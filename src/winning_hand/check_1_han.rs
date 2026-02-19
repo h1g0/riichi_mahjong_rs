@@ -12,7 +12,7 @@ pub fn check_ready_hand(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::ReadyHand,
         status.has_claimed_open,
@@ -36,7 +36,7 @@ pub fn check_self_pick(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::SelfPick,
         status.has_claimed_open,
@@ -56,7 +56,7 @@ pub fn check_one_shot(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::OneShot,
         status.has_claimed_open,
@@ -78,7 +78,7 @@ pub fn check_last_tile_from_the_wall(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::LastTileFromTheWall,
         status.has_claimed_open,
@@ -87,14 +87,18 @@ pub fn check_last_tile_from_the_wall(
     if !has_won(hand) {
         return Ok((name, false, 0));
     }
-    todo!();
+    if status.is_last_tile_from_the_wall && status.is_self_picked {
+        Ok((name, true, 1))
+    } else {
+        Ok((name, false, 0))
+    }
 }
 /// 河底撈魚
 pub fn check_last_discard(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::LastDiscard,
         status.has_claimed_open,
@@ -103,14 +107,18 @@ pub fn check_last_discard(
     if !has_won(hand) {
         return Ok((name, false, 0));
     }
-    todo!();
+    if status.is_last_discard && !status.is_self_picked {
+        Ok((name, true, 1))
+    } else {
+        Ok((name, false, 0))
+    }
 }
 /// 嶺上開花
 pub fn check_dead_wall_draw(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::DeadWallDraw,
         status.has_claimed_open,
@@ -119,14 +127,18 @@ pub fn check_dead_wall_draw(
     if !has_won(hand) {
         return Ok((name, false, 0));
     }
-    todo!();
+    if status.is_dead_wall_draw && status.is_self_picked {
+        Ok((name, true, 1))
+    } else {
+        Ok((name, false, 0))
+    }
 }
 /// 搶槓
 pub fn check_robbing_a_quad(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::RobbingAQuad,
         status.has_claimed_open,
@@ -135,14 +147,18 @@ pub fn check_robbing_a_quad(
     if !has_won(hand) {
         return Ok((name, false, 0));
     }
-    todo!();
+    if status.is_robbing_a_quad && !status.is_self_picked {
+        Ok((name, true, 1))
+    } else {
+        Ok((name, false, 0))
+    }
 }
 /// ダブル立直
 pub fn check_double_ready(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::DoubleReady,
         status.has_claimed_open,
@@ -151,14 +167,21 @@ pub fn check_double_ready(
     if !has_won(hand) {
         return Ok((name, false, 0));
     }
-    todo!();
+    if status.has_claimed_open {
+        return Ok((name, false, 0));
+    }
+    if status.is_double_ready && status.has_claimed_ready {
+        Ok((name, true, 2))
+    } else {
+        Ok((name, false, 0))
+    }
 }
 /// 平和
 pub fn check_no_points_hand(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::NoPointsHand,
         status.has_claimed_open,
@@ -167,14 +190,40 @@ pub fn check_no_points_hand(
     if !has_won(hand) {
         return Ok((name, false, 0));
     }
-    todo!();
+    // 門前でなければ平和は成立しない
+    if status.has_claimed_open {
+        return Ok((name, false, 0));
+    }
+    // 4つの順子と1つの雀頭で構成されている必要がある
+    if hand.sequential3.len() != 4 || hand.same2.len() != 1 {
+        return Ok((name, false, 0));
+    }
+    // 雀頭が役牌でないこと
+    for head in &hand.same2 {
+        // 三元牌は不可
+        if head.has_dragon(Dragon::White)?
+            || head.has_dragon(Dragon::Green)?
+            || head.has_dragon(Dragon::Red)?
+        {
+            return Ok((name, false, 0));
+        }
+        // 自風牌は不可
+        if head.has_wind(status.player_wind)? {
+            return Ok((name, false, 0));
+        }
+        // 場風牌は不可
+        if head.has_wind(status.prevailing_wind)? {
+            return Ok((name, false, 0));
+        }
+    }
+    Ok((name, true, 1))
 }
 /// 一盃口
 pub fn check_one_set_of_identical_sequences(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::OneSetOfIdenticalSequences,
         status.has_claimed_open,
@@ -209,7 +258,7 @@ pub fn check_all_simples(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::AllSimples,
         status.has_claimed_open,
@@ -219,7 +268,7 @@ pub fn check_all_simples(
         return Ok((name, false, 0));
     }
     // 喰いタンなしなら鳴いている時点で抜ける
-    if !settings.openned_all_simples && status.has_claimed_open {
+    if !settings.opened_all_simples && status.has_claimed_open {
         return Ok((name, false, 0));
     }
     let mut has_1_9_honor = false;
@@ -256,7 +305,7 @@ pub fn check_honor_tiles_players_wind(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::HonorTilesPlayersWind,
         status.has_claimed_open,
@@ -284,7 +333,7 @@ pub fn check_honor_tiles_prevailing_wind(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::HonorTilesPrevailingWind,
         status.has_claimed_open,
@@ -333,7 +382,7 @@ pub fn check_honor_tiles_white_dragon(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::HonorTilesWhiteDragon,
         status.has_claimed_open,
@@ -350,7 +399,7 @@ pub fn check_honor_tiles_green_dragon(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::HonorTilesGreenDragon,
         status.has_claimed_open,
@@ -367,7 +416,7 @@ pub fn check_honor_tiles_red_dragon(
     hand: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
-) -> Result<(&'static str, bool, u32) >{
+) -> Result<(&'static str, bool, u32)> {
     let name = get(
         Kind::HonorTilesRedDragon,
         status.has_claimed_open,
@@ -452,7 +501,7 @@ mod tests {
         let mut status = Status::new();
         let mut rules = Settings::new();
         // 喰い断あり鳴きなし
-        rules.openned_all_simples = true;
+        rules.opened_all_simples = true;
         status.has_claimed_open = false;
         assert_eq!(
             check_all_simples(&test_analyzer, &status, &rules).unwrap(),
@@ -468,7 +517,7 @@ mod tests {
         let mut status = Status::new();
         let mut rules = Settings::new();
         // 喰い断あり鳴きなし
-        rules.openned_all_simples = true;
+        rules.opened_all_simples = true;
         status.has_claimed_open = false;
         assert_eq!(
             check_all_simples(&test_analyzer, &status, &rules).unwrap(),
@@ -484,7 +533,7 @@ mod tests {
         let mut status = Status::new();
         let mut rules = Settings::new();
         // 喰い断あり鳴きなし
-        rules.openned_all_simples = true;
+        rules.opened_all_simples = true;
         status.has_claimed_open = false;
         assert_eq!(
             check_all_simples(&test_analyzer, &status, &rules).unwrap(),
@@ -500,7 +549,7 @@ mod tests {
         let mut status = Status::new();
         let mut rules = Settings::new();
         // 喰い断あり鳴きなし
-        rules.openned_all_simples = true;
+        rules.opened_all_simples = true;
         status.has_claimed_open = false;
         assert_eq!(
             check_all_simples(&test_analyzer, &status, &rules).unwrap(),
@@ -516,7 +565,7 @@ mod tests {
         let mut status = Status::new();
         let mut rules = Settings::new();
         // 喰い断あり鳴きあり
-        rules.openned_all_simples = true;
+        rules.opened_all_simples = true;
         status.has_claimed_open = true;
         assert_eq!(
             check_all_simples(&test_analyzer, &status, &rules).unwrap(),
@@ -532,7 +581,7 @@ mod tests {
         let mut status = Status::new();
         let mut rules = Settings::new();
         // 喰い断なし鳴きなし
-        rules.openned_all_simples = false;
+        rules.opened_all_simples = false;
         status.has_claimed_open = false;
         assert_eq!(
             check_all_simples(&test_analyzer, &status, &rules).unwrap(),
@@ -548,7 +597,7 @@ mod tests {
         let mut status = Status::new();
         let mut rules = Settings::new();
         // 喰い断なし鳴きあり（役無し）
-        rules.openned_all_simples = false;
+        rules.opened_all_simples = false;
         status.has_claimed_open = true;
         assert_eq!(
             check_all_simples(&test_analyzer, &status, &rules).unwrap(),
@@ -571,7 +620,7 @@ mod tests {
     }
     #[test]
     /// 一盃口で和了った（鳴きあり）→役なし
-    fn test_no_win_by_one_set_of_identical_sequences_with_openned() {
+    fn test_no_win_by_one_set_of_identical_sequences_with_opened() {
         let test_str = "112233m456p456s7z 7z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -666,6 +715,152 @@ mod tests {
         assert_eq!(
             check_honor_tiles_red_dragon(&test_analyzer, &status, &settings).unwrap(),
             ("役牌（中）", true, 1)
+        );
+    }
+    #[test]
+    /// 海底撈月で和了った
+    fn test_win_by_last_tile_from_the_wall() {
+        let test_str = "123m45678p999s11z 9p";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.is_last_tile_from_the_wall = true;
+        status.is_self_picked = true;
+        assert_eq!(
+            check_last_tile_from_the_wall(&test_analyzer, &status, &settings).unwrap(),
+            ("海底撈月", true, 1)
+        );
+    }
+    #[test]
+    /// 海底撈月はツモ和了でなければ成立しない
+    fn test_not_win_by_last_tile_from_the_wall_without_self_pick() {
+        let test_str = "123m45678p999s11z 9p";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.is_last_tile_from_the_wall = true;
+        status.is_self_picked = false;
+        assert_eq!(
+            check_last_tile_from_the_wall(&test_analyzer, &status, &settings).unwrap(),
+            ("海底撈月", false, 0)
+        );
+    }
+    #[test]
+    /// 河底撈魚で和了った
+    fn test_win_by_last_discard() {
+        let test_str = "123m45678p999s11z 9p";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.is_last_discard = true;
+        status.is_self_picked = false;
+        assert_eq!(
+            check_last_discard(&test_analyzer, &status, &settings).unwrap(),
+            ("河底撈魚", true, 1)
+        );
+    }
+    #[test]
+    /// 嶺上開花で和了った
+    fn test_win_by_dead_wall_draw() {
+        let test_str = "123m45678p999s11z 9p";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.is_dead_wall_draw = true;
+        status.is_self_picked = true;
+        assert_eq!(
+            check_dead_wall_draw(&test_analyzer, &status, &settings).unwrap(),
+            ("嶺上開花", true, 1)
+        );
+    }
+    #[test]
+    /// 搶槓で和了った
+    fn test_win_by_robbing_a_quad() {
+        let test_str = "123m45678p999s11z 9p";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.is_robbing_a_quad = true;
+        status.is_self_picked = false;
+        assert_eq!(
+            check_robbing_a_quad(&test_analyzer, &status, &settings).unwrap(),
+            ("搶槓", true, 1)
+        );
+    }
+    #[test]
+    /// ダブル立直で和了った
+    fn test_win_by_double_ready() {
+        let test_str = "123m45678p999s11z 9p";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.has_claimed_ready = true;
+        status.is_double_ready = true;
+        assert_eq!(
+            check_double_ready(&test_analyzer, &status, &settings).unwrap(),
+            ("ダブル立直", true, 2)
+        );
+    }
+    #[test]
+    /// ダブル立直は立直していなければ成立しない
+    fn test_not_win_by_double_ready_without_ready() {
+        let test_str = "123m45678p999s11z 9p";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.has_claimed_ready = false;
+        status.is_double_ready = true;
+        assert_eq!(
+            check_double_ready(&test_analyzer, &status, &settings).unwrap(),
+            ("ダブル立直", false, 0)
+        );
+    }
+    #[test]
+    /// 平和で和了った
+    fn test_win_by_no_points_hand() {
+        let test_str = "123567m234p6799s 5s";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.has_claimed_open = false;
+        assert_eq!(
+            check_no_points_hand(&test_analyzer, &status, &settings).unwrap(),
+            ("平和", true, 1)
+        );
+    }
+    #[test]
+    /// 平和は鳴いていたら成立しない
+    fn test_not_win_by_no_points_hand_with_open() {
+        let test_str = "123m234p6799s 567m 5s";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.has_claimed_open = true;
+        assert_eq!(
+            check_no_points_hand(&test_analyzer, &status, &settings).unwrap(),
+            ("平和", false, 0)
+        );
+    }
+    #[test]
+    /// 刻子があると平和にならない
+    fn test_not_win_by_no_points_hand_with_triplet() {
+        let test_str = "111m456m789p78s33z 9s";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let status = Status::new();
+        let settings = Settings::new();
+        assert_eq!(
+            check_no_points_hand(&test_analyzer, &status, &settings).unwrap(),
+            ("平和", false, 0)
         );
     }
 }

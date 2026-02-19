@@ -20,7 +20,38 @@ pub fn check_two_sets_of_identical_sequences(
     if !has_won(hand) {
         return Ok((name, false, 0));
     }
-    todo!();
+    // 門前でなければ二盃口は成立しない
+    if status.has_claimed_open {
+        return Ok((name, false, 0));
+    }
+    // 順子が4つなければ二盃口はありえない
+    if hand.sequential3.len() != 4 {
+        return Ok((name, false, 0));
+    }
+    // 2組の同じ順子ペアがあるか確認
+    let mut used = [false; 4];
+    let mut pair_count = 0;
+    for i in 0..4 {
+        if used[i] {
+            continue;
+        }
+        for j in (i + 1)..4 {
+            if used[j] {
+                continue;
+            }
+            if hand.sequential3[i] == hand.sequential3[j] {
+                used[i] = true;
+                used[j] = true;
+                pair_count += 1;
+                break;
+            }
+        }
+    }
+    if pair_count == 2 {
+        Ok((name, true, 3))
+    } else {
+        Ok((name, false, 0))
+    }
 }
 /// 純全帯么九
 pub fn check_terminal_in_each_set(
@@ -69,7 +100,7 @@ pub fn check_terminal_in_each_set(
     }
     if status.has_claimed_open {
         Ok((name, true, 2))
-    }else{
+    } else {
         Ok((name, true, 3))
     }
 }
@@ -87,7 +118,66 @@ pub fn check_half_flush(
     if !has_won(hand) {
         return Ok((name, false, 0));
     }
-    todo!();
+    let mut has_honor = false;
+    let mut has_character = false;
+    let mut has_circle = false;
+    let mut has_bamboo = false;
+
+    for same in &hand.same3 {
+        if same.has_honor()? {
+            has_honor = true;
+        }
+        if same.is_character()? {
+            has_character = true;
+        }
+        if same.is_circle()? {
+            has_circle = true;
+        }
+        if same.is_bamboo()? {
+            has_bamboo = true;
+        }
+    }
+    for seq in &hand.sequential3 {
+        if seq.is_character()? {
+            has_character = true;
+        }
+        if seq.is_circle()? {
+            has_circle = true;
+        }
+        if seq.is_bamboo()? {
+            has_bamboo = true;
+        }
+    }
+    for head in &hand.same2 {
+        if head.has_honor()? {
+            has_honor = true;
+        }
+        if head.is_character()? {
+            has_character = true;
+        }
+        if head.is_circle()? {
+            has_circle = true;
+        }
+        if head.is_bamboo()? {
+            has_bamboo = true;
+        }
+    }
+
+    if !has_honor {
+        return Ok((name, false, 0));
+    }
+    let suit_count = [has_character, has_circle, has_bamboo]
+        .iter()
+        .filter(|&&x| x)
+        .count();
+    if suit_count != 1 {
+        return Ok((name, false, 0));
+    }
+    if status.has_claimed_open {
+        Ok((name, true, 2))
+    } else {
+        Ok((name, true, 3))
+    }
 }
 
 /// ユニットテスト
@@ -136,11 +226,15 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings).unwrap().1,
+            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings)
+                .unwrap()
+                .1,
             true
         );
         assert_eq!(
-            check_terminal_in_each_set(&test_analyzer, &status, &settings).unwrap().1,
+            check_terminal_in_each_set(&test_analyzer, &status, &settings)
+                .unwrap()
+                .1,
             false
         );
     }
@@ -154,12 +248,59 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings).unwrap().1,
+            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings)
+                .unwrap()
+                .1,
             false
         );
         assert_eq!(
-            check_terminal_in_each_set(&test_analyzer, &status, &settings).unwrap().1,
+            check_terminal_in_each_set(&test_analyzer, &status, &settings)
+                .unwrap()
+                .1,
             true
+        );
+    }
+    #[test]
+    /// 二盃口で和了った（高点法により七対子より二盃口が優先される）
+    fn test_two_sets_of_identical_sequences() {
+        let test_str = "112233m456456p7z 7z";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.has_claimed_open = false;
+        assert_eq!(test_analyzer.form, Form::Normal);
+        assert_eq!(
+            check_two_sets_of_identical_sequences(&test_analyzer, &status, &settings).unwrap(),
+            ("二盃口", true, 3)
+        );
+    }
+    #[test]
+    /// 混一色で和了った（食い下がり2翻）
+    fn test_half_flush() {
+        let test_str = "123456m2z 789m 111z 2z";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.has_claimed_open = true;
+        assert_eq!(
+            check_half_flush(&test_analyzer, &status, &settings).unwrap(),
+            ("混一色（鳴）", true, 2)
+        );
+    }
+    #[test]
+    /// 混一色で和了った
+    fn test_half_flush_closed() {
+        let test_str = "11112345699m11z 9m";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.has_claimed_open = false;
+        assert_eq!(
+            check_half_flush(&test_analyzer, &status, &settings).unwrap(),
+            ("混一色", true, 3)
         );
     }
 }

@@ -19,7 +19,12 @@ pub fn check_nagashi_mangan(
     if !has_won(hand) {
         return Ok((name, false, 0));
     }
-    todo!();
+    // 流し満貫は状態フラグで判定する
+    if status.is_nagashi_mangan {
+        Ok((name, true, 5))
+    } else {
+        Ok((name, false, 0))
+    }
 }
 
 /// ユニットテスト

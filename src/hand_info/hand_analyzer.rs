@@ -1,5 +1,5 @@
-use anyhow::Result;
 use anyhow::anyhow;
+use anyhow::Result;
 
 use std::cmp::*;
 
@@ -71,9 +71,15 @@ impl HandAnalyzer {
     /// ```
     pub fn new(hand: &Hand) -> Result<HandAnalyzer> {
         let sp = HandAnalyzer::new_by_form(hand, Form::SevenPairs)?;
-        let to = HandAnalyzer::new_by_form(hand, Form::ThirteenOrphens)?;
+        let to = HandAnalyzer::new_by_form(hand, Form::ThirteenOrphans)?;
         let normal = HandAnalyzer::new_by_form(hand, Form::Normal)?;
-        Ok(min(min(sp, to), normal))
+        // 高点法: 和了している場合（shanten == -1）、通常形を優先する。
+        // 二盃口（3翻）は七対子（2翻）より高得点であるため、通常形で和了できるならそちらを採用する。
+        if normal.shanten == -1 {
+            Ok(normal)
+        } else {
+            Ok(min(min(sp, to), normal))
+        }
     }
 
     /// 和了形を指定して向聴数を計算する
@@ -88,7 +94,7 @@ impl HandAnalyzer {
     /// let to_test_str = "19m19p19s1234567z 1m";
     /// let to_test = Hand::from(to_test_str);
     /// assert_eq!(
-    ///   HandAnalyzer::new_by_form(&to_test, Form::ThirteenOrphens).unwrap().shanten,
+    ///   HandAnalyzer::new_by_form(&to_test, Form::ThirteenOrphans).unwrap().shanten,
     ///   -1
     /// );
     ///
@@ -111,7 +117,7 @@ impl HandAnalyzer {
     pub fn new_by_form(hand: &Hand, form: Form) -> Result<HandAnalyzer> {
         Ok(match form {
             Form::SevenPairs => HandAnalyzer::calc_seven_pairs(hand)?,
-            Form::ThirteenOrphens => HandAnalyzer::calc_thirteen_orphens(hand)?,
+            Form::ThirteenOrphans => HandAnalyzer::calc_thirteen_orphans(hand)?,
             Form::Normal => HandAnalyzer::calc_normal_form(hand)?,
         })
     }
@@ -159,7 +165,7 @@ impl HandAnalyzer {
     /// 国士無双への向聴数を計算する
     ///
     /// Vecへの詰め込みは未実装（詰め込んでも意味がない）
-    fn calc_thirteen_orphens(hand: &Hand) -> Result<HandAnalyzer> {
+    fn calc_thirteen_orphans(hand: &Hand) -> Result<HandAnalyzer> {
         let to_tiles = [
             Tile::M1,
             Tile::M9,
@@ -190,7 +196,7 @@ impl HandAnalyzer {
         let num_to_win: i32 = (14 - kind - if pair > 0 { 1 } else { 0 }) as i32;
         Ok(HandAnalyzer {
             shanten: num_to_win - 1,
-            form: Form::ThirteenOrphens,
+            form: Form::ThirteenOrphans,
             same3: Vec::new(),
             sequential3: Vec::new(),
             same2: Vec::new(),
@@ -348,7 +354,9 @@ impl HandAnalyzer {
 
     /// 独立した（他の順子と複合し得ない）順子の数を返す
     /// i.e. xx567xxのような順子
-    fn count_independent_sequential_3(summarized_hand: &mut TileSummarize) -> Result<Vec<Sequential3>> {
+    fn count_independent_sequential_3(
+        summarized_hand: &mut TileSummarize,
+    ) -> Result<Vec<Sequential3>> {
         let mut result: Vec<Sequential3> = Vec::new();
         // 先に一盃口の処理をしてから通常の処理
         for i in (1..=2).rev() {
@@ -641,7 +649,7 @@ fn count_same_or_sequential_2(
     same2_result: &mut Vec<Same2>,
     sequential2_result: &mut Vec<Sequential2>,
     single_result: &mut Vec<TileType>,
-)-> Result<()> {
+) -> Result<()> {
     for i in idx..=Tile::Z7 {
         // 対子
         if summarized_hand[i as usize] == 2 {
@@ -755,7 +763,9 @@ mod tests {
         let test_str = "226699m99p228s66z 1z";
         let test = Hand::from(test_str);
         assert_eq!(
-            HandAnalyzer::new_by_form(&test, Form::SevenPairs).unwrap().shanten,
+            HandAnalyzer::new_by_form(&test, Form::SevenPairs)
+                .unwrap()
+                .shanten,
             0
         );
     }
@@ -765,17 +775,21 @@ mod tests {
         let test_str = "226699m99p222s66z 1z";
         let test = Hand::from(test_str);
         assert_eq!(
-            HandAnalyzer::new_by_form(&test, Form::SevenPairs).unwrap().shanten,
+            HandAnalyzer::new_by_form(&test, Form::SevenPairs)
+                .unwrap()
+                .shanten,
             0
         );
     }
     #[test]
     /// 国士無双を聴牌
-    fn zero_shanten_to_orphens() {
+    fn zero_shanten_to_orphans() {
         let test_str = "19m19p11s1234567z 5m";
         let test = Hand::from(test_str);
         assert_eq!(
-            HandAnalyzer::new_by_form(&test, Form::ThirteenOrphens).unwrap().shanten,
+            HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans)
+                .unwrap()
+                .shanten,
             0
         );
     }
@@ -786,7 +800,9 @@ mod tests {
         let test_str = "1122m3344p5555s1z 1z";
         let test = Hand::from(test_str);
         assert_eq!(
-            HandAnalyzer::new_by_form(&test, Form::SevenPairs).unwrap().shanten,
+            HandAnalyzer::new_by_form(&test, Form::SevenPairs)
+                .unwrap()
+                .shanten,
             1
         );
     }
@@ -796,7 +812,12 @@ mod tests {
     fn win_by_ready_hand() {
         let test_str = "123m444p789s1112z 2z";
         let test = Hand::from(test_str);
-        assert_eq!(HandAnalyzer::new_by_form(&test, Form::Normal).unwrap().shanten, -1);
+        assert_eq!(
+            HandAnalyzer::new_by_form(&test, Form::Normal)
+                .unwrap()
+                .shanten,
+            -1
+        );
     }
 
     #[test]
@@ -804,7 +825,12 @@ mod tests {
     fn win_by_honor_tiles_players_wind() {
         let test_str = "333m456p1789s 333z 1s";
         let test = Hand::from(test_str);
-        assert_eq!(HandAnalyzer::new_by_form(&test, Form::Normal).unwrap().shanten, -1);
+        assert_eq!(
+            HandAnalyzer::new_by_form(&test, Form::Normal)
+                .unwrap()
+                .shanten,
+            -1
+        );
     }
 
     #[test]
@@ -812,21 +838,36 @@ mod tests {
     fn win_by_honor_tiles_prevailing_wind() {
         let test_str = "234567m6789s 111z 6s";
         let test = Hand::from(test_str);
-        assert_eq!(HandAnalyzer::new_by_form(&test, Form::Normal).unwrap().shanten, -1);
+        assert_eq!(
+            HandAnalyzer::new_by_form(&test, Form::Normal)
+                .unwrap()
+                .shanten,
+            -1
+        );
     }
     #[test]
     /// 三元牌で和了った
     fn win_by_honor_tiles_dragons() {
         let test_str = "5m123456p888s 777z 5m";
         let test = Hand::from(test_str);
-        assert_eq!(HandAnalyzer::new_by_form(&test, Form::Normal).unwrap().shanten, -1);
+        assert_eq!(
+            HandAnalyzer::new_by_form(&test, Form::Normal)
+                .unwrap()
+                .shanten,
+            -1
+        );
     }
     #[test]
     /// 断么九で和了った
     fn win_by_all_simples() {
         let test_str = "234m8s 567m 333p 456s 8s";
         let test = Hand::from(test_str);
-        assert_eq!(HandAnalyzer::new_by_form(&test, Form::Normal).unwrap().shanten, -1);
+        assert_eq!(
+            HandAnalyzer::new_by_form(&test, Form::Normal)
+                .unwrap()
+                .shanten,
+            -1
+        );
     }
 
     #[test]
@@ -834,6 +875,11 @@ mod tests {
     fn win_by_no_points() {
         let test_str = "123567m234p6799s 5s";
         let test = Hand::from(test_str);
-        assert_eq!(HandAnalyzer::new_by_form(&test, Form::Normal).unwrap().shanten, -1);
+        assert_eq!(
+            HandAnalyzer::new_by_form(&test, Form::Normal)
+                .unwrap()
+                .shanten,
+            -1
+        );
     }
 }

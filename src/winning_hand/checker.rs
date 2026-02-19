@@ -1,6 +1,6 @@
+use anyhow::Result;
 /// 役を判定する
 use std::collections::HashMap;
-use anyhow::Result;
 use strum::{EnumCount, IntoEnumIterator};
 
 use crate::hand_info::hand_analyzer::HandAnalyzer;
@@ -25,30 +25,18 @@ pub fn check(
     }
 
     // 立直
-    result.insert(
-        Kind::ReadyHand,
-        check_ready_hand(hand, status, settings)?,
-    );
+    result.insert(Kind::ReadyHand, check_ready_hand(hand, status, settings)?);
     // 七対子
-    result.insert(
-        Kind::SevenPairs,
-        check_seven_pairs(hand, status, settings)?,
-    );
+    result.insert(Kind::SevenPairs, check_seven_pairs(hand, status, settings)?);
     // 流し満貫
     result.insert(
         Kind::NagashiMangan,
         check_nagashi_mangan(hand, status, settings)?,
     );
     // 門前清自摸和
-    result.insert(
-        Kind::SelfPick,
-        check_self_pick(hand, status, settings)?,
-    );
+    result.insert(Kind::SelfPick, check_self_pick(hand, status, settings)?);
     // 一発
-    result.insert(
-        Kind::OneShot,
-        check_one_shot(hand, status, settings)?,
-    );
+    result.insert(Kind::OneShot, check_one_shot(hand, status, settings)?);
     // 海底撈月
     result.insert(
         Kind::LastTileFromTheWall,
@@ -86,14 +74,11 @@ pub fn check(
     );
     // 三色同順
     result.insert(
-        Kind::ThreeColourStraight,
-        check_three_colour_straight(hand, status, settings)?,
+        Kind::ThreeColorStraight,
+        check_three_color_straight(hand, status, settings)?,
     );
     // 一気通貫
-    result.insert(
-        Kind::Straight,
-        check_straight(hand, status, settings)?,
-    );
+    result.insert(Kind::Straight, check_straight(hand, status, settings)?);
     // 二盃口
     result.insert(
         Kind::TwoSetsOfIdenticalSequences,
@@ -111,14 +96,11 @@ pub fn check(
     );
     // 三色同刻
     result.insert(
-        Kind::ThreeColourTriplets,
-        check_three_colour_triplets(hand, status, settings)?,
+        Kind::ThreeColorTriplets,
+        check_three_color_triplets(hand, status, settings)?,
     );
     // 断么九
-    result.insert(
-        Kind::AllSimples,
-        check_all_simples(hand, status, settings)?,
-    );
+    result.insert(Kind::AllSimples, check_all_simples(hand, status, settings)?);
     // 役牌（自風牌）
     result.insert(
         Kind::HonorTilesPlayersWind,
@@ -165,10 +147,7 @@ pub fn check(
         // 純全帯么九
     );
     // 混一色
-    result.insert(
-        Kind::HalfFlush,
-        check_half_flush(hand, status, settings)?,
-    );
+    result.insert(Kind::HalfFlush, check_half_flush(hand, status, settings)?);
     // 清一色
     result.insert(Kind::Flush, check_flush(hand, status, settings)?);
     // 国士無双
@@ -197,30 +176,18 @@ pub fn check(
         check_big_four_winds(hand, status, settings)?,
     );
     // 字一色
-    result.insert(
-        Kind::AllHonors,
-        check_all_honors(hand, status, settings)?,
-    );
+    result.insert(Kind::AllHonors, check_all_honors(hand, status, settings)?);
     // 清老頭
     result.insert(
         Kind::AllTerminals,
         check_all_terminals(hand, status, settings)?,
     );
     // 緑一色
-    result.insert(
-        Kind::AllGreen,
-        check_all_green(hand, status, settings)?,
-    );
+    result.insert(Kind::AllGreen, check_all_green(hand, status, settings)?);
     // 九蓮宝燈
-    result.insert(
-        Kind::NineGates,
-        check_nine_gates(hand, status, settings)?,
-    );
+    result.insert(Kind::NineGates, check_nine_gates(hand, status, settings)?);
     // 四槓子
-    result.insert(
-        Kind::FourKans,
-        check_four_kans(hand, status, settings)?,
-    );
+    result.insert(Kind::FourKans, check_four_kans(hand, status, settings)?);
     // 天和
     result.insert(
         Kind::HeavenlyHand,

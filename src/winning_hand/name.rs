@@ -8,7 +8,7 @@ pub enum Form {
     /// 七対子
     SevenPairs,
     /// 国士無双
-    ThirteenOrphens,
+    ThirteenOrphans,
     /// 通常（4面子1雀頭）の手牌
     Normal,
 }
@@ -43,7 +43,7 @@ pub enum Kind {
     /// 一盃口
     OneSetOfIdenticalSequences,
     /// 三色同順
-    ThreeColourStraight,
+    ThreeColorStraight,
     /// 一気通貫
     Straight,
     /// 二盃口
@@ -53,7 +53,7 @@ pub enum Kind {
     /// 三暗刻
     ThreeClosedTriplets,
     /// 三色同刻
-    ThreeColourTriplets,
+    ThreeColorTriplets,
     /// 断么九
     AllSimples,
     /// 役牌（自風牌）
@@ -117,10 +117,10 @@ pub enum Kind {
 /// use mahjong_rs::settings::Lang;
 /// use mahjong_rs::winning_hand::name::*;
 ///
-/// assert_eq!(get(Kind::ThreeColourStraight, true, Lang::Ja), "三色同順（鳴）");
-/// assert_eq!(get(Kind::ThreeColourStraight, false, Lang::Ja), "三色同順");
-/// assert_eq!(get(Kind::ThreeColourStraight, true, Lang::En), "Three Colour Straight (Open)");
-/// assert_eq!(get(Kind::ThreeColourStraight, false, Lang::En), "Three Colour Straight");
+/// assert_eq!(get(Kind::ThreeColorStraight, true, Lang::Ja), "三色同順（鳴）");
+/// assert_eq!(get(Kind::ThreeColorStraight, false, Lang::Ja), "三色同順");
+/// assert_eq!(get(Kind::ThreeColorStraight, true, Lang::En), "Three Color Straight (Open)");
+/// assert_eq!(get(Kind::ThreeColorStraight, false, Lang::En), "Three Color Straight");
 /// ```
 
 pub fn get(hand_kind: Kind, has_openned: bool, lang: Lang) -> &'static str {
@@ -170,8 +170,8 @@ fn get_en(hand_kind: Kind, has_openned: bool) -> &'static str {
         // 一盃口
         Kind::OneSetOfIdenticalSequences => "One Set Of Identical Sequences",
         // 三色同順
-        Kind::ThreeColourStraight => {
-            openned_name!("Three Colour Straight", has_openned, Lang::En)
+        Kind::ThreeColorStraight => {
+            openned_name!("Three Color Straight", has_openned, Lang::En)
         }
         // 一気通貫
         Kind::Straight => openned_name!("Straight", has_openned, Lang::En),
@@ -183,7 +183,7 @@ fn get_en(hand_kind: Kind, has_openned: bool) -> &'static str {
         // 三暗刻
         Kind::ThreeClosedTriplets => "Three Closed Triplets",
         // 三色同刻
-        Kind::ThreeColourTriplets => "Three Colour Triplets",
+        Kind::ThreeColorTriplets => "Three Color Triplets",
         // 断么九
         Kind::AllSimples => "All Simples",
         // 役牌（自風牌）
@@ -270,7 +270,7 @@ fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
         // 一盃口
         Kind::OneSetOfIdenticalSequences => "一盃口",
         // 三色同順
-        Kind::ThreeColourStraight => {
+        Kind::ThreeColorStraight => {
             openned_name!("三色同順", has_openned, Lang::Ja)
         }
         // 一気通貫
@@ -284,7 +284,7 @@ fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
         // 三暗刻
         Kind::ThreeClosedTriplets => "三暗刻",
         // 三色同刻
-        Kind::ThreeColourTriplets => "三色同刻",
+        Kind::ThreeColorTriplets => "三色同刻",
         // 断么九
         Kind::AllSimples => "断么九",
         // 役牌（自風牌）
