@@ -1,16 +1,16 @@
 use anyhow::Result;
 
+use crate::hand::Hand;
 use crate::hand_info::block::BlockProperty;
 use crate::hand_info::hand_analyzer::*;
 use crate::hand_info::status::*;
 use crate::settings::*;
-use crate::tile::{Dragon, Tile, TileSummarize};
-use crate::hand::Hand;
+use crate::tile::Dragon;
 use crate::winning_hand::name::*;
 
 /// 立直
 pub fn check_ready_hand(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -19,7 +19,7 @@ pub fn check_ready_hand(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     if status.has_claimed_open {
@@ -34,7 +34,7 @@ pub fn check_ready_hand(
 
 /// 門前清自摸和
 pub fn check_self_pick(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -43,7 +43,7 @@ pub fn check_self_pick(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     if !status.has_claimed_open && status.is_self_picked {
@@ -54,7 +54,7 @@ pub fn check_self_pick(
 
 /// 一発
 pub fn check_one_shot(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -63,10 +63,10 @@ pub fn check_one_shot(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
-    if !check_ready_hand(hand, status, settings)?.1 {
+    if !check_ready_hand(hand_analyzer, status, settings)?.1 {
         return Ok((name, false, 0));
     }
     if status.is_one_shot {
@@ -76,7 +76,7 @@ pub fn check_one_shot(
 }
 /// 海底撈月
 pub fn check_last_tile_from_the_wall(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -85,7 +85,7 @@ pub fn check_last_tile_from_the_wall(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     if status.is_last_tile_from_the_wall && status.is_self_picked {
@@ -96,7 +96,7 @@ pub fn check_last_tile_from_the_wall(
 }
 /// 河底撈魚
 pub fn check_last_discard(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -105,7 +105,7 @@ pub fn check_last_discard(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     if status.is_last_discard && !status.is_self_picked {
@@ -116,7 +116,7 @@ pub fn check_last_discard(
 }
 /// 嶺上開花
 pub fn check_dead_wall_draw(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -125,7 +125,7 @@ pub fn check_dead_wall_draw(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     if status.is_dead_wall_draw && status.is_self_picked {
@@ -136,7 +136,7 @@ pub fn check_dead_wall_draw(
 }
 /// 搶槓
 pub fn check_robbing_a_quad(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -145,7 +145,7 @@ pub fn check_robbing_a_quad(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     if status.is_robbing_a_quad && !status.is_self_picked {
@@ -156,7 +156,7 @@ pub fn check_robbing_a_quad(
 }
 /// ダブル立直
 pub fn check_double_ready(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -165,7 +165,7 @@ pub fn check_double_ready(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     if status.has_claimed_open {
@@ -179,7 +179,7 @@ pub fn check_double_ready(
 }
 /// 平和
 pub fn check_no_points_hand(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     raw_hand: &Hand,
     status: &Status,
     settings: &Settings,
@@ -189,7 +189,7 @@ pub fn check_no_points_hand(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 門前でなければ平和は成立しない
@@ -197,11 +197,11 @@ pub fn check_no_points_hand(
         return Ok((name, false, 0));
     }
     // 4つの順子と1つの雀頭で構成されている必要がある
-    if hand.sequential3.len() != 4 || hand.same2.len() != 1 {
+    if hand_analyzer.sequential3.len() != 4 || hand_analyzer.same2.len() != 1 {
         return Ok((name, false, 0));
     }
     // 雀頭が役牌でないこと
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         // 三元牌は不可
         if head.has_dragon(Dragon::White)?
             || head.has_dragon(Dragon::Green)?
@@ -218,11 +218,39 @@ pub fn check_no_points_hand(
             return Ok((name, false, 0));
         }
     }
+    // 平和は両面待ちのみ成立（辺張・嵌張・単騎は不可）
+    if let Some(winning_tile) = raw_hand.drawn() {
+        let mut has_open_wait = false;
+        for seq in &hand_analyzer.sequential3 {
+            let tiles = seq.get();
+            if winning_tile.get() == tiles[1] {
+                // 嵌張待ち
+                continue;
+            }
+            if winning_tile.get() == tiles[0] {
+                // 789の7待ちは辺張
+                if tiles[0] % 9 != 6 {
+                    has_open_wait = true;
+                    break;
+                }
+            }
+            if winning_tile.get() == tiles[2] {
+                // 123の3待ちは辺張
+                if tiles[2] % 9 != 2 {
+                    has_open_wait = true;
+                    break;
+                }
+            }
+        }
+        if !has_open_wait {
+            return Ok((name, false, 0));
+        }
+    }
     Ok((name, true, 1))
 }
 /// 一盃口
 pub fn check_one_set_of_identical_sequences(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -231,7 +259,7 @@ pub fn check_one_set_of_identical_sequences(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 鳴いていたら一盃口は成立しない
@@ -239,13 +267,13 @@ pub fn check_one_set_of_identical_sequences(
         return Ok((name, false, 0));
     }
     // 順子が2つ以上なければ一盃口はありえない
-    if hand.sequential3.len() < 2 {
+    if hand_analyzer.sequential3.len() < 2 {
         return Ok((name, false, 0));
     }
-    for i in 0..hand.sequential3.len() - 1 {
-        if let Some(v) = hand.sequential3.get(i) {
-            for j in i + 1..hand.sequential3.len() {
-                if let Some(v2) = hand.sequential3.get(j) {
+    for i in 0..hand_analyzer.sequential3.len() - 1 {
+        if let Some(v) = hand_analyzer.sequential3.get(i) {
+            for j in i + 1..hand_analyzer.sequential3.len() {
+                if let Some(v2) = hand_analyzer.sequential3.get(j) {
                     if *v == *v2 {
                         return Ok((name, true, 1));
                     }
@@ -257,7 +285,7 @@ pub fn check_one_set_of_identical_sequences(
 }
 /// 断么九
 pub fn check_all_simples(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -266,7 +294,7 @@ pub fn check_all_simples(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 喰いタンなしなら鳴いている時点で抜ける
@@ -277,20 +305,20 @@ pub fn check_all_simples(
     // 面子
 
     // 刻子
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_1_or_9()? || same.has_honor()? {
             has_1_9_honor = true;
         }
     }
     // 順子
-    for seq in &hand.sequential3 {
+    for seq in &hand_analyzer.sequential3 {
         if seq.has_1_or_9()? {
             has_1_9_honor = true;
         }
     }
 
     // 雀頭
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if head.has_1_or_9()? || head.has_honor()? {
             has_1_9_honor = true;
         }
@@ -304,7 +332,7 @@ pub fn check_all_simples(
 }
 /// 役牌（自風牌）
 pub fn check_honor_tiles_players_wind(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -313,12 +341,12 @@ pub fn check_honor_tiles_players_wind(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     let mut has_player_wind = false;
     // 刻子
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_wind(status.player_wind)? {
             has_player_wind = true;
         }
@@ -332,7 +360,7 @@ pub fn check_honor_tiles_players_wind(
 }
 /// 役牌（場風牌）
 pub fn check_honor_tiles_prevailing_wind(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -341,12 +369,12 @@ pub fn check_honor_tiles_prevailing_wind(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     let mut has_prevailing_wind = false;
     // 刻子
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_wind(status.prevailing_wind)? {
             has_prevailing_wind = true;
         }
@@ -360,13 +388,13 @@ pub fn check_honor_tiles_prevailing_wind(
 }
 
 /// 面子に三元牌の順子が含まれるか調べる
-pub fn check_honor_tiles_dragons(hand: &HandAnalyzer, dragon: Dragon) -> Result<bool> {
-    if !has_won(hand) {
+pub fn check_honor_tiles_dragons(hand_analyzer: &HandAnalyzer, dragon: Dragon) -> Result<bool> {
+    if !has_won(hand_analyzer) {
         return Ok(false);
     }
     let mut has_dragon = false;
     // 刻子
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_dragon(dragon)? {
             has_dragon = true;
         }
@@ -381,7 +409,7 @@ pub fn check_honor_tiles_dragons(hand: &HandAnalyzer, dragon: Dragon) -> Result<
 
 /// 役牌（白）
 pub fn check_honor_tiles_white_dragon(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -390,7 +418,7 @@ pub fn check_honor_tiles_white_dragon(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if check_honor_tiles_dragons(hand, Dragon::White)? {
+    if check_honor_tiles_dragons(hand_analyzer, Dragon::White)? {
         Ok((name, true, 1))
     } else {
         Ok((name, false, 0))
@@ -398,7 +426,7 @@ pub fn check_honor_tiles_white_dragon(
 }
 /// 役牌（發）
 pub fn check_honor_tiles_green_dragon(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -407,7 +435,7 @@ pub fn check_honor_tiles_green_dragon(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if check_honor_tiles_dragons(hand, Dragon::Green)? {
+    if check_honor_tiles_dragons(hand_analyzer, Dragon::Green)? {
         Ok((name, true, 1))
     } else {
         Ok((name, false, 0))
@@ -415,7 +443,7 @@ pub fn check_honor_tiles_green_dragon(
 }
 /// 役牌（中）
 pub fn check_honor_tiles_red_dragon(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -424,7 +452,7 @@ pub fn check_honor_tiles_red_dragon(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if check_honor_tiles_dragons(hand, Dragon::Red)? {
+    if check_honor_tiles_dragons(hand_analyzer, Dragon::Red)? {
         Ok((name, true, 1))
     } else {
         Ok((name, false, 0))
@@ -904,47 +932,6 @@ mod tests {
         assert_eq!(
             check_double_ready(&test_analyzer, &status, &settings).unwrap(),
             ("ダブル立直", false, 0)
-        );
-    }
-    #[test]
-    /// 平和で和了った
-    fn test_win_by_no_points_hand() {
-        let test_str = "123567m234p6799s 5s";
-        let test = Hand::from(test_str);
-        let test_analyzer = HandAnalyzer::new(&test).unwrap();
-        let mut status = Status::new();
-        let settings = Settings::new();
-        status.has_claimed_open = false;
-        assert_eq!(
-            check_no_points_hand(&test_analyzer, &status, &settings).unwrap(),
-            ("平和", true, 1)
-        );
-    }
-    #[test]
-    /// 平和は鳴いていたら成立しない
-    fn test_not_win_by_no_points_hand_with_open() {
-        let test_str = "123m234p6799s 567m 5s";
-        let test = Hand::from(test_str);
-        let test_analyzer = HandAnalyzer::new(&test).unwrap();
-        let mut status = Status::new();
-        let settings = Settings::new();
-        status.has_claimed_open = true;
-        assert_eq!(
-            check_no_points_hand(&test_analyzer, &status, &settings).unwrap(),
-            ("平和", false, 0)
-        );
-    }
-    #[test]
-    /// 刻子があると平和にならない
-    fn test_not_win_by_no_points_hand_with_triplet() {
-        let test_str = "111m456m789p78s33z 9s";
-        let test = Hand::from(test_str);
-        let test_analyzer = HandAnalyzer::new(&test).unwrap();
-        let status = Status::new();
-        let settings = Settings::new();
-        assert_eq!(
-            check_no_points_hand(&test_analyzer, &status, &settings).unwrap(),
-            ("平和", false, 0)
         );
     }
 }

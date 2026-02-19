@@ -7,7 +7,7 @@ use crate::winning_hand::name::*;
 
 /// 流し満貫
 pub fn check_nagashi_mangan(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -16,7 +16,7 @@ pub fn check_nagashi_mangan(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 流し満貫は状態フラグで判定する

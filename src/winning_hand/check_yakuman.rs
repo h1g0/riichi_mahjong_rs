@@ -9,7 +9,7 @@ use crate::winning_hand::name::*;
 
 /// 国士無双
 pub fn check_thirteen_orphans(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -18,10 +18,10 @@ pub fn check_thirteen_orphans(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
-    return if hand.form == Form::ThirteenOrphans {
+    return if hand_analyzer.form == Form::ThirteenOrphans {
         Ok((name, true, 13))
     } else {
         Ok((name, false, 0))
@@ -29,7 +29,7 @@ pub fn check_thirteen_orphans(
 }
 /// 四暗刻
 pub fn check_four_concealed_triplets(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -38,10 +38,10 @@ pub fn check_four_concealed_triplets(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
-    if !status.has_claimed_open && hand.same3.len() == 4 && status.is_self_picked {
+    if !status.has_claimed_open && hand_analyzer.same3.len() == 4 && status.is_self_picked {
         Ok((name, true, 13))
     } else {
         Ok((name, false, 0))
@@ -49,7 +49,7 @@ pub fn check_four_concealed_triplets(
 }
 /// 大三元
 pub fn check_big_three_dragons(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -58,12 +58,12 @@ pub fn check_big_three_dragons(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 大三元: 三元牌（白・發・中）の3つすべてが刻子
     let mut dragon_count = 0;
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_dragon(Dragon::White)?
             || same.has_dragon(Dragon::Green)?
             || same.has_dragon(Dragon::Red)?
@@ -79,7 +79,7 @@ pub fn check_big_three_dragons(
 }
 /// 小四喜
 pub fn check_little_four_winds(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -88,13 +88,13 @@ pub fn check_little_four_winds(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 小四喜: 風牌のうち3つが刻子、1つが雀頭
     let mut wind_triplet_count = 0;
     let mut wind_pair = false;
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_wind(Wind::East)?
             || same.has_wind(Wind::South)?
             || same.has_wind(Wind::West)?
@@ -103,7 +103,7 @@ pub fn check_little_four_winds(
             wind_triplet_count += 1;
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if head.has_wind(Wind::East)?
             || head.has_wind(Wind::South)?
             || head.has_wind(Wind::West)?
@@ -120,7 +120,7 @@ pub fn check_little_four_winds(
 }
 /// 大四喜
 pub fn check_big_four_winds(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -129,12 +129,12 @@ pub fn check_big_four_winds(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 大四喜: 風牌4つすべてが刻子
     let mut wind_triplet_count = 0;
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_wind(Wind::East)?
             || same.has_wind(Wind::South)?
             || same.has_wind(Wind::West)?
@@ -151,7 +151,7 @@ pub fn check_big_four_winds(
 }
 /// 字一色
 pub fn check_all_honors(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -160,27 +160,27 @@ pub fn check_all_honors(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 字一色: すべての牌が字牌で構成される
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if !same.has_honor()? {
             return Ok((name, false, 0));
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if !head.has_honor()? {
             return Ok((name, false, 0));
         }
     }
     // 順子があったら字一色ではない
-    if hand.sequential3.len() > 0 {
+    if hand_analyzer.sequential3.len() > 0 {
         return Ok((name, false, 0));
     }
     // 七対子形の場合もチェック（same2が7つの場合）
-    if hand.form == Form::SevenPairs {
-        for head in &hand.same2 {
+    if hand_analyzer.form == Form::SevenPairs {
+        for head in &hand_analyzer.same2 {
             if !head.has_honor()? {
                 return Ok((name, false, 0));
             }
@@ -190,7 +190,7 @@ pub fn check_all_honors(
 }
 /// 清老頭
 pub fn check_all_terminals(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -199,19 +199,19 @@ pub fn check_all_terminals(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 清老頭: すべての牌が数牌の1と9のみで構成される（字牌なし・順子なし）
-    if hand.sequential3.len() > 0 {
+    if hand_analyzer.sequential3.len() > 0 {
         return Ok((name, false, 0));
     }
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if !same.has_1_or_9()? || same.has_honor()? {
             return Ok((name, false, 0));
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if !head.has_1_or_9()? || head.has_honor()? {
             return Ok((name, false, 0));
         }
@@ -220,7 +220,7 @@ pub fn check_all_terminals(
 }
 /// 緑一色
 pub fn check_all_green(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -229,7 +229,7 @@ pub fn check_all_green(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 緑一色: 2s, 3s, 4s, 6s, 8s, 6z（發）のみで構成される
@@ -239,12 +239,12 @@ pub fn check_all_green(
             Tile::S2 | Tile::S3 | Tile::S4 | Tile::S6 | Tile::S8 | Tile::Z6
         )
     };
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if !is_green_tile(same.get()[0]) {
             return Ok((name, false, 0));
         }
     }
-    for seq in &hand.sequential3 {
+    for seq in &hand_analyzer.sequential3 {
         let tiles = seq.get();
         for t in &tiles {
             if !is_green_tile(*t) {
@@ -252,7 +252,7 @@ pub fn check_all_green(
             }
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if !is_green_tile(head.get()[0]) {
             return Ok((name, false, 0));
         }
@@ -261,7 +261,7 @@ pub fn check_all_green(
 }
 /// 九蓮宝燈
 pub fn check_nine_gates(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -270,7 +270,7 @@ pub fn check_nine_gates(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 九蓮宝燈: 門前で同一種の数牌のみで、1112345678999+同種1枚の形
@@ -283,7 +283,7 @@ pub fn check_nine_gates(
     let mut has_bamboo = false;
     let mut has_honor = false;
 
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.is_character()? {
             has_character = true;
         }
@@ -297,7 +297,7 @@ pub fn check_nine_gates(
             has_honor = true;
         }
     }
-    for seq in &hand.sequential3 {
+    for seq in &hand_analyzer.sequential3 {
         if seq.is_character()? {
             has_character = true;
         }
@@ -308,7 +308,7 @@ pub fn check_nine_gates(
             has_bamboo = true;
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if head.is_character()? {
             has_character = true;
         }
@@ -344,21 +344,21 @@ pub fn check_nine_gates(
         18
     };
     let mut counts = [0u32; 9];
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         let t = same.get()[0];
         counts[(t - offset) as usize] += 3;
     }
-    for seq in &hand.sequential3 {
+    for seq in &hand_analyzer.sequential3 {
         let tiles = seq.get();
         for t in &tiles {
             counts[(*t - offset) as usize] += 1;
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         let t = head.get()[0];
         counts[(t - offset) as usize] += 2;
     }
-    for single in &hand.single {
+    for single in &hand_analyzer.single {
         if *single >= offset && *single < offset + 9 {
             counts[(*single - offset) as usize] += 1;
         }
@@ -384,7 +384,7 @@ pub fn check_nine_gates(
 }
 /// 四槓子
 pub fn check_four_kans(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -393,7 +393,7 @@ pub fn check_four_kans(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 四槓子: 4つの槓子を持っている
@@ -405,7 +405,7 @@ pub fn check_four_kans(
 }
 /// 天和
 pub fn check_heavenly_hand(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -414,7 +414,7 @@ pub fn check_heavenly_hand(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 天和: 親の配牌時点で和了している（第一ツモ・親・自摸）
@@ -427,7 +427,7 @@ pub fn check_heavenly_hand(
 }
 /// 地和
 pub fn check_hand_of_earth(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -436,7 +436,7 @@ pub fn check_hand_of_earth(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 地和: 子の第一ツモで和了している（第一ツモ・子・自摸）

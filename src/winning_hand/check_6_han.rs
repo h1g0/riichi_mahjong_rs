@@ -8,12 +8,12 @@ use crate::winning_hand::name::*;
 
 /// 清一色
 pub fn check_flush(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(Kind::Flush, status.has_claimed_open, settings.display_lang);
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 清一色: 1種類の数牌のみで構成される（字牌なし）
@@ -22,7 +22,7 @@ pub fn check_flush(
     let mut has_circle = false;
     let mut has_bamboo = false;
 
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_honor()? {
             has_honor = true;
         }
@@ -36,7 +36,7 @@ pub fn check_flush(
             has_bamboo = true;
         }
     }
-    for seq in &hand.sequential3 {
+    for seq in &hand_analyzer.sequential3 {
         if seq.is_character()? {
             has_character = true;
         }
@@ -47,7 +47,7 @@ pub fn check_flush(
             has_bamboo = true;
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if head.has_honor()? {
             has_honor = true;
         }

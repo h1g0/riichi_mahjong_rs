@@ -4,12 +4,11 @@ use crate::hand_info::block::BlockProperty;
 use crate::hand_info::hand_analyzer::*;
 use crate::hand_info::status::*;
 use crate::settings::*;
-use crate::tile::TileType;
 use crate::winning_hand::name::*;
 
 /// 二盃口
 pub fn check_two_sets_of_identical_sequences(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -18,7 +17,7 @@ pub fn check_two_sets_of_identical_sequences(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 門前でなければ二盃口は成立しない
@@ -26,7 +25,7 @@ pub fn check_two_sets_of_identical_sequences(
         return Ok((name, false, 0));
     }
     // 順子が4つなければ二盃口はありえない
-    if hand.sequential3.len() != 4 {
+    if hand_analyzer.sequential3.len() != 4 {
         return Ok((name, false, 0));
     }
     // 2組の同じ順子ペアがあるか確認
@@ -40,7 +39,7 @@ pub fn check_two_sets_of_identical_sequences(
             if used[j] {
                 continue;
             }
-            if hand.sequential3[i] == hand.sequential3[j] {
+            if hand_analyzer.sequential3[i] == hand_analyzer.sequential3[j] {
                 used[i] = true;
                 used[j] = true;
                 pair_count += 1;
@@ -56,7 +55,7 @@ pub fn check_two_sets_of_identical_sequences(
 }
 /// 純全帯么九
 pub fn check_terminal_in_each_set(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -65,11 +64,11 @@ pub fn check_terminal_in_each_set(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 清老頭とは複合しないため、必ず順子が含まれる
-    if hand.sequential3.len() == 0 {
+    if hand_analyzer.sequential3.len() == 0 {
         return Ok((name, false, 0));
     }
 
@@ -77,20 +76,20 @@ pub fn check_terminal_in_each_set(
     // 面子
 
     // 刻子
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if !same.has_1_or_9()? {
             no_1_9 = true;
         }
     }
     // 順子
-    for seq in &hand.sequential3 {
+    for seq in &hand_analyzer.sequential3 {
         if !seq.has_1_or_9()? {
             no_1_9 = true;
         }
     }
 
     // 雀頭
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if !head.has_1_or_9()? {
             no_1_9 = true;
         }
@@ -107,7 +106,7 @@ pub fn check_terminal_in_each_set(
 }
 /// 混一色
 pub fn check_half_flush(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -116,7 +115,7 @@ pub fn check_half_flush(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     let mut has_honor = false;
@@ -124,7 +123,7 @@ pub fn check_half_flush(
     let mut has_circle = false;
     let mut has_bamboo = false;
 
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_honor()? {
             has_honor = true;
         }
@@ -138,7 +137,7 @@ pub fn check_half_flush(
             has_bamboo = true;
         }
     }
-    for seq in &hand.sequential3 {
+    for seq in &hand_analyzer.sequential3 {
         if seq.is_character()? {
             has_character = true;
         }
@@ -149,7 +148,7 @@ pub fn check_half_flush(
             has_bamboo = true;
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if head.has_honor()? {
             has_honor = true;
         }

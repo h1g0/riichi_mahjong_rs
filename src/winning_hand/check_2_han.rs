@@ -9,7 +9,7 @@ use crate::winning_hand::name::*;
 
 /// 七対子
 pub fn check_seven_pairs(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -18,10 +18,10 @@ pub fn check_seven_pairs(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
-    if hand.form == Form::SevenPairs {
+    if hand_analyzer.form == Form::SevenPairs {
         Ok((name, true, 2))
     } else {
         Ok((name, false, 0))
@@ -30,7 +30,7 @@ pub fn check_seven_pairs(
 
 /// 三色同順
 pub fn check_three_color_straight(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -39,19 +39,19 @@ pub fn check_three_color_straight(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 順子が3つ以上なければ三色同順はありえない
-    if hand.sequential3.len() < 3 {
+    if hand_analyzer.sequential3.len() < 3 {
         return Ok((name, false, 0));
     }
-    for i in 0..hand.sequential3.len() {
-        for j in (i + 1)..hand.sequential3.len() {
-            for k in (j + 1)..hand.sequential3.len() {
-                let a = hand.sequential3[i].get();
-                let b = hand.sequential3[j].get();
-                let c = hand.sequential3[k].get();
+    for i in 0..hand_analyzer.sequential3.len() {
+        for j in (i + 1)..hand_analyzer.sequential3.len() {
+            for k in (j + 1)..hand_analyzer.sequential3.len() {
+                let a = hand_analyzer.sequential3[i].get();
+                let b = hand_analyzer.sequential3[j].get();
+                let c = hand_analyzer.sequential3[k].get();
                 // 3つの順子の開始牌が同じ数字（mod 9）で、かつ異なる色であること
                 let a_num = a[0] % 9;
                 let b_num = b[0] % 9;
@@ -81,7 +81,7 @@ pub fn check_three_color_straight(
 }
 /// 一気通貫
 pub fn check_straight(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -91,14 +91,14 @@ pub fn check_straight(
         settings.display_lang,
     );
 
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     let mut m = [false; 3];
     let mut p = [false; 3];
     let mut s = [false; 3];
 
-    for v in &hand.sequential3 {
+    for v in &hand_analyzer.sequential3 {
         match v.get() {
             [Tile::M1, Tile::M2, Tile::M3] => m[0] = true,
             [Tile::M4, Tile::M5, Tile::M6] => m[1] = true,
@@ -124,7 +124,7 @@ pub fn check_straight(
 }
 /// 対々和
 pub fn check_all_triplet_hand(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -133,17 +133,17 @@ pub fn check_all_triplet_hand(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
-    if hand.same3.len() == 4 && hand.same2.len() == 1 {
+    if hand_analyzer.same3.len() == 4 && hand_analyzer.same2.len() == 1 {
         return Ok((name, true, 2));
     }
     Ok((name, false, 0))
 }
 /// 三暗刻
 pub fn check_three_closed_triplets(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -152,11 +152,11 @@ pub fn check_three_closed_triplets(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 刻子が3つ以上あれば三暗刻の可能性がある
-    if hand.same3.len() >= 3 {
+    if hand_analyzer.same3.len() >= 3 {
         Ok((name, true, 2))
     } else {
         Ok((name, false, 0))
@@ -164,7 +164,7 @@ pub fn check_three_closed_triplets(
 }
 /// 三色同刻
 pub fn check_three_color_triplets(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -173,19 +173,19 @@ pub fn check_three_color_triplets(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 刻子が3つ以上なければ三色同刻はありえない
-    if hand.same3.len() < 3 {
+    if hand_analyzer.same3.len() < 3 {
         return Ok((name, false, 0));
     }
-    for i in 0..hand.same3.len() {
-        for j in (i + 1)..hand.same3.len() {
-            for k in (j + 1)..hand.same3.len() {
-                let a = hand.same3[i].get()[0];
-                let b = hand.same3[j].get()[0];
-                let c = hand.same3[k].get()[0];
+    for i in 0..hand_analyzer.same3.len() {
+        for j in (i + 1)..hand_analyzer.same3.len() {
+            for k in (j + 1)..hand_analyzer.same3.len() {
+                let a = hand_analyzer.same3[i].get()[0];
+                let b = hand_analyzer.same3[j].get()[0];
+                let c = hand_analyzer.same3[k].get()[0];
                 // 数牌のみ（字牌は三色同刻にならない）
                 if a > Tile::S9 || b > Tile::S9 || c > Tile::S9 {
                     continue;
@@ -209,7 +209,7 @@ pub fn check_three_color_triplets(
 }
 /// 混全帯么九
 pub fn check_terminal_or_honor_in_each_set(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -218,12 +218,12 @@ pub fn check_terminal_or_honor_in_each_set(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
 
     // 混老頭とは複合しないため、必ず順子が含まれる
-    if hand.sequential3.len() == 0 {
+    if hand_analyzer.sequential3.len() == 0 {
         return Ok((name, false, 0));
     }
 
@@ -234,7 +234,7 @@ pub fn check_terminal_or_honor_in_each_set(
     // 面子
 
     // 刻子
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if !same.has_1_or_9()? && !same.has_honor()? {
             no_1_9_honor = true;
         }
@@ -244,14 +244,14 @@ pub fn check_terminal_or_honor_in_each_set(
         }
     }
     // 順子
-    for seq in &hand.sequential3 {
+    for seq in &hand_analyzer.sequential3 {
         if !seq.has_1_or_9()? {
             no_1_9_honor = true;
         }
     }
 
     // 雀頭
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if !head.has_1_or_9()? && !head.has_honor()? {
             no_1_9_honor = true;
         }
@@ -270,7 +270,7 @@ pub fn check_terminal_or_honor_in_each_set(
 }
 /// 混老頭
 pub fn check_all_terminals_and_honors(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -279,12 +279,12 @@ pub fn check_all_terminals_and_honors(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 混老頭は全ての面子・雀頭が么九牌（1,9）または字牌で構成される
     // 順子が含まれていてはいけない
-    if hand.sequential3.len() > 0 {
+    if hand_analyzer.sequential3.len() > 0 {
         return Ok((name, false, 0));
     }
     // 字牌が含まれていなければ清老頭であり混老頭にはならない
@@ -292,7 +292,7 @@ pub fn check_all_terminals_and_honors(
     // 数牌（1,9）が含まれていなければ字一色であり混老頭にはならない
     let mut has_terminal = false;
 
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_honor()? {
             has_honor = true;
         } else if same.has_1_or_9()? {
@@ -301,7 +301,7 @@ pub fn check_all_terminals_and_honors(
             return Ok((name, false, 0));
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if head.has_honor()? {
             has_honor = true;
         } else if head.has_1_or_9()? {
@@ -318,7 +318,7 @@ pub fn check_all_terminals_and_honors(
 }
 /// 小三元
 pub fn check_little_three_dragons(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -327,13 +327,13 @@ pub fn check_little_three_dragons(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 小三元: 三元牌のうち2つが刻子、1つが雀頭
     let mut dragon_triplet_count = 0;
     let mut dragon_pair = false;
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if same.has_dragon(Dragon::White)?
             || same.has_dragon(Dragon::Green)?
             || same.has_dragon(Dragon::Red)?
@@ -341,7 +341,7 @@ pub fn check_little_three_dragons(
             dragon_triplet_count += 1;
         }
     }
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if head.has_dragon(Dragon::White)?
             || head.has_dragon(Dragon::Green)?
             || head.has_dragon(Dragon::Red)?

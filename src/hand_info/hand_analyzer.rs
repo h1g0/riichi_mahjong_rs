@@ -544,7 +544,7 @@ fn count_normal_shanten_recursively(
         *sequential2_result = sequential2.clone();
         single_result.clear();
         for i in Tile::M1..=Tile::Z7 {
-            for _ in 0..summarized_hand[i as usize] {
+            for _ in 0..summarized_hand[i as usize] as u32 {
                 single_result.push(i);
             }
         }
