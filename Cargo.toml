@@ -1,5 +1,5 @@
 [package]
-name = "mahjong_rs"
+name = "riichi_mahjong_rs"
 version = "0.1.0"
 authors = ["hi_go <me@clutte.red>"]
 edition = "2021"

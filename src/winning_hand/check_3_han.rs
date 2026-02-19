@@ -4,6 +4,7 @@ use crate::hand_info::block::BlockProperty;
 use crate::hand_info::hand_analyzer::*;
 use crate::hand_info::status::*;
 use crate::settings::*;
+use crate::tile::TileType;
 use crate::winning_hand::name::*;
 
 /// 二盃口

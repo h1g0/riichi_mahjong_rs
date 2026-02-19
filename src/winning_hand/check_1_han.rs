@@ -4,7 +4,8 @@ use crate::hand_info::block::BlockProperty;
 use crate::hand_info::hand_analyzer::*;
 use crate::hand_info::status::*;
 use crate::settings::*;
-use crate::tile::Dragon;
+use crate::tile::{Dragon, Tile, TileSummarize};
+use crate::hand::Hand;
 use crate::winning_hand::name::*;
 
 /// 立直
@@ -179,6 +180,7 @@ pub fn check_double_ready(
 /// 平和
 pub fn check_no_points_hand(
     hand: &HandAnalyzer,
+    raw_hand: &Hand,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -630,6 +632,88 @@ mod tests {
         assert_eq!(
             check_one_set_of_identical_sequences(&test_analyzer, &status, &settings).unwrap(),
             ("一盃口", false, 0)
+        );
+    }
+    #[test]
+    /// 平和で和了った
+    fn test_win_by_no_points_hand() {
+        let test_str = "123567m234p6799s 5s";
+        let test = Hand::from(test_str);
+        let analyzer = HandAnalyzer::new(&test).unwrap();
+        let status = Status::new();
+        let settings = Settings::new();
+        assert_eq!(
+            check_no_points_hand(&analyzer, &test, &status, &settings).unwrap(),
+            ("平和", true, 1)
+        );
+    }
+    #[test]
+    /// 鳴いていると平和にならない
+    fn test_not_win_by_no_points_hand_with_open() {
+        let test_str = "123567m6799s 234p 5s";
+        let test = Hand::from(test_str);
+        let analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.has_claimed_open = true;
+        assert_eq!(
+            check_no_points_hand(&analyzer, &test, &status, &settings).unwrap(),
+            ("平和", false, 0)
+        );
+    }
+    #[test]
+    /// 刻子が含まれると平和にならない
+    fn test_not_win_by_no_points_hand_with_triplet() {
+        let test_str = "123456m789p222s3s 3s";
+        let test = Hand::from(test_str);
+        let analyzer = HandAnalyzer::new(&test).unwrap();
+        let status = Status::new();
+        let settings = Settings::new();
+        assert_eq!(
+            check_no_points_hand(&analyzer, &test, &status, &settings).unwrap(),
+            ("平和", false, 0)
+        );
+    }
+    #[test]
+    /// 両面待ちでないと平和にならない（辺張待ち）
+    fn test_not_win_by_no_points_hand_with_edge_wait() {
+        let test_str = "12567m234p56799s 3m";
+        let test = Hand::from(test_str);
+        let analyzer = HandAnalyzer::new(&test).unwrap();
+        let status = Status::new();
+        let settings = Settings::new();
+        assert_eq!(
+            check_no_points_hand(&analyzer, &test, &status, &settings).unwrap(),
+            ("平和", false, 0)
+        );
+    }
+
+    #[test]
+    /// 両面待ちでないと平和にならない（嵌張待ち）
+    fn test_not_win_by_no_points_hand_with_closed_wait() {
+        let test_str = "123567m234p5799s 6s";
+        let test = Hand::from(test_str);
+        let analyzer = HandAnalyzer::new(&test).unwrap();
+        let status = Status::new();
+        let settings = Settings::new();
+        assert_eq!(
+            check_no_points_hand(&analyzer, &test, &status, &settings).unwrap(),
+            ("平和", false, 0)
+        );
+    }
+    #[test]
+    /// 雀頭が役牌だと平和にならない
+    fn test_not_win_by_no_points_hand_with_honor_pair() {
+        let test_str = "123567m234p67s11z 8s";
+        let test = Hand::from(test_str);
+        let analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.player_wind = Wind::East;
+        status.prevailing_wind = Wind::East;
+        assert_eq!(
+            check_no_points_hand(&analyzer, &test, &status, &settings).unwrap(),
+            ("平和", false, 0)
         );
     }
     #[test]

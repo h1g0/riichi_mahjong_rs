@@ -24,6 +24,11 @@ impl Hand {
         }
     }
 
+    /// ツモった牌を返す
+    pub fn drawn(&self) -> Option<Tile> {
+        self.drawn
+    }
+
     /// 手牌をソートする
     pub fn sort(&mut self) {
         self.tiles.sort();

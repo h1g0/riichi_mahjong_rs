@@ -52,9 +52,9 @@ impl HandAnalyzer {
     /// # Examples
     ///
     /// ```
-    /// use mahjong_rs::hand::*;
-    /// use mahjong_rs::hand_info::hand_analyzer::*;
-    /// use mahjong_rs::winning_hand::name::*;
+    /// use riichi_mahjong_rs::hand::*;
+    /// use riichi_mahjong_rs::hand_info::hand_analyzer::*;
+    /// use riichi_mahjong_rs::winning_hand::name::*;
     ///
     /// // 通常型で和了る
     /// let nm_test_str = "222333444666s6z 6z";
@@ -86,9 +86,9 @@ impl HandAnalyzer {
     /// # Examples
     ///
     /// ```
-    /// use mahjong_rs::hand::*;
-    /// use mahjong_rs::hand_info::hand_analyzer::*;
-    /// use mahjong_rs::winning_hand::name::*;
+    /// use riichi_mahjong_rs::hand::*;
+    /// use riichi_mahjong_rs::hand_info::hand_analyzer::*;
+    /// use riichi_mahjong_rs::winning_hand::name::*;
     ///
     /// // 国士無双で和了る
     /// let to_test_str = "19m19p19s1234567z 1m";
