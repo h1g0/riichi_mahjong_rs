@@ -4,12 +4,11 @@ use crate::hand_info::block::BlockProperty;
 use crate::hand_info::hand_analyzer::*;
 use crate::hand_info::status::*;
 use crate::settings::*;
-use crate::tile::TileType;
 use crate::winning_hand::name::*;
 
 /// 二盃口
 pub fn check_two_sets_of_identical_sequences(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -18,22 +17,37 @@ pub fn check_two_sets_of_identical_sequences(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
+    // 門前でなければ二盃口は成立しない
     if status.has_claimed_open {
         return Ok((name, false, 0));
     }
-    if hand.sequential3.len() < 4 {
+    // 順子が4つなければ二盃口はありえない
+    if hand_analyzer.sequential3.len() != 4 {
         return Ok((name, false, 0));
     }
-    use std::collections::HashMap;
-    let mut map: HashMap<[TileType;3], usize> = HashMap::new();
-    for seq in &hand.sequential3 {
-        *map.entry(seq.get()).or_insert(0) += 1;
+    // 2組の同じ順子ペアがあるか確認
+    let mut used = [false; 4];
+    let mut pair_count = 0;
+    for i in 0..4 {
+        if used[i] {
+            continue;
+        }
+        for j in (i + 1)..4 {
+            if used[j] {
+                continue;
+            }
+            if hand_analyzer.sequential3[i] == hand_analyzer.sequential3[j] {
+                used[i] = true;
+                used[j] = true;
+                pair_count += 1;
+                break;
+            }
+        }
     }
-    let pairs = map.values().map(|c| c / 2).sum::<usize>();
-    if pairs >= 2 {
+    if pair_count == 2 {
         Ok((name, true, 3))
     } else {
         Ok((name, false, 0))
@@ -41,7 +55,7 @@ pub fn check_two_sets_of_identical_sequences(
 }
 /// 純全帯么九
 pub fn check_terminal_in_each_set(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -50,11 +64,11 @@ pub fn check_terminal_in_each_set(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
     // 清老頭とは複合しないため、必ず順子が含まれる
-    if hand.sequential3.len() == 0 {
+    if hand_analyzer.sequential3.len() == 0 {
         return Ok((name, false, 0));
     }
 
@@ -62,20 +76,20 @@ pub fn check_terminal_in_each_set(
     // 面子
 
     // 刻子
-    for same in &hand.same3 {
+    for same in &hand_analyzer.same3 {
         if !same.has_1_or_9()? {
             no_1_9 = true;
         }
     }
     // 順子
-    for seq in &hand.sequential3 {
+    for seq in &hand_analyzer.sequential3 {
         if !seq.has_1_or_9()? {
             no_1_9 = true;
         }
     }
 
     // 雀頭
-    for head in &hand.same2 {
+    for head in &hand_analyzer.same2 {
         if !head.has_1_or_9()? {
             no_1_9 = true;
         }
@@ -86,13 +100,13 @@ pub fn check_terminal_in_each_set(
     }
     if status.has_claimed_open {
         Ok((name, true, 2))
-    }else{
+    } else {
         Ok((name, true, 3))
     }
 }
 /// 混一色
 pub fn check_half_flush(
-    hand: &HandAnalyzer,
+    hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -101,38 +115,68 @@ pub fn check_half_flush(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand) {
+    if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
-    let mut char = false;
-    let mut circle = false;
-    let mut bamboo = false;
+    let mut has_honor = false;
+    let mut has_character = false;
+    let mut has_circle = false;
+    let mut has_bamboo = false;
 
-    for same in &hand.same3 {
-        if same.is_character()? { char = true; }
-        if same.is_circle()? { circle = true; }
-        if same.is_bamboo()? { bamboo = true; }
-    }
-    for seq in &hand.sequential3 {
-        if seq.is_character()? { char = true; }
-        if seq.is_circle()? { circle = true; }
-        if seq.is_bamboo()? { bamboo = true; }
-    }
-    for pair in &hand.same2 {
-        if pair.is_character()? { char = true; }
-        if pair.is_circle()? { circle = true; }
-        if pair.is_bamboo()? { bamboo = true; }
-    }
-
-    let suits = char as u32 + circle as u32 + bamboo as u32;
-    if suits == 1 {
-        if status.has_claimed_open {
-            Ok((name, true, 2))
-        } else {
-            Ok((name, true, 3))
+    for same in &hand_analyzer.same3 {
+        if same.has_honor()? {
+            has_honor = true;
         }
+        if same.is_character()? {
+            has_character = true;
+        }
+        if same.is_circle()? {
+            has_circle = true;
+        }
+        if same.is_bamboo()? {
+            has_bamboo = true;
+        }
+    }
+    for seq in &hand_analyzer.sequential3 {
+        if seq.is_character()? {
+            has_character = true;
+        }
+        if seq.is_circle()? {
+            has_circle = true;
+        }
+        if seq.is_bamboo()? {
+            has_bamboo = true;
+        }
+    }
+    for head in &hand_analyzer.same2 {
+        if head.has_honor()? {
+            has_honor = true;
+        }
+        if head.is_character()? {
+            has_character = true;
+        }
+        if head.is_circle()? {
+            has_circle = true;
+        }
+        if head.is_bamboo()? {
+            has_bamboo = true;
+        }
+    }
+
+    if !has_honor {
+        return Ok((name, false, 0));
+    }
+    let suit_count = [has_character, has_circle, has_bamboo]
+        .iter()
+        .filter(|&&x| x)
+        .count();
+    if suit_count != 1 {
+        return Ok((name, false, 0));
+    }
+    if status.has_claimed_open {
+        Ok((name, true, 2))
     } else {
-        Ok((name, false, 0))
+        Ok((name, true, 3))
     }
 }
 
@@ -182,11 +226,15 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings).unwrap().1,
+            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings)
+                .unwrap()
+                .1,
             true
         );
         assert_eq!(
-            check_terminal_in_each_set(&test_analyzer, &status, &settings).unwrap().1,
+            check_terminal_in_each_set(&test_analyzer, &status, &settings)
+                .unwrap()
+                .1,
             false
         );
     }
@@ -200,54 +248,59 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings).unwrap().1,
+            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings)
+                .unwrap()
+                .1,
             false
         );
         assert_eq!(
-            check_terminal_in_each_set(&test_analyzer, &status, &settings).unwrap().1,
+            check_terminal_in_each_set(&test_analyzer, &status, &settings)
+                .unwrap()
+                .1,
             true
         );
     }
     #[test]
-    /// 二盃口の判定
+    /// 二盃口で和了った（高点法により七対子より二盃口が優先される）
     fn test_two_sets_of_identical_sequences() {
-        let test_str = "112233m778899p7z 7z";
-        let hand = Hand::from(test_str);
-        let analyzer = HandAnalyzer::new(&hand).unwrap();
-        let status = Status::new();
+        let test_str = "112233m456456p7z 7z";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
         let settings = Settings::new();
+        status.has_claimed_open = false;
+        assert_eq!(test_analyzer.form, Form::Normal);
         assert_eq!(
-            check_two_sets_of_identical_sequences(&analyzer, &status, &settings).unwrap(),
-            ("二盃口", false, 0)
+            check_two_sets_of_identical_sequences(&test_analyzer, &status, &settings).unwrap(),
+            ("二盃口", true, 3)
         );
     }
-
     #[test]
-    /// 混一色（門前）で和了った
-    fn test_half_flush_closed() {
-        let test_str = "123456789m1112z 2z";
-        let hand = Hand::from(test_str);
-        let analyzer = HandAnalyzer::new(&hand).unwrap();
-        let status = Status::new();
-        let settings = Settings::new();
-        assert_eq!(
-            check_half_flush(&analyzer, &status, &settings).unwrap(),
-            ("混一色", true, 3)
-        );
-    }
-
-    #[test]
-    /// 混一色（鳴き）で和了った
-    fn test_half_flush_open() {
-        let test_str = "111m789m2z 123m 222z 2z";
-        let hand = Hand::from(test_str);
-        let analyzer = HandAnalyzer::new(&hand).unwrap();
+    /// 混一色で和了った（食い下がり2翻）
+    fn test_half_flush() {
+        let test_str = "123456m2z 789m 111z 2z";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
         status.has_claimed_open = true;
         assert_eq!(
-            check_half_flush(&analyzer, &status, &settings).unwrap(),
+            check_half_flush(&test_analyzer, &status, &settings).unwrap(),
             ("混一色（鳴）", true, 2)
+        );
+    }
+    #[test]
+    /// 混一色で和了った
+    fn test_half_flush_closed() {
+        let test_str = "11112345699m11z 9m";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.has_claimed_open = false;
+        assert_eq!(
+            check_half_flush(&test_analyzer, &status, &settings).unwrap(),
+            ("混一色", true, 3)
         );
     }
 }

@@ -12,14 +12,14 @@ pub struct Settings {
     /// 表示言語（デフォルトは日本語）
     pub display_lang: Lang,
     /// 喰いタンありかなしか（デフォルトはあり）
-    pub openned_all_simples: bool,
+    pub opened_all_simples: bool,
 }
 
 impl Settings {
     pub fn new() -> Settings {
         Settings {
             display_lang: Lang::Ja,
-            openned_all_simples: true,
+            opened_all_simples: true,
         }
     }
 }
