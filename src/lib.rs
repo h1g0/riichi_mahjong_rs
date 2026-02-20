@@ -8,5 +8,7 @@ pub mod hand;
 pub mod hand_info;
 /// 和了役
 pub mod winning_hand;
+/// 符計算・点数計算
+pub mod scoring;
 /// 卓
 pub mod board;
