@@ -29,6 +29,11 @@ impl Hand {
         self.drawn
     }
 
+    /// 副露を返す
+    pub fn opened(&self) -> &[OpenTiles] {
+        &self.opened
+    }
+
     /// 手牌をソートする
     pub fn sort(&mut self) {
         self.tiles.sort();
