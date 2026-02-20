@@ -1,11 +1,11 @@
+use anyhow::Result;
 /// 役を判定する
 use std::collections::HashMap;
-use anyhow::Result;
 use strum::{EnumCount, IntoEnumIterator};
 
+use crate::hand::Hand;
 use crate::hand_info::hand_analyzer::HandAnalyzer;
 use crate::hand_info::status::Status;
-use crate::hand::Hand;
 use crate::settings::*;
 use crate::winning_hand::check_1_han::*;
 use crate::winning_hand::check_2_han::*;
@@ -42,15 +42,9 @@ pub fn check(
         check_nagashi_mangan(analyzer, status, settings)?,
     );
     // 門前清自摸和
-    result.insert(
-        Kind::SelfPick,
-        check_self_pick(analyzer, status, settings)?,
-    );
+    result.insert(Kind::SelfPick, check_self_pick(analyzer, status, settings)?);
     // 一発
-    result.insert(
-        Kind::OneShot,
-        check_one_shot(analyzer, status, settings)?,
-    );
+    result.insert(Kind::OneShot, check_one_shot(analyzer, status, settings)?);
     // 海底撈月
     result.insert(
         Kind::LastTileFromTheWall,
@@ -88,14 +82,11 @@ pub fn check(
     );
     // 三色同順
     result.insert(
-        Kind::ThreeColourStraight,
-        check_three_colour_straight(analyzer, status, settings)?,
+        Kind::ThreeColorStraight,
+        check_three_color_straight(analyzer, status, settings)?,
     );
     // 一気通貫
-    result.insert(
-        Kind::Straight,
-        check_straight(analyzer, status, settings)?,
-    );
+    result.insert(Kind::Straight, check_straight(analyzer, status, settings)?);
     // 二盃口
     result.insert(
         Kind::TwoSetsOfIdenticalSequences,
@@ -113,8 +104,8 @@ pub fn check(
     );
     // 三色同刻
     result.insert(
-        Kind::ThreeColourTriplets,
-        check_three_colour_triplets(analyzer, status, settings)?,
+        Kind::ThreeColorTriplets,
+        check_three_color_triplets(analyzer, status, settings)?,
     );
     // 断么九
     result.insert(
@@ -209,20 +200,14 @@ pub fn check(
         check_all_terminals(analyzer, status, settings)?,
     );
     // 緑一色
-    result.insert(
-        Kind::AllGreen,
-        check_all_green(analyzer, status, settings)?,
-    );
+    result.insert(Kind::AllGreen, check_all_green(analyzer, status, settings)?);
     // 九蓮宝燈
     result.insert(
         Kind::NineGates,
         check_nine_gates(analyzer, status, settings)?,
     );
     // 四槓子
-    result.insert(
-        Kind::FourKans,
-        check_four_kans(analyzer, status, settings)?,
-    );
+    result.insert(Kind::FourKans, check_four_kans(analyzer, status, settings)?);
     // 天和
     result.insert(
         Kind::HeavenlyHand,
