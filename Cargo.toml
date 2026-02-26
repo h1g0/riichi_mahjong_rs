@@ -2,12 +2,12 @@
 name = "riichi_mahjong_rs"
 version = "0.1.0"
 authors = ["hi_go <me@clutte.red>"]
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand = "0.8.1"
-strum = "0.21"
-strum_macros = "0.21"
+rand = "0.10"
+strum = "0.28"
+strum_macros = "0.28"
 anyhow = "1.0"
