@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::tile::{Tile, TileSummarize, TileType, Wind};
 
 /// 手牌の（牌以外の）状態
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
     /// 立直したか
     pub has_claimed_ready: bool,

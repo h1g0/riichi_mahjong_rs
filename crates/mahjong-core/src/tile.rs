@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 /// 牌の種類を示す型
 pub type TileType = u32;
 
 pub type TileSummarize = [u32; Tile::LEN];
 
 /// 牌
-#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Tile {
     index: TileType,
     red_dora: bool,
@@ -101,71 +103,88 @@ impl Tile {
         };
     }
 
+    /// 赤ドラの牌を作成する
+    pub fn new_red(tile_type: TileType) -> Tile {
+        Tile {
+            index: tile_type,
+            red_dora: true,
+        }
+    }
+
     pub fn get(&self) -> TileType {
         return self.index;
     }
 
-    /*
-        /// 萬子か否かを返す
-        pub fn is_character(&self) -> bool {
-            return matches!(self.index, Tile::M1..=Tile::M9);
-        }
-        /// 筒子か否かを返す
-        pub fn is_circle(&self) -> bool {
-            return matches!(self.index, Tile::P1..=Tile::P9);
-        }
-        /// 索子か否かを返す
-        pub fn is_bamboo(&self) -> bool {
-            return matches!(self.index, Tile::S1..=Tile::S9);
-        }
-        /// 風牌か否かを返す
-        pub fn is_wind(&self) -> bool {
-            return matches!(self.index, Tile::Z1..=Tile::Z4);
-        }
-        /// 三元牌か否かを返す
-        pub fn is_dragon(&self) -> bool {
-            return matches!(self.index, Tile::Z5..=Tile::Z7);
-        }
-        /// 字牌か否かを返す
-        pub fn is_honor(&self) -> bool {
-            return self.is_wind() || self.is_dragon();
-        }
+    /// 赤ドラか否かを返す
+    pub fn is_red_dora(&self) -> bool {
+        self.red_dora
+    }
 
-        /// 老頭牌か否かを返す
-        pub fn is_1_or_9(&self) -> bool {
-            return matches!(
-                self.index,
-                Tile::M1 | Tile::M9 | Tile::P1 | Tile::P9 | Tile::S1 | Tile::S9
-            );
-        }
-        /// 么九牌（老頭牌＋字牌）か否かを返す
-        pub fn is_1_9_honor(&self) -> bool {
-            return self.is_1_or_9() || self.is_honor();
-        }
+    /// 数牌か否かを返す
+    pub fn is_suited(&self) -> bool {
+        self.is_character() || self.is_circle() || self.is_bamboo()
+    }
 
-        /// 対子（同じ2枚）か否かを返す
-        pub fn is_same_to(&self, tile: Tile) -> bool {
-            return self.get() == tile.get();
-        }
-        /// 搭子（連続した2枚）か否かを返す
-        pub fn is_sequential_to(&self, tile: Tile) -> bool {
-            // 字牌ならば連続はありえない
-            if self.is_honor() {
-                return false;
-            }
-            // 一萬・一筒・一索の時に1つ前（九萬・九筒）が来ても連続とはみなさない
-            if matches!(self.index, Tile::M1 | Tile::P1 | Tile::S1) && self.get() == tile.get() + 1 {
-                return false;
-            }
-            // 九萬・九筒・九索の時に1つ後（一筒・一索・東）が来ても連続とはみなさない
-            if matches!(self.index, Tile::M9 | Tile::P9 | Tile::S9) && self.get() == tile.get() - 1 {
-                return false;
-            } else if self.get() == tile.get() - 1 || self.get() == tile.get() + 1 {
-                return true;
-            }
+    /// 萬子か否かを返す
+    pub fn is_character(&self) -> bool {
+        return matches!(self.index, Tile::M1..=Tile::M9);
+    }
+    /// 筒子か否かを返す
+    pub fn is_circle(&self) -> bool {
+        return matches!(self.index, Tile::P1..=Tile::P9);
+    }
+    /// 索子か否かを返す
+    pub fn is_bamboo(&self) -> bool {
+        return matches!(self.index, Tile::S1..=Tile::S9);
+    }
+    /// 風牌か否かを返す
+    pub fn is_wind(&self) -> bool {
+        return matches!(self.index, Tile::Z1..=Tile::Z4);
+    }
+    /// 三元牌か否かを返す
+    pub fn is_dragon(&self) -> bool {
+        return matches!(self.index, Tile::Z5..=Tile::Z7);
+    }
+    /// 字牌か否かを返す
+    pub fn is_honor(&self) -> bool {
+        return self.is_wind() || self.is_dragon();
+    }
+
+    /// 老頭牌か否かを返す
+    pub fn is_1_or_9(&self) -> bool {
+        return matches!(
+            self.index,
+            Tile::M1 | Tile::M9 | Tile::P1 | Tile::P9 | Tile::S1 | Tile::S9
+        );
+    }
+    /// 么九牌（老頭牌＋字牌）か否かを返す
+    pub fn is_1_9_honor(&self) -> bool {
+        return self.is_1_or_9() || self.is_honor();
+    }
+
+    /// 対子（同じ2枚）か否かを返す
+    pub fn is_same_to(&self, tile: Tile) -> bool {
+        return self.get() == tile.get();
+    }
+    /// 搭子（連続した2枚）か否かを返す
+    pub fn is_sequential_to(&self, tile: Tile) -> bool {
+        // 字牌ならば連続はありえない
+        if self.is_honor() {
             return false;
         }
-    */
+        // 一萬・一筒・一索の時に1つ前（九萬・九筒）が来ても連続とはみなさない
+        if matches!(self.index, Tile::M1 | Tile::P1 | Tile::S1) && self.get() == tile.get() + 1 {
+            return false;
+        }
+        // 九萬・九筒・九索の時に1つ後（一筒・一索・東）が来ても連続とはみなさない
+        if matches!(self.index, Tile::M9 | Tile::P9 | Tile::S9) && self.get() == tile.get() - 1 {
+            return false;
+        } else if self.get() == tile.get() - 1 || self.get() == tile.get() + 1 {
+            return true;
+        }
+        return false;
+    }
+
     pub fn to_char(&self) -> char {
         return Tile::CHARS[self.index as usize];
     }
@@ -217,8 +236,30 @@ impl Tile {
     }
 }
 
+/// ドラ表示牌から実際のドラを返す
+pub fn dora_indicator_to_dora(indicator: TileType) -> TileType {
+    match indicator {
+        // 萬子: 9m→1m にループ
+        Tile::M9 => Tile::M1,
+        Tile::M1..=Tile::M8 => indicator + 1,
+        // 筒子: 9p→1p にループ
+        Tile::P9 => Tile::P1,
+        Tile::P1..=Tile::P8 => indicator + 1,
+        // 索子: 9s→1s にループ
+        Tile::S9 => Tile::S1,
+        Tile::S1..=Tile::S8 => indicator + 1,
+        // 風牌: 北→東 にループ
+        Tile::Z4 => Tile::Z1,
+        Tile::Z1..=Tile::Z3 => indicator + 1,
+        // 三元牌: 中→白 にループ
+        Tile::Z7 => Tile::Z5,
+        Tile::Z5..=Tile::Z6 => indicator + 1,
+        _ => indicator,
+    }
+}
+
 /// 自風／場風
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Wind {
     /// 東家（`Tile::Z1`）
     East = Tile::Z1 as isize,
@@ -243,10 +284,41 @@ impl Wind {
     pub fn is_tile(tile: &Tile) -> Option<Wind> {
         Wind::is_tile_type(tile.get())
     }
+
+    /// 次の風を返す（東→南→西→北→東）
+    pub fn next(&self) -> Wind {
+        match self {
+            Wind::East => Wind::South,
+            Wind::South => Wind::West,
+            Wind::West => Wind::North,
+            Wind::North => Wind::East,
+        }
+    }
+
+    /// 風をインデックス（0-3）に変換する
+    pub fn to_index(&self) -> usize {
+        match self {
+            Wind::East => 0,
+            Wind::South => 1,
+            Wind::West => 2,
+            Wind::North => 3,
+        }
+    }
+
+    /// インデックス（0-3）から風を生成する
+    pub fn from_index(index: usize) -> Wind {
+        match index % 4 {
+            0 => Wind::East,
+            1 => Wind::South,
+            2 => Wind::West,
+            3 => Wind::North,
+            _ => unreachable!(),
+        }
+    }
 }
 
 /// 三元牌
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Dragon {
     /// 白（`Tile::Z5`）
     White = Tile::Z5 as isize,
@@ -272,8 +344,8 @@ impl Dragon {
 
 #[cfg(test)]
 mod tests {
-    //use super::*;
-    /*
+    use super::*;
+
     /// 萬子の属性テスト
     #[test]
     fn suit_char_test() {
@@ -430,5 +502,41 @@ mod tests {
             false
         );
     }
-    */
+
+    /// ドラ表示牌テスト
+    #[test]
+    fn dora_indicator_test() {
+        assert_eq!(dora_indicator_to_dora(Tile::M1), Tile::M2);
+        assert_eq!(dora_indicator_to_dora(Tile::M9), Tile::M1);
+        assert_eq!(dora_indicator_to_dora(Tile::P5), Tile::P6);
+        assert_eq!(dora_indicator_to_dora(Tile::P9), Tile::P1);
+        assert_eq!(dora_indicator_to_dora(Tile::S9), Tile::S1);
+        assert_eq!(dora_indicator_to_dora(Tile::Z1), Tile::Z2);
+        assert_eq!(dora_indicator_to_dora(Tile::Z4), Tile::Z1);
+        assert_eq!(dora_indicator_to_dora(Tile::Z5), Tile::Z6);
+        assert_eq!(dora_indicator_to_dora(Tile::Z7), Tile::Z5);
+    }
+
+    /// 赤ドラテスト
+    #[test]
+    fn red_dora_test() {
+        let red5m = Tile::new_red(Tile::M5);
+        assert_eq!(red5m.is_red_dora(), true);
+        assert_eq!(red5m.get(), Tile::M5);
+
+        let normal5m = Tile::new(Tile::M5);
+        assert_eq!(normal5m.is_red_dora(), false);
+    }
+
+    /// Windテスト
+    #[test]
+    fn wind_test() {
+        assert_eq!(Wind::East.next(), Wind::South);
+        assert_eq!(Wind::South.next(), Wind::West);
+        assert_eq!(Wind::West.next(), Wind::North);
+        assert_eq!(Wind::North.next(), Wind::East);
+        assert_eq!(Wind::East.to_index(), 0);
+        assert_eq!(Wind::from_index(2), Wind::West);
+        assert_eq!(Wind::from_index(4), Wind::East);
+    }
 }

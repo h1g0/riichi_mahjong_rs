@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::tile::*;
 
 /// 副露の種類
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 pub enum OpenType {
     /// チー
     Chi,
@@ -12,7 +14,7 @@ pub enum OpenType {
 }
 
 /// 誰から副露したか
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 pub enum OpenFrom {
     /// 上家（チー・ポン・明カン）
     Previous,
@@ -27,7 +29,7 @@ pub enum OpenFrom {
 }
 
 /// 副露状態を表す構造体
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenTiles {
     /// 3枚の牌が入る。カンした時も3枚（4枚目は自明）
     pub tiles: [Tile; 3],

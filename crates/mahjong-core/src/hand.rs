@@ -3,7 +3,7 @@ use crate::tile::*;
 use std::collections::VecDeque;
 
 /// 手牌
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Hand {
     /// 現在の手牌（副露がなければ13枚）
     tiles: Vec<Tile>,
@@ -13,6 +13,36 @@ pub struct Hand {
     drawn: Option<Tile>,
 }
 impl Hand {
+    /// 手牌の参照を返す
+    pub fn tiles(&self) -> &[Tile] {
+        &self.tiles
+    }
+
+    /// 手牌の可変参照を返す
+    pub fn tiles_mut(&mut self) -> &mut Vec<Tile> {
+        &mut self.tiles
+    }
+
+    /// ツモ牌をセットする
+    pub fn set_drawn(&mut self, tile: Option<Tile>) {
+        self.drawn = tile;
+    }
+
+    /// 副露を追加する
+    pub fn add_opened(&mut self, open: OpenTiles) {
+        self.opened.push(open);
+    }
+
+    /// 指定インデックスの牌を手牌から除去する
+    pub fn remove_tiles_by_indices(&mut self, indices: &mut Vec<usize>) {
+        indices.sort_unstable_by(|a, b| b.cmp(a));
+        for &idx in indices.iter() {
+            if idx < self.tiles.len() {
+                self.tiles.remove(idx);
+            }
+        }
+    }
+
     pub fn new(tiles: Vec<Tile>, drawn: Option<Tile>) -> Hand {
         return Hand::new_with_opened(tiles, Vec::new(), drawn);
     }
