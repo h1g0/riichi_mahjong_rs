@@ -1,0 +1,12 @@
+[package]
+name = "mahjong-client"
+version = "0.1.0"
+authors = ["hi_go <me@clutte.red>"]
+edition = "2024"
+
+[dependencies]
+mahjong-core = { path = "../mahjong-core" }
+mahjong-server = { path = "../mahjong-server" }
+macroquad = "0.4"
+serde = { version = "1", features = ["derive"] }
+getrandom = "0.4"

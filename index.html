@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <title>麻雀</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas" tabindex='1' width="1280" height="800"></canvas>
+    <script src="mq_js_bundle.js"></script>
+    <script>
+        if (typeof load === "function") {
+            load("target/wasm32-unknown-unknown/release/mahjong-client.wasm");
+        } else {
+            document.body.innerHTML = "<p style='color:white;text-align:center;margin-top:40vh'>エラー: mq_js_bundle.js が読み込めませんでした</p>";
+        }
+    </script>
+</body>
+</html>

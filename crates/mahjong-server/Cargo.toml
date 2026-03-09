@@ -1,0 +1,11 @@
+[package]
+name = "mahjong-server"
+version = "0.1.0"
+authors = ["hi_go <me@clutte.red>"]
+edition = "2024"
+
+[dependencies]
+mahjong-core = { path = "../mahjong-core" }
+rand = "0.10"
+serde = { version = "1", features = ["derive"] }
+anyhow = "1.0"

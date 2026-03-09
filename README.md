@@ -17,3 +17,21 @@ Currently,
 - [x] シャンテン数の計算を実装完了
 - [x] 役の判定を実装完了
 - [x] 符計算および点数計算を実装完了
+
+## Vercel deployment
+
+This project can be built on Vercel instead of committing prebuilt WASM assets.
+
+1. Import the repository into Vercel.
+2. Keep the project root at this repository root.
+3. Deploy. Vercel will run `bash scripts/vercel-install.sh` and `bash scripts/vercel-build.sh` from `vercel.json`.
+
+The build does the following:
+- installs `rustup` if needed
+- adds the `wasm32-unknown-unknown` target
+- builds `mahjong-client` in release mode
+- downloads `mq_js_bundle.js`
+- writes deployable assets to `public/`
+
+If you want to test the same flow locally, run the equivalent steps manually on a machine with Bash, curl, Rust, and the wasm target installed.
+
