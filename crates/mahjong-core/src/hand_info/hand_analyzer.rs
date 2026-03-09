@@ -752,8 +752,10 @@ fn calc_normal_shanten(
 ) -> i32 {
     let block3 =
         independent_same3.len() + independent_sequential3.len() + same3.len() + sequential3.len();
-    let block2 = same2.len() + sequential2.len();
-    return 8 - (block3 * 2 + block2) as i32;
+    let head = usize::from(!same2.is_empty());
+    let mut block2 = sequential2.len() + same2.len().saturating_sub(head);
+    block2 = block2.min(4usize.saturating_sub(block3));
+    return 8 - (block3 * 2 + block2 + head) as i32;
 }
 
 /// ユニットテスト
@@ -910,4 +912,13 @@ mod tests {
         let test = Hand::from(test_str);
         assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
     }
+
+    #[test]
+    /// 4面子1塔子は和了ではなく聴牌
+    fn four_melds_and_one_taatsu_is_tenpai_not_win() {
+        let test = Hand::from("234678m56p567s55z 5z");
+        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
+    }
 }
+
+
