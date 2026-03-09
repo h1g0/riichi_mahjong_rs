@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source "$HOME/.cargo/env"
+export HOME="${HOME:-/vercel}"
+export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+
+if [ -f "$CARGO_HOME/env" ]; then
+  source "$CARGO_HOME/env"
+else
+  export PATH="$CARGO_HOME/bin:$PATH"
+fi
 
 rm -rf public
 mkdir -p public
