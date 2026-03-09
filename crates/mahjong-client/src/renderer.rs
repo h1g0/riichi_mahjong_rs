@@ -129,7 +129,6 @@ fn draw_info_panel(state: &GameState, font: Option<&Font>) {
 
 /// 捨て牌を描画する
 fn draw_discards(state: &GameState, font: Option<&Font>) {
-    let labels = ["自分", "下家", "対面", "上家"];
     let positions: [(f32, f32); 4] = [
         (400.0, 500.0), // 自分（下）
         (900.0, 300.0), // 下家（右）
@@ -137,13 +136,18 @@ fn draw_discards(state: &GameState, font: Option<&Font>) {
         (100.0, 300.0), // 上家（左）
     ];
 
+    let my_wind_idx = state.seat_wind.map(|w| w.to_index()).unwrap_or(0);
+
     for player_idx in 0..4 {
         let (base_x, base_y) = positions[player_idx];
         let discards = &state.discards[player_idx];
+        let display_wind = mahjong_core::tile::Wind::from_index(my_wind_idx + player_idx);
+        let score = state.scores[player_idx];
+        let label = format!("{} {}点", wind_to_str(display_wind), score);
 
         draw_jp_text(
             font,
-            labels[player_idx],
+            &label,
             base_x,
             base_y - 5.0,
             SMALL_FONT,
@@ -532,6 +536,8 @@ fn wind_to_str(wind: mahjong_core::tile::Wind) -> &'static str {
         mahjong_core::tile::Wind::North => "北",
     }
 }
+
+
 
 
 

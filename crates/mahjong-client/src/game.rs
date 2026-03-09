@@ -266,6 +266,7 @@ impl GameState {
                 fu,
                 score_points,
                 rank_name,
+                uradora_indicators,
             } => {
                 self.scores = scores;
                 let winner_name = self.wind_to_name(winner);
@@ -292,12 +293,23 @@ impl GameState {
                     format!("{}符{}翻 {}", fu, han, rank_name)
                 };
 
+                let uradora_text = if uradora_indicators.is_empty() {
+                    String::new()
+                } else {
+                    let tiles: Vec<String> = uradora_indicators
+                        .iter()
+                        .map(|t| tile_to_string(*t))
+                        .collect();
+                    format!("\n裏ドラ表示: {}", tiles.join(" "))
+                };
+
                 let msg = format!(
-                    "{}が{}和了！{}\n和了牌: {}\n{}\n{} → {}点",
+                    "{}が{}和了！{}\n和了牌: {}{}\n{}\n{} → {}点",
                     winner_name,
                     win_type,
                     loser_text,
                     tile_to_string(winning_tile),
+                    uradora_text,
                     yaku_text,
                     rank_display,
                     score_points
@@ -653,3 +665,5 @@ mod tests {
         assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::Z5))));
     }
 }
+
+

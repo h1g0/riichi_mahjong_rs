@@ -549,6 +549,7 @@ impl Round {
                     fu: score_result.fu,
                     score_points: deltas[winner],
                     rank_name: rank_name.clone(),
+                    uradora_indicators: uradora_indicators.clone(),
                 },
             ));
         }
@@ -927,6 +928,7 @@ impl Round {
                     fu: score_result.fu,
                     score_points: deltas[winner],
                     rank_name: rank_name.clone(),
+                    uradora_indicators: uradora_indicators.clone(),
                 },
             ));
         }
@@ -1363,3 +1365,7 @@ mod tests {
         assert!(round.players[0].is_riichi);
     }
 }
+
+
+
+

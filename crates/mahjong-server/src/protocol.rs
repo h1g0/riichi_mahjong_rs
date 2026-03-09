@@ -148,6 +148,8 @@ pub enum ServerEvent {
         score_points: i32,
         /// 点数等級名（満貫、跳満など。通常は空文字列）
         rank_name: String,
+        /// 裏ドラ表示牌（リーチ和了時のみ公開）
+        uradora_indicators: Vec<Tile>,
     },
 
     /// 局終了（流局）
@@ -200,3 +202,4 @@ pub enum ClientAction {
     /// パス（鳴きやロンをしない）
     Pass,
 }
+
