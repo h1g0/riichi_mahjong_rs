@@ -3,9 +3,11 @@
 //! 各プレイヤーの手牌、捨て牌、点数、リーチ状態などを管理する。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::opened::OpenFrom;
-use mahjong_core::tile::{Tile, Wind};
+use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
+use mahjong_core::tile::{Tile, TileType, Wind};
 use serde::{Deserialize, Serialize};
+
+use crate::scoring;
 
 /// プレイヤーの状態
 pub struct Player {
@@ -65,14 +67,19 @@ impl Player {
     }
 
     /// 手牌から指定牌を捨てる
-    /// ツモ牌と同じならツモ切り、そうでなければ手出し
-    pub fn discard(&mut self, tile_index: Option<usize>) -> Tile {
+    /// tile が Some(牌) なら手牌からその牌を探して捨てる（手出し）
+    /// tile が None ならツモ切り
+    pub fn discard(&mut self, tile: Option<Tile>) -> Tile {
         let drawn = self.hand.drawn();
 
-        match tile_index {
-            // 手牌からの手出し
-            Some(idx) => {
+        match tile {
+            // 手牌からの手出し: 牌の種類で検索して除去
+            Some(target) => {
                 let tiles = self.hand.tiles_mut();
+                let idx = tiles
+                    .iter()
+                    .position(|t| *t == target)
+                    .expect("指定された牌が手牌にありません");
                 let discarded = tiles.remove(idx);
 
                 // ツモ牌を手牌に加える
@@ -143,6 +150,155 @@ impl Player {
         // リーチ棒代を引く
         self.score -= 1000;
     }
+
+    // ===== 鳴き判定メソッド =====
+
+    /// ポン可能か判定する
+    pub fn can_pon(&self, tile: Tile) -> bool {
+        let count = self.hand.tiles().iter().filter(|t| t.get() == tile.get()).count();
+        count >= 2
+    }
+
+    /// チー可能な組み合わせを返す
+    ///
+    /// 各要素は [TileType; 2] で、手牌から使う2枚の牌の種類を表す。
+    /// 字牌はチー不可。
+    pub fn chi_options(&self, tile: Tile) -> Vec<[TileType; 2]> {
+        if tile.is_honor() {
+            return vec![];
+        }
+
+        let tt = tile.get();
+        let tiles = self.hand.tiles();
+        let mut options = vec![];
+
+        // 同じスーツの範囲を計算
+        let suit_start = (tt / 9) * 9;
+        let suit_end = suit_start + 9;
+
+        // パターン1: [tt-2, tt-1] + tt （例: 鳴く牌が3m, 手牌に1m2mがある）
+        if tt >= suit_start + 2 {
+            let a = tt - 2;
+            let b = tt - 1;
+            if tiles.iter().any(|t| t.get() == a)
+                && tiles.iter().any(|t| t.get() == b)
+            {
+                options.push([a, b]);
+            }
+        }
+
+        // パターン2: [tt-1, tt+1] + tt （例: 鳴く牌が5m, 手牌に4m6mがある）
+        if tt >= suit_start + 1 && tt + 1 < suit_end {
+            let a = tt - 1;
+            let b = tt + 1;
+            if tiles.iter().any(|t| t.get() == a)
+                && tiles.iter().any(|t| t.get() == b)
+            {
+                options.push([a, b]);
+            }
+        }
+
+        // パターン3: [tt+1, tt+2] + tt （例: 鳴く牌が1m, 手牌に2m3mがある）
+        if tt + 2 < suit_end {
+            let a = tt + 1;
+            let b = tt + 2;
+            if tiles.iter().any(|t| t.get() == a)
+                && tiles.iter().any(|t| t.get() == b)
+            {
+                options.push([a, b]);
+            }
+        }
+
+        options
+    }
+
+    /// フリテン状態か判定する
+    ///
+    /// 自分の待ち牌のいずれかが自分の捨て牌に含まれている場合、フリテン。
+    pub fn is_furiten(&self) -> bool {
+        let waiting = scoring::get_waiting_tiles(self);
+        if waiting.is_empty() {
+            return false;
+        }
+        for &wt in &waiting {
+            if self.discards.iter().any(|d| d.tile.get() == wt) {
+                return true;
+            }
+        }
+        false
+    }
+
+    // ===== 鳴き実行メソッド =====
+
+    /// ポンを実行する
+    ///
+    /// 手牌から同じ種類の牌2枚を取り除き、鳴いた牌と合わせて副露に追加する。
+    pub fn do_pon(&mut self, called_tile: Tile, from: OpenFrom) {
+        let tt = called_tile.get();
+        let mut indices: Vec<usize> = Vec::new();
+        for (i, t) in self.hand.tiles().iter().enumerate() {
+            if t.get() == tt && indices.len() < 2 {
+                indices.push(i);
+            }
+        }
+
+        let t1 = self.hand.tiles()[indices[0]];
+        let t2 = self.hand.tiles()[indices[1]];
+
+        self.hand.remove_tiles_by_indices(&mut indices);
+
+        self.hand.add_opened(OpenTiles {
+            tiles: [t1, t2, called_tile],
+            category: OpenType::Pon,
+            from,
+        });
+
+        self.is_first_turn = false;
+        self.is_ippatsu = false;
+    }
+
+    /// チーを実行する
+    ///
+    /// 手牌から指定種類の牌2枚を取り除き、鳴いた牌と合わせて副露に追加する。
+    pub fn do_chi(&mut self, called_tile: Tile, hand_tile_types: [TileType; 2]) {
+        let mut indices: Vec<usize> = Vec::new();
+        for &tt in &hand_tile_types {
+            for (i, t) in self.hand.tiles().iter().enumerate() {
+                if t.get() == tt && !indices.contains(&i) {
+                    indices.push(i);
+                    break;
+                }
+            }
+        }
+
+        let t1 = self.hand.tiles()[indices[0]];
+        let t2 = self.hand.tiles()[indices[1]];
+
+        self.hand.remove_tiles_by_indices(&mut indices);
+
+        // 順子の牌をソートして副露に追加
+        let mut chi_tiles = [t1, t2, called_tile];
+        chi_tiles.sort();
+
+        self.hand.add_opened(OpenTiles {
+            tiles: chi_tiles,
+            category: OpenType::Chi,
+            from: OpenFrom::Previous, // チーは常に上家から
+        });
+
+        self.is_first_turn = false;
+        self.is_ippatsu = false;
+    }
+
+    /// 捨てたプレイヤーと自分の相対位置から OpenFrom を返す
+    pub fn open_from_relative(caller: usize, discarder: usize) -> OpenFrom {
+        match (caller + 4 - discarder) % 4 {
+            1 => OpenFrom::Previous,   // 上家（カミチャ）
+            2 => OpenFrom::Opposite,   // 対面（トイメン）
+            3 => OpenFrom::Following,  // 下家（シモチャ）
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -203,7 +359,7 @@ mod tests {
         player.draw(draw_tile);
 
         // 手牌の最初の牌（1m）を捨てる
-        let discarded = player.discard(Some(0));
+        let discarded = player.discard(Some(Tile::new(Tile::M1)));
         assert_eq!(discarded.get(), Tile::M1);
         assert_eq!(player.discards.len(), 1);
         assert!(!player.discards[0].is_tsumogiri);
@@ -237,5 +393,136 @@ mod tests {
     fn test_not_dealer() {
         let player = Player::new(Wind::South, make_test_tiles(), 25000);
         assert!(!player.is_dealer());
+    }
+
+    #[test]
+    fn test_can_pon() {
+        // 手牌: 1m1m3m 4p5p6p 7s8s9s 1z2z3z4z
+        let tiles = vec![
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S7),
+            Tile::new(Tile::S8),
+            Tile::new(Tile::S9),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z2),
+            Tile::new(Tile::Z3),
+            Tile::new(Tile::Z4),
+        ];
+        let player = Player::new(Wind::East, tiles, 25000);
+        assert!(player.can_pon(Tile::new(Tile::M1))); // 1mが2枚ある
+        assert!(!player.can_pon(Tile::new(Tile::M3))); // 3mは1枚しかない
+    }
+
+    #[test]
+    fn test_chi_options() {
+        // 手牌: 2m3m5m 4p5p6p 7s8s9s 1z2z3z4z
+        let tiles = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M5),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S7),
+            Tile::new(Tile::S8),
+            Tile::new(Tile::S9),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z2),
+            Tile::new(Tile::Z3),
+            Tile::new(Tile::Z4),
+        ];
+        let player = Player::new(Wind::East, tiles, 25000);
+
+        // 4mでチー: [2m,3m] or [3m,5m]
+        let options = player.chi_options(Tile::new(Tile::M4));
+        assert_eq!(options.len(), 2);
+        assert!(options.contains(&[Tile::M2, Tile::M3]));
+        assert!(options.contains(&[Tile::M3, Tile::M5]));
+
+        // 字牌はチー不可
+        let options = player.chi_options(Tile::new(Tile::Z1));
+        assert!(options.is_empty());
+
+        // 1mでチー: [2m,3m]
+        let options = player.chi_options(Tile::new(Tile::M1));
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0], [Tile::M2, Tile::M3]);
+    }
+
+    #[test]
+    fn test_do_pon() {
+        let tiles = vec![
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S7),
+            Tile::new(Tile::S8),
+            Tile::new(Tile::S9),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z2),
+            Tile::new(Tile::Z3),
+            Tile::new(Tile::Z4),
+        ];
+        let mut player = Player::new(Wind::South, tiles, 25000);
+        let called = Tile::new(Tile::M1);
+
+        player.do_pon(called, OpenFrom::Previous);
+
+        // 手牌が11枚になること（13 - 2 = 11）
+        assert_eq!(player.hand.tiles().len(), 11);
+        // 副露が1つ
+        assert_eq!(player.hand.opened().len(), 1);
+        assert_eq!(player.hand.opened()[0].category, OpenType::Pon);
+        // 門前でなくなる
+        assert!(!player.is_menzen());
+    }
+
+    #[test]
+    fn test_do_chi() {
+        let tiles = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M5),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S7),
+            Tile::new(Tile::S8),
+            Tile::new(Tile::S9),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z2),
+            Tile::new(Tile::Z3),
+            Tile::new(Tile::Z4),
+        ];
+        let mut player = Player::new(Wind::South, tiles, 25000);
+        let called = Tile::new(Tile::M4);
+
+        player.do_chi(called, [Tile::M3, Tile::M5]);
+
+        // 手牌が11枚になること
+        assert_eq!(player.hand.tiles().len(), 11);
+        // 副露が1つ
+        assert_eq!(player.hand.opened().len(), 1);
+        assert_eq!(player.hand.opened()[0].category, OpenType::Chi);
+        // 門前でなくなる
+        assert!(!player.is_menzen());
+    }
+
+    #[test]
+    fn test_open_from_relative() {
+        // プレイヤー1から見たプレイヤー0 → 上家（Previous）
+        assert_eq!(Player::open_from_relative(1, 0), OpenFrom::Previous);
+        // プレイヤー2から見たプレイヤー0 → 対面（Opposite）
+        assert_eq!(Player::open_from_relative(2, 0), OpenFrom::Opposite);
+        // プレイヤー3から見たプレイヤー0 → 下家（Following）
+        assert_eq!(Player::open_from_relative(3, 0), OpenFrom::Following);
     }
 }

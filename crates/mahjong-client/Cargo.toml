@@ -9,3 +9,4 @@ mahjong-core = { path = "../mahjong-core" }
 mahjong-server = { path = "../mahjong-server" }
 macroquad = "0.4"
 serde = { version = "1", features = ["derive"] }
+getrandom = "0.4"

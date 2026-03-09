@@ -146,7 +146,7 @@ fn extract_yaku_list(
 }
 
 /// 等級を決定する
-fn determine_rank(han: u32, fu: u32, has_yakuman: bool) -> ScoreRank {
+pub fn determine_rank(han: u32, fu: u32, has_yakuman: bool) -> ScoreRank {
     if has_yakuman || han >= 13 {
         ScoreRank::Yakuman
     } else if han >= 11 {
@@ -167,7 +167,7 @@ fn determine_rank(han: u32, fu: u32, has_yakuman: bool) -> ScoreRank {
 }
 
 /// 基本点を計算する
-fn calculate_base_points(han: u32, fu: u32, rank: ScoreRank) -> u32 {
+pub fn calculate_base_points(han: u32, fu: u32, rank: ScoreRank) -> u32 {
     match rank {
         ScoreRank::Yakuman => 8000,
         ScoreRank::Sanbaiman => 6000,
@@ -184,7 +184,7 @@ fn calculate_base_points(han: u32, fu: u32, rank: ScoreRank) -> u32 {
 }
 
 /// 100点単位に切り上げる
-fn round_up_to_100(points: u32) -> u32 {
+pub fn round_up_to_100(points: u32) -> u32 {
     (points + 99) / 100 * 100
 }
 

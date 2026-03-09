@@ -6,7 +6,7 @@
 use mahjong_core::tile::Wind;
 
 use crate::protocol::{ClientAction, ServerEvent};
-use crate::round::{Round, RoundResult, TurnPhase};
+use crate::round::{CallResponse, Round, RoundResult, TurnPhase};
 
 /// ゲームの設定
 #[derive(Debug, Clone)]
@@ -64,7 +64,13 @@ impl Table {
 
     /// 新しい局を開始する
     pub fn start_round(&mut self) {
-        let round = Round::new(self.prevailing_wind, self.dealer, self.scores);
+        let round = Round::new(
+            self.prevailing_wind,
+            self.dealer,
+            self.scores,
+            self.honba,
+            self.round_number,
+        );
         self.round = Some(round);
     }
 
@@ -93,20 +99,51 @@ impl Table {
             None => return false,
         };
 
-        // 現在の手番プレイヤーのアクションのみ受け付ける
-        if round.current_player != player_idx {
-            return false;
-        }
-
         match action {
-            ClientAction::Discard { tile_index } => {
+            // === 手番アクション（current_player のみ） ===
+            ClientAction::Discard { tile } => {
+                if round.current_player != player_idx {
+                    return false;
+                }
                 if round.phase != TurnPhase::WaitForDiscard {
                     return false;
                 }
-                round.do_discard(tile_index)
+                round.do_discard(tile)
             }
-            // Phase 6以降で実装予定
-            _ => false,
+            ClientAction::Tsumo => {
+                if round.current_player != player_idx {
+                    return false;
+                }
+                round.do_tsumo()
+            }
+            ClientAction::Riichi { tile } => {
+                if round.current_player != player_idx {
+                    return false;
+                }
+                round.do_riichi(tile)
+            }
+
+            // === 鳴きアクション（WaitForCalls フェーズで対象プレイヤーのみ） ===
+            ClientAction::Ron => {
+                round.respond_to_call(player_idx, CallResponse::Ron)
+            }
+            ClientAction::Pon => {
+                round.respond_to_call(player_idx, CallResponse::Pon)
+            }
+            ClientAction::Chi { tiles } => {
+                round.respond_to_call(
+                    player_idx,
+                    CallResponse::Chi {
+                        hand_tile_types: tiles,
+                    },
+                )
+            }
+            ClientAction::Pass => {
+                round.respond_to_call(player_idx, CallResponse::Pass)
+            }
+
+            // カンは Phase 9 で実装予定
+            ClientAction::Kan { .. } => false,
         }
     }
 
@@ -133,19 +170,22 @@ impl Table {
         self.scores = round.get_scores();
 
         match result {
-            Some(RoundResult::ExhaustiveDraw) => {
-                // 流局: 本場を増やし、同じ親で再度
+            Some(RoundResult::ExhaustiveDraw) | Some(RoundResult::SpecialDraw) => {
+                // 流局: 本場を増やし、親交代して局を進める
                 self.honba += 1;
+                self.dealer = (self.dealer + 1) % 4;
                 self.advance_round_number();
             }
             Some(RoundResult::Tsumo { winner, .. }) | Some(RoundResult::Ron { winner, .. }) => {
-                self.honba = 0;
-                if winner != self.dealer {
-                    // 親が上がっていなければ親交代
+                if winner == self.dealer {
+                    // 親が上がった場合は連荘（同じ局、本場+1）
+                    self.honba += 1;
+                } else {
+                    // 親が上がっていなければ親交代、本場リセット
+                    self.honba = 0;
                     self.dealer = (self.dealer + 1) % 4;
                     self.advance_round_number();
                 }
-                // 親が上がった場合は連荘（同じ局）
             }
             None => {}
         }
@@ -221,7 +261,24 @@ mod tests {
         table.drain_events();
 
         // プレイヤー0がツモ切り
-        assert!(table.handle_action(0, ClientAction::Discard { tile_index: None }));
+        assert!(table.handle_action(0, ClientAction::Discard { tile: None }));
+
+        // WaitForCallsの場合は全員パスさせる
+        {
+            let round = table.current_round_mut().unwrap();
+            if round.phase == TurnPhase::WaitForCalls {
+                for i in 0..4 {
+                    if let Some(ref cs) = round.call_state {
+                        if !cs.responded[i] {
+                            round.respond_to_call(i, CallResponse::Pass);
+                            if round.call_state.is_none() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // 手番がプレイヤー1に移る
         let round = table.current_round().unwrap();
@@ -240,7 +297,7 @@ mod tests {
         }
 
         // プレイヤー1は手番ではないのでfalse
-        assert!(!table.handle_action(1, ClientAction::Discard { tile_index: None }));
+        assert!(!table.handle_action(1, ClientAction::Discard { tile: None }));
     }
 
     #[test]

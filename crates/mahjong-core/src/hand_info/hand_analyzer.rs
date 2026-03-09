@@ -674,64 +674,68 @@ fn count_same_or_sequential_2(
             summarized_hand[i as usize] += 2;
             same2.pop();
         }
-        //数牌
-        if i <= Tile::S9 && (i >= Tile::M1 && i <= Tile::M7)
-            || (i >= Tile::P1 && i <= Tile::P7)
-            || (i >= Tile::S1 && i <= Tile::S7)
+        // 塔子（隣接する2枚: 例 8m9m）— *8 まで含める
+        let is_sequential_range = (i >= Tile::M1 && i <= Tile::M8)
+            || (i >= Tile::P1 && i <= Tile::P8)
+            || (i >= Tile::S1 && i <= Tile::S8);
+        if is_sequential_range
+            && summarized_hand[i as usize] >= 1
+            && summarized_hand[i as usize + 1] >= 1
         {
-            // 塔子
-            if summarized_hand[i as usize] >= 1 && summarized_hand[i as usize + 1] >= 1 {
-                sequential2.push(Sequential2::new(i, i + 1)?);
-                summarized_hand[i as usize] -= 1;
-                summarized_hand[i as usize + 1] -= 1;
-                *shanten_min = count_normal_shanten_recursively(
-                    idx,
-                    independent_same3,
-                    independent_sequential3,
-                    same3,
-                    sequential3,
-                    same2,
-                    sequential2,
-                    summarized_hand,
-                    shanten_min,
-                    same3_result,
-                    sequential3_result,
-                    same2_result,
-                    sequential2_result,
-                    single_result,
-                )?;
-                summarized_hand[i as usize] += 1;
-                summarized_hand[i as usize + 1] += 1;
-                sequential2.pop();
-            }
-            //嵌張
-            if summarized_hand[i as usize] >= 1
-                && summarized_hand[i as usize + 1] == 0
-                && summarized_hand[i as usize + 2] >= 1
-            {
-                sequential2.push(Sequential2::new(i, i + 2)?);
-                summarized_hand[i as usize] -= 1;
-                summarized_hand[i as usize + 2] -= 1;
-                *shanten_min = count_normal_shanten_recursively(
-                    idx,
-                    independent_same3,
-                    independent_sequential3,
-                    same3,
-                    sequential3,
-                    same2,
-                    sequential2,
-                    summarized_hand,
-                    shanten_min,
-                    same3_result,
-                    sequential3_result,
-                    same2_result,
-                    sequential2_result,
-                    single_result,
-                )?;
-                summarized_hand[i as usize] += 1;
-                summarized_hand[i as usize + 2] += 1;
-                sequential2.pop();
-            }
+            sequential2.push(Sequential2::new(i, i + 1)?);
+            summarized_hand[i as usize] -= 1;
+            summarized_hand[i as usize + 1] -= 1;
+            *shanten_min = count_normal_shanten_recursively(
+                idx,
+                independent_same3,
+                independent_sequential3,
+                same3,
+                sequential3,
+                same2,
+                sequential2,
+                summarized_hand,
+                shanten_min,
+                same3_result,
+                sequential3_result,
+                same2_result,
+                sequential2_result,
+                single_result,
+            )?;
+            summarized_hand[i as usize] += 1;
+            summarized_hand[i as usize + 1] += 1;
+            sequential2.pop();
+        }
+        // 嵌張（間が空いた2枚: 例 7m9m）— *7 まで
+        let is_kanchan_range = (i >= Tile::M1 && i <= Tile::M7)
+            || (i >= Tile::P1 && i <= Tile::P7)
+            || (i >= Tile::S1 && i <= Tile::S7);
+        if is_kanchan_range
+            && summarized_hand[i as usize] >= 1
+            && summarized_hand[i as usize + 1] == 0
+            && summarized_hand[i as usize + 2] >= 1
+        {
+            sequential2.push(Sequential2::new(i, i + 2)?);
+            summarized_hand[i as usize] -= 1;
+            summarized_hand[i as usize + 2] -= 1;
+            *shanten_min = count_normal_shanten_recursively(
+                idx,
+                independent_same3,
+                independent_sequential3,
+                same3,
+                sequential3,
+                same2,
+                sequential2,
+                summarized_hand,
+                shanten_min,
+                same3_result,
+                sequential3_result,
+                same2_result,
+                sequential2_result,
+                single_result,
+            )?;
+            summarized_hand[i as usize] += 1;
+            summarized_hand[i as usize + 2] += 1;
+            sequential2.pop();
         }
     }
     Ok(())
@@ -881,5 +885,29 @@ mod tests {
                 .shanten,
             -1
         );
+    }
+
+    #[test]
+    /// 55m123567p56789s + ツモ9m → 聴牌（シャンテン数0）
+    fn tenpai_with_89_wait() {
+        let test_str = "55m123567p56789s 9m";
+        let test = Hand::from(test_str);
+        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
+    }
+
+    #[test]
+    /// 89sの塔子を含む聴牌
+    fn tenpai_with_89s_toitsu() {
+        let test_str = "11m234p567p234s89s 1z";
+        let test = Hand::from(test_str);
+        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
+    }
+
+    #[test]
+    /// 89mの塔子を含む聴牌
+    fn tenpai_with_89m_toitsu() {
+        let test_str = "89m11p234p567s234s 2z";
+        let test = Hand::from(test_str);
+        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
     }
 }

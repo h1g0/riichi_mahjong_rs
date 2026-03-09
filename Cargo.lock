@@ -254,6 +254,7 @@ checksum = "64b1d96218903768c1ce078b657c0d5965465c95a60d2682fd97443c9d2483dd"
 name = "mahjong-client"
 version = "0.1.0"
 dependencies = [
+ "getrandom",
  "macroquad",
  "mahjong-core",
  "mahjong-server",
