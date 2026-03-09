@@ -492,4 +492,28 @@ mod tests {
         // 門前ツモ(1翻) + 場風(1翻) = 2翻
         assert!(score.han >= 2);
     }
+
+    #[test]
+    fn test_check_ron_rejects_four_melds_and_one_taatsu() {
+        let hand = Hand::from("234678m56p567s55z");
+        let player = Player::new(Wind::South, hand.tiles().to_vec(), 25000);
+
+        let result = check_ron(&player, Tile::new(Tile::Z5), Wind::East, false);
+        assert!(!result.is_win);
+        assert!(result.score_result.is_none());
+
+        assert!(player.can_pon(Tile::new(Tile::Z5)));
+    }
+
+    #[test]
+    fn test_get_waiting_tiles_for_47p_shape() {
+        let hand = Hand::from("234678m56p567s55z");
+        let player = Player::new(Wind::South, hand.tiles().to_vec(), 25000);
+
+        let waiting = get_waiting_tiles(&player);
+        assert_eq!(waiting, vec![Tile::P4, Tile::P7]);
+    }
 }
+
+
+

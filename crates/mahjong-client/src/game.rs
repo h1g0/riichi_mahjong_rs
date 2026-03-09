@@ -3,6 +3,8 @@
 //! サーバから受信したイベントに基づいてクライアント側の状態を管理する。
 
 use macroquad::prelude::*;
+use mahjong_core::hand::Hand;
+use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::tile::{Tile, Wind};
 use mahjong_server::protocol::{AvailableCall, CallType, ClientAction, DrawReason, ServerEvent};
 
@@ -49,6 +51,12 @@ pub struct GameState {
     pub can_riichi: bool,
     /// 自分がリーチ中か
     pub is_riichi: bool,
+    /// リーチ宣言のための打牌選択中か
+    pub riichi_selection_mode: bool,
+    /// リーチ可能な手牌インデックス
+    pub riichi_selectable_tiles: Vec<usize>,
+    /// ツモ牌切りでリーチ可能か
+    pub riichi_selectable_drawn: bool,
     /// 局の結果メッセージ
     pub result_message: Option<String>,
     /// 自分の手番か
@@ -98,6 +106,9 @@ impl GameState {
             can_tsumo: false,
             can_riichi: false,
             is_riichi: false,
+            riichi_selection_mode: false,
+            riichi_selectable_tiles: Vec::new(),
+            riichi_selectable_drawn: false,
             result_message: None,
             is_my_turn: false,
             phase: GamePhase::WaitingForStart,
@@ -138,6 +149,7 @@ impl GameState {
                 self.can_tsumo = false;
                 self.can_riichi = false;
                 self.is_riichi = false;
+                self.clear_riichi_selection();
                 self.melds.clear();
                 self.round_number = round_number;
                 self.honba = honba;
@@ -154,6 +166,7 @@ impl GameState {
                 self.is_my_turn = true;
                 self.can_tsumo = can_tsumo;
                 self.can_riichi = can_riichi;
+                self.clear_riichi_selection();
                 self.available_calls.clear();
                 self.call_target_tile = None;
             }
@@ -182,6 +195,7 @@ impl GameState {
                     self.drawn = None;
                     self.selected_tile = None;
                     self.selected_drawn = false;
+                    self.clear_riichi_selection();
                 }
             }
 
@@ -222,6 +236,7 @@ impl GameState {
                             // （サーバ側で処理済みなので、次のイベントで反映）
                             self.is_my_turn = true;
                             self.drawn = None; // 鳴き後はdrawnなし
+                            self.clear_riichi_selection();
                         }
                     }
                 }
@@ -232,6 +247,7 @@ impl GameState {
                 if Some(player) == self.seat_wind {
                     self.is_riichi = true;
                     self.can_riichi = false;
+                    self.clear_riichi_selection();
                 }
             }
 
@@ -290,6 +306,7 @@ impl GameState {
                 self.phase = GamePhase::RoundResult;
                 self.is_my_turn = false;
                 self.available_calls.clear();
+                self.clear_riichi_selection();
             }
 
             ServerEvent::RoundDraw { scores, reason, tenpai } => {
@@ -314,8 +331,75 @@ impl GameState {
                 self.phase = GamePhase::RoundResult;
                 self.is_my_turn = false;
                 self.available_calls.clear();
+                self.clear_riichi_selection();
             }
         }
+    }
+
+    fn clear_riichi_selection(&mut self) {
+        self.riichi_selection_mode = false;
+        self.riichi_selectable_tiles.clear();
+        self.riichi_selectable_drawn = false;
+        self.selected_tile = None;
+        self.selected_drawn = false;
+    }
+
+    fn can_discard_for_riichi(&self, tile: Option<Tile>) -> bool {
+        if self.drawn.is_none() {
+            return false;
+        }
+
+        let mut hand = Hand::new(self.hand.clone(), self.drawn);
+        match tile {
+            Some(target) => {
+                let drawn = hand.drawn();
+                let tiles = hand.tiles_mut();
+                let Some(idx) = tiles.iter().position(|t| *t == target) else {
+                    return false;
+                };
+                tiles.remove(idx);
+                if let Some(drawn_tile) = drawn {
+                    tiles.push(drawn_tile);
+                    tiles.sort();
+                }
+                hand.set_drawn(None);
+            }
+            None => {
+                hand.set_drawn(None);
+            }
+        }
+
+        match HandAnalyzer::new(&hand) {
+            Ok(analyzer) => analyzer.shanten == 0,
+            Err(_) => false,
+        }
+    }
+
+    fn enter_riichi_selection(&mut self) {
+        self.riichi_selection_mode = true;
+        self.selected_tile = None;
+        self.selected_drawn = false;
+        self.riichi_selectable_tiles = self
+            .hand
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, &tile)| self.can_discard_for_riichi(Some(tile)).then_some(idx))
+            .collect();
+        self.riichi_selectable_drawn = self.can_discard_for_riichi(None);
+    }
+
+    fn apply_local_discard_from_hand(&mut self, idx: usize) -> Tile {
+        let discarded_tile = self.hand[idx];
+        self.selected_tile = None;
+        self.selected_drawn = false;
+        if let Some(drawn_tile) = self.drawn.take() {
+            self.hand.remove(idx);
+            self.hand.push(drawn_tile);
+            self.hand.sort();
+        } else {
+            self.hand.remove(idx);
+        }
+        discarded_tile
     }
 
     /// 入力処理: クリックで牌を選択し、アクションを返す
@@ -324,7 +408,6 @@ impl GameState {
             return None;
         }
 
-        // 鳴き選択中の入力処理
         if !self.available_calls.is_empty() {
             return self.handle_call_input();
         }
@@ -333,17 +416,14 @@ impl GameState {
             return None;
         }
 
-        // リーチ中は自動ツモ切り（ツモ和了できない場合）
         if self.is_riichi && self.drawn.is_some() && !self.can_tsumo {
             self.drawn.take();
             return Some(ClientAction::Discard { tile: None });
         }
 
-        // マウスクリック判定
         if is_mouse_button_pressed(MouseButton::Left) {
             let (mx, my) = mouse_position();
 
-            // ツモ和了ボタン判定
             if self.can_tsumo {
                 let tsumo_x = 900.0;
                 let tsumo_y = 720.0;
@@ -358,7 +438,6 @@ impl GameState {
                 }
             }
 
-            // リーチボタン判定
             if self.can_riichi {
                 let riichi_x = 1000.0;
                 let riichi_y = 720.0;
@@ -369,32 +448,19 @@ impl GameState {
                     && my >= riichi_y
                     && my <= riichi_y + btn_h
                 {
-                    // リーチ宣言
-                    // 牌が選択されている場合はその牌を切ってリーチ
-                    if let Some(idx) = self.selected_tile {
-                        let discarded_tile = self.hand[idx];
-                        self.selected_tile = None;
-                        // 選択した牌を手牌から除去し、ツモ牌を手牌に入れる
-                        if let Some(drawn_tile) = self.drawn.take() {
-                            self.hand.remove(idx);
-                            self.hand.push(drawn_tile);
-                            self.hand.sort();
-                        }
-                        return Some(ClientAction::Riichi { tile: Some(discarded_tile) });
+                    if self.riichi_selection_mode {
+                        self.clear_riichi_selection();
                     } else {
-                        // 選択牌なし → ツモ牌を捨ててリーチ
-                        self.drawn.take();
-                        return Some(ClientAction::Riichi { tile: None });
+                        self.enter_riichi_selection();
                     }
+                    return None;
                 }
             }
 
-            // リーチ中はツモ和了ボタンのみ（自動ツモ切りなので手動操作不要）
             if self.is_riichi {
                 return None;
             }
 
-            // 手牌クリック判定
             let hand_start_x = 100.0;
             let hand_y = 680.0;
             let tile_w = 48.0;
@@ -404,32 +470,29 @@ impl GameState {
             for i in 0..hand_len {
                 let x = hand_start_x + i as f32 * tile_w;
                 if mx >= x && mx <= x + tile_w && my >= hand_y && my <= hand_y + tile_h {
-                    // 2回目のクリックで確定
+                    if self.riichi_selection_mode && !self.riichi_selectable_tiles.contains(&i) {
+                        return None;
+                    }
+
                     if self.selected_tile == Some(i) {
-                        let discarded_tile = self.hand[i];
-                        self.selected_tile = None;
-                        self.selected_drawn = false;
-                        if let Some(drawn_tile) = self.drawn.take() {
-                            // 通常の手出し: ツモ牌を手牌に入れて選択牌を捨てる
-                            self.hand.remove(i);
-                            self.hand.push(drawn_tile);
-                            self.hand.sort();
-                        } else {
-                            // 鳴き後の打牌: ツモ牌なし、手牌から直接捨てる
-                            self.hand.remove(i);
+                        let discarded_tile = self.apply_local_discard_from_hand(i);
+                        if self.riichi_selection_mode {
+                            self.clear_riichi_selection();
+                            return Some(ClientAction::Riichi {
+                                tile: Some(discarded_tile),
+                            });
                         }
                         return Some(ClientAction::Discard {
                             tile: Some(discarded_tile),
                         });
-                    } else {
-                        self.selected_tile = Some(i);
-                        self.selected_drawn = false; // 手牌選択時はツモ牌の選択を解除
                     }
-                    break;
+
+                    self.selected_tile = Some(i);
+                    self.selected_drawn = false;
+                    return None;
                 }
             }
 
-            // ツモ牌クリック判定（手牌の右側に表示）
             if self.drawn.is_some() {
                 let drawn_x = hand_start_x + hand_len as f32 * tile_w + 20.0;
                 if mx >= drawn_x
@@ -437,16 +500,23 @@ impl GameState {
                     && my >= hand_y
                     && my <= hand_y + tile_h
                 {
+                    if self.riichi_selection_mode && !self.riichi_selectable_drawn {
+                        return None;
+                    }
+
                     if self.selected_drawn {
-                        // 2回目のクリック → ツモ切り確定
                         self.selected_drawn = false;
                         self.drawn.take();
+                        if self.riichi_selection_mode {
+                            self.clear_riichi_selection();
+                            return Some(ClientAction::Riichi { tile: None });
+                        }
                         return Some(ClientAction::Discard { tile: None });
-                    } else {
-                        // 1回目のクリック → 選択状態にする
-                        self.selected_drawn = true;
-                        self.selected_tile = None; // 手牌の選択を解除
                     }
+
+                    self.selected_drawn = true;
+                    self.selected_tile = None;
+                    return None;
                 }
             }
         }
@@ -548,3 +618,38 @@ pub fn tile_to_string(tile: Tile) -> String {
     }
 }
 
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_enter_riichi_selection_marks_only_tenpai_discards() {
+        let mut state = GameState::new();
+        let hand = Hand::from("123m123p123s45z67m 8m");
+        state.hand = hand.tiles().to_vec();
+        state.hand.sort();
+        state.drawn = hand.drawn();
+        state.enter_riichi_selection();
+
+        assert_eq!(state.riichi_selectable_tiles.len(), 2);
+        assert_eq!(state.hand[state.riichi_selectable_tiles[0]], Tile::new(Tile::Z4));
+        assert_eq!(state.hand[state.riichi_selectable_tiles[1]], Tile::new(Tile::Z5));
+        assert!(!state.riichi_selectable_drawn);
+    }
+
+    #[test]
+    fn test_can_discard_for_riichi_rejects_non_tenpai_discard() {
+        let mut state = GameState::new();
+        let hand = Hand::from("123m123p123s45z67m 8m");
+        state.hand = hand.tiles().to_vec();
+        state.hand.sort();
+        state.drawn = hand.drawn();
+
+        assert!(!state.can_discard_for_riichi(None));
+        assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::Z4))));
+        assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::Z5))));
+    }
+}

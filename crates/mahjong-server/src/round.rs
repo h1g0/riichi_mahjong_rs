@@ -668,6 +668,38 @@ impl Round {
         self.phase = TurnPhase::WaitForDiscard;
     }
 
+    fn can_player_riichi_with_discard(&self, player_idx: usize, tile: Option<Tile>) -> bool {
+        let player = &self.players[player_idx];
+        let mut hand = player.hand.clone();
+
+        match tile {
+            Some(target) => {
+                let drawn = hand.drawn();
+                let tiles = hand.tiles_mut();
+                let Some(idx) = tiles.iter().position(|t| *t == target) else {
+                    return false;
+                };
+                tiles.remove(idx);
+                if let Some(drawn_tile) = drawn {
+                    tiles.push(drawn_tile);
+                    tiles.sort();
+                }
+                hand.set_drawn(None);
+            }
+            None => {
+                if hand.drawn().is_none() {
+                    return false;
+                }
+                hand.set_drawn(None);
+            }
+        }
+
+        match HandAnalyzer::new(&hand) {
+            Ok(analyzer) => analyzer.shanten == 0,
+            Err(_) => false,
+        }
+    }
+
     /// プレイヤーがリーチ宣言可能か判定する
     ///
     /// 条件:
@@ -675,7 +707,7 @@ impl Round {
     /// - 持ち点が1000点以上
     /// - まだリーチしていない
     /// - 山に1枚以上残っている（打牌後に少なくとも1回はツモが行われる）
-    /// - 14枚の手牌でシャンテン数が0以下（聴牌状態から打牌可能）
+    /// - 14枚の手牌から、聴牌を維持する打牌が1つ以上ある
     fn can_player_riichi(&self, player_idx: usize) -> bool {
         let player = &self.players[player_idx];
 
@@ -691,13 +723,20 @@ impl Round {
         if self.wall.remaining() < 1 {
             return false;
         }
-
-        // 14枚の手牌（ツモ牌含む）でシャンテン数を計算
-        // shanten <= 0 なら、何らかの打牌で聴牌を維持できる
-        match HandAnalyzer::new(&player.hand) {
-            Ok(analyzer) => analyzer.shanten <= 0,
-            Err(_) => false,
+        if player.hand.drawn().is_none() {
+            return false;
         }
+
+        if self.can_player_riichi_with_discard(player_idx, None) {
+            return true;
+        }
+
+        player
+            .hand
+            .tiles()
+            .iter()
+            .copied()
+            .any(|tile| self.can_player_riichi_with_discard(player_idx, Some(tile)))
     }
 
     /// リーチ宣言を実行する
@@ -714,6 +753,9 @@ impl Round {
 
         // リーチ条件チェック
         if !self.can_player_riichi(player_idx) {
+            return false;
+        }
+        if !self.can_player_riichi_with_discard(player_idx, tile) {
             return false;
         }
 
@@ -739,6 +781,7 @@ impl Round {
         // （declare_riichi内でippatsu=trueが設定されるが、
         //   直後のdiscardでippatsu=falseにされてしまう。
         //   これを防ぐため、一時的にippatsuを保護する）
+        let is_tsumogiri = tile.is_none();
         let discarded = self.players[player_idx].discard(tile);
         // リーチ宣言直後の打牌なのでippatsuを復元
         self.players[player_idx].is_ippatsu = true;
@@ -758,7 +801,7 @@ impl Round {
                 ServerEvent::TileDiscarded {
                     player: current_wind,
                     tile: discarded,
-                    is_tsumogiri: false,
+                    is_tsumogiri,
                 },
             ));
         }
@@ -1283,5 +1326,40 @@ mod tests {
             }
             assert_eq!(round.phase, TurnPhase::Draw);
         }
+    }
+
+    #[test]
+    fn test_check_available_calls_offers_pon_but_not_ron_for_5z() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let seat_wind = round.players[1].seat_wind;
+        let hand = mahjong_core::hand::Hand::from("234678m56p567s55z");
+        round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+
+        let call_state = round.check_available_calls(Tile::new(Tile::Z5), 0);
+        assert!(call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Pon)));
+        assert!(!call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Ron)));
+    }
+
+    #[test]
+    fn test_do_riichi_requires_tenpai_after_discard() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let seat_wind = round.players[0].seat_wind;
+        let hand = mahjong_core::hand::Hand::from("123m123p123s45z67m 8m");
+        round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+        round.players[0].draw(hand.drawn().unwrap());
+        round.phase = TurnPhase::WaitForDiscard;
+        round.current_player = 0;
+        round.drain_events();
+
+        assert!(!round.do_riichi(None));
+        assert!(!round.players[0].is_riichi);
+        assert_eq!(round.players[0].hand.drawn(), Some(Tile::new(Tile::M8)));
+
+        assert!(round.do_riichi(Some(Tile::new(Tile::Z4))));
+        assert!(round.players[0].is_riichi);
     }
 }

@@ -15,6 +15,9 @@ const TILE_BORDER: Color = Color::new(0.3, 0.3, 0.3, 1.0);
 const TILE_TEXT: Color = Color::new(0.1, 0.1, 0.1, 1.0);
 const TILE_RED: Color = Color::new(0.9, 0.1, 0.1, 1.0);
 const SELECTED_BG: Color = Color::new(0.8, 1.0, 0.8, 1.0);
+const RIICHI_SELECTABLE_BG: Color = Color::new(1.0, 0.96, 0.72, 1.0);
+const RIICHI_DISABLED_BG: Color = Color::new(0.78, 0.78, 0.72, 1.0);
+const RIICHI_DISABLED_TEXT: Color = Color::new(0.45, 0.45, 0.42, 1.0);
 
 const TILE_W: f32 = 48.0;
 const TILE_H: f32 = 68.0;
@@ -173,17 +176,21 @@ fn draw_hand(state: &GameState, font: Option<&Font>) {
     for (i, tile) in state.hand.iter().enumerate() {
         let x = hand_start_x + i as f32 * TILE_W;
         let selected = state.selected_tile == Some(i);
+        let riichi_selectable = state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);
         let y_offset = if selected { -10.0 } else { 0.0 };
 
-        draw_tile(x, hand_y + y_offset, tile, selected, font);
+        let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
+        draw_tile(x, hand_y + y_offset, tile, selected, riichi_selectable, riichi_disabled, font);
     }
 
     // ツモ牌（少し間隔を開けて表示）
     if let Some(drawn) = &state.drawn {
         let drawn_x = hand_start_x + state.hand.len() as f32 * TILE_W + 20.0;
         let selected = state.selected_drawn;
+        let riichi_selectable = state.riichi_selection_mode && state.riichi_selectable_drawn;
         let y_offset = if selected { -10.0 } else { 0.0 };
-        draw_tile(drawn_x, hand_y + y_offset, drawn, selected, font);
+        let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
+        draw_tile(drawn_x, hand_y + y_offset, drawn, selected, riichi_selectable, riichi_disabled, font);
 
         // ツモ牌ラベル
         draw_jp_text(
@@ -250,15 +257,25 @@ fn draw_meld_tile(x: f32, y: f32, tile: &mahjong_core::tile::Tile, w: f32, h: f3
 }
 
 /// 牌1枚を描画する
-fn draw_tile(x: f32, y: f32, tile: &mahjong_core::tile::Tile, selected: bool, font: Option<&Font>) {
+fn draw_tile(x: f32, y: f32, tile: &mahjong_core::tile::Tile, selected: bool, riichi_selectable: bool, riichi_disabled: bool, font: Option<&Font>) {
     // 背景
-    let bg = if selected { SELECTED_BG } else { TILE_BG };
+    let bg = if selected {
+        SELECTED_BG
+    } else if riichi_selectable {
+        RIICHI_SELECTABLE_BG
+    } else if riichi_disabled {
+        RIICHI_DISABLED_BG
+    } else {
+        TILE_BG
+    };
     draw_rectangle(x, y, TILE_W - 2.0, TILE_H - 2.0, bg);
     draw_rectangle_lines(x, y, TILE_W - 2.0, TILE_H - 2.0, 2.0, TILE_BORDER);
 
     // 牌の文字列
     let text = tile.to_string();
-    let color = if tile.is_red_dora() {
+    let color = if riichi_disabled {
+        RIICHI_DISABLED_TEXT
+    } else if tile.is_red_dora() {
         TILE_RED
     } else {
         TILE_TEXT
@@ -296,8 +313,16 @@ fn draw_action_buttons(state: &GameState, font: Option<&Font>) {
         return;
     }
 
-    // リーチ中の表示
-    if state.is_riichi {
+    if state.riichi_selection_mode {
+        draw_jp_text(
+            font,
+            "【リーチ】聴牌になる牌を選んで打牌",
+            330.0,
+            640.0,
+            FONT_SIZE,
+            Color::new(1.0, 0.9, 0.3, 1.0),
+        );
+    } else if state.is_riichi {
         draw_jp_text(
             font,
             "【リーチ中】自動ツモ切り",
@@ -326,7 +351,16 @@ fn draw_action_buttons(state: &GameState, font: Option<&Font>) {
         }
 
         // 操作説明
-        if !state.is_riichi {
+        if state.riichi_selection_mode {
+            draw_jp_text(
+                font,
+                "黄色の牌だけがリーチ打牌できます。リーチボタンでも解除できます。",
+                100.0,
+                770.0,
+                SMALL_FONT,
+                Color::new(0.9, 0.9, 0.5, 0.8),
+            );
+        } else if !state.is_riichi {
             draw_jp_text(
                 font,
                 "牌をクリックで選択、もう一度クリックで打牌",
@@ -498,3 +532,10 @@ fn wind_to_str(wind: mahjong_core::tile::Wind) -> &'static str {
         mahjong_core::tile::Wind::North => "北",
     }
 }
+
+
+
+
+
+
+
