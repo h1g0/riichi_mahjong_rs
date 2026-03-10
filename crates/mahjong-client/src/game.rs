@@ -77,6 +77,8 @@ pub struct GameState {
     pub round_number: usize,
     /// 本場数
     pub honba: usize,
+    /// 場に出ている供託リーチ棒の本数
+    pub riichi_sticks: usize,
 }
 
 /// ゲームフェーズ
@@ -121,6 +123,7 @@ impl GameState {
             melds: Vec::new(),
             round_number: 0,
             honba: 0,
+            riichi_sticks: 0,
         }
     }
 
@@ -135,6 +138,7 @@ impl GameState {
                 dora_indicators,
                 round_number,
                 honba,
+                riichi_sticks,
             } => {
                 self.seat_wind = Some(seat_wind);
                 self.hand = hand;
@@ -158,6 +162,7 @@ impl GameState {
                 self.melds.clear();
                 self.round_number = round_number;
                 self.honba = honba;
+                self.riichi_sticks = riichi_sticks;
             }
 
             ServerEvent::TileDrawn {
@@ -270,7 +275,14 @@ impl GameState {
                 self.dora_indicators = dora_indicators;
             }
 
-            ServerEvent::PlayerRiichi { player } => {
+            ServerEvent::PlayerRiichi {
+                player,
+                scores,
+                riichi_sticks,
+            } => {
+                self.scores = scores;
+                self.riichi_sticks = riichi_sticks;
+
                 // 自分がリーチした場合
                 if Some(player) == self.seat_wind {
                     self.is_riichi = true;
@@ -296,8 +308,10 @@ impl GameState {
                 score_points,
                 rank_name,
                 uradora_indicators,
+                riichi_sticks,
             } => {
                 self.scores = scores;
+                self.riichi_sticks = 0;
                 let winner_name = self.wind_to_name(winner);
                 let win_type = if loser.is_some() { "ロン" } else { "ツモ" };
                 let loser_text = if let Some(l) = loser {
@@ -332,13 +346,20 @@ impl GameState {
                     format!("\n裏ドラ表示: {}", tiles.join(" "))
                 };
 
+                let riichi_sticks_text = if riichi_sticks == 0 {
+                    String::new()
+                } else {
+                    format!("\n供託: {}本", riichi_sticks)
+                };
+
                 let msg = format!(
-                    "{}が{}和了！{}\n和了牌: {}{}\n{}\n{} → {}点",
+                    "{}が{}和了！{}\n和了牌: {}{}{}\n{}\n{} → {}点",
                     winner_name,
                     win_type,
                     loser_text,
                     tile_to_string(winning_tile),
                     uradora_text,
+                    riichi_sticks_text,
                     yaku_text,
                     rank_display,
                     score_points
@@ -351,8 +372,14 @@ impl GameState {
                 self.self_kan_options.clear();
             }
 
-            ServerEvent::RoundDraw { scores, reason, tenpai } => {
+            ServerEvent::RoundDraw {
+                scores,
+                reason,
+                tenpai,
+                riichi_sticks,
+            } => {
                 self.scores = scores;
+                self.riichi_sticks = riichi_sticks;
                 let reason_text = match reason {
                     DrawReason::Exhaustive => "荒牌流局",
                     DrawReason::FourWinds => "四風連打",
@@ -367,6 +394,9 @@ impl GameState {
                         .map(|w| self.wind_to_name(*w))
                         .collect();
                     msg.push_str(&format!("\nテンパイ: {}", tenpai_names.join(", ")));
+                }
+                if riichi_sticks > 0 {
+                    msg.push_str(&format!("\n供託: {}本", riichi_sticks));
                 }
 
                 self.result_message = Some(msg);
