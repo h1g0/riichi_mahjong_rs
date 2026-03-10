@@ -64,6 +64,11 @@ impl Hand {
         &self.opened
     }
 
+    /// 副露の可変参照を返す
+    pub fn opened_mut(&mut self) -> &mut Vec<OpenTiles> {
+        &mut self.opened
+    }
+
     /// 手牌をソートする
     pub fn sort(&mut self) {
         self.tiles.sort();
@@ -81,6 +86,9 @@ impl Hand {
         for i in 0..self.opened.len() {
             for j in 0..self.opened[i].tiles.len() {
                 result[self.opened[i].tiles[j].get() as usize] += 1;
+            }
+            if self.opened[i].category == OpenType::Kan {
+                result[self.opened[i].tiles[0].get() as usize] += 1;
             }
         }
 

@@ -84,7 +84,11 @@ fn draw_info_panel(state: &GameState, font: Option<&Font>) {
     } else {
         String::new()
     };
-    let riichi_marker = if state.is_riichi { " 【リーチ】" } else { "" };
+    let riichi_marker = if state.is_riichi {
+        " 【リーチ】"
+    } else {
+        ""
+    };
 
     draw_jp_text(
         font,
@@ -180,11 +184,20 @@ fn draw_hand(state: &GameState, font: Option<&Font>) {
     for (i, tile) in state.hand.iter().enumerate() {
         let x = hand_start_x + i as f32 * TILE_W;
         let selected = state.selected_tile == Some(i);
-        let riichi_selectable = state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);
+        let riichi_selectable =
+            state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);
         let y_offset = if selected { -10.0 } else { 0.0 };
 
         let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
-        draw_tile(x, hand_y + y_offset, tile, selected, riichi_selectable, riichi_disabled, font);
+        draw_tile(
+            x,
+            hand_y + y_offset,
+            tile,
+            selected,
+            riichi_selectable,
+            riichi_disabled,
+            font,
+        );
     }
 
     // ツモ牌（少し間隔を開けて表示）
@@ -194,7 +207,15 @@ fn draw_hand(state: &GameState, font: Option<&Font>) {
         let riichi_selectable = state.riichi_selection_mode && state.riichi_selectable_drawn;
         let y_offset = if selected { -10.0 } else { 0.0 };
         let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
-        draw_tile(drawn_x, hand_y + y_offset, drawn, selected, riichi_selectable, riichi_disabled, font);
+        draw_tile(
+            drawn_x,
+            hand_y + y_offset,
+            drawn,
+            selected,
+            riichi_selectable,
+            riichi_disabled,
+            font,
+        );
 
         // ツモ牌ラベル
         draw_jp_text(
@@ -237,7 +258,14 @@ fn draw_melds(state: &GameState, font: Option<&Font>) {
 }
 
 /// 副露の牌1枚を描画する（少し小さめ）
-fn draw_meld_tile(x: f32, y: f32, tile: &mahjong_core::tile::Tile, w: f32, h: f32, font: Option<&Font>) {
+fn draw_meld_tile(
+    x: f32,
+    y: f32,
+    tile: &mahjong_core::tile::Tile,
+    w: f32,
+    h: f32,
+    font: Option<&Font>,
+) {
     let bg = Color::new(0.9, 0.95, 1.0, 1.0); // 薄い青系で副露を区別
     draw_rectangle(x, y, w - 2.0, h - 2.0, bg);
     draw_rectangle_lines(x, y, w - 2.0, h - 2.0, 2.0, TILE_BORDER);
@@ -261,7 +289,15 @@ fn draw_meld_tile(x: f32, y: f32, tile: &mahjong_core::tile::Tile, w: f32, h: f3
 }
 
 /// 牌1枚を描画する
-fn draw_tile(x: f32, y: f32, tile: &mahjong_core::tile::Tile, selected: bool, riichi_selectable: bool, riichi_disabled: bool, font: Option<&Font>) {
+fn draw_tile(
+    x: f32,
+    y: f32,
+    tile: &mahjong_core::tile::Tile,
+    selected: bool,
+    riichi_selectable: bool,
+    riichi_disabled: bool,
+    font: Option<&Font>,
+) {
     // 背景
     let bg = if selected {
         SELECTED_BG
@@ -354,6 +390,21 @@ fn draw_action_buttons(state: &GameState, font: Option<&Font>) {
             draw_jp_text(font, "リーチ", 1008.0, 747.0, SMALL_FONT, WHITE);
         }
 
+        for (idx, tile) in state.self_kan_options.iter().enumerate() {
+            let x = 720.0 + idx as f32 * 110.0;
+            let kan_bg = Color::new(0.1, 0.3, 0.8, 1.0);
+            draw_rectangle(x, 670.0, 100.0, 40.0, kan_bg);
+            draw_rectangle_lines(x, 670.0, 100.0, 40.0, 2.0, WHITE);
+            draw_jp_text(
+                font,
+                &format!("{}カン", tile.to_string()),
+                x + 10.0,
+                697.0,
+                SMALL_FONT,
+                WHITE,
+            );
+        }
+
         // 操作説明
         if state.riichi_selection_mode {
             draw_jp_text(
@@ -399,8 +450,8 @@ fn draw_call_buttons(state: &GameState, font: Option<&Font>) {
     let btn_spacing = 10.0;
 
     let call_btn_bg = Color::new(0.8, 0.2, 0.2, 1.0); // 赤系
-    let ron_btn_bg = Color::new(0.9, 0.1, 0.1, 1.0);   // 濃い赤
-    let pass_btn_bg = Color::new(0.4, 0.4, 0.4, 1.0);  // グレー
+    let ron_btn_bg = Color::new(0.9, 0.1, 0.1, 1.0); // 濃い赤
+    let pass_btn_bg = Color::new(0.4, 0.4, 0.4, 1.0); // グレー
 
     let mut btn_idx = 0;
 
@@ -416,6 +467,11 @@ fn draw_call_buttons(state: &GameState, font: Option<&Font>) {
                 draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
                 draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
                 draw_jp_text(font, "ポン", x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
+            }
+            AvailableCall::Daiminkan => {
+                draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
+                draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
+                draw_jp_text(font, "カン", x + 18.0, base_y + 27.0, SMALL_FONT, WHITE);
             }
             AvailableCall::Chi { .. } => {
                 draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
@@ -436,13 +492,7 @@ fn draw_call_buttons(state: &GameState, font: Option<&Font>) {
 /// 局の結果を表示する
 fn draw_result(state: &GameState, font: Option<&Font>) {
     // 半透明背景（大きめ）
-    draw_rectangle(
-        150.0,
-        150.0,
-        980.0,
-        420.0,
-        Color::new(0.0, 0.0, 0.0, 0.85),
-    );
+    draw_rectangle(150.0, 150.0, 980.0, 420.0, Color::new(0.0, 0.0, 0.0, 0.85));
 
     if let Some(msg) = &state.result_message {
         let lines: Vec<&str> = msg.lines().collect();
@@ -453,14 +503,7 @@ fn draw_result(state: &GameState, font: Option<&Font>) {
             } else {
                 (22, Color::new(0.9, 0.9, 0.7, 1.0))
             };
-            draw_jp_text(
-                font,
-                line,
-                220.0,
-                240.0 + i as f32 * 35.0,
-                font_size,
-                color,
-            );
+            draw_jp_text(font, line, 220.0, 240.0 + i as f32 * 35.0, font_size, color);
         }
     }
 
@@ -476,18 +519,12 @@ fn draw_result(state: &GameState, font: Option<&Font>) {
 
 /// ゲーム終了画面
 fn draw_game_over(state: &GameState, font: Option<&Font>) {
-    draw_rectangle(
-        200.0,
-        150.0,
-        880.0,
-        500.0,
-        Color::new(0.0, 0.0, 0.0, 0.9),
-    );
+    draw_rectangle(200.0, 150.0, 880.0, 500.0, Color::new(0.0, 0.0, 0.0, 0.9));
 
     draw_jp_text(font, "ゲーム終了", 520.0, 250.0, 36, WHITE);
 
     // 最終順位を表示
-    let wind_names = ["東家", "南家", "西家", "北家"];
+    let wind_names = ["プレイヤー", "CPU1", "CPU2", "CPU3"];
     let mut rankings: Vec<(usize, i32)> = state
         .scores
         .iter()
@@ -504,12 +541,7 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         };
         draw_jp_text(
             font,
-            &format!(
-                "{}位: {} {}点",
-                rank + 1,
-                wind_names[*player_idx],
-                score
-            ),
+            &format!("{}位: {} {}点", rank + 1, wind_names[*player_idx], score),
             440.0,
             330.0 + rank as f32 * 40.0,
             24,
@@ -536,12 +568,3 @@ fn wind_to_str(wind: mahjong_core::tile::Wind) -> &'static str {
         mahjong_core::tile::Wind::North => "北",
     }
 }
-
-
-
-
-
-
-
-
-

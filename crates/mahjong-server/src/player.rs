@@ -212,6 +212,50 @@ impl Player {
         options
     }
 
+    /// 大明カン可能か判定する
+    pub fn can_daiminkan(&self, tile: Tile) -> bool {
+        let count = self.hand.tiles().iter().filter(|t| t.get() == tile.get()).count();
+        count >= 3
+    }
+
+    /// 暗カン可能な牌種一覧を返す
+    pub fn ankan_options(&self) -> Vec<TileType> {
+        let mut counts = [0u8; Tile::LEN as usize];
+        for tile in self.hand.tiles() {
+            counts[tile.get() as usize] += 1;
+        }
+        if let Some(drawn) = self.hand.drawn() {
+            counts[drawn.get() as usize] += 1;
+        }
+
+        counts
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, &count)| (count == 4).then_some(idx as TileType))
+            .collect()
+    }
+
+    /// 加カン可能な牌種一覧を返す
+    pub fn kakan_options(&self) -> Vec<TileType> {
+        let mut counts = [0u8; Tile::LEN as usize];
+        for tile in self.hand.tiles() {
+            counts[tile.get() as usize] += 1;
+        }
+        if let Some(drawn) = self.hand.drawn() {
+            counts[drawn.get() as usize] += 1;
+        }
+
+        self.hand
+            .opened()
+            .iter()
+            .filter(|open| open.category == OpenType::Pon)
+            .filter_map(|open| {
+                let tile_type = open.tiles[0].get();
+                (counts[tile_type as usize] >= 1).then_some(tile_type)
+            })
+            .collect()
+    }
+
     /// フリテン状態か判定する
     ///
     /// 自分の待ち牌のいずれかが自分の捨て牌に含まれている場合、フリテン。
@@ -288,6 +332,105 @@ impl Player {
 
         self.is_first_turn = false;
         self.is_ippatsu = false;
+    }
+
+    /// 大明カンを実行する
+    pub fn do_daiminkan(&mut self, called_tile: Tile, from: OpenFrom) {
+        let tt = called_tile.get();
+        let mut indices: Vec<usize> = Vec::new();
+        for (i, t) in self.hand.tiles().iter().enumerate() {
+            if t.get() == tt && indices.len() < 3 {
+                indices.push(i);
+            }
+        }
+        assert_eq!(indices.len(), 3, "大明カンに必要な3枚がありません");
+
+        let t1 = self.hand.tiles()[indices[0]];
+        let t2 = self.hand.tiles()[indices[1]];
+        let t3 = self.hand.tiles()[indices[2]];
+
+        self.hand.remove_tiles_by_indices(&mut indices);
+        self.hand.add_opened(OpenTiles {
+            tiles: [t1, t2, t3],
+            category: OpenType::Kan,
+            from,
+        });
+
+        self.is_first_turn = false;
+        self.is_ippatsu = false;
+    }
+
+    /// 暗カンを実行する
+    pub fn do_ankan(&mut self, tile_type: TileType) {
+        let mut indices: Vec<usize> = Vec::new();
+        for (i, t) in self.hand.tiles().iter().enumerate() {
+            if t.get() == tile_type {
+                indices.push(i);
+            }
+        }
+
+        let drawn = self.hand.drawn();
+        let drawn_matches = drawn.map(|t| t.get() == tile_type).unwrap_or(false);
+        assert_eq!(
+            indices.len() + usize::from(drawn_matches),
+            4,
+            "暗カンに必要な4枚が揃っていません"
+        );
+
+        let mut kan_tiles: Vec<Tile> = indices
+            .iter()
+            .map(|&idx| self.hand.tiles()[idx])
+            .collect();
+        if drawn_matches {
+            kan_tiles.push(drawn.unwrap());
+            self.hand.set_drawn(None);
+        }
+
+        self.hand.remove_tiles_by_indices(&mut indices);
+        self.hand.add_opened(OpenTiles {
+            tiles: [kan_tiles[0], kan_tiles[1], kan_tiles[2]],
+            category: OpenType::Kan,
+            from: OpenFrom::Myself,
+        });
+
+        self.is_first_turn = false;
+        self.is_ippatsu = false;
+    }
+
+    /// 加カンを実行する
+    pub fn do_kakan(&mut self, tile_type: TileType) {
+        let drawn_matches = self.hand.drawn().map(|t| t.get() == tile_type).unwrap_or(false);
+        if drawn_matches {
+            self.hand.set_drawn(None);
+        } else {
+            let idx = self
+                .hand
+                .tiles()
+                .iter()
+                .position(|t| t.get() == tile_type)
+                .expect("加カンに必要な牌が手牌にありません");
+            self.hand.tiles_mut().remove(idx);
+        }
+
+        let open = self
+            .hand
+            .opened_mut()
+            .iter_mut()
+            .find(|open| open.category == OpenType::Pon && open.tiles[0].get() == tile_type)
+            .expect("加カン対象のポンがありません");
+        open.category = OpenType::Kan;
+
+        self.is_first_turn = false;
+        self.is_ippatsu = false;
+    }
+
+    /// 手牌に含まれる槓子の数を返す
+    pub fn kan_count(&self) -> usize {
+        self.hand
+            .opened()
+            .iter()
+            .filter(|open| open.category == OpenType::Kan)
+            .count()
     }
 
     /// 捨てたプレイヤーと自分の相対位置から OpenFrom を返す
@@ -513,6 +656,79 @@ mod tests {
         assert_eq!(player.hand.opened().len(), 1);
         assert_eq!(player.hand.opened()[0].category, OpenType::Chi);
         // 門前でなくなる
+        assert!(!player.is_menzen());
+    }
+
+    #[test]
+    fn test_can_daiminkan() {
+        let tiles = vec![
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S7),
+            Tile::new(Tile::S8),
+            Tile::new(Tile::S9),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z2),
+            Tile::new(Tile::Z3),
+        ];
+        let player = Player::new(Wind::East, tiles, 25000);
+        assert!(player.can_daiminkan(Tile::new(Tile::M1)));
+        assert!(!player.can_daiminkan(Tile::new(Tile::M3)));
+    }
+
+    #[test]
+    fn test_ankan_options() {
+        let hand = Hand::from("111m234p567s789m1z 1m");
+        let mut player = Player::new(Wind::East, hand.tiles().to_vec(), 25000);
+        player.draw(hand.drawn().unwrap());
+
+        assert_eq!(player.ankan_options(), vec![Tile::M1]);
+    }
+
+    #[test]
+    fn test_do_daiminkan() {
+        let hand = Hand::from("111m234p567s789m1z");
+        let mut player = Player::new(Wind::South, hand.tiles().to_vec(), 25000);
+
+        player.do_daiminkan(Tile::new(Tile::M1), OpenFrom::Previous);
+
+        assert_eq!(player.hand.tiles().len(), 10);
+        assert_eq!(player.hand.opened().len(), 1);
+        assert_eq!(player.hand.opened()[0].category, OpenType::Kan);
+        assert!(!player.is_menzen());
+    }
+
+    #[test]
+    fn test_do_ankan() {
+        let hand = Hand::from("111m234p567s789m1z 1m");
+        let mut player = Player::new(Wind::South, hand.tiles().to_vec(), 25000);
+        player.draw(hand.drawn().unwrap());
+
+        player.do_ankan(Tile::M1);
+
+        assert_eq!(player.hand.tiles().len(), 10);
+        assert!(player.hand.drawn().is_none());
+        assert_eq!(player.hand.opened().len(), 1);
+        assert_eq!(player.hand.opened()[0].category, OpenType::Kan);
+        assert!(player.is_menzen());
+    }
+
+    #[test]
+    fn test_do_kakan() {
+        let mut player = Player::new(Wind::South, vec![], 25000);
+        player.hand = Hand::from("234p567s789m1z 111m 1m");
+
+        player.do_kakan(Tile::M1);
+
+        assert_eq!(player.hand.tiles().len(), 10);
+        assert!(player.hand.drawn().is_none());
+        assert_eq!(player.hand.opened().len(), 1);
+        assert_eq!(player.hand.opened()[0].category, OpenType::Kan);
         assert!(!player.is_menzen());
     }
 

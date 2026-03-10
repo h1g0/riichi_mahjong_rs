@@ -3,7 +3,7 @@
 //! 半荘（東風戦/東南戦）を通した状態を管理する。
 //! 局の生成・進行・終了判定を行う。
 
-use mahjong_core::tile::Wind;
+use mahjong_core::tile::{Tile, Wind};
 
 use crate::protocol::{ClientAction, ServerEvent};
 use crate::round::{CallResponse, Round, RoundResult, TurnPhase};
@@ -142,8 +142,18 @@ impl Table {
                 round.respond_to_call(player_idx, CallResponse::Pass)
             }
 
-            // カンは Phase 9 で実装予定
-            ClientAction::Kan { .. } => false,
+            ClientAction::Kan { tile_index } => {
+                if round.phase == TurnPhase::WaitForCalls {
+                    round.respond_to_call(player_idx, CallResponse::Daiminkan)
+                } else if round.current_player == player_idx && round.phase == TurnPhase::WaitForDiscard {
+                    if tile_index >= Tile::LEN {
+                        return false;
+                    }
+                    round.do_kan(tile_index as u32)
+                } else {
+                    false
+                }
+            },
         }
     }
 

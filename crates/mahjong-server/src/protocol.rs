@@ -28,8 +28,12 @@ pub enum CallType {
     Pon,
     /// チー
     Chi,
+    /// 暗カン
+    Ankan,
     /// 大明カン
     Daiminkan,
+    /// 加カン
+    Kakan,
 }
 
 /// 利用可能な鳴きアクション（CallAvailableイベント内で使用）
@@ -39,6 +43,8 @@ pub enum AvailableCall {
     Ron,
     /// ポン可能
     Pon,
+    /// 大明カン可能
+    Daiminkan,
     /// チー可能（使える手牌の組み合わせのリスト: 各要素は [TileType; 2]）
     Chi { options: Vec<[TileType; 2]> },
 }
@@ -114,6 +120,12 @@ pub enum ServerEvent {
         called_tile: Tile,
         /// 副露で公開された牌
         tiles: Vec<Tile>,
+    },
+
+    /// ドラ表示牌の更新
+    DoraIndicatorsUpdated {
+        /// 現在公開されているドラ表示牌
+        dora_indicators: Vec<Tile>,
     },
 
     /// リーチ宣言

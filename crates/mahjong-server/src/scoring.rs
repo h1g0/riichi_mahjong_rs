@@ -33,6 +33,7 @@ pub fn check_win(
     prevailing_wind: Wind,
     is_tsumo: bool,
     is_last_tile: bool,
+    is_dead_wall_draw: bool,
 ) -> WinCheckResult {
     let hand = &player.hand;
 
@@ -68,6 +69,8 @@ pub fn check_win(
     status.is_first_turn = player.is_first_turn;
     status.is_last_tile_from_the_wall = is_last_tile && is_tsumo;
     status.is_last_discard = is_last_tile && !is_tsumo;
+    status.is_dead_wall_draw = is_dead_wall_draw;
+    status.kan_count = player.kan_count() as u32;
 
     let settings = Settings::new();
 
@@ -92,6 +95,17 @@ pub fn check_ron(
     discarded_tile: Tile,
     prevailing_wind: Wind,
     is_last_tile: bool,
+) -> WinCheckResult {
+    check_ron_with_flags(player, discarded_tile, prevailing_wind, is_last_tile, false)
+}
+
+/// ロン和了が可能か判定する（搶槓などの状態フラグ付き）
+pub fn check_ron_with_flags(
+    player: &Player,
+    discarded_tile: Tile,
+    prevailing_wind: Wind,
+    is_last_tile: bool,
+    is_robbing_a_quad: bool,
 ) -> WinCheckResult {
     // 手牌をクローンして捨て牌をdrawnとしてセット
     let mut hand = player.hand.clone();
@@ -126,7 +140,9 @@ pub fn check_ron(
     status.is_dealer = player.is_dealer();
     status.is_first_turn = player.is_first_turn;
     status.is_last_tile_from_the_wall = false;
-    status.is_last_discard = is_last_tile;
+    status.is_last_discard = is_last_tile && !is_robbing_a_quad;
+    status.is_robbing_a_quad = is_robbing_a_quad;
+    status.kan_count = player.kan_count() as u32;
 
     let settings = Settings::new();
 
@@ -262,6 +278,9 @@ pub fn add_dora_to_score(
     for open in hand.opened() {
         for &tile in &open.tiles {
             all_tiles.push(tile);
+        }
+        if open.category == mahjong_core::hand_info::opened::OpenType::Kan {
+            all_tiles.push(open.tiles[0]);
         }
     }
 
@@ -469,7 +488,7 @@ mod tests {
         let mut player = Player::new(Wind::East, tiles, 25000);
         player.draw(Tile::new(Tile::Z5));
 
-        let result = check_win(&player, Wind::East, true, false);
+        let result = check_win(&player, Wind::East, true, false, false);
         assert!(!result.is_win);
         assert!(result.score_result.is_none());
     }
@@ -486,7 +505,7 @@ mod tests {
             player.draw(d);
         }
 
-        let result = check_win(&player, Wind::East, true, false);
+        let result = check_win(&player, Wind::East, true, false, false);
         assert!(result.is_win);
         let score = result.score_result.unwrap();
         // 門前ツモ(1翻) + 場風(1翻) = 2翻

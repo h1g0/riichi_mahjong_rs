@@ -49,6 +49,8 @@ pub struct GameState {
     pub can_tsumo: bool,
     /// リーチ宣言可能か
     pub can_riichi: bool,
+    /// 自分の手番で暗カン可能な牌
+    pub self_kan_options: Vec<Tile>,
     /// 自分がリーチ中か
     pub is_riichi: bool,
     /// リーチ宣言のための打牌選択中か
@@ -105,6 +107,7 @@ impl GameState {
             selected_drawn: false,
             can_tsumo: false,
             can_riichi: false,
+            self_kan_options: Vec::new(),
             is_riichi: false,
             riichi_selection_mode: false,
             riichi_selectable_tiles: Vec::new(),
@@ -145,9 +148,11 @@ impl GameState {
                 self.phase = GamePhase::Playing;
                 self.available_calls.clear();
                 self.call_target_tile = None;
+                self.refresh_self_kan_options();
                 self.call_discarder = None;
                 self.can_tsumo = false;
                 self.can_riichi = false;
+                self.self_kan_options.clear();
                 self.is_riichi = false;
                 self.clear_riichi_selection();
                 self.melds.clear();
@@ -169,6 +174,7 @@ impl GameState {
                 self.clear_riichi_selection();
                 self.available_calls.clear();
                 self.call_target_tile = None;
+                self.refresh_self_kan_options();
             }
 
             ServerEvent::OtherPlayerDrew {
@@ -196,6 +202,7 @@ impl GameState {
                     self.selected_tile = None;
                     self.selected_drawn = false;
                     self.clear_riichi_selection();
+                    self.self_kan_options.clear();
                 }
             }
 
@@ -218,6 +225,7 @@ impl GameState {
                 // 鳴き選択肢をクリア
                 self.available_calls.clear();
                 self.call_target_tile = None;
+                self.refresh_self_kan_options();
                 self.call_discarder = None;
 
                 // 自分が鳴いた場合、副露情報を保存し打牌待ちへ
@@ -226,20 +234,40 @@ impl GameState {
                         CallType::Ron => {
                             // ロンの場合は局終了イベントが続く
                         }
-                        CallType::Pon | CallType::Chi | CallType::Daiminkan => {
-                            // 副露情報を保存
+                        CallType::Pon | CallType::Chi | CallType::Daiminkan | CallType::Ankan => {
                             self.melds.push(MeldInfo {
                                 call_type: call_type.clone(),
                                 tiles: tiles.clone(),
                             });
-                            // ポン/チー/カンの場合、自分の手牌を更新
-                            // （サーバ側で処理済みなので、次のイベントで反映）
                             self.is_my_turn = true;
-                            self.drawn = None; // 鳴き後はdrawnなし
+                            self.drawn = None;
                             self.clear_riichi_selection();
+                            self.self_kan_options.clear();
+                        }
+                        CallType::Kakan => {
+                            if let Some(meld) = self.melds.iter_mut().find(|meld| {
+                                meld.call_type == CallType::Pon
+                                    && meld.tiles.first().map(|tile| tile.get()) == tiles.first().map(|tile| tile.get())
+                            }) {
+                                meld.call_type = CallType::Kakan;
+                                meld.tiles = tiles.clone();
+                            } else {
+                                self.melds.push(MeldInfo {
+                                    call_type: call_type.clone(),
+                                    tiles: tiles.clone(),
+                                });
+                            }
+                            self.is_my_turn = true;
+                            self.drawn = None;
+                            self.clear_riichi_selection();
+                            self.self_kan_options.clear();
                         }
                     }
                 }
+            }
+
+            ServerEvent::DoraIndicatorsUpdated { dora_indicators } => {
+                self.dora_indicators = dora_indicators;
             }
 
             ServerEvent::PlayerRiichi { player } => {
@@ -254,6 +282,7 @@ impl GameState {
             ServerEvent::HandUpdated { hand } => {
                 self.hand = hand;
                 self.hand.sort();
+                self.refresh_self_kan_options();
             }
 
             ServerEvent::RoundWon {
@@ -319,6 +348,7 @@ impl GameState {
                 self.is_my_turn = false;
                 self.available_calls.clear();
                 self.clear_riichi_selection();
+                self.self_kan_options.clear();
             }
 
             ServerEvent::RoundDraw { scores, reason, tenpai } => {
@@ -344,6 +374,7 @@ impl GameState {
                 self.is_my_turn = false;
                 self.available_calls.clear();
                 self.clear_riichi_selection();
+                self.self_kan_options.clear();
             }
         }
     }
@@ -398,6 +429,36 @@ impl GameState {
             .filter_map(|(idx, &tile)| self.can_discard_for_riichi(Some(tile)).then_some(idx))
             .collect();
         self.riichi_selectable_drawn = self.can_discard_for_riichi(None);
+    }
+
+    fn refresh_self_kan_options(&mut self) {
+        self.self_kan_options.clear();
+        if self.drawn.is_none() || self.is_riichi {
+            return;
+        }
+
+        let mut counts = [0u8; Tile::LEN as usize];
+        for tile in &self.hand {
+            counts[tile.get() as usize] += 1;
+        }
+        if let Some(drawn) = self.drawn {
+            counts[drawn.get() as usize] += 1;
+        }
+
+        for (idx, count) in counts.iter().enumerate() {
+            if *count == 4 {
+                self.self_kan_options.push(Tile::new(idx as u32));
+                continue;
+            }
+
+            let has_pon = self.melds.iter().any(|meld| {
+                meld.call_type == CallType::Pon
+                    && meld.tiles.first().map(|tile| tile.get()) == Some(idx as u32)
+            });
+            if has_pon && *count >= 1 {
+                self.self_kan_options.push(Tile::new(idx as u32));
+            }
+        }
     }
 
     fn apply_local_discard_from_hand(&mut self, idx: usize) -> Tile {
@@ -466,6 +527,18 @@ impl GameState {
                         self.enter_riichi_selection();
                     }
                     return None;
+                }
+            }
+
+            for (idx, tile) in self.self_kan_options.iter().enumerate() {
+                let x = 720.0 + idx as f32 * 110.0;
+                let y = 670.0;
+                let btn_w = 100.0;
+                let btn_h = 40.0;
+                if mx >= x && mx <= x + btn_w && my >= y && my <= y + btn_h {
+                    return Some(ClientAction::Kan {
+                        tile_index: tile.get() as usize,
+                    });
                 }
             }
 
@@ -564,6 +637,13 @@ impl GameState {
                     AvailableCall::Pon => {
                         self.available_calls.clear();
                         return Some(ClientAction::Pon);
+                    }
+                    AvailableCall::Daiminkan => {
+                        let tile = self.call_target_tile?;
+                        self.available_calls.clear();
+                        return Some(ClientAction::Kan {
+                            tile_index: tile.get() as usize,
+                        });
                     }
                     AvailableCall::Chi { options } => {
                         // 最初の選択肢を使う（複数ある場合はMVPでは最初を選択）
