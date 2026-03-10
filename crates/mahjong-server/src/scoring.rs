@@ -513,6 +513,50 @@ mod tests {
     }
 
     #[test]
+    fn test_check_win_closed_tsumo_with_iipeikou_shape() {
+        let hand = Hand::from("2256678m234p456s 7m");
+        let tiles: Vec<Tile> = hand.tiles().to_vec();
+        let drawn = hand.drawn();
+        let mut player = Player::new(Wind::East, tiles, 25000);
+        if let Some(d) = drawn {
+            player.draw(d);
+        }
+
+        let result = check_win(&player, Wind::East, true, false, false);
+        assert!(result.is_win, "closed tsumo hand should be a win");
+        let score = result.score_result.unwrap();
+        assert!(score.han >= 1, "expected at least menzen tsumo");
+    }
+
+    #[test]
+    fn test_check_win_open_tanyao_tsumo() {
+        use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
+
+        let hand = Hand::from("56677m66s 5m");
+        let tiles: Vec<Tile> = hand.tiles().to_vec();
+        let drawn = hand.drawn();
+        let mut player = Player::new(Wind::South, tiles, 25000);
+        player.hand.add_opened(OpenTiles {
+            tiles: [Tile::new(Tile::P4), Tile::new(Tile::P5), Tile::new(Tile::P6)],
+            category: OpenType::Chi,
+            from: OpenFrom::Previous,
+        });
+        player.hand.add_opened(OpenTiles {
+            tiles: [Tile::new(Tile::M2), Tile::new(Tile::M3), Tile::new(Tile::M4)],
+            category: OpenType::Chi,
+            from: OpenFrom::Previous,
+        });
+        if let Some(d) = drawn {
+            player.draw(d);
+        }
+
+        let result = check_win(&player, Wind::East, true, false, false);
+        assert!(result.is_win, "open tanyao tsumo should be a win");
+        let score = result.score_result.unwrap();
+        assert!(score.han >= 1, "expected at least tanyao");
+    }
+
+    #[test]
     fn test_check_ron_rejects_four_melds_and_one_taatsu() {
         let hand = Hand::from("234678m56p567s55z");
         let player = Player::new(Wind::South, hand.tiles().to_vec(), 25000);

@@ -38,6 +38,8 @@ pub struct Table {
     pub round_number: usize,
     /// 本場数
     pub honba: usize,
+    /// 場に出ている供託リーチ棒の本数
+    pub riichi_sticks: usize,
     /// 親のプレイヤーインデックス（0-3）
     pub dealer: usize,
     /// 各プレイヤーの点数
@@ -56,6 +58,7 @@ impl Table {
             prevailing_wind: Wind::East,
             round_number: 0,
             honba: 0,
+            riichi_sticks: 0,
             dealer: 0,
             scores: [initial_score; 4],
             is_game_over: false,
@@ -69,6 +72,7 @@ impl Table {
             self.dealer,
             self.scores,
             self.honba,
+            self.riichi_sticks,
             self.round_number,
         );
         self.round = Some(round);
@@ -178,6 +182,7 @@ impl Table {
 
         let round = self.round.as_ref().unwrap();
         self.scores = round.get_scores();
+        self.riichi_sticks = round.riichi_sticks;
 
         match result {
             Some(RoundResult::ExhaustiveDraw) | Some(RoundResult::SpecialDraw) => {
@@ -226,6 +231,7 @@ mod tests {
         assert_eq!(table.prevailing_wind, Wind::East);
         assert_eq!(table.dealer, 0);
         assert_eq!(table.scores, [25000; 4]);
+        assert_eq!(table.riichi_sticks, 0);
         assert!(!table.is_game_over);
         assert!(table.round.is_none());
     }
@@ -255,6 +261,22 @@ mod tests {
         table.finish_round();
         assert!(table.round.is_none());
         assert_eq!(table.honba, 1); // 流局なので本場が増える
+    }
+
+
+    #[test]
+    fn test_table_carries_riichi_sticks_across_draw() {
+        let mut table = Table::new(GameSettings::default());
+        table.riichi_sticks = 2;
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.riichi_sticks = 3;
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::ExhaustiveDraw);
+
+        table.finish_round();
+        assert_eq!(table.riichi_sticks, 3);
     }
 
     #[test]

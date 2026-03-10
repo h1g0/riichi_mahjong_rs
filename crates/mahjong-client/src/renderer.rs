@@ -84,6 +84,11 @@ fn draw_info_panel(state: &GameState, font: Option<&Font>) {
     } else {
         String::new()
     };
+    let riichi_sticks_text = if state.riichi_sticks > 0 {
+        format!(" 供託:{}本", state.riichi_sticks)
+    } else {
+        String::new()
+    };
     let riichi_marker = if state.is_riichi {
         " 【リーチ】"
     } else {
@@ -93,8 +98,14 @@ fn draw_info_panel(state: &GameState, font: Option<&Font>) {
     draw_jp_text(
         font,
         &format!(
-            "{}{}局{}  自風: {}  残り: {}枚{}",
-            round_wind, round_num, honba_text, seat, state.remaining_tiles, riichi_marker
+            "{}{}局{}{}  自風: {}  残り: {}枚{}",
+            round_wind,
+            round_num,
+            honba_text,
+            riichi_sticks_text,
+            seat,
+            state.remaining_tiles,
+            riichi_marker
         ),
         20.0,
         35.0,

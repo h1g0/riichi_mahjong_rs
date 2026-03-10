@@ -68,6 +68,8 @@ pub enum ServerEvent {
         round_number: usize,
         /// 本場数
         honba: usize,
+        /// 供託リーチ棒の本数
+        riichi_sticks: usize,
     },
 
     /// ツモ（自分がツモった）
@@ -132,6 +134,10 @@ pub enum ServerEvent {
     PlayerRiichi {
         /// リーチしたプレイヤーの風
         player: Wind,
+        /// リーチ宣言後の各プレイヤーの点数
+        scores: [i32; 4],
+        /// 現在の供託リーチ棒の本数
+        riichi_sticks: usize,
     },
 
     /// 手牌更新（鳴き後やリーチ後に自分の手牌を同期する）
@@ -162,6 +168,8 @@ pub enum ServerEvent {
         rank_name: String,
         /// 裏ドラ表示牌（リーチ和了時のみ公開）
         uradora_indicators: Vec<Tile>,
+        /// 和了前に場に出ていた供託リーチ棒の本数
+        riichi_sticks: usize,
     },
 
     /// 局終了（流局）
@@ -172,6 +180,8 @@ pub enum ServerEvent {
         reason: DrawReason,
         /// テンパイしているプレイヤーの風（荒牌流局の場合のみ）
         tenpai: Vec<Wind>,
+        /// 現在の供託リーチ棒の本数
+        riichi_sticks: usize,
     },
 }
 

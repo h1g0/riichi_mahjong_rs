@@ -90,6 +90,8 @@ pub struct Round {
     pub current_player: usize,
     /// 本場数
     pub honba: usize,
+    /// 場に出ている供託リーチ棒の本数
+    pub riichi_sticks: usize,
     /// ターンフェーズ
     pub phase: TurnPhase,
     /// 局の結果（終了時にセット）
@@ -108,7 +110,14 @@ impl Round {
     /// - `prevailing_wind`: 場風（東場なら East）
     /// - `dealer`: 親のプレイヤーインデックス（0-3）
     /// - `initial_scores`: 各プレイヤーの初期点数
-    pub fn new(prevailing_wind: Wind, dealer: usize, initial_scores: [i32; 4], honba: usize, round_number: usize) -> Self {
+    pub fn new(
+        prevailing_wind: Wind,
+        dealer: usize,
+        initial_scores: [i32; 4],
+        honba: usize,
+        riichi_sticks: usize,
+        round_number: usize,
+    ) -> Self {
         let mut wall = Wall::new();
         let dealt = wall.deal();
 
@@ -142,6 +151,7 @@ impl Round {
                     dora_indicators: dora_indicators.clone(),
                     round_number,
                     honba,
+                    riichi_sticks,
                 },
             ));
         }
@@ -153,6 +163,7 @@ impl Round {
             dealer,
             current_player: dealer,
             honba,
+            riichi_sticks,
             phase: TurnPhase::Draw,
             result: None,
             events,
@@ -177,6 +188,84 @@ impl Round {
         std::mem::take(&mut self.events)
     }
 
+    /// デバッグ用に自分のツモ時の判定状態を出力する
+    fn log_draw_diagnostics(&self, player_idx: usize, source: &str, can_tsumo: bool, can_riichi: bool) {
+        if player_idx != 0 {
+            return;
+        }
+
+        let player = &self.players[player_idx];
+        let analyzer = HandAnalyzer::new(&player.hand);
+        let win_result = scoring::check_win(
+            player,
+            self.prevailing_wind,
+            true,
+            self.wall.is_empty(),
+            self.last_draw_was_dead_wall,
+        );
+        let riichi_discards: Vec<String> = player
+            .hand
+            .tiles()
+            .iter()
+            .copied()
+            .filter(|&tile| self.can_player_riichi_with_discard(player_idx, Some(tile)))
+            .map(|tile| tile.to_string())
+            .collect();
+        let can_riichi_with_drawn = self
+            .can_player_riichi_with_discard(player_idx, None)
+            .then(|| String::from("tsumo"));
+
+        match analyzer {
+            Ok(analyzer) => {
+                let yaku_summary = win_result
+                    .score_result
+                    .as_ref()
+                    .map(|score| {
+                        score
+                            .yaku_list
+                            .iter()
+                            .map(|(name, han)| format!("{}:{}", name, han))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .unwrap_or_default();
+                let drawn = player
+                    .hand
+                    .drawn()
+                    .map(|tile| tile.to_string())
+                    .unwrap_or_else(|| String::from("none"));
+                let mut riichi_options = riichi_discards;
+                if let Some(drawn_label) = can_riichi_with_drawn {
+                    riichi_options.push(drawn_label);
+                }
+
+                eprintln!(
+                    "[draw-diag] source={} hand={} drawn={} shanten={} can_tsumo={} is_win={} can_riichi={} riichi_discards=[{}] yaku=[{}]",
+                    source,
+                    player.hand.to_string(),
+                    drawn,
+                    analyzer.shanten,
+                    can_tsumo,
+                    win_result.is_win,
+                    can_riichi,
+                    riichi_options.join(","),
+                    yaku_summary,
+                );
+            }
+            Err(err) => {
+                eprintln!(
+                    "[draw-diag] source={} hand={} analyzer_error={} can_tsumo={} can_riichi={}",
+                    source,
+                    player.hand.to_string(),
+                    err,
+                    can_tsumo,
+                    can_riichi,
+                );
+            }
+        }
+    }
+
+
     /// ツモフェーズを実行する
     /// 山から1枚引いて現在のプレイヤーに配る
     pub fn do_draw(&mut self) -> bool {
@@ -194,12 +283,14 @@ impl Round {
         let remaining = self.wall.remaining();
         self.players[self.current_player].draw(tile);
         self.last_draw_was_dead_wall = false;
+        self.phase = TurnPhase::WaitForDiscard;
 
         // ツモ和了チェック
         let can_tsumo = self.can_tsumo();
 
         // リーチ可能チェック
         let can_riichi = self.can_player_riichi(self.current_player);
+        self.log_draw_diagnostics(self.current_player, "draw", can_tsumo, can_riichi);
 
         // 自分にはツモ牌を公開
         self.events.push((
@@ -226,7 +317,6 @@ impl Round {
             }
         }
 
-        self.phase = TurnPhase::WaitForDiscard;
         true
     }
 
@@ -561,9 +651,14 @@ impl Round {
             winner_is_dealer,
             self.honba,
         );
+        let riichi_sticks = self.riichi_sticks;
 
         for i in 0..4 {
             self.players[i].score += deltas[i];
+        }
+        if riichi_sticks > 0 {
+            self.players[winner].score += (riichi_sticks as i32) * 1000;
+            self.riichi_sticks = 0;
         }
 
         if !is_robbing_a_quad {
@@ -596,9 +691,10 @@ impl Round {
                     yaku_list: yaku_list.clone(),
                     han: score_result.han,
                     fu: score_result.fu,
-                    score_points: deltas[winner],
+                    score_points: deltas[winner] + (riichi_sticks as i32) * 1000,
                     rank_name: rank_name.clone(),
                     uradora_indicators: uradora_indicators.clone(),
+                    riichi_sticks,
                 },
             ));
         }
@@ -937,6 +1033,7 @@ impl Round {
         let remaining = self.wall.remaining();
         let can_tsumo = self.can_tsumo();
         let can_riichi = self.can_player_riichi(player_idx);
+        self.log_draw_diagnostics(player_idx, "kan_draw", can_tsumo, can_riichi);
 
         self.events.push((
             player_idx,
@@ -1059,14 +1156,18 @@ impl Round {
 
         // リーチ宣言
         self.players[player_idx].declare_riichi(is_double);
+        self.riichi_sticks += 1;
 
         // 全プレイヤーにリーチ通知
         let player_wind = self.players[player_idx].seat_wind;
+        let scores = self.get_scores();
         for i in 0..4 {
             self.events.push((
                 i,
                 ServerEvent::PlayerRiichi {
                     player: player_wind,
+                    scores,
+                    riichi_sticks: self.riichi_sticks,
                 },
             ));
         }
@@ -1202,10 +1303,15 @@ impl Round {
             self.dealer,
             self.honba,
         );
+        let riichi_sticks = self.riichi_sticks;
 
         // 点数を適用
         for i in 0..4 {
             self.players[i].score += deltas[i];
+        }
+        if riichi_sticks > 0 {
+            self.players[winner].score += (riichi_sticks as i32) * 1000;
+            self.riichi_sticks = 0;
         }
 
         let scores = self.get_scores();
@@ -1231,9 +1337,10 @@ impl Round {
                     yaku_list: yaku_list.clone(),
                     han: score_result.han,
                     fu: score_result.fu,
-                    score_points: deltas[winner],
+                    score_points: deltas[winner] + (riichi_sticks as i32) * 1000,
                     rank_name: rank_name.clone(),
                     uradora_indicators: uradora_indicators.clone(),
+                    riichi_sticks,
                 },
             ));
         }
@@ -1375,6 +1482,7 @@ impl Round {
                     scores,
                     reason: DrawReason::Exhaustive,
                     tenpai: tenpai_winds.clone(),
+                    riichi_sticks: self.riichi_sticks,
                 },
             ));
         }
@@ -1439,6 +1547,7 @@ impl Round {
                     scores,
                     reason: reason.clone(),
                     tenpai: Vec::new(),
+                    riichi_sticks: self.riichi_sticks,
                 },
             ));
         }
@@ -1466,7 +1575,7 @@ mod tests {
 
     #[test]
     fn test_round_new() {
-        let round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         assert_eq!(round.prevailing_wind, Wind::East);
         assert_eq!(round.current_player, 0);
         assert_eq!(round.phase, TurnPhase::Draw);
@@ -1483,7 +1592,7 @@ mod tests {
 
     #[test]
     fn test_round_draw() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         round.drain_events(); // 初期イベントをクリア
 
         assert!(round.do_draw());
@@ -1497,7 +1606,7 @@ mod tests {
 
     #[test]
     fn test_round_discard() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         round.drain_events();
         round.do_draw();
         round.drain_events();
@@ -1532,7 +1641,7 @@ mod tests {
 
     #[test]
     fn test_round_turn_flow() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         round.drain_events();
 
         // 4人分のターンを回す
@@ -1571,7 +1680,7 @@ mod tests {
 
     #[test]
     fn test_round_play_to_end() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         round.play_to_end();
 
         assert!(round.is_over());
@@ -1580,14 +1689,14 @@ mod tests {
 
     #[test]
     fn test_round_scores() {
-        let round = Round::new(Wind::East, 0, [25000, 30000, 20000, 25000], 0, 0);
+        let round = Round::new(Wind::East, 0, [25000, 30000, 20000, 25000], 0, 0, 0);
         let scores = round.get_scores();
         assert_eq!(scores, [25000, 30000, 20000, 25000]);
     }
 
     #[test]
     fn test_round_events_on_start() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         let events = round.drain_events();
 
         // 4人分のGameStartedイベント
@@ -1615,7 +1724,7 @@ mod tests {
     #[test]
     fn test_wait_for_calls_and_pass() {
         // 打牌後に WaitForCalls になった場合、全員パスで Draw に進む
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         round.drain_events();
         round.do_draw();
         round.drain_events();
@@ -1639,7 +1748,7 @@ mod tests {
 
     #[test]
     fn test_check_available_calls_offers_pon_but_not_ron_for_5z() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         let seat_wind = round.players[1].seat_wind;
         let hand = mahjong_core::hand::Hand::from("234678m56p567s55z");
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -1655,7 +1764,7 @@ mod tests {
 
     #[test]
     fn test_do_riichi_requires_tenpai_after_discard() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         let seat_wind = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("123m123p123s45z67m 8m");
         round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -1672,9 +1781,26 @@ mod tests {
         assert!(round.players[0].is_riichi);
     }
 
+
+    #[test]
+    fn test_do_riichi_deducts_score_and_adds_stick() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let seat_wind = round.players[0].seat_wind;
+        let hand = mahjong_core::hand::Hand::from("123m123p123s45z67m 8m");
+        round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+        round.players[0].draw(hand.drawn().unwrap());
+        round.phase = TurnPhase::WaitForDiscard;
+        round.current_player = 0;
+        round.drain_events();
+
+        assert!(round.do_riichi(Some(Tile::new(Tile::Z4))));
+        assert_eq!(round.players[0].score, 24000);
+        assert_eq!(round.riichi_sticks, 1);
+    }
+
     #[test]
     fn test_check_available_calls_offers_daiminkan() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         let seat_wind = round.players[1].seat_wind;
         let hand = mahjong_core::hand::Hand::from("111m234p567s789m");
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -1687,7 +1813,7 @@ mod tests {
 
     #[test]
     fn test_do_ankan_draws_rinshan_and_reveals_dora() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         let seat_wind = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("111m234p567s789m 1m");
         round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -1705,7 +1831,7 @@ mod tests {
 
     #[test]
     fn test_do_kakan_draws_rinshan_and_reveals_dora() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
         let seat_wind = round.players[0].seat_wind;
         let mut player = Player::new(seat_wind, vec![], 25000);
         player.hand = mahjong_core::hand::Hand::from("234p567s789m1z 111m 1m");
@@ -1723,7 +1849,7 @@ mod tests {
 
     #[test]
     fn test_kakan_offers_rob_ron() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
 
         let seat0 = round.players[0].seat_wind;
         let mut player0 = Player::new(seat0, vec![], 25000);
