@@ -44,6 +44,15 @@ pub enum RoundResult {
     SpecialDraw,
 }
 
+/// 鳴き解決後の進行先
+#[derive(Debug, Clone)]
+enum CallResolution {
+    /// 通常の打牌後処理
+    AfterDiscard,
+    /// 加カンに対する搶槓判定後の処理
+    AfterKakan { caller: usize, tile_type: TileType },
+}
+
 /// 鳴き待ち中の状態
 #[derive(Debug, Clone)]
 pub struct CallState {
@@ -59,8 +68,12 @@ pub struct CallState {
     pub ron_declared: Vec<usize>,
     /// ポンを宣言したプレイヤー
     pub pon_declared: Option<usize>,
+    /// 大明カンを宣言したプレイヤー
+    pub daiminkan_declared: Option<usize>,
     /// チーを宣言したプレイヤーと使う牌種
     pub chi_declared: Option<(usize, [TileType; 2])>,
+    /// 全員応答後の進行先
+    resolution: CallResolution,
 }
 
 /// 1局分の状態
@@ -85,6 +98,8 @@ pub struct Round {
     events: Vec<(usize, ServerEvent)>,
     /// 鳴き待ち中の状態
     pub call_state: Option<CallState>,
+    /// 直前のツモが嶺上牌か
+    pub last_draw_was_dead_wall: bool,
 }
 
 impl Round {
@@ -142,6 +157,7 @@ impl Round {
             result: None,
             events,
             call_state: None,
+            last_draw_was_dead_wall: false,
         }
     }
 
@@ -177,6 +193,7 @@ impl Round {
         let tile = self.wall.draw().unwrap();
         let remaining = self.wall.remaining();
         self.players[self.current_player].draw(tile);
+        self.last_draw_was_dead_wall = false;
 
         // ツモ和了チェック
         let can_tsumo = self.can_tsumo();
@@ -333,6 +350,11 @@ impl Round {
                 available_calls[i].push(AvailableCall::Pon);
             }
 
+            // 大明カン判定
+            if player.can_daiminkan(discarded_tile) {
+                available_calls[i].push(AvailableCall::Daiminkan);
+            }
+
             // チー判定（上家からのみ＝次のプレイヤー）
             let next_player = (discarder + 1) % 4;
             if i == next_player {
@@ -354,7 +376,9 @@ impl Round {
             responded,
             ron_declared: Vec::new(),
             pon_declared: None,
+            daiminkan_declared: None,
             chi_declared: None,
+            resolution: CallResolution::AfterDiscard,
         }
     }
 
@@ -400,6 +424,16 @@ impl Round {
                     return false;
                 }
             }
+            CallResponse::Daiminkan => {
+                if call_state.available_calls[player_idx]
+                    .iter()
+                    .any(|c| matches!(c, AvailableCall::Daiminkan))
+                {
+                    call_state.daiminkan_declared = Some(player_idx);
+                } else {
+                    return false;
+                }
+            }
             CallResponse::Chi { hand_tile_types } => {
                 // チーの組み合わせが有効か確認
                 let valid = call_state.available_calls[player_idx].iter().any(|c| {
@@ -430,13 +464,13 @@ impl Round {
         true
     }
 
-    /// 鳴きを解決する（優先度: ロン > ポン > チー > パス）
+    /// 鳴きを解決する（優先度: ロン > 大明カン > ポン > チー > パス）
     fn resolve_calls(&mut self) {
         let call_state = self.call_state.take().unwrap();
 
         // 1. ロン（最優先）
         if !call_state.ron_declared.is_empty() {
-            // 複数ロンの場合、捨てたプレイヤーから反時計回りで最初のプレイヤーが和了
+            let is_robbing_a_quad = matches!(call_state.resolution, CallResolution::AfterKakan { .. });
             let discarder = call_state.discarder;
             let winner = call_state
                 .ron_declared
@@ -445,23 +479,35 @@ impl Round {
                 .copied()
                 .unwrap();
 
-            self.execute_ron(winner, discarder, call_state.discarded_tile);
+            self.execute_ron(winner, discarder, call_state.discarded_tile, is_robbing_a_quad);
             return;
         }
 
-        // 2. ポン
+        if let CallResolution::AfterKakan { caller, tile_type } = call_state.resolution {
+            self.execute_kakan(caller, tile_type);
+            return;
+        }
+
+
+        // 2. 大明カン
+        if let Some(caller) = call_state.daiminkan_declared {
+            self.execute_daiminkan(caller, call_state.discarder, call_state.discarded_tile);
+            return;
+        }
+
+        // 3. ポン
         if let Some(caller) = call_state.pon_declared {
             self.execute_pon(caller, call_state.discarder, call_state.discarded_tile);
             return;
         }
 
-        // 3. チー
+        // 4. チー
         if let Some((caller, hand_tile_types)) = call_state.chi_declared {
             self.execute_chi(caller, call_state.discarder, call_state.discarded_tile, hand_tile_types);
             return;
         }
 
-        // 4. 全員パス → 次のプレイヤーへ
+        // 5. 全員パス → 次のプレイヤーへ
         self.current_player = (call_state.discarder + 1) % 4;
         self.phase = TurnPhase::Draw;
 
@@ -470,15 +516,16 @@ impl Round {
     }
 
     /// ロン和了を実行する
-    fn execute_ron(&mut self, winner: usize, loser: usize, winning_tile: Tile) {
+    fn execute_ron(&mut self, winner: usize, loser: usize, winning_tile: Tile, is_robbing_a_quad: bool) {
         let is_last_tile = self.wall.is_empty();
 
         // 一時的にdrawnを設定して点数計算
-        let win_result = scoring::check_ron(
+        let win_result = scoring::check_ron_with_flags(
             &self.players[winner],
             winning_tile,
             self.prevailing_wind,
             is_last_tile,
+            is_robbing_a_quad,
         );
 
         if !win_result.is_win {
@@ -519,9 +566,11 @@ impl Round {
             self.players[i].score += deltas[i];
         }
 
-        // 捨て牌を「鳴かれた」としてマーク
-        if let Some(last_discard) = self.players[loser].discards.last_mut() {
-            last_discard.is_called = true;
+        if !is_robbing_a_quad {
+            // 捨て牌を「鳴かれた」としてマーク
+            if let Some(last_discard) = self.players[loser].discards.last_mut() {
+                last_discard.is_called = true;
+            }
         }
 
         let scores = self.get_scores();
@@ -613,6 +662,49 @@ impl Round {
         self.phase = TurnPhase::WaitForDiscard;
     }
 
+    /// 大明カンを実行する
+    fn execute_daiminkan(&mut self, caller: usize, discarder: usize, called_tile: Tile) {
+        let from = Player::open_from_relative(caller, discarder);
+        self.players[caller].do_daiminkan(called_tile, from);
+
+        if let Some(last_discard) = self.players[discarder].discards.last_mut() {
+            last_discard.is_called = true;
+        }
+
+        for i in 0..4 {
+            self.players[i].is_ippatsu = false;
+            self.players[i].first_turn_interrupted = true;
+        }
+
+        let caller_wind = self.players[caller].seat_wind;
+        let open = self.players[caller].hand.opened().last().unwrap();
+        let mut tiles = open.tiles.to_vec();
+        tiles.push(called_tile);
+
+        for i in 0..4 {
+            self.events.push((
+                i,
+                ServerEvent::PlayerCalled {
+                    player: caller_wind,
+                    call_type: CallType::Daiminkan,
+                    called_tile,
+                    tiles: tiles.clone(),
+                },
+            ));
+        }
+
+        self.events.push((
+            caller,
+            ServerEvent::HandUpdated {
+                hand: self.players[caller].hand.tiles().to_vec(),
+            },
+        ));
+
+        self.reveal_new_dora_indicator();
+        self.current_player = caller;
+        self.draw_after_kan(caller);
+    }
+
     /// チーを実行する
     fn execute_chi(
         &mut self,
@@ -667,6 +759,207 @@ impl Round {
         // チーしたプレイヤーの打牌待ちへ
         self.current_player = caller;
         self.phase = TurnPhase::WaitForDiscard;
+    }
+
+    fn execute_kakan(&mut self, caller: usize, tile_type: TileType) {
+        self.players[caller].do_kakan(tile_type);
+        for i in 0..4 {
+            self.players[i].is_ippatsu = false;
+            self.players[i].first_turn_interrupted = true;
+        }
+
+        let caller_wind = self.players[caller].seat_wind;
+        let open = self.players[caller].hand.opened().iter().rev().find(|open| open.category == mahjong_core::hand_info::opened::OpenType::Kan && open.tiles[0].get() == tile_type).unwrap();
+        let mut tiles = open.tiles.to_vec();
+        tiles.push(Tile::new(tile_type));
+
+        for i in 0..4 {
+            self.events.push((
+                i,
+                ServerEvent::PlayerCalled {
+                    player: caller_wind,
+                    call_type: CallType::Kakan,
+                    called_tile: Tile::new(tile_type),
+                    tiles: tiles.clone(),
+                },
+            ));
+        }
+
+        self.events.push((
+            caller,
+            ServerEvent::HandUpdated {
+                hand: self.players[caller].hand.tiles().to_vec(),
+            },
+        ));
+
+        self.reveal_new_dora_indicator();
+        self.draw_after_kan(caller);
+    }
+
+    fn check_kakan_ron_and_resolve(&mut self, caller: usize, tile_type: TileType) {
+        let called_tile = Tile::new(tile_type);
+        let is_last_tile = self.wall.is_empty();
+        let mut available_calls: [Vec<AvailableCall>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let mut responded = [true; 4];
+
+        for i in 0..4 {
+            if i == caller {
+                continue;
+            }
+
+            let player = &self.players[i];
+            if !player.is_furiten() {
+                let win_result = scoring::check_ron_with_flags(
+                    player,
+                    called_tile,
+                    self.prevailing_wind,
+                    is_last_tile,
+                    true,
+                );
+                if win_result.is_win {
+                    available_calls[i].push(AvailableCall::Ron);
+                    responded[i] = false;
+                }
+            }
+        }
+
+        let has_any_calls = available_calls.iter().any(|calls| !calls.is_empty());
+        if has_any_calls {
+            self.phase = TurnPhase::WaitForCalls;
+            let caller_wind = self.players[caller].seat_wind;
+            for i in 0..4 {
+                if !available_calls[i].is_empty() {
+                    self.events.push((
+                        i,
+                        ServerEvent::CallAvailable {
+                            tile: called_tile,
+                            discarder: caller_wind,
+                            calls: available_calls[i].clone(),
+                        },
+                    ));
+                }
+            }
+
+            self.call_state = Some(CallState {
+                discarded_tile: called_tile,
+                discarder: caller,
+                available_calls,
+                responded,
+                ron_declared: Vec::new(),
+                pon_declared: None,
+                daiminkan_declared: None,
+                chi_declared: None,
+                resolution: CallResolution::AfterKakan { caller, tile_type },
+            });
+        } else {
+            self.execute_kakan(caller, tile_type);
+        }
+    }
+
+    /// 暗カン/加カンを実行する
+    pub fn do_kan(&mut self, tile_type: TileType) -> bool {
+        if self.phase != TurnPhase::WaitForDiscard {
+            return false;
+        }
+
+        let player_idx = self.current_player;
+        if self.players[player_idx].is_riichi {
+            return false;
+        }
+
+        if self.players[player_idx].ankan_options().contains(&tile_type) {
+            self.players[player_idx].do_ankan(tile_type);
+        } else if self.players[player_idx].kakan_options().contains(&tile_type) {
+            self.check_kakan_ron_and_resolve(player_idx, tile_type);
+            return true;
+        } else {
+            return false;
+        }
+        for i in 0..4 {
+            self.players[i].is_ippatsu = false;
+            self.players[i].first_turn_interrupted = true;
+        }
+
+        let caller_wind = self.players[player_idx].seat_wind;
+        let open = self.players[player_idx].hand.opened().last().unwrap();
+        let mut tiles = open.tiles.to_vec();
+        tiles.push(open.tiles[0]);
+        let called_tile = Tile::new(tile_type);
+
+        for i in 0..4 {
+            self.events.push((
+                i,
+                ServerEvent::PlayerCalled {
+                    player: caller_wind,
+                    call_type: CallType::Ankan,
+                    called_tile,
+                    tiles: tiles.clone(),
+                },
+            ));
+        }
+
+        self.events.push((
+            player_idx,
+            ServerEvent::HandUpdated {
+                hand: self.players[player_idx].hand.tiles().to_vec(),
+            },
+        ));
+
+        self.reveal_new_dora_indicator();
+        self.draw_after_kan(player_idx);
+        true
+    }
+
+    fn reveal_new_dora_indicator(&mut self) {
+        self.wall.add_dora_indicator();
+        let dora_indicators = self.wall.dora_indicators();
+        for i in 0..4 {
+            self.events.push((
+                i,
+                ServerEvent::DoraIndicatorsUpdated {
+                    dora_indicators: dora_indicators.clone(),
+                },
+            ));
+        }
+    }
+
+    fn draw_after_kan(&mut self, player_idx: usize) {
+        let Some(tile) = self.wall.draw_rinshan() else {
+            self.do_exhaustive_draw();
+            return;
+        };
+
+        self.current_player = player_idx;
+        self.phase = TurnPhase::WaitForDiscard;
+        self.last_draw_was_dead_wall = true;
+        self.players[player_idx].draw(tile);
+
+        let remaining = self.wall.remaining();
+        let can_tsumo = self.can_tsumo();
+        let can_riichi = self.can_player_riichi(player_idx);
+
+        self.events.push((
+            player_idx,
+            ServerEvent::TileDrawn {
+                tile,
+                remaining_tiles: remaining,
+                can_tsumo,
+                can_riichi,
+            },
+        ));
+
+        let current_wind = self.players[player_idx].seat_wind;
+        for i in 0..4 {
+            if i != player_idx {
+                self.events.push((
+                    i,
+                    ServerEvent::OtherPlayerDrew {
+                        player: current_wind,
+                        remaining_tiles: remaining,
+                    },
+                ));
+            }
+        }
     }
 
     fn can_player_riichi_with_discard(&self, player_idx: usize, tile: Option<Tile>) -> bool {
@@ -847,7 +1140,13 @@ impl Round {
         }
         let player = &self.players[self.current_player];
         let is_last_tile = self.wall.is_empty();
-        let result = scoring::check_win(player, self.prevailing_wind, true, is_last_tile);
+        let result = scoring::check_win(
+            player,
+            self.prevailing_wind,
+            true,
+            is_last_tile,
+            self.last_draw_was_dead_wall,
+        );
         result.is_win
     }
 
@@ -860,7 +1159,13 @@ impl Round {
 
         let player = &self.players[self.current_player];
         let is_last_tile = self.wall.is_empty();
-        let win_result = scoring::check_win(player, self.prevailing_wind, true, is_last_tile);
+        let win_result = scoring::check_win(
+            player,
+            self.prevailing_wind,
+            true,
+            is_last_tile,
+            self.last_draw_was_dead_wall,
+        );
 
         if !win_result.is_win {
             return false;
@@ -1147,6 +1452,8 @@ pub enum CallResponse {
     Ron,
     /// ポン
     Pon,
+    /// 大明カン
+    Daiminkan,
     /// チー（手牌から使う牌の種類2つ）
     Chi { hand_tile_types: [TileType; 2] },
     /// パス
@@ -1363,6 +1670,89 @@ mod tests {
 
         assert!(round.do_riichi(Some(Tile::new(Tile::Z4))));
         assert!(round.players[0].is_riichi);
+    }
+
+    #[test]
+    fn test_check_available_calls_offers_daiminkan() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let seat_wind = round.players[1].seat_wind;
+        let hand = mahjong_core::hand::Hand::from("111m234p567s789m");
+        round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+
+        let call_state = round.check_available_calls(Tile::new(Tile::M1), 0);
+        assert!(call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Daiminkan)));
+    }
+
+    #[test]
+    fn test_do_ankan_draws_rinshan_and_reveals_dora() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let seat_wind = round.players[0].seat_wind;
+        let hand = mahjong_core::hand::Hand::from("111m234p567s789m 1m");
+        round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+        round.players[0].draw(hand.drawn().unwrap());
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+        round.drain_events();
+
+        assert!(round.do_kan(Tile::M1));
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+        assert!(round.players[0].hand.drawn().is_some());
+        assert_eq!(round.players[0].hand.opened().len(), 1);
+        assert_eq!(round.wall.dora_indicators().len(), 2);
+    }
+
+    #[test]
+    fn test_do_kakan_draws_rinshan_and_reveals_dora() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+        let seat_wind = round.players[0].seat_wind;
+        let mut player = Player::new(seat_wind, vec![], 25000);
+        player.hand = mahjong_core::hand::Hand::from("234p567s789m1z 111m 1m");
+        round.players[0] = player;
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+        round.drain_events();
+
+        assert!(round.do_kan(Tile::M1));
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+        assert!(round.players[0].hand.drawn().is_some());
+        assert_eq!(round.players[0].hand.opened()[0].category, mahjong_core::hand_info::opened::OpenType::Kan);
+        assert_eq!(round.wall.dora_indicators().len(), 2);
+    }
+
+    #[test]
+    fn test_kakan_offers_rob_ron() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0);
+
+        let seat0 = round.players[0].seat_wind;
+        let mut player0 = Player::new(seat0, vec![], 25000);
+        player0.hand = mahjong_core::hand::Hand::from("234p567s789m1z 111m 1m");
+        round.players[0] = player0;
+
+        let seat1 = round.players[1].seat_wind;
+        let hand1 = mahjong_core::hand::Hand::from("11m234p567p789s55z");
+        round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
+
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+        round.drain_events();
+
+        assert!(round.do_kan(Tile::M1));
+        assert_eq!(round.phase, TurnPhase::WaitForCalls);
+        let call_state = round.call_state.as_ref().unwrap();
+        assert!(call_state.available_calls[1].iter().any(|call| matches!(call, AvailableCall::Ron)));
+
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert_eq!(round.phase, TurnPhase::RoundOver);
+        match round.result {
+            Some(RoundResult::Ron { winner, loser, winning_tile }) => {
+                assert_eq!(winner, 1);
+                assert_eq!(loser, 0);
+                assert_eq!(winning_tile, Tile::new(Tile::M1));
+            }
+            _ => panic!("expected ron result after robbing a quad"),
+        }
     }
 }
 
