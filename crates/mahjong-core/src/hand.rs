@@ -83,12 +83,12 @@ impl Hand {
         }
 
         // 鳴いている牌があればカウント
+        //
+        // 解析用途では副露は常に1面子として扱う。槓子の4枚目まで数えると
+        // 「4面子1雀頭に加えて孤立牌が1枚ある」手を和了形と誤認しうる。
         for i in 0..self.opened.len() {
             for j in 0..self.opened[i].tiles.len() {
                 result[self.opened[i].tiles[j].get() as usize] += 1;
-            }
-            if self.opened[i].category == OpenType::Kan {
-                result[self.opened[i].tiles[0].get() as usize] += 1;
             }
         }
 
