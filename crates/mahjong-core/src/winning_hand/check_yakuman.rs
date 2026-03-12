@@ -538,7 +538,8 @@ mod tests {
         status.has_claimed_open = has_claimed_open;
         assert_eq!(test_analyzer.shanten, -1);
         assert_eq!(
-            check_four_concealed_triplets_single_wait(&test_analyzer, &test, &status, &settings).unwrap(),
+            check_four_concealed_triplets_single_wait(&test_analyzer, &test, &status, &settings)
+                .unwrap(),
             expected_single_wait
         );
         assert_eq!(
@@ -718,4 +719,3 @@ mod tests {
         );
     }
 }
-
