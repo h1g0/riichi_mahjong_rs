@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::hand::Hand;
 use crate::hand_info::block::BlockProperty;
 use crate::hand_info::hand_analyzer::*;
 use crate::hand_info::status::*;
@@ -27,9 +28,19 @@ pub fn check_thirteen_orphans(
         Ok((name, false, 0))
     };
 }
+fn is_four_concealed_triplets_single_wait(hand_analyzer: &HandAnalyzer, hand: &Hand) -> bool {
+    hand.drawn().is_some_and(|winning_tile| {
+        hand_analyzer
+            .same2
+            .iter()
+            .any(|pair| pair.get()[0] == winning_tile.get())
+    })
+}
+
 /// 四暗刻
 pub fn check_four_concealed_triplets(
     hand_analyzer: &HandAnalyzer,
+    hand: &Hand,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -41,7 +52,40 @@ pub fn check_four_concealed_triplets(
     if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
-    if !status.has_claimed_open && hand_analyzer.same3.len() == 4 && status.is_self_picked {
+    if status.has_claimed_open
+        || hand_analyzer.same3.len() != 4
+        || is_four_concealed_triplets_single_wait(hand_analyzer, hand)
+    {
+        return Ok((name, false, 0));
+    }
+
+    if status.is_self_picked {
+        Ok((name, true, 13))
+    } else {
+        Ok((name, false, 0))
+    }
+}
+
+/// 四暗刻単騎待ち
+pub fn check_four_concealed_triplets_single_wait(
+    hand_analyzer: &HandAnalyzer,
+    hand: &Hand,
+    status: &Status,
+    settings: &Settings,
+) -> Result<(&'static str, bool, u32)> {
+    let name = get(
+        Kind::FourConcealedTripletsSingleWait,
+        status.has_claimed_open,
+        settings.display_lang,
+    );
+    if !has_won(hand_analyzer) {
+        return Ok((name, false, 0));
+    }
+    if status.has_claimed_open || hand_analyzer.same3.len() != 4 {
+        return Ok((name, false, 0));
+    }
+
+    if is_four_concealed_triplets_single_wait(hand_analyzer, hand) {
         Ok((name, true, 13))
     } else {
         Ok((name, false, 0))
@@ -456,6 +500,7 @@ pub fn check_hand_of_earth(
 mod tests {
     use super::*;
     use crate::hand::Hand;
+    use rstest::rstest;
 
     #[test]
     /// 国士無双で和了った
@@ -471,33 +516,35 @@ mod tests {
         );
     }
 
-    #[test]
-    /// 四暗刻単騎で和了った
-    fn test_win_by_four_concealed_triplets_single() {
-        let test_str = "111333m444s1777z 1z";
+    #[rstest]
+    #[case::tanki_tsumo("111333m444s1777z 1z", true, ("四暗刻単騎待ち", true, 13), ("四暗刻", false, 0), false)]
+    #[case::tanki_ron("111333m444s1777z 1z", false, ("四暗刻単騎待ち", true, 13), ("四暗刻", false, 0), false)]
+    #[case::shanpon_tsumo("111333m444s55s77z 5s", true, ("四暗刻単騎待ち", false, 0), ("四暗刻", true, 13), false)]
+    #[case::shanpon_ron("111333m444s55s77z 5s", false, ("四暗刻単騎待ち", false, 0), ("四暗刻", false, 0), false)]
+    #[case::open_tanki_tsumo("111333m444s1777z 1z", true, ("四暗刻単騎待ち", false, 0), ("四暗刻", false, 0), true)]
+    /// 四暗刻と四暗刻単騎待ちの振り分けを確認する
+    fn test_four_concealed_triplets(
+        #[case] test_str: &str,
+        #[case] is_self_picked: bool,
+        #[case] expected_single_wait: (&'static str, bool, u32),
+        #[case] expected_four_concealed_triplets: (&'static str, bool, u32),
+        #[case] has_claimed_open: bool,
+    ) {
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = true; // 自摸和了
         let settings = Settings::new();
+        status.is_self_picked = is_self_picked;
+        status.has_claimed_open = has_claimed_open;
+        assert_eq!(test_analyzer.shanten, -1);
         assert_eq!(
-            check_four_concealed_triplets(&test_analyzer, &status, &settings).unwrap(),
-            ("四暗刻", true, 13)
+            check_four_concealed_triplets_single_wait(&test_analyzer, &test, &status, &settings)
+                .unwrap(),
+            expected_single_wait
         );
-    }
-
-    #[test]
-    /// 通常の四暗刻では、自摸和了のみ（ロンした場合は三暗刻＋対々和になる）
-    fn test_not_win_by_four_concealed_triplets_single_if_not_self_pick() {
-        let test_str = "111333m444s1777z 1z";
-        let test = Hand::from(test_str);
-        let test_analyzer = HandAnalyzer::new(&test).unwrap();
-        let mut status = Status::new();
-        status.is_self_picked = false;
-        let settings = Settings::new();
         assert_eq!(
-            check_four_concealed_triplets(&test_analyzer, &status, &settings).unwrap(),
-            ("四暗刻", false, 0)
+            check_four_concealed_triplets(&test_analyzer, &test, &status, &settings).unwrap(),
+            expected_four_concealed_triplets
         );
     }
     #[test]

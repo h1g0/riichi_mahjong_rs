@@ -1,7 +1,9 @@
 use anyhow::Result;
 
+use crate::hand::Hand;
 use crate::hand_info::block::BlockProperty;
 use crate::hand_info::hand_analyzer::*;
+use crate::hand_info::opened::{OpenFrom, OpenType};
 use crate::hand_info::status::*;
 use crate::settings::*;
 use crate::tile::{Dragon, Tile};
@@ -144,6 +146,7 @@ pub fn check_all_triplet_hand(
 /// 三暗刻
 pub fn check_three_closed_triplets(
     hand_analyzer: &HandAnalyzer,
+    hand: &Hand,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -155,8 +158,38 @@ pub fn check_three_closed_triplets(
     if !has_won(hand_analyzer) {
         return Ok((name, false, 0));
     }
-    // 刻子が3つ以上あれば三暗刻の可能性がある
-    if hand_analyzer.same3.len() >= 3 {
+
+    let mut concealed_triplet_count = hand_analyzer.same3.len();
+
+    for open in hand.opened() {
+        let is_open_triplet = matches!(open.category, OpenType::Pon)
+            || (matches!(open.category, OpenType::Kan) && open.from != OpenFrom::Myself);
+        if is_open_triplet {
+            concealed_triplet_count = concealed_triplet_count.saturating_sub(1);
+        }
+    }
+
+    if !status.is_self_picked {
+        if let Some(winning_tile) = hand.drawn() {
+            let winning_tile_type = winning_tile.get();
+            let completes_open_triplet = hand.opened().iter().any(|open| {
+                open.tiles[0].get() == winning_tile_type
+                    && (matches!(open.category, OpenType::Pon)
+                        || (matches!(open.category, OpenType::Kan)
+                            && open.from != OpenFrom::Myself))
+            });
+            let completes_concealed_triplet = hand_analyzer
+                .same3
+                .iter()
+                .any(|triplet| triplet.get()[0] == winning_tile_type);
+
+            if completes_concealed_triplet && !completes_open_triplet {
+                concealed_triplet_count = concealed_triplet_count.saturating_sub(1);
+            }
+        }
+    }
+
+    if concealed_triplet_count >= 3 {
         Ok((name, true, 2))
     } else {
         Ok((name, false, 0))
@@ -361,6 +394,7 @@ pub fn check_little_three_dragons(
 mod tests {
     use super::*;
     use crate::hand::*;
+    use rstest::rstest;
     #[test]
     /// 七対子で和了った
     fn test_win_by_seven_pairs() {
@@ -473,19 +507,35 @@ mod tests {
             ("三色同順（鳴）", true, 1)
         );
     }
-    #[test]
-    /// 三暗刻で和了った
-    fn test_three_closed_triplets() {
-        let test_str = "111m333p999s789m1z 1z";
+    #[rstest]
+    #[case::tanki_tsumo("111m333p999s789m1z 1z", true, false, ("三暗刻", true, 2))]
+    #[case::tanki_ron("111m333p999s789m1z 1z", false, false, ("三暗刻", true, 2))]
+    #[case::shanpon_ron("111m222p789s44z55z 5z", false, false, ("三暗刻", false, 0))]
+    #[case::shanpon_tsumo("111m222p789s44z55z 5z", true, false, ("三暗刻", true, 2))]
+    #[case::sequence_wait_ron("111m222p333s45m77z 6m", false, false, ("三暗刻", true, 2))]
+    #[case::sequence_wait_tsumo("111m222p333s45m77z 6m", true, false, ("三暗刻", true, 2))]
+    #[case::open_sequence_tsumo("111m333p999s1z 456s 1z", true, true, ("三暗刻", true, 2))]
+    #[case::open_sequence_ron("111m333p999s1z 456s 1z", false, true, ("三暗刻", true, 2))]
+    #[case::open_triplet_tsumo("111m333p1z789s 999s 1z", true, true, ("三暗刻", false, 0))]
+    fn test_three_closed_triplets(
+        #[case] test_str: &str,
+        #[case] is_self_picked: bool,
+        #[case] has_claimed_open: bool,
+        #[case] expected: (&'static str, bool, u32),
+    ) {
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
-        let status = Status::new();
+        let mut status = Status::new();
         let settings = Settings::new();
+        status.is_self_picked = is_self_picked;
+        status.has_claimed_open = has_claimed_open;
+        assert_eq!(test_analyzer.shanten, -1);
         assert_eq!(
-            check_three_closed_triplets(&test_analyzer, &status, &settings).unwrap(),
-            ("三暗刻", true, 2)
+            check_three_closed_triplets(&test_analyzer, &test, &status, &settings).unwrap(),
+            expected
         );
     }
+
     #[test]
     /// 三色同刻で和了った
     fn test_three_color_triplets() {

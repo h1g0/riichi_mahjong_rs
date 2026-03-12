@@ -82,6 +82,8 @@ pub enum Kind {
     ThirteenOrphans,
     /// 四暗刻
     FourConcealedTriplets,
+    /// 四暗刻単騎待ち
+    FourConcealedTripletsSingleWait,
     /// 大三元
     BigThreeDragons,
     /// 小四喜
@@ -220,6 +222,8 @@ fn get_en(hand_kind: Kind, has_openned: bool) -> &'static str {
         Kind::ThirteenOrphans => "Thirteen Orphans",
         // 四暗刻
         Kind::FourConcealedTriplets => "Four Concealed Triplets",
+        // 四暗刻単騎待ち
+        Kind::FourConcealedTripletsSingleWait => "Four Concealed Triplets Single Wait",
         // 大三元
         Kind::BigThreeDragons => "Big Three Dragons",
         // 小四喜
@@ -321,6 +325,8 @@ fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
         Kind::ThirteenOrphans => "国士無双",
         // 四暗刻
         Kind::FourConcealedTriplets => "四暗刻",
+        // 四暗刻単騎待ち
+        Kind::FourConcealedTripletsSingleWait => "四暗刻単騎待ち",
         // 大三元
         Kind::BigThreeDragons => "大三元",
         // 小四喜
@@ -343,3 +349,4 @@ fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
         Kind::HandOfEarth => "地和",
     }
 }
+
