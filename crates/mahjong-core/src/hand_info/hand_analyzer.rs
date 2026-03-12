@@ -8,6 +8,8 @@ use crate::hand_info::block::*;
 use crate::tile::*;
 use crate::winning_hand::name::Form;
 
+const UNAVAILABLE_SHANTEN: i32 = i32::MAX;
+
 /// 与えられた手牌について、向聴数が最小になる時の面子・対子等の組み合わせを計算して格納する
 ///
 /// 通常形・七対子の場合は面子・対子等の情報もVecに格納される。
@@ -48,6 +50,18 @@ impl PartialEq for HandAnalyzer {
 }
 
 impl HandAnalyzer {
+    fn unavailable(form: Form) -> HandAnalyzer {
+        HandAnalyzer {
+            shanten: UNAVAILABLE_SHANTEN,
+            form,
+            same3: Vec::new(),
+            sequential3: Vec::new(),
+            same2: Vec::new(),
+            sequential2: Vec::new(),
+            single: Vec::new(),
+        }
+    }
+
     /// 七対子・国士無双・通常の3つの和了形に対してそれぞれ向聴数を求め、最小のものを返す。
     /// # Examples
     ///
@@ -127,6 +141,10 @@ impl HandAnalyzer {
     /// Vecへの詰め込みは`same2`（対子）以外は`single`（単独）に詰め込まれる。
     /// 七対子はVecを使用する役として断么九・混老頭・混一色・清一色と複合しうる
     fn calc_seven_pairs(hand: &Hand) -> Result<HandAnalyzer> {
+        if !hand.opened().is_empty() {
+            return Ok(HandAnalyzer::unavailable(Form::SevenPairs));
+        }
+
         let mut pair: u32 = 0;
         let mut kind: u32 = 0;
         let mut t = hand.summarize_tiles();
@@ -166,6 +184,10 @@ impl HandAnalyzer {
     ///
     /// Vecへの詰め込みは未実装（詰め込んでも意味がない）
     fn calc_thirteen_orphans(hand: &Hand) -> Result<HandAnalyzer> {
+        if !hand.opened().is_empty() {
+            return Ok(HandAnalyzer::unavailable(Form::ThirteenOrphans));
+        }
+
         let to_tiles = [
             Tile::M1,
             Tile::M9,
@@ -208,7 +230,7 @@ impl HandAnalyzer {
     /// 通常の役への向聴数を計算する
     fn calc_normal_form(hand: &Hand) -> Result<HandAnalyzer> {
         let mut t = hand.summarize_tiles();
-        let mut shanten: i32 = 100;
+        let mut shanten: i32 = UNAVAILABLE_SHANTEN;
         // 計算用
         let mut same3: Vec<Same3> = Vec::new();
         let mut sequential3: Vec<Sequential3> = Vec::new();
@@ -919,6 +941,17 @@ mod tests {
         let test = Hand::from("234678m56p567s55z 5z");
         assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
     }
+
+    #[test]
+    fn kan_hand_with_unrelated_rinshan_tile_is_not_a_win() {
+        let test = Hand::from("567p123s678s8s 5555s 1m");
+        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
+    }
+
+    #[test]
+    fn opened_hand_cannot_be_seven_pairs_or_thirteen_orphans() {
+        let test = Hand::from("123456789m11p 789s 1p");
+        assert!(HandAnalyzer::new_by_form(&test, Form::SevenPairs).unwrap().shanten > 0);
+        assert!(HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans).unwrap().shanten > 0);
+    }
 }
-
-
