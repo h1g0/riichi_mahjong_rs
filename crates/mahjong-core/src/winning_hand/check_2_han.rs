@@ -508,16 +508,19 @@ mod tests {
         );
     }
     #[rstest]
-    #[case::tanki_tsumo("111m333p999s789m1z 1z", true, ("三暗刻", true, 2))]
-    #[case::tanki_ron("111m333p999s789m1z 1z", false, ("三暗刻", true, 2))]
-    #[case::shanpon_ron("111m222p789s44z55z 5z", false, ("三暗刻", false, 0))]
-    #[case::shanpon_tsumo("111m222p789s44z55z 5z", true, ("三暗刻", true, 2))]
-    #[case::sequence_wait_ron("111m222p333s45m77z 6m", false, ("三暗刻", true, 2))]
-    #[case::sequence_wait_tsumo("111m222p333s45m77z 6m", true, ("三暗刻", true, 2))]
-    /// 三暗刻の待ち形ごとの成立条件を確認する
+    #[case::tanki_tsumo("111m333p999s789m1z 1z", true, false, ("三暗刻", true, 2))]
+    #[case::tanki_ron("111m333p999s789m1z 1z", false, false, ("三暗刻", true, 2))]
+    #[case::shanpon_ron("111m222p789s44z55z 5z", false, false, ("三暗刻", false, 0))]
+    #[case::shanpon_tsumo("111m222p789s44z55z 5z", true, false, ("三暗刻", true, 2))]
+    #[case::sequence_wait_ron("111m222p333s45m77z 6m", false, false, ("三暗刻", true, 2))]
+    #[case::sequence_wait_tsumo("111m222p333s45m77z 6m", true, false, ("三暗刻", true, 2))]
+    #[case::open_sequence_tsumo("111m333p999s1z 456s 1z", true, true, ("三暗刻", true, 2))]
+    #[case::open_sequence_ron("111m333p999s1z 456s 1z", false, true, ("三暗刻", true, 2))]
+    #[case::open_triplet_tsumo("111m333p1z789s 999s 1z", true, true, ("三暗刻", false, 0))]
     fn test_three_closed_triplets(
         #[case] test_str: &str,
         #[case] is_self_picked: bool,
+        #[case] has_claimed_open: bool,
         #[case] expected: (&'static str, bool, u32),
     ) {
         let test = Hand::from(test_str);
@@ -525,6 +528,7 @@ mod tests {
         let mut status = Status::new();
         let settings = Settings::new();
         status.is_self_picked = is_self_picked;
+        status.has_claimed_open = has_claimed_open;
         assert_eq!(test_analyzer.shanten, -1);
         assert_eq!(
             check_three_closed_triplets(&test_analyzer, &test, &status, &settings).unwrap(),
