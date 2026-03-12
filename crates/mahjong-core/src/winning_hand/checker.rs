@@ -169,10 +169,15 @@ pub fn check(
         Kind::ThirteenOrphans,
         check_thirteen_orphans(analyzer, status, settings)?,
     );
+    // 四暗刻単騎待ち
+    result.insert(
+        Kind::FourConcealedTripletsSingleWait,
+        check_four_concealed_triplets_single_wait(analyzer, hand, status, settings)?,
+    );
     // 四暗刻
     result.insert(
         Kind::FourConcealedTriplets,
-        check_four_concealed_triplets(analyzer, status, settings)?,
+        check_four_concealed_triplets(analyzer, hand, status, settings)?,
     );
     // 大三元
     result.insert(
