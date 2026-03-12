@@ -100,7 +100,7 @@ pub fn check(
     // 三暗刻
     result.insert(
         Kind::ThreeClosedTriplets,
-        check_three_closed_triplets(analyzer, status, settings)?,
+        check_three_closed_triplets(analyzer, hand, status, settings)?,
     );
     // 三色同刻
     result.insert(
@@ -225,3 +225,4 @@ pub fn check(
 /// ユニットテスト
 #[cfg(test)]
 mod tests {}
+
