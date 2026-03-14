@@ -410,6 +410,12 @@ impl Player {
                 .position(|t| t.get() == tile_type)
                 .expect("加カンに必要な牌が手牌にありません");
             self.hand.tiles_mut().remove(idx);
+
+            if let Some(drawn_tile) = self.hand.drawn() {
+                self.hand.tiles_mut().push(drawn_tile);
+                self.hand.sort();
+                self.hand.set_drawn(None);
+            }
         }
 
         let open = self
@@ -730,6 +736,20 @@ mod tests {
         assert_eq!(player.hand.opened().len(), 1);
         assert_eq!(player.hand.opened()[0].category, OpenType::Kan);
         assert!(!player.is_menzen());
+    }
+
+    #[test]
+    fn test_do_kakan_preserves_unrelated_drawn_tile() {
+        let mut player = Player::new(Wind::South, vec![], 25000);
+        player.hand = Hand::from("127m234p567s1z 111m 9s");
+
+        player.do_kakan(Tile::M1);
+
+        assert!(player.hand.drawn().is_none());
+        assert_eq!(player.hand.tiles().len(), 10);
+        assert!(player.hand.tiles().contains(&Tile::new(Tile::S9)));
+        assert_eq!(player.hand.opened().len(), 1);
+        assert_eq!(player.hand.opened()[0].category, OpenType::Kan);
     }
 
     #[test]

@@ -1853,6 +1853,27 @@ mod tests {
     }
 
     #[test]
+    fn test_do_kakan_keeps_unrelated_drawn_tile_in_hand() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let seat_wind = round.players[0].seat_wind;
+        let mut player = Player::new(seat_wind, vec![], 25000);
+        player.hand = mahjong_core::hand::Hand::from("127m234p567s1z 111m 9s");
+        round.players[0] = player;
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+        round.drain_events();
+
+        assert!(round.do_kan(Tile::M1));
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+        assert!(round.players[0].hand.drawn().is_some());
+        assert_eq!(round.players[0].hand.tiles().len(), 10);
+        assert!(round.players[0]
+            .hand
+            .tiles()
+            .contains(&mahjong_core::tile::Tile::new(Tile::S9)));
+    }
+
+    #[test]
     fn test_kakan_offers_rob_ron() {
         let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
 
@@ -1886,7 +1907,5 @@ mod tests {
         }
     }
 }
-
-
 
 
