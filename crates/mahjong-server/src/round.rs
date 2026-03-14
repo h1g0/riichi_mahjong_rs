@@ -39,7 +39,10 @@ pub enum RoundResult {
         winning_tile: Tile,
     },
     /// 荒牌流局（牌山切れ）
-    ExhaustiveDraw,
+    ExhaustiveDraw {
+        /// 親がテンパイしているか
+        dealer_tenpai: bool,
+    },
     /// 途中流局（四風連打、四家立直、九種九牌）
     SpecialDraw,
 }
@@ -1472,8 +1475,10 @@ impl Round {
             .map(|&i| self.players[i].seat_wind)
             .collect();
 
+        let dealer_tenpai = tenpai_players.contains(&self.dealer);
+
         self.phase = TurnPhase::RoundOver;
-        self.result = Some(RoundResult::ExhaustiveDraw);
+        self.result = Some(RoundResult::ExhaustiveDraw { dealer_tenpai });
 
         for i in 0..4 {
             self.events.push((
