@@ -5,6 +5,7 @@
 use macroquad::prelude::*;
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
+use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
 use mahjong_core::tile::{Tile, Wind};
 use mahjong_server::protocol::{AvailableCall, CallType, ClientAction, DrawReason, ServerEvent};
 
@@ -422,7 +423,7 @@ impl GameState {
             return false;
         }
 
-        let mut hand = Hand::new(self.hand.clone(), self.drawn);
+        let mut hand = Hand::new_with_opened(self.hand.clone(), self.opened_tiles_for_analysis(), self.drawn);
         match tile {
             Some(target) => {
                 let drawn = hand.drawn();
@@ -446,6 +447,30 @@ impl GameState {
             Ok(analyzer) => analyzer.shanten == 0,
             Err(_) => false,
         }
+    }
+
+    fn opened_tiles_for_analysis(&self) -> Vec<OpenTiles> {
+        self.melds
+            .iter()
+            .filter_map(|meld| match meld.call_type {
+                CallType::Chi => Some(OpenTiles {
+                    tiles: [meld.tiles[0], meld.tiles[1], meld.tiles[2]],
+                    category: OpenType::Chi,
+                    from: OpenFrom::Unknown,
+                }),
+                CallType::Pon => Some(OpenTiles {
+                    tiles: [meld.tiles[0], meld.tiles[1], meld.tiles[2]],
+                    category: OpenType::Pon,
+                    from: OpenFrom::Unknown,
+                }),
+                CallType::Daiminkan | CallType::Ankan | CallType::Kakan => Some(OpenTiles {
+                    tiles: [meld.tiles[0], meld.tiles[1], meld.tiles[2]],
+                    category: OpenType::Kan,
+                    from: OpenFrom::Unknown,
+                }),
+                CallType::Ron => None,
+            })
+            .collect()
     }
 
     fn enter_riichi_selection(&mut self) {
@@ -774,6 +799,26 @@ mod tests {
         assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::Z4))));
         assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::Z5))));
     }
-}
 
+    #[test]
+    fn test_can_discard_for_riichi_after_ankan_uses_opened_melds() {
+        let mut state = GameState::new();
+        let hand = Hand::from("1m1m5m5m7m7m9m1s2s3s 3m3m3m3m 8m");
+        state.hand = hand.tiles().to_vec();
+        state.hand.sort();
+        state.drawn = hand.drawn();
+        state.melds.push(MeldInfo {
+            call_type: CallType::Ankan,
+            tiles: vec![
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M3),
+            ],
+        });
+
+        assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::M5))));
+        assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::M7))));
+    }
+}
 
