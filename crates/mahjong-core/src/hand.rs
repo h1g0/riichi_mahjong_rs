@@ -113,7 +113,11 @@ impl Hand {
                 self.opened[i].tiles[0].to_char(),
                 self.opened[i].tiles[1].to_char(),
                 self.opened[i].tiles[2].to_char()
-            ))
+            ));
+            // カンなら4枚目を追加する
+            if self.opened[i].category == OpenType::Kan {
+                result.push(self.opened[i].tiles[0].to_char());
+            }
         }
 
         if let Some(tsumo) = self.drawn {
@@ -155,7 +159,7 @@ impl Hand {
         if tiles.len() == 0 {
             return String::from("");
         } else if tiles.len() == 1 {
-            return tiles[1].to_string();
+            return tiles[0].to_string();
         }
         tiles.sort();
         let mut result = String::new();

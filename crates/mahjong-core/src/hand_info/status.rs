@@ -74,21 +74,21 @@ pub fn is_two_sided_wait(tile: TileType, counts: &TileSummarize) -> bool {
         tile - Tile::S1 + 1
     };
 
-    // 左側が存在する形 : xx[tile-2][tile-1] + tile かつ123または789にならない
+    // 左側が存在する形 : [tile-2][tile-1] + tile
+    // offset == 3 は辺張（12の3待ち）なので除外
     if offset >= 3
         && counts[(tile - 1) as usize] > 0
         && counts[(tile - 2) as usize] > 0
         && offset != 3
-        && offset != 9
     {
         return true;
     }
 
-    // 右側が存在する形 : tile + [tile+1][tile+2] かつ123または789にならない
+    // 右側が存在する形 : tile + [tile+1][tile+2]
+    // offset == 7 は辺張（89の7待ち）なので除外
     if offset <= 7
         && counts[(tile + 1) as usize] > 0
         && counts[(tile + 2) as usize] > 0
-        && offset != 1
         && offset != 7
     {
         return true;

@@ -25,6 +25,10 @@ pub fn check_ready_hand(
     if status.has_claimed_open {
         return Ok((name, false, 0));
     }
+    // ダブル立直の場合は通常の立直とは複合しない（ダブル立直が立直を置き換える）
+    if status.is_double_ready {
+        return Ok((name, false, 0));
+    }
     if status.has_claimed_ready {
         Ok((name, true, 1))
     } else {
@@ -270,16 +274,28 @@ pub fn check_one_set_of_identical_sequences(
     if hand_analyzer.sequential3.len() < 2 {
         return Ok((name, false, 0));
     }
-    for i in 0..hand_analyzer.sequential3.len() - 1 {
-        if let Some(v) = hand_analyzer.sequential3.get(i) {
-            for j in i + 1..hand_analyzer.sequential3.len() {
-                if let Some(v2) = hand_analyzer.sequential3.get(j) {
-                    if *v == *v2 {
-                        return Ok((name, true, 1));
-                    }
-                }
+    // 同一順子ペアの数をカウント（二盃口との区別のため）
+    let mut used = vec![false; hand_analyzer.sequential3.len()];
+    let mut pair_count = 0;
+    for i in 0..hand_analyzer.sequential3.len() {
+        if used[i] {
+            continue;
+        }
+        for j in i + 1..hand_analyzer.sequential3.len() {
+            if used[j] {
+                continue;
+            }
+            if hand_analyzer.sequential3[i] == hand_analyzer.sequential3[j] {
+                used[i] = true;
+                used[j] = true;
+                pair_count += 1;
+                break;
             }
         }
+    }
+    // 二盃口（ペアが2組）の場合は一盃口とは複合しない
+    if pair_count == 1 {
+        return Ok((name, true, 1));
     }
     Ok((name, false, 0))
 }

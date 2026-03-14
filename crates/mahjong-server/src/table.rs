@@ -185,11 +185,19 @@ impl Table {
         self.riichi_sticks = round.riichi_sticks;
 
         match result {
-            Some(RoundResult::ExhaustiveDraw) | Some(RoundResult::SpecialDraw) => {
-                // 流局: 本場を増やし、親交代して局を進める
+            Some(RoundResult::ExhaustiveDraw { dealer_tenpai }) => {
                 self.honba += 1;
-                self.dealer = (self.dealer + 1) % 4;
-                self.advance_round_number();
+                if dealer_tenpai {
+                    // 親がテンパイなら連荘（親交代しない、局も進めない）
+                } else {
+                    // 親がノーテンなら親交代して局を進める
+                    self.dealer = (self.dealer + 1) % 4;
+                    self.advance_round_number();
+                }
+            }
+            Some(RoundResult::SpecialDraw) => {
+                // 途中流局: 本場を増やし、局は進めない（連荘扱い）
+                self.honba += 1;
             }
             Some(RoundResult::Tsumo { winner, .. }) | Some(RoundResult::Ron { winner, .. }) => {
                 if winner == self.dealer {
@@ -273,7 +281,7 @@ mod tests {
         let round = table.current_round_mut().unwrap();
         round.riichi_sticks = 3;
         round.phase = TurnPhase::RoundOver;
-        round.result = Some(RoundResult::ExhaustiveDraw);
+        round.result = Some(RoundResult::ExhaustiveDraw { dealer_tenpai: false });
 
         table.finish_round();
         assert_eq!(table.riichi_sticks, 3);
