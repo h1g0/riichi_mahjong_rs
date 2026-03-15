@@ -243,7 +243,7 @@ impl Round {
                 }
 
                 eprintln!(
-                    "[draw-diag] source={} hand={} drawn={} shanten={} can_tsumo={} is_win={} can_riichi={} riichi_discards=[{}] yaku=[{}]",
+                    "[draw-diag] source={} hand={} drawn={} shanten={} can_tsumo={} is_win={} can_riichi={} riichi_discards=[{}] yaku=[{}] remaining={} score={}",
                     source,
                     player.hand.to_string(),
                     drawn,
@@ -253,6 +253,8 @@ impl Round {
                     can_riichi,
                     riichi_options.join(","),
                     yaku_summary,
+                    self.wall.remaining(),
+                    player.score,
                 );
             }
             Err(err) => {
@@ -276,6 +278,9 @@ impl Round {
             return false;
         }
 
+        // 同巡フリテンを解除（自分のツモ番が来たので）
+        self.players[self.current_player].is_temporary_furiten = false;
+
         // 牌山が空なら流局
         if self.wall.is_empty() {
             self.do_exhaustive_draw();
@@ -295,6 +300,9 @@ impl Round {
         let can_riichi = self.can_player_riichi(self.current_player);
         self.log_draw_diagnostics(self.current_player, "draw", can_tsumo, can_riichi);
 
+        // フリテン判定
+        let is_furiten = self.players[self.current_player].is_furiten();
+
         // 自分にはツモ牌を公開
         self.events.push((
             self.current_player,
@@ -303,6 +311,7 @@ impl Round {
                 remaining_tiles: remaining,
                 can_tsumo,
                 can_riichi,
+                is_furiten,
             },
         ));
 
@@ -560,6 +569,25 @@ impl Round {
     /// 鳴きを解決する（優先度: ロン > 大明カン > ポン > チー > パス）
     fn resolve_calls(&mut self) {
         let call_state = self.call_state.take().unwrap();
+
+        // ロン見逃しによるフリテン判定
+        // AvailableCall::Ron があったのにロン宣言しなかったプレイヤーにフリテンを設定
+        for i in 0..4 {
+            let had_ron = call_state.available_calls[i]
+                .iter()
+                .any(|c| matches!(c, AvailableCall::Ron));
+            let declared_ron = call_state.ron_declared.contains(&i);
+
+            if had_ron && !declared_ron {
+                if self.players[i].is_riichi {
+                    // リーチ中 → リーチ後フリテン（局終了まで永続）
+                    self.players[i].is_riichi_furiten = true;
+                } else {
+                    // 非リーチ → 同巡フリテン（自分のツモ番で解除）
+                    self.players[i].is_temporary_furiten = true;
+                }
+            }
+        }
 
         // 1. ロン（最優先）
         if !call_state.ron_declared.is_empty() {
@@ -1023,6 +1051,9 @@ impl Round {
     }
 
     fn draw_after_kan(&mut self, player_idx: usize) {
+        // 同巡フリテンを解除（嶺上ツモも自分のツモ番）
+        self.players[player_idx].is_temporary_furiten = false;
+
         let Some(tile) = self.wall.draw_rinshan() else {
             self.do_exhaustive_draw();
             return;
@@ -1038,6 +1069,7 @@ impl Round {
         let can_riichi = self.can_player_riichi(player_idx);
         self.log_draw_diagnostics(player_idx, "kan_draw", can_tsumo, can_riichi);
 
+        let is_furiten = self.players[player_idx].is_furiten();
         self.events.push((
             player_idx,
             ServerEvent::TileDrawn {
@@ -1045,6 +1077,7 @@ impl Round {
                 remaining_tiles: remaining,
                 can_tsumo,
                 can_riichi,
+                is_furiten,
             },
         ));
 
@@ -1106,18 +1139,40 @@ impl Round {
         let player = &self.players[player_idx];
 
         if player.is_riichi {
+            if player_idx == 0 {
+                eprintln!("[riichi-reject] reason=already_riichi player={}", player_idx);
+            }
             return false;
         }
         if !player.is_menzen() {
+            if player_idx == 0 {
+                eprintln!("[riichi-reject] reason=not_menzen player={}", player_idx);
+            }
             return false;
         }
         if player.score < 1000 {
+            if player_idx == 0 {
+                eprintln!(
+                    "[riichi-reject] reason=score_too_low player={} score={}",
+                    player_idx, player.score
+                );
+            }
             return false;
         }
         if self.wall.remaining() < 1 {
+            if player_idx == 0 {
+                eprintln!(
+                    "[riichi-reject] reason=wall_empty player={} remaining={}",
+                    player_idx,
+                    self.wall.remaining()
+                );
+            }
             return false;
         }
         if player.hand.drawn().is_none() {
+            if player_idx == 0 {
+                eprintln!("[riichi-reject] reason=no_drawn player={}", player_idx);
+            }
             return false;
         }
 
@@ -1871,6 +1926,195 @@ mod tests {
             .hand
             .tiles()
             .contains(&mahjong_core::tile::Tile::new(Tile::S9)));
+    }
+
+    #[test]
+    fn test_temporary_furiten_set_on_ron_pass() {
+        // プレイヤー1がロン可能な状態で、パスすると同巡フリテンが設定される
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+
+        // プレイヤー1にテンパイ手を設定: 123m456p789s11z 待ち1z（場風東）
+        let seat1 = round.players[1].seat_wind;
+        let hand1 = mahjong_core::hand::Hand::from("123m456p789s1122z");
+        round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
+
+        // プレイヤー0が1z（東）を捨てた場合をチェック
+        let call_state = round.check_available_calls(Tile::new(Tile::Z1), 0);
+
+        // ロンが可能であること
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|c| matches!(c, AvailableCall::Ron)),
+            "player 1 should be able to ron"
+        );
+
+        // CallStateをセットしてパスで応答
+        round.phase = TurnPhase::WaitForCalls;
+        round.call_state = Some(call_state);
+        for i in 0..4 {
+            if let Some(ref cs) = round.call_state {
+                if !cs.responded[i] {
+                    round.respond_to_call(i, CallResponse::Pass);
+                    if round.call_state.is_none() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 同巡フリテンが設定されていること
+        assert!(round.players[1].is_temporary_furiten);
+        assert!(!round.players[1].is_riichi_furiten);
+    }
+
+    #[test]
+    fn test_temporary_furiten_cleared_on_draw() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        round.drain_events();
+
+        // プレイヤー1に同巡フリテンを設定
+        round.players[1].is_temporary_furiten = true;
+
+        // プレイヤー1のツモ番にする
+        round.current_player = 1;
+        round.phase = TurnPhase::Draw;
+        round.do_draw();
+
+        // 同巡フリテンが解除されていること
+        assert!(!round.players[1].is_temporary_furiten);
+    }
+
+    #[test]
+    fn test_riichi_furiten_set_on_ron_pass() {
+        // リーチ中のプレイヤーがロンを見逃すとリーチ後フリテンが設定される
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+
+        let seat1 = round.players[1].seat_wind;
+        let hand1 = mahjong_core::hand::Hand::from("123m456p789s1122z");
+        round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
+        round.players[1].is_riichi = true;
+
+        let call_state = round.check_available_calls(Tile::new(Tile::Z1), 0);
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|c| matches!(c, AvailableCall::Ron)),
+            "riichi player should be able to ron"
+        );
+
+        round.phase = TurnPhase::WaitForCalls;
+        round.call_state = Some(call_state);
+        for i in 0..4 {
+            if let Some(ref cs) = round.call_state {
+                if !cs.responded[i] {
+                    round.respond_to_call(i, CallResponse::Pass);
+                    if round.call_state.is_none() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // リーチ後フリテンが設定されていること
+        assert!(round.players[1].is_riichi_furiten);
+        assert!(!round.players[1].is_temporary_furiten);
+    }
+
+    #[test]
+    fn test_riichi_furiten_persists_after_draw() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        round.drain_events();
+
+        // リーチ後フリテンを設定
+        round.players[1].is_riichi_furiten = true;
+        round.players[1].is_riichi = true;
+
+        // プレイヤー1がツモ
+        round.current_player = 1;
+        round.phase = TurnPhase::Draw;
+        round.do_draw();
+
+        // リーチ後フリテンは解除されないこと
+        assert!(round.players[1].is_riichi_furiten);
+    }
+
+    #[test]
+    fn test_temporary_furiten_blocks_ron() {
+        // 同巡フリテンのプレイヤーにはロンが提供されない
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+
+        let seat1 = round.players[1].seat_wind;
+        let hand1 = mahjong_core::hand::Hand::from("123m456p789s1122z");
+        round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
+        round.players[1].is_temporary_furiten = true;
+
+        let call_state = round.check_available_calls(Tile::new(Tile::Z1), 0);
+
+        // フリテンなのでロンが提供されないこと
+        assert!(
+            !call_state.available_calls[1]
+                .iter()
+                .any(|c| matches!(c, AvailableCall::Ron)),
+            "furiten player should not be offered ron"
+        );
+    }
+
+    #[test]
+    fn test_kakan_ron_pass_sets_furiten() {
+        // 加カンで搶槓可能だがパスした場合、フリテンが設定される
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+
+        let seat0 = round.players[0].seat_wind;
+        let mut player0 = Player::new(seat0, vec![], 25000);
+        player0.hand = mahjong_core::hand::Hand::from("234p567s789m1z 111m 1m");
+        round.players[0] = player0;
+
+        let seat1 = round.players[1].seat_wind;
+        let hand1 = mahjong_core::hand::Hand::from("11m234p567p789s55z");
+        round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
+
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+        round.drain_events();
+
+        assert!(round.do_kan(Tile::M1));
+        assert_eq!(round.phase, TurnPhase::WaitForCalls);
+        let call_state = round.call_state.as_ref().unwrap();
+        assert!(call_state.available_calls[1].iter().any(|call| matches!(call, AvailableCall::Ron)));
+
+        // ロンせずパス → フリテンが設定されること
+        assert!(round.respond_to_call(1, CallResponse::Pass));
+        assert!(round.players[1].is_temporary_furiten);
+    }
+
+    #[test]
+    fn test_riichi_with_specific_tenpai_hand() {
+        // 再現テスト: 6m7m1p2p3p3p4p5p5p6p7s8s9s ツモ8m
+        // shanten=0 で riichi_discards がある（3p,3p,5p,5p,6p）
+        // → can_riichi = true であるべき
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+
+        let seat0 = round.players[0].seat_wind;
+        let hand = mahjong_core::hand::Hand::from("67m12334556p789s");
+        round.players[0] = Player::new(seat0, hand.tiles().to_vec(), 25000);
+        round.players[0].hand.set_drawn(Some(Tile::new(Tile::M8)));
+
+        // 前提条件チェック
+        assert!(!round.players[0].is_riichi, "should not be in riichi");
+        assert!(round.players[0].is_menzen(), "should be menzen");
+        assert!(round.players[0].score >= 1000, "should have >= 1000 score");
+        assert!(round.wall.remaining() >= 1, "wall should have tiles");
+        assert!(
+            round.players[0].hand.drawn().is_some(),
+            "should have drawn tile"
+        );
+
+        // リーチ可能であるべき
+        assert!(
+            round.can_player_riichi(0),
+            "should be able to declare riichi with tenpai hand"
+        );
     }
 
     #[test]

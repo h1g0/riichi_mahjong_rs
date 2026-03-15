@@ -29,6 +29,10 @@ pub struct Player {
     pub is_first_turn: bool,
     /// 副露によって一巡目が中断されたか
     pub first_turn_interrupted: bool,
+    /// リーチ後フリテン（リーチ後にロン見逃し → 局終了まで永続）
+    pub is_riichi_furiten: bool,
+    /// 同巡フリテン（ロン見逃し → 自分のツモ番で解除）
+    pub is_temporary_furiten: bool,
 }
 
 /// 捨て牌1枚の情報
@@ -58,6 +62,8 @@ impl Player {
             is_ippatsu: false,
             is_first_turn: true,
             first_turn_interrupted: false,
+            is_riichi_furiten: false,
+            is_temporary_furiten: false,
         }
     }
 
@@ -258,8 +264,16 @@ impl Player {
 
     /// フリテン状態か判定する
     ///
-    /// 自分の待ち牌のいずれかが自分の捨て牌に含まれている場合、フリテン。
+    /// 以下のいずれかに該当する場合、フリテン（ロン不可・ツモのみ可）:
+    /// 1. 捨て牌フリテン: 自分の待ち牌のいずれかが自分の捨て牌に含まれている
+    /// 2. リーチ後フリテン: リーチ後にロンを見逃した（局終了まで永続）
+    /// 3. 同巡フリテン: ロンを見逃した（自分のツモ番で解除）
     pub fn is_furiten(&self) -> bool {
+        // リーチ後フリテン・同巡フリテン（O(1)で早期リターン）
+        if self.is_riichi_furiten || self.is_temporary_furiten {
+            return true;
+        }
+        // 捨て牌フリテン
         let waiting = scoring::get_waiting_tiles(self);
         if waiting.is_empty() {
             return false;
@@ -760,5 +774,25 @@ mod tests {
         assert_eq!(Player::open_from_relative(2, 0), OpenFrom::Opposite);
         // プレイヤー3から見たプレイヤー0 → 下家（Following）
         assert_eq!(Player::open_from_relative(3, 0), OpenFrom::Following);
+    }
+
+    #[test]
+    fn test_is_furiten_riichi_furiten() {
+        let mut player = Player::new(Wind::East, make_test_tiles(), 25000);
+        player.is_riichi_furiten = true;
+        assert!(player.is_furiten());
+    }
+
+    #[test]
+    fn test_is_furiten_temporary_furiten() {
+        let mut player = Player::new(Wind::East, make_test_tiles(), 25000);
+        player.is_temporary_furiten = true;
+        assert!(player.is_furiten());
+    }
+
+    #[test]
+    fn test_is_furiten_none() {
+        let player = Player::new(Wind::East, make_test_tiles(), 25000);
+        assert!(!player.is_furiten());
     }
 }

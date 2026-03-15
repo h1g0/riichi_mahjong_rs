@@ -6,7 +6,7 @@ use macroquad::prelude::*;
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
-use mahjong_core::tile::{Tile, Wind};
+use mahjong_core::tile::{Tile, TileType, Wind};
 use mahjong_server::protocol::{AvailableCall, CallType, ClientAction, DrawReason, ServerEvent};
 
 /// 副露（鳴き）の表示情報
@@ -80,6 +80,10 @@ pub struct GameState {
     pub honba: usize,
     /// 場に出ている供託リーチ棒の本数
     pub riichi_sticks: usize,
+    /// フリテン状態か
+    pub is_furiten: bool,
+    /// 選択中の牌を捨てるとフリテンになるか
+    pub selected_would_cause_furiten: bool,
 }
 
 /// ゲームフェーズ
@@ -125,6 +129,8 @@ impl GameState {
             round_number: 0,
             honba: 0,
             riichi_sticks: 0,
+            is_furiten: false,
+            selected_would_cause_furiten: false,
         }
     }
 
@@ -164,6 +170,8 @@ impl GameState {
                 self.round_number = round_number;
                 self.honba = honba;
                 self.riichi_sticks = riichi_sticks;
+                self.is_furiten = false;
+                self.selected_would_cause_furiten = false;
             }
 
             ServerEvent::TileDrawn {
@@ -171,12 +179,15 @@ impl GameState {
                 remaining_tiles,
                 can_tsumo,
                 can_riichi,
+                is_furiten,
             } => {
                 self.drawn = Some(tile);
                 self.remaining_tiles = remaining_tiles;
                 self.is_my_turn = true;
                 self.can_tsumo = can_tsumo;
                 self.can_riichi = can_riichi;
+                self.is_furiten = is_furiten;
+                self.selected_would_cause_furiten = false;
                 self.clear_riichi_selection();
                 self.available_calls.clear();
                 self.call_target_tile = None;
@@ -486,6 +497,77 @@ impl GameState {
         self.riichi_selectable_drawn = self.can_discard_for_riichi(None);
     }
 
+    /// 指定の牌を捨てた場合にフリテンになるかを判定する
+    ///
+    /// 捨てた後の手牌がテンパイで、待ち牌が自分の捨て牌に含まれていればフリテン。
+    /// tile: Some(牌) = 手牌から捨てる, None = ツモ切り
+    fn would_discard_cause_furiten(&self, tile: Option<Tile>) -> bool {
+        let mut hand_tiles = self.hand.clone();
+        match tile {
+            Some(target) => {
+                let Some(idx) = hand_tiles.iter().position(|t| *t == target) else {
+                    return false;
+                };
+                hand_tiles.remove(idx);
+                if let Some(drawn) = self.drawn {
+                    hand_tiles.push(drawn);
+                    hand_tiles.sort();
+                }
+            }
+            None => {
+                // ツモ切り: drawnを使わない
+            }
+        }
+
+        // 手牌13枚でテンパイか確認
+        let hand = Hand::new_with_opened(hand_tiles, self.opened_tiles_for_analysis(), None);
+        let analyzer = match HandAnalyzer::new(&hand) {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        if analyzer.shanten != 0 {
+            return false;
+        }
+
+        // 待ち牌を求める
+        let mut waiting: Vec<TileType> = Vec::new();
+        for tile_type in 0..Tile::LEN as u32 {
+            let mut test_hand = hand.clone();
+            test_hand.set_drawn(Some(Tile::new(tile_type)));
+            if let Ok(a) = HandAnalyzer::new(&test_hand) {
+                if a.shanten == -1 {
+                    waiting.push(tile_type);
+                }
+            }
+        }
+
+        if waiting.is_empty() {
+            return false;
+        }
+
+        // 待ち牌が自分の捨て牌に含まれていればフリテン
+        let my_discards = &self.discards[0];
+        for &wt in &waiting {
+            if my_discards.iter().any(|d| d.tile.get() == wt) {
+                return true;
+            }
+        }
+        // 捨てようとしている牌自体も捨て牌に加わるので、それも含めて判定
+        let discard_tile_type = match tile {
+            Some(t) => t.get(),
+            None => match self.drawn {
+                Some(d) => d.get(),
+                None => return false,
+            },
+        };
+        for &wt in &waiting {
+            if wt == discard_tile_type {
+                return true;
+            }
+        }
+        false
+    }
+
     fn refresh_self_kan_options(&mut self) {
         self.self_kan_options.clear();
         if self.drawn.is_none() || self.is_riichi {
@@ -629,6 +711,8 @@ impl GameState {
 
                     self.selected_tile = Some(i);
                     self.selected_drawn = false;
+                    self.selected_would_cause_furiten =
+                        self.would_discard_cause_furiten(Some(self.hand[i]));
                     return None;
                 }
             }
@@ -656,6 +740,8 @@ impl GameState {
 
                     self.selected_drawn = true;
                     self.selected_tile = None;
+                    self.selected_would_cause_furiten =
+                        self.would_discard_cause_furiten(None);
                     return None;
                 }
             }
