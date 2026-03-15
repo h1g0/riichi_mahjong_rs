@@ -256,6 +256,32 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
     let hand_start_x = 100.0;
     let hand_y = 680.0;
 
+    // フリテン状態の表示
+    if state.is_furiten {
+        draw_jp_text(
+            font,
+            "！！振聴です！！",
+            hand_start_x,
+            hand_y - 20.0,
+            FONT_SIZE,
+            Color::new(1.0, 0.2, 0.2, 1.0),
+        );
+    }
+
+    // 選択中の牌を捨てるとフリテンになる場合の警告
+    if state.selected_would_cause_furiten
+        && (state.selected_tile.is_some() || state.selected_drawn)
+    {
+        draw_jp_text(
+            font,
+            "振聴になります！",
+            hand_start_x + 200.0,
+            hand_y - 20.0,
+            FONT_SIZE,
+            Color::new(1.0, 0.6, 0.1, 1.0),
+        );
+    }
+
     for (i, tile) in state.hand.iter().enumerate() {
         let x = hand_start_x + i as f32 * TILE_W;
         let selected = state.selected_tile == Some(i);

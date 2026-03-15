@@ -82,6 +82,8 @@ pub enum ServerEvent {
         can_tsumo: bool,
         /// リーチ宣言可能か
         can_riichi: bool,
+        /// フリテン状態か（ロン不可・ツモのみ可）
+        is_furiten: bool,
     },
 
     /// 他プレイヤーがツモった（牌は非公開）
