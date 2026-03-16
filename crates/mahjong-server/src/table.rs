@@ -128,28 +128,22 @@ impl Table {
             }
 
             // === 鳴きアクション（WaitForCalls フェーズで対象プレイヤーのみ） ===
-            ClientAction::Ron => {
-                round.respond_to_call(player_idx, CallResponse::Ron)
-            }
-            ClientAction::Pon => {
-                round.respond_to_call(player_idx, CallResponse::Pon)
-            }
-            ClientAction::Chi { tiles } => {
-                round.respond_to_call(
-                    player_idx,
-                    CallResponse::Chi {
-                        hand_tile_types: tiles,
-                    },
-                )
-            }
-            ClientAction::Pass => {
-                round.respond_to_call(player_idx, CallResponse::Pass)
-            }
+            ClientAction::Ron => round.respond_to_call(player_idx, CallResponse::Ron),
+            ClientAction::Pon => round.respond_to_call(player_idx, CallResponse::Pon),
+            ClientAction::Chi { tiles } => round.respond_to_call(
+                player_idx,
+                CallResponse::Chi {
+                    hand_tile_types: tiles,
+                },
+            ),
+            ClientAction::Pass => round.respond_to_call(player_idx, CallResponse::Pass),
 
             ClientAction::Kan { tile_index } => {
                 if round.phase == TurnPhase::WaitForCalls {
                     round.respond_to_call(player_idx, CallResponse::Daiminkan)
-                } else if round.current_player == player_idx && round.phase == TurnPhase::WaitForDiscard {
+                } else if round.current_player == player_idx
+                    && round.phase == TurnPhase::WaitForDiscard
+                {
                     if tile_index >= Tile::LEN {
                         return false;
                     }
@@ -157,7 +151,7 @@ impl Table {
                 } else {
                     false
                 }
-            },
+            }
         }
     }
 
@@ -183,6 +177,13 @@ impl Table {
         let round = self.round.as_ref().unwrap();
         self.scores = round.get_scores();
         self.riichi_sticks = round.riichi_sticks;
+
+        // 誰かが箱割れしていたらその時点でゲーム終了（0点は許容）
+        if self.scores.iter().any(|&score| score < 0) {
+            self.is_game_over = true;
+            self.round = None;
+            return;
+        }
 
         match result {
             Some(RoundResult::ExhaustiveDraw { dealer_tenpai }) => {
@@ -271,7 +272,6 @@ mod tests {
         assert_eq!(table.honba, 1); // 流局なので本場が増える
     }
 
-
     #[test]
     fn test_table_carries_riichi_sticks_across_draw() {
         let mut table = Table::new(GameSettings::default());
@@ -281,7 +281,9 @@ mod tests {
         let round = table.current_round_mut().unwrap();
         round.riichi_sticks = 3;
         round.phase = TurnPhase::RoundOver;
-        round.result = Some(RoundResult::ExhaustiveDraw { dealer_tenpai: false });
+        round.result = Some(RoundResult::ExhaustiveDraw {
+            dealer_tenpai: false,
+        });
 
         table.finish_round();
         assert_eq!(table.riichi_sticks, 3);
@@ -356,5 +358,26 @@ mod tests {
         }
 
         assert!(table.is_game_over);
+    }
+
+    #[test]
+    fn test_table_game_over_when_score_is_negative() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.players[0].score = -100;
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::Ron {
+            winner: 1,
+            loser: 0,
+            winning_tile: Tile::new(Tile::M1),
+        });
+
+        table.finish_round();
+
+        assert!(table.is_game_over);
+        assert!(table.round.is_none());
+        assert_eq!(table.scores[0], -100);
     }
 }
