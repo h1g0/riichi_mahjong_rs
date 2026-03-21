@@ -4,7 +4,7 @@
 //! プレイヤーと全く同じプロトコルでサーバとやり取りする。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
+use mahjong_core::hand_info::hand_analyzer::shanten_number;
 use mahjong_core::tile::Tile;
 
 use crate::protocol::{AvailableCall, ClientAction, ServerEvent};
@@ -280,10 +280,7 @@ impl CpuClient {
 
             // 捨てた後にテンパイ（shanten == 0）を維持するか
             let hand = Hand::new(remaining, None);
-            let shanten = match HandAnalyzer::new(&hand) {
-                Ok(a) => a.shanten,
-                Err(_) => continue,
-            };
+            let shanten = shanten_number(&hand);
 
             if shanten == 0 {
                 // 安全度で比較
@@ -331,10 +328,8 @@ impl CpuClient {
                         .copied()
                         .collect();
                     let hand = Hand::new(remaining, None);
-                    if let Ok(a) = HandAnalyzer::new(&hand) {
-                        if a.shanten > 0 {
-                            continue; // テンパイが崩れるのでカンしない
-                        }
+                    if shanten_number(&hand) > 0 {
+                        continue; // テンパイが崩れるのでカンしない
                     }
                 }
                 return Some(ClientAction::Kan {
@@ -356,10 +351,7 @@ impl CpuClient {
             all_tiles.push(drawn);
         }
         let hand = Hand::new(all_tiles, None);
-        let shanten = match HandAnalyzer::new(&hand) {
-            Ok(a) => a.shanten,
-            Err(_) => 99,
-        };
+        let shanten = shanten_number(&hand);
 
         // テンパイなら基本的に攻撃
         if shanten <= 0 {
@@ -474,10 +466,7 @@ impl CpuClient {
     fn call_reduces_shanten_pon(&self, called_tile: Tile) -> bool {
         // 現在の向聴数
         let current_hand = Hand::new(self.state.my_hand.clone(), None);
-        let current_shanten = match HandAnalyzer::new(&current_hand) {
-            Ok(a) => a.shanten,
-            Err(_) => return false,
-        };
+        let current_shanten = shanten_number(&current_hand);
 
         // ポン後の手牌（同じ種類の2枚を除去）
         let tt = called_tile.get();
@@ -497,19 +486,13 @@ impl CpuClient {
         }
 
         let new_hand = Hand::new(remaining, None);
-        match HandAnalyzer::new(&new_hand) {
-            Ok(a) => a.shanten < current_shanten,
-            Err(_) => false,
-        }
+        shanten_number(&new_hand) < current_shanten
     }
 
     /// チーした場合に向聴数が下がるか
     fn call_reduces_shanten_chi(&self, called_tile: Tile, hand_tiles: [u32; 2]) -> bool {
         let current_hand = Hand::new(self.state.my_hand.clone(), None);
-        let current_shanten = match HandAnalyzer::new(&current_hand) {
-            Ok(a) => a.shanten,
-            Err(_) => return false,
-        };
+        let current_shanten = shanten_number(&current_hand);
 
         // チー後の手牌（指定の2枚を除去）
         let mut remaining = self.state.my_hand.clone();
@@ -523,10 +506,7 @@ impl CpuClient {
 
         let _ = called_tile; // チーで取得する牌は副露に入るので手牌からは除外済み
         let new_hand = Hand::new(remaining, None);
-        match HandAnalyzer::new(&new_hand) {
-            Ok(a) => a.shanten < current_shanten,
-            Err(_) => false,
-        }
+        shanten_number(&new_hand) < current_shanten
     }
 }
 

@@ -5,7 +5,7 @@
 //! 点数移動を適用する。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
+use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
 use mahjong_core::hand_info::status::Status;
 use mahjong_core::scoring::score::{
     calculate_base_points, calculate_score, determine_rank, round_up_to_100, ScoreRank, ScoreResult,
@@ -169,12 +169,7 @@ pub fn get_waiting_tiles(player: &Player) -> Vec<TileType> {
         let mut hand = player.hand.clone();
         hand.set_drawn(Some(Tile::new(tile_type)));
 
-        let analyzer = match HandAnalyzer::new(&hand) {
-            Ok(a) => a,
-            Err(_) => continue,
-        };
-
-        if analyzer.shanten == -1 {
+        if hand_analyzer::shanten_number(&hand) == -1 {
             waiting.push(tile_type);
         }
     }
@@ -338,10 +333,7 @@ pub fn add_dora_to_score(
 
 /// プレイヤーがテンパイしているか判定する（13枚の手牌で）
 pub fn is_tenpai(player: &Player) -> bool {
-    match HandAnalyzer::new(&player.hand) {
-        Ok(analyzer) => analyzer.shanten == 0,
-        Err(_) => false,
-    }
+    hand_analyzer::shanten_number(&player.hand) == 0
 }
 
 /// ロン和了の点数移動を計算する

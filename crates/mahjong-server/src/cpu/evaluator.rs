@@ -4,7 +4,7 @@
 //! 入力は CpuGameState のみ（サーバ内部にはアクセスしない）。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
+use mahjong_core::hand_info::hand_analyzer::shanten_number;
 use mahjong_core::tile::{dora_indicator_to_dora, Tile, TileType, Wind};
 
 use super::client::CpuConfig;
@@ -54,16 +54,13 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
         let mut remaining: Vec<Tile> = all_tiles.clone();
         remaining.remove(i);
 
-        // HandAnalyzer で向聴数を計算（13枚の手牌として）
+        // 向聴数を高速計算（Vec割り当てなし）
         let hand = Hand::new(remaining.clone(), None);
-        let shanten = match HandAnalyzer::new(&hand) {
-            Ok(a) => a.shanten,
-            Err(_) => 99, // エラー時は最悪値
-        };
+        let shanten = shanten_number(&hand);
 
-        // 有効牌数（受入数）を計算
+        // 有効牌数（受入数）を計算（既知の向聴数を渡して重複計算を回避）
         let acceptance_count = if config.level.uses_acceptance_count() {
-            count_acceptance(&remaining, &visible_counts)
+            count_acceptance(&remaining, &visible_counts, shanten)
         } else {
             0
         };
@@ -96,14 +93,9 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
 
 /// 有効牌（受入牌）の残り枚数をカウントする
 ///
-/// 13枚の手牌に対して、各牌種を加えた時に向聴数が下がるものをカウント
-fn count_acceptance(hand_tiles: &[Tile], visible_counts: &[u8; 34]) -> u32 {
-    let hand = Hand::new(hand_tiles.to_vec(), None);
-    let current_shanten = match HandAnalyzer::new(&hand) {
-        Ok(a) => a.shanten,
-        Err(_) => return 0,
-    };
-
+/// 13枚の手牌に対して、各牌種を加えた時に向聴数が下がるものをカウント。
+/// `current_shanten` は呼び出し元で既に計算済みの向聴数。
+fn count_acceptance(hand_tiles: &[Tile], visible_counts: &[u8; 34], current_shanten: i32) -> u32 {
     let mut total = 0u32;
     for tile_type in 0..34u32 {
         // 場に4枚全て見えていたら受入不可
@@ -112,12 +104,9 @@ fn count_acceptance(hand_tiles: &[Tile], visible_counts: &[u8; 34]) -> u32 {
             continue;
         }
 
-        // この牌を加えて向聴数が下がるか
+        // この牌を加えて向聴数が下がるか（高速計算）
         let test_hand = Hand::new(hand_tiles.to_vec(), Some(Tile::new(tile_type)));
-        let new_shanten = match HandAnalyzer::new(&test_hand) {
-            Ok(a) => a.shanten,
-            Err(_) => continue,
-        };
+        let new_shanten = shanten_number(&test_hand);
 
         if new_shanten < current_shanten {
             total += remaining as u32;
