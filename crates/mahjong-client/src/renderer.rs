@@ -33,7 +33,6 @@ pub struct TileTextures {
     red_5m: Texture2D,
     red_5p: Texture2D,
     red_5s: Texture2D,
-    #[allow(dead_code)]
     back: Texture2D,
 }
 
@@ -123,6 +122,7 @@ pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTex
         GamePhase::Playing => {
             draw_info_panel(state, font, tile_textures);
             draw_discards(state, font, tile_textures);
+            draw_other_player_hands(state, tile_textures);
             draw_hand(state, font, tile_textures);
             draw_melds(state, tile_textures);
             draw_action_buttons(state, font);
@@ -130,6 +130,7 @@ pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTex
         GamePhase::RoundResult => {
             draw_info_panel(state, font, tile_textures);
             draw_discards(state, font, tile_textures);
+            draw_other_player_hands(state, tile_textures);
             draw_hand(state, font, tile_textures);
             draw_melds(state, tile_textures);
             draw_result(state, font);
@@ -219,17 +220,29 @@ fn draw_info_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileT
 }
 
 fn draw_discards(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
-    let positions: [(f32, f32); 4] = [
-        (400.0, 500.0),
-        (900.0, 300.0),
-        (400.0, 100.0),
-        (100.0, 300.0),
+    // ラベル位置（各プレイヤー） — 中央寄りに配置
+    let label_positions: [(f32, f32); 4] = [
+        (400.0, 500.0),  // 自分（下）
+        (720.0, 300.0),  // 下家（右）— 中央寄り
+        (440.0, 230.0),  // 対面（上）— 中央寄り
+        (260.0, 300.0),  // 上家（左）— 中央寄り
     ];
+
+    let dtw: f32 = 32.0; // 牌の自然な幅
+    let dth: f32 = 44.0; // 牌の自然な高さ
+    // 自分用（回転なし）: グリッド間隔
+    let col_step: f32 = 36.0; // 列方向（牌幅+余白）
+    let row_step: f32 = 46.0; // 行方向（dth=44 + 余白2）
+    // 対面用（180°）: 列間を重ならないように
+    let top_row_step: f32 = 46.0; // 行方向（dth=44 + 余白2）
+    // 上家・下家用（90°回転）: 重ならないグリッド間隔
+    let rot_col_step: f32 = 36.0; // 牌短辺方向（回転後高さ=dtw=32 + 余白4）
+    let rot_row_step: f32 = 46.0; // 牌長辺方向（回転後幅=dth=44 + 余白2）
 
     let my_wind_idx = state.seat_wind.map(|w| w.to_index()).unwrap_or(0);
 
     for player_idx in 0..4 {
-        let (base_x, base_y) = positions[player_idx];
+        let (label_x, label_y) = label_positions[player_idx];
         let discards = &state.discards[player_idx];
         let display_wind = mahjong_core::tile::Wind::from_index(my_wind_idx + player_idx);
         let score = state.scores[player_idx];
@@ -238,23 +251,133 @@ fn draw_discards(state: &GameState, font: Option<&Font>, tile_textures: &TileTex
         draw_jp_text(
             font,
             &label,
-            base_x,
-            base_y - 5.0,
+            label_x,
+            label_y - 5.0,
             SMALL_FONT,
             Color::new(0.8, 0.8, 0.8, 1.0),
         );
 
+        // リーチ宣言牌を考慮した位置計算
+        // リーチ牌は90°追加回転するため、占有スペースが変わる。
+        // 各プレイヤーのベース回転に+90°して描画し、グリッド上のオフセットを調整する。
+        let mut col_offset: f32 = 0.0; // 列方向の累積オフセット
+        let mut current_row: usize = 0;
+
         for (i, discard) in discards.iter().enumerate() {
             let col = i % 6;
             let row = i / 6;
-            let x = base_x + col as f32 * 36.0;
-            let y = base_y + row as f32 * 30.0;
             let tint = if discard.is_tsumogiri {
                 Color::new(0.72, 0.72, 0.72, 1.0)
             } else {
                 WHITE
             };
-            draw_tile_sprite(tile_textures.for_tile(&discard.tile), x, y, 32.0, 44.0, tint);
+
+            // 行が変わったらオフセットをリセット
+            if row != current_row {
+                col_offset = 0.0;
+                current_row = row;
+            }
+
+            match player_idx {
+                0 => {
+                    // 自分: 左→右、行は下方向。通常は回転なし
+                    if discard.is_riichi {
+                        // リーチ牌: 90°回転（横倒し）
+                        // 横倒し牌の見た目: 幅=dth(44), 高さ=dtw(32)
+                        // 縦方向のセンタリング: (dth - dtw) / 2 = 6px 下にずらす
+                        let x = label_x + col_offset;
+                        let y = label_y + row as f32 * row_step + (dth - dtw) / 2.0;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(&discard.tile),
+                            x, y, dtw, dth, tint,
+                            std::f32::consts::FRAC_PI_2,
+                        );
+                        col_offset += dth + 4.0; // 横倒し牌は幅=dth
+                    } else {
+                        let x = label_x + col_offset;
+                        let y = label_y + row as f32 * row_step;
+                        draw_tile_sprite(
+                            tile_textures.for_tile(&discard.tile),
+                            x, y, dtw, dth, tint,
+                        );
+                        col_offset += col_step;
+                    }
+                }
+                1 => {
+                    // 下家（右）: 6枚ずつ縦に、下→上に並べる。-90°回転
+                    // リーチ牌はさらに90°回転（合計-180°ではなく0°相当＝正立横倒し）
+                    if discard.is_riichi {
+                        // リーチ牌: 0°（-90°+90°）で横倒し
+                        // 通常の-90°牌の見た目: 幅=dth(44), 高さ=dtw(32)
+                        // リーチ牌は正立: 幅=dtw(32), 高さ=dth(44)
+                        // 横方向のセンタリング: (dth - dtw) / 2 = 6px
+                        let vx = label_x + row as f32 * rot_row_step + (dth - dtw) / 2.0;
+                        let vy = label_y + (5 - col) as f32 * rot_col_step - col_offset;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(&discard.tile),
+                            vx, vy, dtw, dth, tint,
+                            0.0, // -90° + 90° = 0°
+                        );
+                        col_offset += dth - rot_col_step + 4.0; // 高さ差分を補正
+                    } else {
+                        let vx = label_x + row as f32 * rot_row_step;
+                        let vy = label_y + (5 - col) as f32 * rot_col_step - col_offset;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(&discard.tile),
+                            vx, vy, dtw, dth, tint,
+                            -std::f32::consts::FRAC_PI_2,
+                        );
+                    }
+                }
+                2 => {
+                    // 対面（上）: 右→左に並べる。180°回転
+                    // リーチ牌はさらに90°回転（合計270°= -90°）
+                    if discard.is_riichi {
+                        // 横倒し牌の見た目: 幅=dth(44), 高さ=dtw(32)
+                        let x = label_x + (5 - col) as f32 * col_step - col_offset;
+                        let y = label_y - row as f32 * top_row_step - (dth - dtw) / 2.0;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(&discard.tile),
+                            x, y, dtw, dth, tint,
+                            -std::f32::consts::FRAC_PI_2, // 180° + 90° = 270° = -90°
+                        );
+                        col_offset += dth - col_step + 4.0; // 幅差分を補正
+                    } else {
+                        let x = label_x + (5 - col) as f32 * col_step - col_offset;
+                        let y = label_y - row as f32 * top_row_step;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(&discard.tile),
+                            x, y, dtw, dth, tint,
+                            std::f32::consts::PI,
+                        );
+                    }
+                }
+                3 => {
+                    // 上家（左）: 6枚ずつ縦に、上→下に並べる。90°回転
+                    // リーチ牌はさらに90°回転（合計180°）
+                    if discard.is_riichi {
+                        // リーチ牌: 180°（90°+90°）
+                        // 横方向のセンタリング: (dth - dtw) / 2
+                        let vx = label_x - row as f32 * rot_row_step - (dth - dtw) / 2.0;
+                        let vy = label_y + col as f32 * rot_col_step + col_offset;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(&discard.tile),
+                            vx, vy, dtw, dth, tint,
+                            std::f32::consts::PI, // 90° + 90° = 180°
+                        );
+                        col_offset += dth - rot_col_step + 4.0; // 高さ差分を補正
+                    } else {
+                        let vx = label_x - row as f32 * rot_row_step;
+                        let vy = label_y + col as f32 * rot_col_step + col_offset;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(&discard.tile),
+                            vx, vy, dtw, dth, tint,
+                            std::f32::consts::FRAC_PI_2,
+                        );
+                    }
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -419,6 +542,202 @@ fn draw_tile_sprite(texture: &Texture2D, x: f32, y: f32, w: f32, h: f32, tint: C
             ..Default::default()
         },
     );
+}
+
+/// 回転付きで牌スプライトを描画する
+///
+/// (vx, vy) は回転後の「見た目上の左上」座標。
+/// テクスチャは常に自然なアスペクト比 (w, h) で描画し、
+/// 回転による描画座標のずれを内部で補正する。
+fn draw_tile_sprite_rotated(
+    texture: &Texture2D,
+    vx: f32,
+    vy: f32,
+    w: f32,
+    h: f32,
+    tint: Color,
+    rotation: f32,
+) {
+    // 90度回転時、バウンディングボックスの左上が (w, h) の矩形中心を基準にずれる。
+    // 回転後の見た目サイズ: 0°/180° → (w, h), ±90° → (h, w)
+    // draw座標 = visual座標 + 補正
+    let is_90 = (rotation.abs() - std::f32::consts::FRAC_PI_2).abs() < 0.01;
+    let (dx, dy) = if is_90 {
+        ((h - w) / 2.0, (w - h) / 2.0)
+    } else {
+        (0.0, 0.0)
+    };
+    let x = vx + dx;
+    let y = vy + dy;
+
+    draw_texture_ex(
+        texture,
+        x,
+        y,
+        tint,
+        DrawTextureParams {
+            dest_size: Some(vec2(w, h)),
+            rotation,
+            pivot: Some(vec2(x + w / 2.0, y + h / 2.0)),
+            ..Default::default()
+        },
+    );
+}
+
+/// 他プレイヤー（CPU）の手牌を描画する
+fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
+    // 他プレイヤーの手牌サイズ（小さめ）
+    let tw: f32 = 28.0; // 牌の自然な幅
+    let th: f32 = 40.0; // 牌の自然な高さ
+    let meld_gap: f32 = 6.0;
+
+    // 90度回転後の見た目高さ = 自然な幅
+    let rotated_h = tw;
+
+    for other_idx in 0..3 {
+        let relative_idx = other_idx + 1; // 1=下家, 2=対面, 3=上家
+        let other = &state.other_players[other_idx];
+
+        match relative_idx {
+            1 => {
+                // 下家（右側）: 捨て牌の右側、下から上に並べる、90°左回転（-π/2）
+                // 下家の視点: 下=左、上=右。手牌が下、副露が上。
+                let base_x = 1120.0;
+                let base_y = 480.0;
+                let rotation = -std::f32::consts::FRAC_PI_2;
+
+                // 手牌を先に描画（下側から上方向へ）
+                let mut offset = 0.0;
+                if other.revealed {
+                    for tile in &other.hand {
+                        let vy = base_y - offset - rotated_h;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(tile),
+                            base_x, vy, tw, th, WHITE, rotation,
+                        );
+                        offset += rotated_h + 1.0;
+                    }
+                } else {
+                    for _ in 0..other.concealed_count {
+                        let vy = base_y - offset - rotated_h;
+                        draw_tile_sprite_rotated(
+                            &tile_textures.back,
+                            base_x, vy, tw, th, WHITE, rotation,
+                        );
+                        offset += rotated_h + 1.0;
+                    }
+                }
+
+                // 副露を手牌の上側に描画
+                if !other.melds.is_empty() {
+                    offset += meld_gap;
+                }
+                for meld in &other.melds {
+                    for tile in &meld.tiles {
+                        let vy = base_y - offset - rotated_h;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(tile),
+                            base_x, vy, tw, th, WHITE, rotation,
+                        );
+                        offset += rotated_h + 1.0;
+                    }
+                    offset += meld_gap;
+                }
+            }
+            2 => {
+                // 対面（上側）: 捨て牌の上側、右から左に並べる、180°回転
+                // 対面の視点: 右=画面左(-x)、左=画面右(+x)。
+                // 手牌が画面右（対面の左）、副露が画面左（対面の右）。
+                let base_x = 860.0;
+                let base_y = 18.0;
+                let rotation = std::f32::consts::PI;
+
+                // 手牌を先に描画（右端から左へ）
+                let mut offset = 0.0;
+                if other.revealed {
+                    for tile in other.hand.iter().rev() {
+                        let vx = base_x - offset - tw;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(tile),
+                            vx, base_y, tw, th, WHITE, rotation,
+                        );
+                        offset += tw + 1.0;
+                    }
+                } else {
+                    for _ in 0..other.concealed_count {
+                        let vx = base_x - offset - tw;
+                        draw_tile_sprite_rotated(
+                            &tile_textures.back,
+                            vx, base_y, tw, th, WHITE, rotation,
+                        );
+                        offset += tw + 1.0;
+                    }
+                }
+
+                // 副露を手牌の左側（対面から見て右）に描画
+                if !other.melds.is_empty() {
+                    offset += meld_gap;
+                }
+                for meld in &other.melds {
+                    for tile in &meld.tiles {
+                        let vx = base_x - offset - tw;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(tile),
+                            vx, base_y, tw, th, WHITE, rotation,
+                        );
+                        offset += tw + 1.0;
+                    }
+                    offset += meld_gap;
+                }
+            }
+            3 => {
+                // 上家（左側）: 捨て牌の左側、上から下に並べる、90°右回転（π/2）
+                // 上家の視点: 上=左、下=右。手牌が上（左）、副露が下（右）。
+                let base_x = 20.0;
+                let base_y = 120.0;
+                let rotation = std::f32::consts::FRAC_PI_2;
+
+                // 手牌を先に描画（上から下へ）
+                let mut offset = 0.0;
+                if other.revealed {
+                    for tile in &other.hand {
+                        let vy = base_y + offset;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(tile),
+                            base_x, vy, tw, th, WHITE, rotation,
+                        );
+                        offset += rotated_h + 1.0;
+                    }
+                } else {
+                    for _ in 0..other.concealed_count {
+                        let vy = base_y + offset;
+                        draw_tile_sprite_rotated(
+                            &tile_textures.back,
+                            base_x, vy, tw, th, WHITE, rotation,
+                        );
+                        offset += rotated_h + 1.0;
+                    }
+                }
+
+                // 副露を手牌の下側（上家から見て右）に描画
+                if !other.melds.is_empty() {
+                    offset += meld_gap;
+                }
+                for meld in &other.melds {
+                    for tile in &meld.tiles {
+                        let vy = base_y + offset;
+                        draw_tile_sprite_rotated(
+                            tile_textures.for_tile(tile),
+                            base_x, vy, tw, th, WHITE, rotation,
+                        );
+                        offset += rotated_h + 1.0;
+                    }
+                    offset += meld_gap;
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// 和了ボタンを描画する（ロン・ツモ共通）

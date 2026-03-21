@@ -3,11 +3,11 @@
 //! 1局分のゲーム進行を管理する。
 //! ツモ → 打牌 → 鳴き判定 → 次の手番 のターンフローを制御する。
 
-use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
+use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
 use mahjong_core::tile::{Tile, TileType, Wind};
 
 use crate::player::Player;
-use crate::protocol::{AvailableCall, CallType, DrawReason, ServerEvent};
+use crate::protocol::{AvailableCall, CallType, DrawReason, MeldTiles, PlayerHandInfo, ServerEvent};
 use crate::scoring;
 use crate::wall::Wall;
 
@@ -176,6 +176,34 @@ impl Round {
     }
 
     /// 各プレイヤーの点数を返す
+    /// 全プレイヤーの手牌情報を構築する
+    fn build_player_hands(&self) -> Vec<PlayerHandInfo> {
+        self.players
+            .iter()
+            .map(|p| {
+                let melds: Vec<MeldTiles> = p.hand.opened().iter().map(|open| {
+                    let mut tiles: Vec<Tile> = open.tiles.to_vec();
+                    let call_type = match open.category {
+                        mahjong_core::hand_info::opened::OpenType::Chi => CallType::Chi,
+                        mahjong_core::hand_info::opened::OpenType::Pon => CallType::Pon,
+                        mahjong_core::hand_info::opened::OpenType::Kan => CallType::Ankan,
+                    };
+                    // カンの場合は4枚にする
+                    if open.category == mahjong_core::hand_info::opened::OpenType::Kan {
+                        tiles.push(tiles[0]);
+                    }
+                    MeldTiles { call_type, tiles }
+                }).collect();
+
+                PlayerHandInfo {
+                    wind: p.seat_wind,
+                    hand: p.hand.tiles().to_vec(),
+                    melds,
+                }
+            })
+            .collect()
+    }
+
     pub fn get_scores(&self) -> [i32; 4] {
         [
             self.players[0].score,
@@ -192,6 +220,7 @@ impl Round {
     }
 
     /// デバッグ用に自分のツモ時の判定状態を出力する
+    #[cfg(debug_assertions)]
     fn log_draw_diagnostics(&self, player_idx: usize, source: &str, can_tsumo: bool, can_riichi: bool) {
         if player_idx != 0 {
             return;
@@ -298,6 +327,7 @@ impl Round {
 
         // リーチ可能チェック
         let can_riichi = self.can_player_riichi(self.current_player);
+        #[cfg(debug_assertions)]
         self.log_draw_diagnostics(self.current_player, "draw", can_tsumo, can_riichi);
 
         // フリテン判定
@@ -710,6 +740,7 @@ impl Round {
             .map(|(name, han)| (name.to_string(), *han))
             .collect();
         let rank_name = scoring::rank_to_string(&score_result.rank).to_string();
+        let player_hands = self.build_player_hands();
 
         for i in 0..4 {
             self.events.push((
@@ -726,6 +757,7 @@ impl Round {
                     rank_name: rank_name.clone(),
                     uradora_indicators: uradora_indicators.clone(),
                     riichi_sticks,
+                    player_hands: player_hands.clone(),
                 },
             ));
         }
@@ -1067,6 +1099,7 @@ impl Round {
         let remaining = self.wall.remaining();
         let can_tsumo = self.can_tsumo();
         let can_riichi = self.can_player_riichi(player_idx);
+        #[cfg(debug_assertions)]
         self.log_draw_diagnostics(player_idx, "kan_draw", can_tsumo, can_riichi);
 
         let is_furiten = self.players[player_idx].is_furiten();
@@ -1121,10 +1154,7 @@ impl Round {
             }
         }
 
-        match HandAnalyzer::new(&hand) {
-            Ok(analyzer) => analyzer.shanten == 0,
-            Err(_) => false,
-        }
+        hand_analyzer::shanten_number(&hand) == 0
     }
 
     /// プレイヤーがリーチ宣言可能か判定する
@@ -1382,6 +1412,7 @@ impl Round {
             .map(|(name, han)| (name.to_string(), *han))
             .collect();
         let rank_name = scoring::rank_to_string(&score_result.rank).to_string();
+        let player_hands = self.build_player_hands();
 
         // 全プレイヤーに和了イベントを送信
         for i in 0..4 {
@@ -1399,6 +1430,7 @@ impl Round {
                     rank_name: rank_name.clone(),
                     uradora_indicators: uradora_indicators.clone(),
                     riichi_sticks,
+                    player_hands: player_hands.clone(),
                 },
             ));
         }
@@ -1531,6 +1563,7 @@ impl Round {
             .collect();
 
         let dealer_tenpai = tenpai_players.contains(&self.dealer);
+        let player_hands = self.build_player_hands();
 
         self.phase = TurnPhase::RoundOver;
         self.result = Some(RoundResult::ExhaustiveDraw { dealer_tenpai });
@@ -1543,6 +1576,7 @@ impl Round {
                     reason: DrawReason::Exhaustive,
                     tenpai: tenpai_winds.clone(),
                     riichi_sticks: self.riichi_sticks,
+                    player_hands: player_hands.clone(),
                 },
             ));
         }
@@ -1597,6 +1631,7 @@ impl Round {
     /// 特殊流局を宣言する
     fn declare_special_draw(&mut self, reason: DrawReason) {
         let scores = self.get_scores();
+        let player_hands = self.build_player_hands();
         self.phase = TurnPhase::RoundOver;
         self.result = Some(RoundResult::SpecialDraw);
 
@@ -1608,6 +1643,7 @@ impl Round {
                     reason: reason.clone(),
                     tenpai: Vec::new(),
                     riichi_sticks: self.riichi_sticks,
+                    player_hands: player_hands.clone(),
                 },
             ));
         }

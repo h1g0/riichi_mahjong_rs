@@ -6,3 +6,4 @@ pub mod turn;
 pub mod action;
 pub mod scoring;
 pub mod protocol;
+pub mod cpu;
