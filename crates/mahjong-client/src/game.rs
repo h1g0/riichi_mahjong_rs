@@ -635,14 +635,11 @@ impl GameState {
             let (mx, my) = mouse_position();
 
             if self.can_tsumo {
-                let tsumo_x = 900.0;
-                let tsumo_y = 720.0;
-                let btn_w = 80.0;
-                let btn_h = 40.0;
-                if mx >= tsumo_x
-                    && mx <= tsumo_x + btn_w
-                    && my >= tsumo_y
-                    && my <= tsumo_y + btn_h
+                // 和了ボタン（手牌上部の大きなボタン）
+                if mx >= crate::renderer::AGARI_BTN_X
+                    && mx <= crate::renderer::AGARI_BTN_X + crate::renderer::AGARI_BTN_W
+                    && my >= crate::renderer::AGARI_BTN_Y
+                    && my <= crate::renderer::AGARI_BTN_Y + crate::renderer::AGARI_BTN_H
                 {
                     return Some(ClientAction::Tsumo);
                 }
@@ -758,9 +755,32 @@ impl GameState {
 
         let (mx, my) = mouse_position();
 
-        // 鳴きボタンの配置（画面下部中央付近）
-        let base_x = 400.0;
-        let base_y = 620.0;
+        // 和了ボタン（ロン）の判定 — 手牌上部の大きなボタン
+        let has_ron = self
+            .available_calls
+            .iter()
+            .any(|c| matches!(c, AvailableCall::Ron));
+        if has_ron
+            && mx >= crate::renderer::AGARI_BTN_X
+            && mx <= crate::renderer::AGARI_BTN_X + crate::renderer::AGARI_BTN_W
+            && my >= crate::renderer::AGARI_BTN_Y
+            && my <= crate::renderer::AGARI_BTN_Y + crate::renderer::AGARI_BTN_H
+        {
+            self.available_calls.clear();
+            return Some(ClientAction::Ron);
+        }
+
+        // 鳴きボタンの配置 — ロンがある場合は和了ボタンの右側に配置
+        let base_x = if has_ron {
+            crate::renderer::AGARI_BTN_X + crate::renderer::AGARI_BTN_W + 20.0
+        } else {
+            400.0
+        };
+        let base_y = if has_ron {
+            crate::renderer::AGARI_BTN_Y + 10.0
+        } else {
+            620.0
+        };
         let btn_w = 100.0;
         let btn_h = 40.0;
         let btn_spacing = 10.0;
@@ -768,13 +788,13 @@ impl GameState {
         let mut btn_idx = 0;
 
         for call in &self.available_calls {
+            if matches!(call, AvailableCall::Ron) {
+                continue;
+            }
             let x = base_x + btn_idx as f32 * (btn_w + btn_spacing);
             if mx >= x && mx <= x + btn_w && my >= base_y && my <= base_y + btn_h {
                 match call {
-                    AvailableCall::Ron => {
-                        self.available_calls.clear();
-                        return Some(ClientAction::Ron);
-                    }
+                    AvailableCall::Ron => unreachable!(),
                     AvailableCall::Pon => {
                         self.available_calls.clear();
                         return Some(ClientAction::Pon);
