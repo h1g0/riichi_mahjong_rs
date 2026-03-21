@@ -20,6 +20,13 @@ const TILE_W: f32 = 48.0;
 const TILE_H: f32 = 68.0;
 const FONT_SIZE: u16 = 20;
 const SMALL_FONT: u16 = 16;
+const AGARI_FONT: u16 = 32;
+
+/// 和了ボタンの定数（描画・入力の両方で使用）
+pub const AGARI_BTN_X: f32 = 346.0;
+pub const AGARI_BTN_Y: f32 = 600.0;
+pub const AGARI_BTN_W: f32 = 200.0;
+pub const AGARI_BTN_H: f32 = 60.0;
 
 pub struct TileTextures {
     standard_tiles: Vec<Texture2D>,
@@ -414,6 +421,26 @@ fn draw_tile_sprite(texture: &Texture2D, x: f32, y: f32, w: f32, h: f32, tint: C
     );
 }
 
+/// 和了ボタンを描画する（ロン・ツモ共通）
+fn draw_agari_button(font: Option<&Font>) {
+    let bg = Color::new(0.9, 0.05, 0.05, 1.0);
+    let border = Color::new(1.0, 0.85, 0.0, 1.0);
+
+    // 背景（角丸風に外枠を太くして目立たせる）
+    draw_rectangle(AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_W, AGARI_BTN_H, bg);
+    draw_rectangle_lines(AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_W, AGARI_BTN_H, 4.0, border);
+
+    // テキスト「和 了」を大きく中央に表示
+    draw_jp_text(
+        font,
+        "和　了",
+        AGARI_BTN_X + 50.0,
+        AGARI_BTN_Y + 42.0,
+        AGARI_FONT,
+        WHITE,
+    );
+}
+
 fn draw_action_buttons(state: &GameState, font: Option<&Font>) {
     if !state.available_calls.is_empty() {
         draw_call_buttons(state, font);
@@ -453,11 +480,9 @@ fn draw_action_buttons(state: &GameState, font: Option<&Font>) {
     }
 
     if state.drawn.is_some() {
+        // 和了ボタン（ツモ）を目立つ位置に表示
         if state.can_tsumo {
-            let tsumo_bg = Color::new(0.9, 0.1, 0.1, 1.0);
-            draw_rectangle(900.0, 720.0, 80.0, 40.0, tsumo_bg);
-            draw_rectangle_lines(900.0, 720.0, 80.0, 40.0, 2.0, WHITE);
-            draw_jp_text(font, "ツモ", 916.0, 747.0, FONT_SIZE, WHITE);
+            draw_agari_button(font);
         }
 
         if state.can_riichi {
@@ -505,38 +530,59 @@ fn draw_action_buttons(state: &GameState, font: Option<&Font>) {
 }
 
 fn draw_call_buttons(state: &GameState, font: Option<&Font>) {
-    if let Some(target) = &state.call_target_tile {
-        let tile_str = crate::game::tile_to_string(*target);
-        draw_jp_text(
-            font,
-            &format!("捨て牌: {}  鳴きますか？", tile_str),
-            400.0,
-            600.0,
-            FONT_SIZE,
-            Color::new(1.0, 0.9, 0.3, 1.0),
-        );
+    let has_ron = state
+        .available_calls
+        .iter()
+        .any(|c| matches!(c, AvailableCall::Ron));
+    let has_non_ron = state
+        .available_calls
+        .iter()
+        .any(|c| !matches!(c, AvailableCall::Ron));
+
+    // ロンがある場合は和了ボタンを大きく表示
+    if has_ron {
+        draw_agari_button(font);
     }
 
-    let base_x = 400.0;
-    let base_y = 620.0;
+    // ロン以外の鳴きがある場合のみ「鳴きますか？」を表示
+    if has_non_ron {
+        if let Some(target) = &state.call_target_tile {
+            let tile_str = crate::game::tile_to_string(*target);
+            draw_jp_text(
+                font,
+                &format!("捨て牌: {}  鳴きますか？", tile_str),
+                400.0,
+                600.0,
+                FONT_SIZE,
+                Color::new(1.0, 0.9, 0.3, 1.0),
+            );
+        }
+    }
+
+    // ロンがある場合は和了ボタンの右側に配置、なければ従来位置
+    let base_x = if has_ron {
+        AGARI_BTN_X + AGARI_BTN_W + 20.0
+    } else {
+        400.0
+    };
+    let base_y = if has_ron { AGARI_BTN_Y + 10.0 } else { 620.0 };
     let btn_w = 100.0;
     let btn_h = 40.0;
     let btn_spacing = 10.0;
 
     let call_btn_bg = Color::new(0.8, 0.2, 0.2, 1.0);
-    let ron_btn_bg = Color::new(0.9, 0.1, 0.1, 1.0);
     let pass_btn_bg = Color::new(0.4, 0.4, 0.4, 1.0);
 
     let mut btn_idx = 0;
 
     for call in &state.available_calls {
+        // ロンは和了ボタンで表示済みなのでスキップ
+        if matches!(call, AvailableCall::Ron) {
+            continue;
+        }
         let x = base_x + btn_idx as f32 * (btn_w + btn_spacing);
         match call {
-            AvailableCall::Ron => {
-                draw_rectangle(x, base_y, btn_w, btn_h, ron_btn_bg);
-                draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
-                draw_jp_text(font, "ロン", x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
-            }
+            AvailableCall::Ron => unreachable!(),
             AvailableCall::Pon => {
                 draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
                 draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
