@@ -7,7 +7,8 @@ use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
 use mahjong_core::tile::{Tile, TileType, Wind};
-use mahjong_server::protocol::{AvailableCall, CallType, ClientAction, DrawReason, ServerEvent};
+use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
+use mahjong_server::protocol::{AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent};
 
 /// 副露（鳴き）の表示情報
 #[derive(Debug, Clone)]
@@ -22,6 +23,32 @@ pub struct MeldInfo {
 pub struct DiscardInfo {
     pub tile: Tile,
     pub is_tsumogiri: bool,
+    /// リーチ宣言牌かどうか（横向きに表示）
+    pub is_riichi: bool,
+}
+
+/// 他プレイヤーの手牌表示情報（相対インデックスで管理）
+#[derive(Debug, Clone)]
+pub struct OtherPlayerHand {
+    /// 手牌（公開時のみ設定。非公開時は空）
+    pub hand: Vec<Tile>,
+    /// 副露（鳴き）一覧
+    pub melds: Vec<MeldInfo>,
+    /// 手牌が公開されているか（和了時・テンパイ時）
+    pub revealed: bool,
+    /// 非公開時の手牌枚数（裏向き表示用）
+    pub concealed_count: usize,
+}
+
+impl OtherPlayerHand {
+    fn new() -> Self {
+        OtherPlayerHand {
+            hand: Vec::new(),
+            melds: Vec::new(),
+            revealed: false,
+            concealed_count: 13,
+        }
+    }
 }
 
 /// クライアント側のゲーム状態
@@ -84,11 +111,83 @@ pub struct GameState {
     pub is_furiten: bool,
     /// 選択中の牌を捨てるとフリテンになるか
     pub selected_would_cause_furiten: bool,
+    /// 他プレイヤーの手牌情報（下家=0, 対面=1, 上家=2）
+    pub other_players: [OtherPlayerHand; 3],
+    /// リーチ宣言済みで次の打牌がリーチ宣言牌となるプレイヤーの風（一時フラグ）
+    pending_riichi_player: Option<Wind>,
+    /// 対局開始前設定
+    pub setup_state: SetupState,
+}
+
+/// 対局開始前の設定画面の状態
+#[derive(Debug, Clone)]
+pub struct SetupState {
+    /// 各CPUの強さ設定（下家, 対面, 上家）
+    pub cpu_levels: [usize; 3],
+    /// 各CPUの性格設定（下家, 対面, 上家）
+    pub cpu_personalities: [usize; 3],
+}
+
+impl SetupState {
+    pub fn new() -> Self {
+        SetupState {
+            cpu_levels: [1, 1, 1],         // 全員 Normal
+            cpu_personalities: [0, 1, 2],  // Balanced, Speedy, HighValue
+        }
+    }
+
+    pub fn level_name(idx: usize) -> &'static str {
+        match idx {
+            0 => "Weak",
+            1 => "Normal",
+            2 => "Strong",
+            _ => "Normal",
+        }
+    }
+
+    pub fn personality_name(idx: usize) -> &'static str {
+        match idx {
+            0 => "Balanced",
+            1 => "Speedy",
+            2 => "HighValue",
+            3 => "Defensive",
+            _ => "Balanced",
+        }
+    }
+
+    pub fn level_count() -> usize { 3 }
+    pub fn personality_count() -> usize { 4 }
+
+    /// 設定からCpuConfigの配列を生成する
+    pub fn build_configs(&self) -> [CpuConfig; 3] {
+        let to_level = |idx: usize| -> CpuLevel {
+            match idx {
+                0 => CpuLevel::Weak,
+                2 => CpuLevel::Strong,
+                _ => CpuLevel::Normal,
+            }
+        };
+        let to_personality = |idx: usize| -> CpuPersonality {
+            match idx {
+                1 => CpuPersonality::Speedy,
+                2 => CpuPersonality::HighValue,
+                3 => CpuPersonality::Defensive,
+                _ => CpuPersonality::Balanced,
+            }
+        };
+        [
+            CpuConfig::new(to_level(self.cpu_levels[0]), to_personality(self.cpu_personalities[0])),
+            CpuConfig::new(to_level(self.cpu_levels[1]), to_personality(self.cpu_personalities[1])),
+            CpuConfig::new(to_level(self.cpu_levels[2]), to_personality(self.cpu_personalities[2])),
+        ]
+    }
 }
 
 /// ゲームフェーズ
 #[derive(Debug, Clone, PartialEq)]
 pub enum GamePhase {
+    /// 対局開始前の設定画面
+    Setup,
     /// ゲーム開始前
     WaitingForStart,
     /// 対局中
@@ -121,7 +220,7 @@ impl GameState {
             riichi_selectable_drawn: false,
             result_message: None,
             is_my_turn: false,
-            phase: GamePhase::WaitingForStart,
+            phase: GamePhase::Setup,
             available_calls: Vec::new(),
             call_target_tile: None,
             call_discarder: None,
@@ -131,6 +230,9 @@ impl GameState {
             riichi_sticks: 0,
             is_furiten: false,
             selected_would_cause_furiten: false,
+            other_players: [OtherPlayerHand::new(), OtherPlayerHand::new(), OtherPlayerHand::new()],
+            pending_riichi_player: None,
+            setup_state: SetupState::new(),
         }
     }
 
@@ -155,6 +257,7 @@ impl GameState {
                 self.prevailing_wind = Some(prevailing_wind);
                 self.dora_indicators = dora_indicators;
                 self.discards = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+                self.pending_riichi_player = None;
                 self.result_message = None;
                 self.phase = GamePhase::Playing;
                 self.available_calls.clear();
@@ -172,6 +275,7 @@ impl GameState {
                 self.riichi_sticks = riichi_sticks;
                 self.is_furiten = false;
                 self.selected_would_cause_furiten = false;
+                self.other_players = [OtherPlayerHand::new(), OtherPlayerHand::new(), OtherPlayerHand::new()];
             }
 
             ServerEvent::TileDrawn {
@@ -195,10 +299,14 @@ impl GameState {
             }
 
             ServerEvent::OtherPlayerDrew {
-                player: _,
+                player,
                 remaining_tiles,
             } => {
                 self.remaining_tiles = remaining_tiles;
+                let relative_idx = self.relative_player_index(player);
+                if relative_idx > 0 {
+                    self.other_players[relative_idx - 1].concealed_count += 1;
+                }
             }
 
             ServerEvent::TileDiscarded {
@@ -207,10 +315,22 @@ impl GameState {
                 is_tsumogiri,
             } => {
                 let relative_idx = self.relative_player_index(player);
+                let is_riichi = self.pending_riichi_player == Some(player);
+                if is_riichi {
+                    self.pending_riichi_player = None;
+                }
                 self.discards[relative_idx].push(DiscardInfo {
                     tile,
                     is_tsumogiri,
+                    is_riichi,
                 });
+
+                // 他プレイヤーが捨てた場合、隠し手牌の枚数を更新
+                if relative_idx > 0 {
+                    let other_idx = relative_idx - 1;
+                    self.other_players[other_idx].concealed_count =
+                        self.other_players[other_idx].concealed_count.saturating_sub(1);
+                }
 
                 // 自分が捨てた場合
                 if Some(player) == self.seat_wind {
@@ -244,6 +364,58 @@ impl GameState {
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
                 self.call_discarder = None;
+
+                // 他プレイヤーが鳴いた場合、副露情報を記録
+                let relative_idx = self.relative_player_index(player);
+                if relative_idx > 0 {
+                    let other_idx = relative_idx - 1;
+                    let other = &mut self.other_players[other_idx];
+                    match call_type {
+                        CallType::Ron => {}
+                        CallType::Kakan => {
+                            if let Some(meld) = other.melds.iter_mut().find(|m| {
+                                m.call_type == CallType::Pon
+                                    && m.tiles.first().map(|t| t.get()) == tiles.first().map(|t| t.get())
+                            }) {
+                                meld.call_type = CallType::Kakan;
+                                meld.tiles = tiles.clone();
+                                // 加カンは手牌1枚減（ポンの3枚→カンの4枚、手牌から1枚使用）
+                                other.concealed_count = other.concealed_count.saturating_sub(1);
+                            } else {
+                                other.melds.push(MeldInfo {
+                                    call_type: call_type.clone(),
+                                    tiles: tiles.clone(),
+                                });
+                                other.concealed_count = other.concealed_count.saturating_sub(1);
+                            }
+                        }
+                        CallType::Ankan => {
+                            other.melds.push(MeldInfo {
+                                call_type: call_type.clone(),
+                                tiles: tiles.clone(),
+                            });
+                            // 暗カンは手牌から4枚使うが、ツモ牌を含む
+                            other.concealed_count = other.concealed_count.saturating_sub(3);
+                        }
+                        CallType::Pon | CallType::Chi => {
+                            other.melds.push(MeldInfo {
+                                call_type: call_type.clone(),
+                                tiles: tiles.clone(),
+                            });
+                            // ポン/チーは手牌から2枚使用（1枚は捨て牌から取る）
+                            // 鳴き後に打牌するので結果として手牌枚数は同じ
+                            // ただし打牌前は手牌が1枚少ない状態
+                            other.concealed_count = other.concealed_count.saturating_sub(2);
+                        }
+                        CallType::Daiminkan => {
+                            other.melds.push(MeldInfo {
+                                call_type: call_type.clone(),
+                                tiles: tiles.clone(),
+                            });
+                            other.concealed_count = other.concealed_count.saturating_sub(3);
+                        }
+                    }
+                }
 
                 // 自分が鳴いた場合、副露情報を保存し打牌待ちへ
                 if Some(player) == self.seat_wind {
@@ -295,6 +467,9 @@ impl GameState {
                 self.scores = scores;
                 self.riichi_sticks = riichi_sticks;
 
+                // 次の打牌をリーチ宣言牌としてマーク
+                self.pending_riichi_player = Some(player);
+
                 // 自分がリーチした場合
                 if Some(player) == self.seat_wind {
                     self.is_riichi = true;
@@ -321,9 +496,11 @@ impl GameState {
                 rank_name,
                 uradora_indicators,
                 riichi_sticks,
+                player_hands,
             } => {
                 self.scores = scores;
                 self.riichi_sticks = 0;
+                self.update_other_player_hands_on_win(&player_hands, winner);
                 let winner_name = self.wind_to_name(winner);
                 let win_type = if loser.is_some() { "ロン" } else { "ツモ" };
                 let loser_text = if let Some(l) = loser {
@@ -389,9 +566,11 @@ impl GameState {
                 reason,
                 tenpai,
                 riichi_sticks,
+                player_hands,
             } => {
                 self.scores = scores;
                 self.riichi_sticks = riichi_sticks;
+                self.update_other_player_hands_on_draw(&player_hands, &tenpai);
                 let reason_text = match reason {
                     DrawReason::Exhaustive => "荒牌流局",
                     DrawReason::FourWinds => "四風連打",
@@ -417,6 +596,48 @@ impl GameState {
                 self.available_calls.clear();
                 self.clear_riichi_selection();
                 self.self_kan_options.clear();
+            }
+        }
+    }
+
+    /// 和了時に他プレイヤーの手牌を更新する（和了者の手牌を公開）
+    fn update_other_player_hands_on_win(&mut self, player_hands: &[PlayerHandInfo], winner: Wind) {
+        for info in player_hands {
+            let relative_idx = self.relative_player_index(info.wind);
+            if relative_idx == 0 {
+                continue; // 自分はスキップ
+            }
+            let other = &mut self.other_players[relative_idx - 1];
+            // 副露を更新
+            other.melds = info.melds.iter().map(|m| MeldInfo {
+                call_type: m.call_type.clone(),
+                tiles: m.tiles.clone(),
+            }).collect();
+            // 和了者の手牌を公開
+            if info.wind == winner {
+                other.hand = info.hand.clone();
+                other.revealed = true;
+            }
+        }
+    }
+
+    /// 流局時に他プレイヤーの手牌を更新する（テンパイ者の手牌を公開）
+    fn update_other_player_hands_on_draw(&mut self, player_hands: &[PlayerHandInfo], tenpai: &[Wind]) {
+        for info in player_hands {
+            let relative_idx = self.relative_player_index(info.wind);
+            if relative_idx == 0 {
+                continue; // 自分はスキップ
+            }
+            let other = &mut self.other_players[relative_idx - 1];
+            // 副露を更新
+            other.melds = info.melds.iter().map(|m| MeldInfo {
+                call_type: m.call_type.clone(),
+                tiles: m.tiles.clone(),
+            }).collect();
+            // テンパイ者の手牌を公開
+            if tenpai.contains(&info.wind) {
+                other.hand = info.hand.clone();
+                other.revealed = true;
             }
         }
     }

@@ -36,6 +36,26 @@ pub enum CallType {
     Kakan,
 }
 
+/// 局終了時のプレイヤー手牌情報
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerHandInfo {
+    /// プレイヤーの風
+    pub wind: Wind,
+    /// 手牌（閉じた部分）
+    pub hand: Vec<Tile>,
+    /// 副露（鳴き）一覧
+    pub melds: Vec<MeldTiles>,
+}
+
+/// 副露の牌情報
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeldTiles {
+    /// 鳴きの種類
+    pub call_type: CallType,
+    /// 副露で公開された牌
+    pub tiles: Vec<Tile>,
+}
+
 /// 利用可能な鳴きアクション（CallAvailableイベント内で使用）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AvailableCall {
@@ -172,6 +192,8 @@ pub enum ServerEvent {
         uradora_indicators: Vec<Tile>,
         /// 和了前に場に出ていた供託リーチ棒の本数
         riichi_sticks: usize,
+        /// 全プレイヤーの手牌情報
+        player_hands: Vec<PlayerHandInfo>,
     },
 
     /// 局終了（流局）
@@ -184,6 +206,8 @@ pub enum ServerEvent {
         tenpai: Vec<Wind>,
         /// 現在の供託リーチ棒の本数
         riichi_sticks: usize,
+        /// 全プレイヤーの手牌情報
+        player_hands: Vec<PlayerHandInfo>,
     },
 }
 

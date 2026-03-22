@@ -500,6 +500,251 @@ impl HandAnalyzer {
 pub fn has_won(hand: &HandAnalyzer) -> bool {
     hand.shanten == -1
 }
+
+/// 向聴数のみを高速に計算する（ブロック分解のVec割り当てなし）
+///
+/// `HandAnalyzer::new()` と同じ結果を返すが、向聴数の数値のみを返す。
+/// CPU打牌評価など大量に呼び出す箇所で使用する。
+pub fn shanten_number(hand: &Hand) -> i32 {
+    let sp = shanten_seven_pairs(hand);
+    let to = shanten_thirteen_orphans(hand);
+    let nm = shanten_normal(hand);
+    min(min(sp, to), nm)
+}
+
+fn shanten_seven_pairs(hand: &Hand) -> i32 {
+    if !hand.opened().is_empty() {
+        return UNAVAILABLE_SHANTEN;
+    }
+    let t = hand.summarize_tiles();
+    let mut pair: u32 = 0;
+    let mut kind: u32 = 0;
+    for i in 0..Tile::LEN as usize {
+        if t[i] > 0 {
+            kind += 1;
+            if t[i] >= 2 {
+                pair += 1;
+            }
+        }
+    }
+    (7 - pair + if kind < 7 { 7 - kind } else { 0 }) as i32 - 1
+}
+
+fn shanten_thirteen_orphans(hand: &Hand) -> i32 {
+    if !hand.opened().is_empty() {
+        return UNAVAILABLE_SHANTEN;
+    }
+    let to_tiles: [usize; 13] = [
+        Tile::M1 as usize, Tile::M9 as usize,
+        Tile::P1 as usize, Tile::P9 as usize,
+        Tile::S1 as usize, Tile::S9 as usize,
+        Tile::Z1 as usize, Tile::Z2 as usize, Tile::Z3 as usize,
+        Tile::Z4 as usize, Tile::Z5 as usize, Tile::Z6 as usize, Tile::Z7 as usize,
+    ];
+    let t = hand.summarize_tiles();
+    let mut pair: u32 = 0;
+    let mut kind: u32 = 0;
+    for &i in &to_tiles {
+        if t[i] > 0 {
+            kind += 1;
+            if t[i] >= 2 {
+                pair += 1;
+            }
+        }
+    }
+    (14 - kind - if pair > 0 { 1 } else { 0 }) as i32 - 1
+}
+
+fn shanten_normal(hand: &Hand) -> i32 {
+    let mut t = hand.summarize_tiles();
+    let mut best = UNAVAILABLE_SHANTEN;
+
+    // 独立ブロックを先に抽出（カウントのみ）
+    let indep_same3 = count_independent_same3_fast(&mut t);
+    let indep_seq3 = count_independent_seq3_fast(&mut t);
+    let _indep_single = remove_independent_singles(&mut t);
+
+    // 雀頭を抜き出す
+    for i in 0..Tile::LEN as usize {
+        if t[i] >= 2 {
+            t[i] -= 2;
+            shanten_recurse_fast(0, indep_same3, indep_seq3, 0, 0, 1, 0, &mut t, &mut best);
+            t[i] += 2;
+        }
+    }
+    // 雀頭なし
+    shanten_recurse_fast(0, indep_same3, indep_seq3, 0, 0, 0, 0, &mut t, &mut best);
+
+    best
+}
+
+/// 高速再帰: カウンタのみで面子・塔子を探索
+fn shanten_recurse_fast(
+    idx: usize,
+    indep_same3: usize,
+    indep_seq3: usize,
+    same3_count: usize,
+    seq3_count: usize,
+    head: usize,
+    block2_count: usize,
+    t: &mut TileSummarize,
+    best: &mut i32,
+) {
+    // 面子の探索
+    for i in idx..Tile::LEN as usize {
+        // 刻子
+        if t[i] >= 3 {
+            t[i] -= 3;
+            shanten_recurse_fast(i, indep_same3, indep_seq3, same3_count + 1, seq3_count, head, block2_count, t, best);
+            t[i] += 3;
+        }
+        // 順子
+        if i < 27 && i % 9 <= 6 && t[i] >= 1 && t[i + 1] >= 1 && t[i + 2] >= 1 {
+            t[i] -= 1;
+            t[i + 1] -= 1;
+            t[i + 2] -= 1;
+            shanten_recurse_fast(i, indep_same3, indep_seq3, same3_count, seq3_count + 1, head, block2_count, t, best);
+            t[i] += 1;
+            t[i + 1] += 1;
+            t[i + 2] += 1;
+        }
+    }
+
+    // 塔子・対子の探索
+    let block3 = indep_same3 + indep_seq3 + same3_count + seq3_count;
+    let mut b2 = block2_count;
+    shanten_recurse2_fast(idx, block3, head, &mut b2, t, best);
+}
+
+/// 塔子・対子の高速再帰
+fn shanten_recurse2_fast(
+    idx: usize,
+    block3: usize,
+    head: usize,
+    block2: &mut usize,
+    t: &mut TileSummarize,
+    best: &mut i32,
+) {
+    // まず現状で向聴数を計算
+    let b2_capped = (*block2).min(4usize.saturating_sub(block3));
+    let shanten = 8i32 - (block3 * 2 + b2_capped + head) as i32;
+    if shanten < *best {
+        *best = shanten;
+    }
+
+    // 枝刈り: これ以上 block2 を増やしても改善しない場合
+    if *block2 >= 4usize.saturating_sub(block3) {
+        return;
+    }
+
+    for i in idx..Tile::LEN as usize {
+        // 対子
+        if t[i] >= 2 {
+            t[i] -= 2;
+            *block2 += 1;
+            shanten_recurse2_fast(i + 1, block3, head, block2, t, best);
+            *block2 -= 1;
+            t[i] += 2;
+        }
+        // 塔子
+        if i < 27 && i % 9 <= 7 && t[i] >= 1 && t[i + 1] >= 1 {
+            t[i] -= 1;
+            t[i + 1] -= 1;
+            *block2 += 1;
+            shanten_recurse2_fast(i, block3, head, block2, t, best);
+            *block2 -= 1;
+            t[i] += 1;
+            t[i + 1] += 1;
+        }
+        // 嵌張
+        if i < 27 && i % 9 <= 6 && t[i] >= 1 && t[i + 1] == 0 && t[i + 2] >= 1 {
+            t[i] -= 1;
+            t[i + 2] -= 1;
+            *block2 += 1;
+            shanten_recurse2_fast(i, block3, head, block2, t, best);
+            *block2 -= 1;
+            t[i] += 1;
+            t[i + 2] += 1;
+        }
+    }
+}
+
+/// 独立した刻子を抽出（カウントのみ返す）
+fn count_independent_same3_fast(t: &mut TileSummarize) -> usize {
+    let mut count = 0;
+    for i in 0..Tile::LEN as usize {
+        if t[i] < 3 {
+            continue;
+        }
+        let is_isolated = if i >= 27 {
+            // 字牌: 常に独立
+            true
+        } else {
+            let pos = i % 9;
+            let base = i - pos;
+            let left2 = if pos >= 2 { t[base + pos - 2] == 0 } else { true };
+            let left1 = if pos >= 1 { t[base + pos - 1] == 0 } else { true };
+            let right1 = if pos <= 7 { t[base + pos + 1] == 0 } else { true };
+            let right2 = if pos <= 6 { t[base + pos + 2] == 0 } else { true };
+            left2 && left1 && right1 && right2
+        };
+        if is_isolated {
+            t[i] -= 3;
+            count += 1;
+        }
+    }
+    count
+}
+
+/// 独立した順子を抽出（カウントのみ返す）
+fn count_independent_seq3_fast(t: &mut TileSummarize) -> usize {
+    let mut count = 0;
+    // 一盃口を先に処理してから通常処理
+    for n in (1u32..=2).rev() {
+        for suit_start in (0..27).step_by(9) {
+            for k in 0..=6usize {
+                let l = suit_start + k;
+                if k >= 2 && t[l - 2] > 0 { continue; }
+                if k >= 1 && t[l - 1] > 0 { continue; }
+                if k <= 5 && t[l + 3] > 0 { continue; }
+                if k <= 4 && t[l + 4] > 0 { continue; }
+                if t[l] == n && t[l + 1] == n && t[l + 2] == n {
+                    t[l] -= n;
+                    t[l + 1] -= n;
+                    t[l + 2] -= n;
+                    count += n as usize;
+                }
+            }
+        }
+    }
+    count
+}
+
+/// 独立した単独牌を除去（カウントのみ返す）
+fn remove_independent_singles(t: &mut TileSummarize) -> usize {
+    let mut count = 0;
+    for i in 0..Tile::LEN as usize {
+        if t[i] != 1 {
+            continue;
+        }
+        let is_isolated = if i >= 27 {
+            true
+        } else {
+            let pos = i % 9;
+            let base = i - pos;
+            let left2 = if pos >= 2 { t[base + pos - 2] == 0 } else { true };
+            let left1 = if pos >= 1 { t[base + pos - 1] == 0 } else { true };
+            let right1 = if pos <= 7 { t[base + pos + 1] == 0 } else { true };
+            let right2 = if pos <= 6 { t[base + pos + 2] == 0 } else { true };
+            left2 && left1 && right1 && right2
+        };
+        if is_isolated {
+            t[i] -= 1;
+            count += 1;
+        }
+    }
+    count
+}
 /// 再帰的にシャンテン数が最小のものを探す
 fn count_normal_shanten_recursively(
     idx: TileType,
@@ -953,5 +1198,28 @@ mod tests {
         let test = Hand::from("123456789m11p 789s 1p");
         assert!(HandAnalyzer::new_by_form(&test, Form::SevenPairs).unwrap().shanten > 0);
         assert!(HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans).unwrap().shanten > 0);
+    }
+
+    /// shanten_number() が HandAnalyzer::new() と同じ結果を返すことを検証
+    #[test]
+    fn shanten_number_matches_full_analyzer() {
+        let test_cases = vec![
+            "226699m99p228s66z 1z",   // 七対子テンパイ
+            "19m19p11s1234567z 5m",   // 国士テンパイ
+            "123m444p789s1112z 2z",   // 通常和了
+            "222333444666s6z 6z",     // 通常和了
+            "1112345678999m 5m",      // 通常和了
+            "1122m3344p5566s7z 7z",   // 七対子和了
+            "19m19p19s1234567z 1m",   // 国士和了
+            "123m456p789s1234z",       // 通常テンパイ（13枚）
+            "147m258p369s1234z",       // 遠い手
+            "333m456p1789s 333z 1s",  // 副露あり
+        ];
+        for s in &test_cases {
+            let hand = Hand::from(*s);
+            let full = HandAnalyzer::new(&hand).unwrap().shanten;
+            let fast = shanten_number(&hand);
+            assert_eq!(full, fast, "shanten mismatch for hand '{s}': full={full}, fast={fast}");
+        }
     }
 }
