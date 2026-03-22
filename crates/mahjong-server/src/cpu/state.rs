@@ -95,7 +95,7 @@ impl CpuGameState {
     }
 
     /// 風からプレイヤーインデックス（0=東, 1=南, 2=西, 3=北）を取得する
-    fn wind_to_index(wind: Wind) -> usize {
+    pub fn wind_to_index(wind: Wind) -> usize {
         match wind {
             Wind::East => 0,
             Wind::South => 1,

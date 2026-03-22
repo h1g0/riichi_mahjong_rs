@@ -5,6 +5,7 @@
 
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::shanten_number;
+use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
 use mahjong_core::tile::Tile;
 
 use crate::protocol::{AvailableCall, ClientAction, ServerEvent};
@@ -462,6 +463,27 @@ impl CpuClient {
         None
     }
 
+    /// 既存の副露を OpenTiles に変換する
+    fn build_existing_opened(&self) -> Vec<OpenTiles> {
+        let mut opened = Vec::new();
+        let my_idx = super::state::CpuGameState::wind_to_index(self.state.my_seat_wind);
+        for meld in &self.state.player_melds[my_idx] {
+            if meld.tiles.len() >= 3 {
+                let ot = OpenTiles {
+                    tiles: [meld.tiles[0], meld.tiles[1], meld.tiles[2]],
+                    category: match meld.call_type {
+                        crate::protocol::CallType::Chi => OpenType::Chi,
+                        crate::protocol::CallType::Pon => OpenType::Pon,
+                        _ => OpenType::Kan,
+                    },
+                    from: OpenFrom::Unknown,
+                };
+                opened.push(ot);
+            }
+        }
+        opened
+    }
+
     /// ポンした場合に向聴数が下がるか
     fn call_reduces_shanten_pon(&self, called_tile: Tile) -> bool {
         // 現在の向聴数
@@ -485,7 +507,15 @@ impl CpuClient {
             return false;
         }
 
-        let new_hand = Hand::new(remaining, None);
+        // 既存の副露 + 今回のポンを含めた Hand を作成
+        let mut opened = self.build_existing_opened();
+        opened.push(OpenTiles {
+            tiles: [called_tile, called_tile, called_tile],
+            category: OpenType::Pon,
+            from: OpenFrom::Unknown,
+        });
+
+        let new_hand = Hand::new_with_opened(remaining, opened, None);
         shanten_number(&new_hand) < current_shanten
     }
 
@@ -496,16 +526,24 @@ impl CpuClient {
 
         // チー後の手牌（指定の2枚を除去）
         let mut remaining = self.state.my_hand.clone();
+        let mut chi_tiles_for_meld = Vec::new();
         for &tt in &hand_tiles {
             if let Some(pos) = remaining.iter().position(|t| t.get() == tt) {
-                remaining.remove(pos);
+                chi_tiles_for_meld.push(remaining.remove(pos));
             } else {
                 return false;
             }
         }
 
-        let _ = called_tile; // チーで取得する牌は副露に入るので手牌からは除外済み
-        let new_hand = Hand::new(remaining, None);
+        // 既存の副露 + 今回のチーを含めた Hand を作成
+        let mut opened = self.build_existing_opened();
+        opened.push(OpenTiles {
+            tiles: [called_tile, chi_tiles_for_meld[0], chi_tiles_for_meld[1]],
+            category: OpenType::Chi,
+            from: OpenFrom::Previous,
+        });
+
+        let new_hand = Hand::new_with_opened(remaining, opened, None);
         shanten_number(&new_hand) < current_shanten
     }
 }

@@ -4,9 +4,10 @@
 
 use macroquad::prelude::*;
 use mahjong_core::tile::Tile;
+use mahjong_server::cpu::client::CpuConfig;
 use mahjong_server::protocol::AvailableCall;
 
-use crate::game::{GamePhase, GameState};
+use crate::game::{GamePhase, GameState, SetupState};
 
 /// 牌を描画する色
 const TILE_BG: Color = Color::new(1.0, 1.0, 0.9, 1.0);
@@ -116,6 +117,9 @@ fn draw_jp_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16,
 
 pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
     match state.phase {
+        GamePhase::Setup => {
+            draw_setup(state, font);
+        }
         GamePhase::WaitingForStart => {
             draw_jp_text(font, "ゲーム開始中...", 540.0, 400.0, 30, WHITE);
         }
@@ -999,4 +1003,133 @@ fn wind_to_str(wind: mahjong_core::tile::Wind) -> &'static str {
         mahjong_core::tile::Wind::West => "西",
         mahjong_core::tile::Wind::North => "北",
     }
+}
+
+// ========== 設定画面 ==========
+
+/// 設定画面のボタン領域
+struct SetupButton {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
+impl SetupButton {
+    fn contains(&self, mx: f32, my: f32) -> bool {
+        mx >= self.x && mx < self.x + self.w && my >= self.y && my < self.y + self.h
+    }
+}
+
+/// 設定画面を描画する
+fn draw_setup(state: &GameState, font: Option<&Font>) {
+    let setup = &state.setup_state;
+
+    // 背景パネル
+    draw_rectangle(190.0, 80.0, 900.0, 640.0, Color::new(0.0, 0.0, 0.0, 0.85));
+    draw_rectangle_lines(190.0, 80.0, 900.0, 640.0, 2.0, Color::new(0.5, 0.5, 0.5, 1.0));
+
+    // タイトル
+    draw_jp_text(font, "対局設定", 540.0, 130.0, 36, WHITE);
+
+    let cpu_names = ["下家 (CPU1)", "対面 (CPU2)", "上家 (CPU3)"];
+    let col_x = [250.0, 520.0, 790.0]; // 3列の左端X座標
+
+    for (cpu_idx, &name) in cpu_names.iter().enumerate() {
+        let cx = col_x[cpu_idx];
+        let base_y = 180.0;
+
+        // CPU名（ベースライン基準なので +24 で文字下端を揃える）
+        draw_jp_text(font, name, cx + 30.0, base_y + 24.0, 24, Color::new(1.0, 0.9, 0.3, 1.0));
+
+        // 強さ
+        draw_jp_text(font, "強さ:", cx, base_y + 70.0, FONT_SIZE, Color::new(0.8, 0.8, 0.8, 1.0));
+        for level_idx in 0..SetupState::level_count() {
+            let btn_y = base_y + 80.0 + level_idx as f32 * 42.0;
+            let selected = setup.cpu_levels[cpu_idx] == level_idx;
+            let bg = if selected {
+                Color::new(0.2, 0.5, 0.2, 1.0)
+            } else {
+                Color::new(0.25, 0.25, 0.25, 1.0)
+            };
+            draw_rectangle(cx, btn_y, 200.0, 34.0, bg);
+            draw_rectangle_lines(cx, btn_y, 200.0, 34.0, 1.0, Color::new(0.5, 0.5, 0.5, 1.0));
+            let label = SetupState::level_name(level_idx);
+            // ボタン(34px)内でフォント(20px)を垂直中央: btn_y + (34+20)/2 = btn_y + 24
+            draw_jp_text(font, label, cx + 10.0, btn_y + 24.0, FONT_SIZE, WHITE);
+        }
+
+        // 性格
+        draw_jp_text(font, "性格:", cx, base_y + 230.0, FONT_SIZE, Color::new(0.8, 0.8, 0.8, 1.0));
+        for pers_idx in 0..SetupState::personality_count() {
+            let btn_y = base_y + 240.0 + pers_idx as f32 * 42.0;
+            let selected = setup.cpu_personalities[cpu_idx] == pers_idx;
+            let bg = if selected {
+                Color::new(0.2, 0.3, 0.6, 1.0)
+            } else {
+                Color::new(0.25, 0.25, 0.25, 1.0)
+            };
+            draw_rectangle(cx, btn_y, 200.0, 34.0, bg);
+            draw_rectangle_lines(cx, btn_y, 200.0, 34.0, 1.0, Color::new(0.5, 0.5, 0.5, 1.0));
+            let label = SetupState::personality_name(pers_idx);
+            draw_jp_text(font, label, cx + 10.0, btn_y + 24.0, FONT_SIZE, WHITE);
+        }
+    }
+
+    // 対局開始ボタン
+    let start_btn = SetupButton { x: 490.0, y: 630.0, w: 300.0, h: 56.0 };
+    draw_rectangle(start_btn.x, start_btn.y, start_btn.w, start_btn.h, Color::new(0.6, 0.15, 0.15, 1.0));
+    draw_rectangle_lines(start_btn.x, start_btn.y, start_btn.w, start_btn.h, 2.0, Color::new(0.9, 0.3, 0.3, 1.0));
+    // ボタン(56px)内でフォント(28px)を垂直中央: btn_y + (56+28)/2 = btn_y + 38
+    draw_jp_text(font, "対局開始", start_btn.x + 80.0, start_btn.y + 38.0, 28, WHITE);
+}
+
+/// 設定画面の入力を処理する。対局開始が押された場合 Some(configs) を返す。
+pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option<[CpuConfig; 3]> {
+    if !is_mouse_button_pressed(MouseButton::Left) {
+        return None;
+    }
+
+    let (mx, my) = mouse_position();
+    let setup = &mut state.setup_state;
+    let col_x = [250.0, 520.0, 790.0];
+    let base_y = 180.0;
+
+    for cpu_idx in 0..3 {
+        let cx = col_x[cpu_idx];
+
+        // 強さボタン
+        for level_idx in 0..SetupState::level_count() {
+            let btn = SetupButton {
+                x: cx, y: base_y + 80.0 + level_idx as f32 * 42.0,
+                w: 200.0, h: 34.0,
+            };
+            if btn.contains(mx, my) {
+                setup.cpu_levels[cpu_idx] = level_idx;
+                return None;
+            }
+        }
+
+        // 性格ボタン
+        for pers_idx in 0..SetupState::personality_count() {
+            let btn = SetupButton {
+                x: cx, y: base_y + 240.0 + pers_idx as f32 * 42.0,
+                w: 200.0, h: 34.0,
+            };
+            if btn.contains(mx, my) {
+                setup.cpu_personalities[cpu_idx] = pers_idx;
+                return None;
+            }
+        }
+    }
+
+    // 対局開始ボタン
+    let start_btn = SetupButton { x: 490.0, y: 630.0, w: 300.0, h: 56.0 };
+    if start_btn.contains(mx, my) {
+        let configs = setup.build_configs();
+        state.phase = GamePhase::WaitingForStart;
+        return Some(configs);
+    }
+
+    None
 }

@@ -7,6 +7,7 @@ use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
 use mahjong_core::tile::{Tile, TileType, Wind};
+use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 use mahjong_server::protocol::{AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent};
 
 /// 副露（鳴き）の表示情報
@@ -114,11 +115,79 @@ pub struct GameState {
     pub other_players: [OtherPlayerHand; 3],
     /// リーチ宣言済みで次の打牌がリーチ宣言牌となるプレイヤーの風（一時フラグ）
     pending_riichi_player: Option<Wind>,
+    /// 対局開始前設定
+    pub setup_state: SetupState,
+}
+
+/// 対局開始前の設定画面の状態
+#[derive(Debug, Clone)]
+pub struct SetupState {
+    /// 各CPUの強さ設定（下家, 対面, 上家）
+    pub cpu_levels: [usize; 3],
+    /// 各CPUの性格設定（下家, 対面, 上家）
+    pub cpu_personalities: [usize; 3],
+}
+
+impl SetupState {
+    pub fn new() -> Self {
+        SetupState {
+            cpu_levels: [1, 1, 1],         // 全員 Normal
+            cpu_personalities: [0, 1, 2],  // Balanced, Speedy, HighValue
+        }
+    }
+
+    pub fn level_name(idx: usize) -> &'static str {
+        match idx {
+            0 => "Weak",
+            1 => "Normal",
+            2 => "Strong",
+            _ => "Normal",
+        }
+    }
+
+    pub fn personality_name(idx: usize) -> &'static str {
+        match idx {
+            0 => "Balanced",
+            1 => "Speedy",
+            2 => "HighValue",
+            3 => "Defensive",
+            _ => "Balanced",
+        }
+    }
+
+    pub fn level_count() -> usize { 3 }
+    pub fn personality_count() -> usize { 4 }
+
+    /// 設定からCpuConfigの配列を生成する
+    pub fn build_configs(&self) -> [CpuConfig; 3] {
+        let to_level = |idx: usize| -> CpuLevel {
+            match idx {
+                0 => CpuLevel::Weak,
+                2 => CpuLevel::Strong,
+                _ => CpuLevel::Normal,
+            }
+        };
+        let to_personality = |idx: usize| -> CpuPersonality {
+            match idx {
+                1 => CpuPersonality::Speedy,
+                2 => CpuPersonality::HighValue,
+                3 => CpuPersonality::Defensive,
+                _ => CpuPersonality::Balanced,
+            }
+        };
+        [
+            CpuConfig::new(to_level(self.cpu_levels[0]), to_personality(self.cpu_personalities[0])),
+            CpuConfig::new(to_level(self.cpu_levels[1]), to_personality(self.cpu_personalities[1])),
+            CpuConfig::new(to_level(self.cpu_levels[2]), to_personality(self.cpu_personalities[2])),
+        ]
+    }
 }
 
 /// ゲームフェーズ
 #[derive(Debug, Clone, PartialEq)]
 pub enum GamePhase {
+    /// 対局開始前の設定画面
+    Setup,
     /// ゲーム開始前
     WaitingForStart,
     /// 対局中
@@ -151,7 +220,7 @@ impl GameState {
             riichi_selectable_drawn: false,
             result_message: None,
             is_my_turn: false,
-            phase: GamePhase::WaitingForStart,
+            phase: GamePhase::Setup,
             available_calls: Vec::new(),
             call_target_tile: None,
             call_discarder: None,
@@ -163,6 +232,7 @@ impl GameState {
             selected_would_cause_furiten: false,
             other_players: [OtherPlayerHand::new(), OtherPlayerHand::new(), OtherPlayerHand::new()],
             pending_riichi_player: None,
+            setup_state: SetupState::new(),
         }
     }
 

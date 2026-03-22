@@ -22,9 +22,16 @@ pub struct LocalAdapter {
 }
 
 impl LocalAdapter {
+    /// デフォルト設定でアダプターを作成する
+    #[allow(dead_code)]
     pub fn new() -> Self {
+        let configs = default_cpu_configs();
+        Self::with_cpu_configs(configs)
+    }
+
+    /// 指定したCPU設定でアダプターを作成する
+    pub fn with_cpu_configs(cpu_configs: [CpuConfig; 3]) -> Self {
         let human_player = 0;
-        let cpu_configs = default_cpu_configs();
 
         // 人間以外のプレイヤーにCPUクライアントを割り当て
         let mut cpu_clients: [Option<CpuClient>; 4] = [None, None, None, None];

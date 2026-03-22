@@ -36,44 +36,54 @@ async fn main() {
         eprintln!("警告: 日本語フォントを読み込めませんでした。デフォルトフォントで表示します。");
     }
 
-    let mut adapter = LocalAdapter::new();
+    let mut adapter: Option<LocalAdapter> = None;
     let mut game_state = GameState::new();
-
-    adapter.start_game();
-
-    let events = adapter.poll_events(0);
-    for event in events {
-        game_state.handle_event(event);
-    }
 
     loop {
         clear_background(Color::from_rgba(0, 100, 0, 255));
 
         match game_state.phase {
-            GamePhase::Playing => {
-                let action = game_state.handle_input();
-                if let Some(act) = action {
-                    adapter.send_action(act);
+            GamePhase::Setup => {
+                // 設定画面の入力処理
+                if let Some(configs) = renderer::handle_setup_input(&mut game_state, font.as_ref()) {
+                    // 対局開始
+                    let mut new_adapter = LocalAdapter::with_cpu_configs(configs);
+                    new_adapter.start_game();
+                    let events = new_adapter.poll_events(0);
+                    for event in events {
+                        game_state.handle_event(event);
+                    }
+                    adapter = Some(new_adapter);
                 }
+            }
 
-                adapter.tick();
+            GamePhase::Playing => {
+                if let Some(ref mut adp) = adapter {
+                    let action = game_state.handle_input();
+                    if let Some(act) = action {
+                        adp.send_action(act);
+                    }
 
-                let events = adapter.poll_events(0);
-                for event in events {
-                    game_state.handle_event(event);
+                    adp.tick();
+
+                    let events = adp.poll_events(0);
+                    for event in events {
+                        game_state.handle_event(event);
+                    }
                 }
             }
 
             GamePhase::RoundResult => {
                 if is_mouse_button_pressed(MouseButton::Left) {
-                    if adapter.is_game_over() {
-                        game_state.phase = GamePhase::GameOver;
-                    } else {
-                        adapter.next_round();
-
-                        let events = adapter.poll_events(0);
-                        for event in events {
-                            game_state.handle_event(event);
+                    if let Some(ref mut adp) = adapter {
+                        if adp.is_game_over() {
+                            game_state.phase = GamePhase::GameOver;
+                        } else {
+                            adp.next_round();
+                            let events = adp.poll_events(0);
+                            for event in events {
+                                game_state.handle_event(event);
+                            }
                         }
                     }
                 }
@@ -81,14 +91,9 @@ async fn main() {
 
             GamePhase::GameOver => {
                 if is_mouse_button_pressed(MouseButton::Left) {
-                    adapter = LocalAdapter::new();
+                    // 設定画面に戻る
                     game_state = GameState::new();
-                    adapter.start_game();
-
-                    let events = adapter.poll_events(0);
-                    for event in events {
-                        game_state.handle_event(event);
-                    }
+                    adapter = None;
                 }
             }
 
