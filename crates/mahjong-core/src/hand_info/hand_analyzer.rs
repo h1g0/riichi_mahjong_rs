@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use anyhow::Result;
 
 use std::cmp::*;
@@ -229,273 +228,26 @@ impl HandAnalyzer {
 
     /// 通常の役への向聴数を計算する
     fn calc_normal_form(hand: &Hand) -> Result<HandAnalyzer> {
-        let mut t = hand.summarize_tiles();
-        let mut shanten: i32 = UNAVAILABLE_SHANTEN;
-        // 計算用
-        let mut same3: Vec<Same3> = Vec::new();
-        let mut sequential3: Vec<Sequential3> = Vec::new();
-        let mut same2: Vec<Same2> = Vec::new();
-        let mut sequential2: Vec<Sequential2> = Vec::new();
-        // 結果保存用
-        let mut same3_result: Vec<Same3> = Vec::new();
-        let mut sequential3_result: Vec<Sequential3> = Vec::new();
-        let mut same2_result: Vec<Same2> = Vec::new();
-        let mut sequential2_result: Vec<Sequential2> = Vec::new();
-        let mut single_result: Vec<TileType> = Vec::new();
-        // 先に独立した牌を抜き出しておく
-        let mut independent_same3 = HandAnalyzer::count_independent_same_3(&mut t)?;
-        let mut independent_sequential3 = HandAnalyzer::count_independent_sequential_3(&mut t)?;
-        let mut independent_single = HandAnalyzer::count_independent_single(&mut t)?;
-
-        // 雀頭を抜き出す
-        for i in Tile::M1..=Tile::Z7 {
-            if t[i as usize] >= 2 {
-                same2.push(Same2::new(i, i)?);
-                t[i as usize] -= 2;
-                shanten = count_normal_shanten_recursively(
-                    0,
-                    &independent_same3,
-                    &independent_sequential3,
-                    &mut same3,
-                    &mut sequential3,
-                    &mut same2,
-                    &mut sequential2,
-                    &mut t,
-                    &mut shanten,
-                    &mut same3_result,
-                    &mut sequential3_result,
-                    &mut same2_result,
-                    &mut sequential2_result,
-                    &mut single_result,
-                )?;
-                t[i as usize] += 2;
-                same2.pop();
-            }
-        }
-
-        // 雀頭がない場合
-        shanten = count_normal_shanten_recursively(
-            0,
-            &independent_same3,
-            &independent_sequential3,
-            &mut same3,
-            &mut sequential3,
-            &mut same2,
-            &mut sequential2,
-            &mut t,
-            &mut shanten,
-            &mut same3_result,
-            &mut sequential3_result,
-            &mut same2_result,
-            &mut sequential2_result,
-            &mut single_result,
-        )?;
-
-        // 最後に結合
-        same3_result.append(&mut independent_same3);
-        sequential3_result.append(&mut independent_sequential3);
-        single_result.append(&mut independent_single);
-
+        let (shanten, tracking) = calc_normal_shanten::<FullTracking>(hand)?;
+        let FullTracking {
+            same3,
+            sequential3,
+            same2,
+            sequential2,
+            single,
+        } = tracking;
         Ok(HandAnalyzer {
             shanten,
             form: Form::Normal,
-            same3: same3_result,
-            sequential3: sequential3_result,
-            same2: same2_result,
-            sequential2: sequential2_result,
-            single: single_result,
+            same3,
+            sequential3,
+            same2,
+            sequential2,
+            single,
         })
     }
-    /// 独立した（順子になり得ない）刻子の数を返す
-    fn count_independent_same_3(summarized_hand: &mut TileSummarize) -> Result<Vec<Same3>> {
-        let mut result: Vec<Same3> = Vec::new();
-        for i in Tile::M1..=Tile::Z7 {
-            match i {
-                Tile::M1 | Tile::P1 | Tile::S1 => {
-                    if summarized_hand[i as usize] >= 3
-                        && summarized_hand[i as usize + 1] == 0
-                        && summarized_hand[i as usize + 2] == 0
-                    {
-                        summarized_hand[i as usize] -= 3;
-                        result.push(Same3::new(i, i, i)?);
-                    }
-                }
-                Tile::M2 | Tile::P2 | Tile::S2 => {
-                    if summarized_hand[i as usize - 1] == 0
-                        && summarized_hand[i as usize] >= 3
-                        && summarized_hand[i as usize + 1] == 0
-                        && summarized_hand[i as usize + 2] == 0
-                    {
-                        summarized_hand[i as usize] -= 3;
-                        result.push(Same3::new(i, i, i)?);
-                    }
-                }
-                Tile::M3..=Tile::M7 | Tile::P3..=Tile::P7 | Tile::S3..=Tile::S7 => {
-                    if summarized_hand[i as usize - 2] == 0
-                        && summarized_hand[i as usize - 1] == 0
-                        && summarized_hand[i as usize] >= 3
-                        && summarized_hand[i as usize + 1] == 0
-                        && summarized_hand[i as usize + 2] == 0
-                    {
-                        summarized_hand[i as usize] -= 3;
-                        result.push(Same3::new(i, i, i)?);
-                    }
-                }
-                Tile::M8 | Tile::P8 | Tile::S8 => {
-                    if summarized_hand[i as usize - 2] == 0
-                        && summarized_hand[i as usize - 1] == 0
-                        && summarized_hand[i as usize] >= 3
-                        && summarized_hand[i as usize + 1] == 0
-                    {
-                        summarized_hand[i as usize] -= 3;
-                        result.push(Same3::new(i, i, i)?);
-                    }
-                }
-                Tile::M9 | Tile::P9 | Tile::S9 => {
-                    if summarized_hand[i as usize - 2] == 0
-                        && summarized_hand[i as usize - 1] == 0
-                        && summarized_hand[i as usize] >= 3
-                    {
-                        summarized_hand[i as usize] -= 3;
-                        result.push(Same3::new(i, i, i)?);
-                    }
-                }
-                Tile::Z1..=Tile::Z7 => {
-                    if summarized_hand[i as usize] >= 3 {
-                        summarized_hand[i as usize] -= 3;
-                        result.push(Same3::new(i, i, i)?);
-                    }
-                }
-                _ => {
-                    return Err(anyhow!("Unknown tile index found!"));
-                }
-            }
-        }
-        Ok(result)
-    }
-
-    /// 独立した（他の順子と複合し得ない）順子の数を返す
-    /// i.e. xx567xxのような順子
-    fn count_independent_sequential_3(
-        summarized_hand: &mut TileSummarize,
-    ) -> Result<Vec<Sequential3>> {
-        let mut result: Vec<Sequential3> = Vec::new();
-        // 先に一盃口の処理をしてから通常の処理
-        for i in (1..=2).rev() {
-            // 一萬、一筒、一索のインデックス位置
-            for j in (Tile::M1..=Tile::S9).step_by(9) {
-                // 一*～七*のインデックス位置
-                for k in 0..=6 {
-                    let l: usize = (j + k) as usize;
-                    //三*以上のとき-2の牌が存在したらチェックしない
-                    // i.e. チェック下限はxx345
-                    if k >= 2 && summarized_hand[l - 2] > 0 {
-                        continue;
-                    }
-                    //二*以上のとき-1の牌が存在したらチェックしない
-                    // i.e. チェック下限はx234
-                    if k >= 1 && summarized_hand[l - 1] > 0 {
-                        continue;
-                    }
-                    //六*以下で+3の牌が存在したらチェックしない
-                    // i.e. チェック上限は678x
-                    if k <= 5 && summarized_hand[l + 3] > 0 {
-                        continue;
-                    }
-                    //五*以下で+4の牌が存在したらチェックしない
-                    // i.e. チェック上限は567xx
-                    if k <= 4 && summarized_hand[l + 4] > 0 {
-                        continue;
-                    }
-                    if summarized_hand[l] == i
-                        && summarized_hand[l + 1] == i
-                        && summarized_hand[l + 2] == i
-                    {
-                        summarized_hand[l] -= i;
-                        summarized_hand[l + 1] -= i;
-                        summarized_hand[l + 2] -= i;
-                        for _ in 0..i {
-                            result.push(Sequential3::new(
-                                l as TileType,
-                                (l + 1) as TileType,
-                                (l + 2) as TileType,
-                            )?);
-                        }
-                    }
-                }
-            }
-        }
-        Ok(result)
-    }
-
-    /// 独立した（他の順子や刻子などと複合し得ない）牌の数を返す
-    fn count_independent_single(summarized_hand: &mut TileSummarize) -> Result<Vec<TileType>> {
-        let mut result: Vec<TileType> = Vec::new();
-        for i in Tile::M1..=Tile::Z7 {
-            match i {
-                Tile::M1 | Tile::P1 | Tile::S1 => {
-                    if summarized_hand[i as usize] == 1
-                        && summarized_hand[i as usize + 1] == 0
-                        && summarized_hand[i as usize + 2] == 0
-                    {
-                        summarized_hand[i as usize] -= 1;
-                        result.push(i);
-                    }
-                }
-                Tile::M2 | Tile::P2 | Tile::S2 => {
-                    if summarized_hand[i as usize - 1] == 0
-                        && summarized_hand[i as usize] == 1
-                        && summarized_hand[i as usize + 1] == 0
-                        && summarized_hand[i as usize + 2] == 0
-                    {
-                        summarized_hand[i as usize] -= 1;
-                        result.push(i);
-                    }
-                }
-                Tile::M3..=Tile::M7 | Tile::P3..=Tile::P7 | Tile::S3..=Tile::S7 => {
-                    if summarized_hand[i as usize - 2] == 0
-                        && summarized_hand[i as usize - 1] == 0
-                        && summarized_hand[i as usize] == 1
-                        && summarized_hand[i as usize + 1] == 0
-                        && summarized_hand[i as usize + 2] == 0
-                    {
-                        summarized_hand[i as usize] -= 1;
-                        result.push(i);
-                    }
-                }
-                Tile::M8 | Tile::P8 | Tile::S8 => {
-                    if summarized_hand[i as usize - 2] == 0
-                        && summarized_hand[i as usize - 1] == 0
-                        && summarized_hand[i as usize] == 1
-                        && summarized_hand[i as usize + 1] == 0
-                    {
-                        summarized_hand[i as usize] -= 1;
-                        result.push(i);
-                    }
-                }
-                Tile::M9 | Tile::P9 | Tile::S9 => {
-                    if summarized_hand[i as usize - 2] == 0
-                        && summarized_hand[i as usize - 1] == 0
-                        && summarized_hand[i as usize] == 1
-                    {
-                        summarized_hand[i as usize] -= 1;
-                        result.push(i);
-                    }
-                }
-                Tile::Z1..=Tile::Z7 => {
-                    if summarized_hand[i as usize] == 1 {
-                        summarized_hand[i as usize] -= 1;
-                        result.push(i);
-                    }
-                }
-                _ => {
-                    return Err(anyhow!("Unknown tile index found!"));
-                }
-            }
-        }
-        Ok(result)
-    }
 }
+
 /// 和了しているか否か
 pub fn has_won(hand: &HandAnalyzer) -> bool {
     hand.shanten == -1
@@ -508,7 +260,9 @@ pub fn has_won(hand: &HandAnalyzer) -> bool {
 pub fn shanten_number(hand: &Hand) -> i32 {
     let sp = shanten_seven_pairs(hand);
     let to = shanten_thirteen_orphans(hand);
-    let nm = shanten_normal(hand);
+    let nm = calc_normal_shanten::<CountOnly>(hand)
+        .map(|(s, _)| s)
+        .unwrap_or(UNAVAILABLE_SHANTEN);
     min(min(sp, to), nm)
 }
 
@@ -555,47 +309,263 @@ fn shanten_thirteen_orphans(hand: &Hand) -> i32 {
     (14 - kind - if pair > 0 { 1 } else { 0 }) as i32 - 1
 }
 
-fn shanten_normal(hand: &Hand) -> i32 {
+// ============================================================================
+// 共通シャンテン数計算エンジン
+//
+// ShantenAccumulator トレイトにより、ブロック分解を Vec で追跡する FullTracking と
+// カウンタのみで追跡する CountOnly の2つのモードを、同一の再帰ロジックで実行する。
+// Rust のモノモーフィゼーションにより CountOnly ではゼロコストで最適化される。
+// ============================================================================
+
+/// 前処理で抽出された独立ブロックの情報
+trait PreprocessResult {
+    fn same3_count(&self) -> usize;
+    fn seq3_count(&self) -> usize;
+}
+
+/// シャンテン数計算中のブロック蓄積を抽象化するトレイト
+trait ShantenAccumulator: Sized {
+    type Preprocess: PreprocessResult;
+
+    /// 前処理: 独立した刻子・順子・孤立牌を抽出する
+    fn preprocess(t: &mut TileSummarize) -> Result<Self::Preprocess>;
+
+    /// 新しい空の追跡状態を作成する
+    fn new_tracking() -> Self;
+
+    fn push_same3(&mut self, tile: usize);
+    fn pop_same3(&mut self);
+    fn same3_count(&self) -> usize;
+
+    fn push_seq3(&mut self, tile: usize);
+    fn pop_seq3(&mut self);
+    fn seq3_count(&self) -> usize;
+
+    fn push_same2(&mut self, tile: usize);
+    fn pop_same2(&mut self);
+    fn same2_count(&self) -> usize;
+
+    fn push_seq2(&mut self, tile1: usize, tile2: usize);
+    fn pop_seq2(&mut self);
+    fn seq2_count(&self) -> usize;
+
+    /// 新しい最良結果が見つかったときに呼ばれる。現在の状態をスナップショットする。
+    fn snapshot_best(&self, pre: &Self::Preprocess, t: &TileSummarize, head: usize) -> Self;
+
+    /// 最終結果に独立ブロックをマージする
+    fn finalize(self, pre: Self::Preprocess) -> Self;
+}
+
+// --- CountOnly: カウンタのみ（高速版） ---
+
+struct CountOnlyPreprocess {
+    same3: usize,
+    seq3: usize,
+}
+
+impl PreprocessResult for CountOnlyPreprocess {
+    #[inline(always)]
+    fn same3_count(&self) -> usize { self.same3 }
+    #[inline(always)]
+    fn seq3_count(&self) -> usize { self.seq3 }
+}
+
+struct CountOnly {
+    same3: usize,
+    seq3: usize,
+    same2: usize,
+    seq2: usize,
+}
+
+impl ShantenAccumulator for CountOnly {
+    type Preprocess = CountOnlyPreprocess;
+
+    fn preprocess(t: &mut TileSummarize) -> Result<CountOnlyPreprocess> {
+        let same3 = extract_independent_same3(t);
+        let seq3 = extract_independent_seq3(t);
+        let _ = remove_independent_singles(t);
+        Ok(CountOnlyPreprocess { same3, seq3 })
+    }
+
+    #[inline(always)]
+    fn new_tracking() -> Self {
+        CountOnly { same3: 0, seq3: 0, same2: 0, seq2: 0 }
+    }
+
+    #[inline(always)]
+    fn push_same3(&mut self, _tile: usize) { self.same3 += 1; }
+    #[inline(always)]
+    fn pop_same3(&mut self) { self.same3 -= 1; }
+    #[inline(always)]
+    fn same3_count(&self) -> usize { self.same3 }
+
+    #[inline(always)]
+    fn push_seq3(&mut self, _tile: usize) { self.seq3 += 1; }
+    #[inline(always)]
+    fn pop_seq3(&mut self) { self.seq3 -= 1; }
+    #[inline(always)]
+    fn seq3_count(&self) -> usize { self.seq3 }
+
+    #[inline(always)]
+    fn push_same2(&mut self, _tile: usize) { self.same2 += 1; }
+    #[inline(always)]
+    fn pop_same2(&mut self) { self.same2 -= 1; }
+    #[inline(always)]
+    fn same2_count(&self) -> usize { self.same2 }
+
+    #[inline(always)]
+    fn push_seq2(&mut self, _tile1: usize, _tile2: usize) { self.seq2 += 1; }
+    #[inline(always)]
+    fn pop_seq2(&mut self) { self.seq2 -= 1; }
+    #[inline(always)]
+    fn seq2_count(&self) -> usize { self.seq2 }
+
+    #[inline(always)]
+    fn snapshot_best(&self, _pre: &CountOnlyPreprocess, _t: &TileSummarize, _head: usize) -> Self {
+        // カウンタのみなのでスナップショット不要
+        CountOnly { same3: 0, seq3: 0, same2: 0, seq2: 0 }
+    }
+
+    #[inline(always)]
+    fn finalize(self, _pre: CountOnlyPreprocess) -> Self { self }
+}
+
+// --- FullTracking: Vec 追跡（役判定・符計算用） ---
+
+struct FullTrackingPreprocess {
+    same3: Vec<Same3>,
+    seq3: Vec<Sequential3>,
+    singles: Vec<TileType>,
+}
+
+impl PreprocessResult for FullTrackingPreprocess {
+    fn same3_count(&self) -> usize { self.same3.len() }
+    fn seq3_count(&self) -> usize { self.seq3.len() }
+}
+
+struct FullTracking {
+    same3: Vec<Same3>,
+    sequential3: Vec<Sequential3>,
+    same2: Vec<Same2>,
+    sequential2: Vec<Sequential2>,
+    single: Vec<TileType>,
+}
+
+impl ShantenAccumulator for FullTracking {
+    type Preprocess = FullTrackingPreprocess;
+
+    fn preprocess(t: &mut TileSummarize) -> Result<FullTrackingPreprocess> {
+        let same3 = extract_independent_same3_full(t)?;
+        let seq3 = extract_independent_seq3_full(t)?;
+        let singles = extract_independent_singles_full(t)?;
+        Ok(FullTrackingPreprocess { same3, seq3, singles })
+    }
+
+    fn new_tracking() -> Self {
+        FullTracking {
+            same3: Vec::new(),
+            sequential3: Vec::new(),
+            same2: Vec::new(),
+            sequential2: Vec::new(),
+            single: Vec::new(),
+        }
+    }
+
+    fn push_same3(&mut self, tile: usize) {
+        self.same3.push(Same3::new(tile as TileType, tile as TileType, tile as TileType).unwrap());
+    }
+    fn pop_same3(&mut self) { self.same3.pop(); }
+    fn same3_count(&self) -> usize { self.same3.len() }
+
+    fn push_seq3(&mut self, tile: usize) {
+        self.sequential3.push(Sequential3::new(
+            tile as TileType, (tile + 1) as TileType, (tile + 2) as TileType,
+        ).unwrap());
+    }
+    fn pop_seq3(&mut self) { self.sequential3.pop(); }
+    fn seq3_count(&self) -> usize { self.sequential3.len() }
+
+    fn push_same2(&mut self, tile: usize) {
+        self.same2.push(Same2::new(tile as TileType, tile as TileType).unwrap());
+    }
+    fn pop_same2(&mut self) { self.same2.pop(); }
+    fn same2_count(&self) -> usize { self.same2.len() }
+
+    fn push_seq2(&mut self, tile1: usize, tile2: usize) {
+        self.sequential2.push(Sequential2::new(tile1 as TileType, tile2 as TileType).unwrap());
+    }
+    fn pop_seq2(&mut self) { self.sequential2.pop(); }
+    fn seq2_count(&self) -> usize { self.sequential2.len() }
+
+    fn snapshot_best(&self, _pre: &FullTrackingPreprocess, t: &TileSummarize, _head: usize) -> Self {
+        let mut single = Vec::new();
+        for i in 0..Tile::LEN as usize {
+            for _ in 0..t[i] {
+                single.push(i as TileType);
+            }
+        }
+        FullTracking {
+            same3: self.same3.clone(),
+            sequential3: self.sequential3.clone(),
+            same2: self.same2.clone(),
+            sequential2: self.sequential2.clone(),
+            single,
+        }
+    }
+
+    fn finalize(mut self, mut pre: FullTrackingPreprocess) -> Self {
+        self.same3.append(&mut pre.same3);
+        self.sequential3.append(&mut pre.seq3);
+        self.single.append(&mut pre.singles);
+        self
+    }
+}
+
+// --- 共通再帰ロジック ---
+
+/// 通常形のシャンテン数を計算する共通エントリポイント
+fn calc_normal_shanten<A: ShantenAccumulator>(hand: &Hand) -> Result<(i32, A)> {
     let mut t = hand.summarize_tiles();
     let mut best = UNAVAILABLE_SHANTEN;
 
-    // 独立ブロックを先に抽出（カウントのみ）
-    let indep_same3 = count_independent_same3_fast(&mut t);
-    let indep_seq3 = count_independent_seq3_fast(&mut t);
-    let _indep_single = remove_independent_singles(&mut t);
+    let pre = A::preprocess(&mut t)?;
+    let mut acc = A::new_tracking();
+    let mut best_acc = A::new_tracking();
 
     // 雀頭を抜き出す
     for i in 0..Tile::LEN as usize {
         if t[i] >= 2 {
             t[i] -= 2;
-            shanten_recurse_fast(0, indep_same3, indep_seq3, 0, 0, 1, 0, &mut t, &mut best);
+            acc.push_same2(i);
+            find_mentsu(0, &pre, &mut acc, 1, &mut t, &mut best, &mut best_acc);
+            acc.pop_same2();
             t[i] += 2;
         }
     }
     // 雀頭なし
-    shanten_recurse_fast(0, indep_same3, indep_seq3, 0, 0, 0, 0, &mut t, &mut best);
+    find_mentsu(0, &pre, &mut acc, 0, &mut t, &mut best, &mut best_acc);
 
-    best
+    let result = best_acc.finalize(pre);
+    Ok((best, result))
 }
 
-/// 高速再帰: カウンタのみで面子・塔子を探索
-fn shanten_recurse_fast(
+/// フェーズ1: 面子（刻子・順子）を再帰的に抽出する
+fn find_mentsu<A: ShantenAccumulator>(
     idx: usize,
-    indep_same3: usize,
-    indep_seq3: usize,
-    same3_count: usize,
-    seq3_count: usize,
+    pre: &A::Preprocess,
+    acc: &mut A,
     head: usize,
-    block2_count: usize,
     t: &mut TileSummarize,
     best: &mut i32,
+    best_acc: &mut A,
 ) {
-    // 面子の探索
     for i in idx..Tile::LEN as usize {
         // 刻子
         if t[i] >= 3 {
             t[i] -= 3;
-            shanten_recurse_fast(i, indep_same3, indep_seq3, same3_count + 1, seq3_count, head, block2_count, t, best);
+            acc.push_same3(i);
+            find_mentsu(i, pre, acc, head, t, best, best_acc);
+            acc.pop_same3();
             t[i] += 3;
         }
         // 順子
@@ -603,39 +573,45 @@ fn shanten_recurse_fast(
             t[i] -= 1;
             t[i + 1] -= 1;
             t[i + 2] -= 1;
-            shanten_recurse_fast(i, indep_same3, indep_seq3, same3_count, seq3_count + 1, head, block2_count, t, best);
+            acc.push_seq3(i);
+            find_mentsu(i, pre, acc, head, t, best, best_acc);
+            acc.pop_seq3();
             t[i] += 1;
             t[i + 1] += 1;
             t[i + 2] += 1;
         }
     }
 
-    // 塔子・対子の探索
-    // 面子抽出後の残り牌は元のインデックスより前に存在し得るため、
-    // 常に先頭から探索する必要がある（例: 234p+234s+567s 抽出後に 23s が残る場合）
-    let block3 = indep_same3 + indep_seq3 + same3_count + seq3_count;
-    let mut b2 = block2_count;
-    shanten_recurse2_fast(0, block3, head, &mut b2, t, best);
+    // 面子を全て抽出し終えたら、塔子・対子の探索に移行する。
+    // 面子抽出後の残り牌は元のインデックスより前に存在し得るため、常に先頭から探索する。
+    let block3 = pre.same3_count() + pre.seq3_count() + acc.same3_count() + acc.seq3_count();
+    find_tatsu(0, block3, head, pre, acc, t, best, best_acc);
 }
 
-/// 塔子・対子の高速再帰
-fn shanten_recurse2_fast(
+/// フェーズ2: 塔子（対子・両面/辺張・嵌張）を再帰的に抽出する
+fn find_tatsu<A: ShantenAccumulator>(
     idx: usize,
     block3: usize,
     head: usize,
-    block2: &mut usize,
+    pre: &A::Preprocess,
+    acc: &mut A,
     t: &mut TileSummarize,
     best: &mut i32,
+    best_acc: &mut A,
 ) {
-    // まず現状で向聴数を計算
-    let b2_capped = (*block2).min(4usize.saturating_sub(block3));
-    let shanten = 8i32 - (block3 * 2 + b2_capped + head) as i32;
+    // 現在の分解で向聴数を計算
+    let block2_raw = acc.same2_count() + acc.seq2_count();
+    // 雀頭として使っている same2 は block2 に含めない
+    let block2_net = block2_raw.saturating_sub(head);
+    let block2_capped = block2_net.min(4usize.saturating_sub(block3));
+    let shanten = 8i32 - (block3 * 2 + block2_capped + head) as i32;
     if shanten < *best {
         *best = shanten;
+        *best_acc = acc.snapshot_best(pre, t, head);
     }
 
     // 枝刈り: これ以上 block2 を増やしても改善しない場合
-    if *block2 >= 4usize.saturating_sub(block3) {
+    if block2_net >= 4usize.saturating_sub(block3) {
         return;
     }
 
@@ -643,54 +619,57 @@ fn shanten_recurse2_fast(
         // 対子
         if t[i] >= 2 {
             t[i] -= 2;
-            *block2 += 1;
-            shanten_recurse2_fast(i + 1, block3, head, block2, t, best);
-            *block2 -= 1;
+            acc.push_same2(i);
+            find_tatsu(i + 1, block3, head, pre, acc, t, best, best_acc);
+            acc.pop_same2();
             t[i] += 2;
         }
-        // 塔子
+        // 塔子（隣接する2枚）
         if i < 27 && i % 9 <= 7 && t[i] >= 1 && t[i + 1] >= 1 {
             t[i] -= 1;
             t[i + 1] -= 1;
-            *block2 += 1;
-            shanten_recurse2_fast(i, block3, head, block2, t, best);
-            *block2 -= 1;
+            acc.push_seq2(i, i + 1);
+            find_tatsu(i, block3, head, pre, acc, t, best, best_acc);
+            acc.pop_seq2();
             t[i] += 1;
             t[i + 1] += 1;
         }
-        // 嵌張
+        // 嵌張（間が空いた2枚）
         if i < 27 && i % 9 <= 6 && t[i] >= 1 && t[i + 1] == 0 && t[i + 2] >= 1 {
             t[i] -= 1;
             t[i + 2] -= 1;
-            *block2 += 1;
-            shanten_recurse2_fast(i, block3, head, block2, t, best);
-            *block2 -= 1;
+            acc.push_seq2(i, i + 2);
+            find_tatsu(i, block3, head, pre, acc, t, best, best_acc);
+            acc.pop_seq2();
             t[i] += 1;
             t[i + 2] += 1;
         }
     }
 }
 
-/// 独立した刻子を抽出（カウントのみ返す）
-fn count_independent_same3_fast(t: &mut TileSummarize) -> usize {
+// ============================================================================
+// 前処理: 独立ブロック抽出
+// ============================================================================
+
+/// 数牌において、隣接2マス以内に他の牌がないかを判定する
+fn is_isolated(t: &TileSummarize, i: usize) -> bool {
+    if i >= 27 {
+        return true; // 字牌は常に独立
+    }
+    let pos = i % 9;
+    let base = i - pos;
+    let left2  = pos < 2 || t[base + pos - 2] == 0;
+    let left1  = pos < 1 || t[base + pos - 1] == 0;
+    let right1 = pos > 7 || t[base + pos + 1] == 0;
+    let right2 = pos > 6 || t[base + pos + 2] == 0;
+    left2 && left1 && right1 && right2
+}
+
+/// 独立した刻子を抽出する（カウントのみ返す）
+fn extract_independent_same3(t: &mut TileSummarize) -> usize {
     let mut count = 0;
     for i in 0..Tile::LEN as usize {
-        if t[i] < 3 {
-            continue;
-        }
-        let is_isolated = if i >= 27 {
-            // 字牌: 常に独立
-            true
-        } else {
-            let pos = i % 9;
-            let base = i - pos;
-            let left2 = if pos >= 2 { t[base + pos - 2] == 0 } else { true };
-            let left1 = if pos >= 1 { t[base + pos - 1] == 0 } else { true };
-            let right1 = if pos <= 7 { t[base + pos + 1] == 0 } else { true };
-            let right2 = if pos <= 6 { t[base + pos + 2] == 0 } else { true };
-            left2 && left1 && right1 && right2
-        };
-        if is_isolated {
+        if t[i] >= 3 && is_isolated(t, i) {
             t[i] -= 3;
             count += 1;
         }
@@ -698,10 +677,27 @@ fn count_independent_same3_fast(t: &mut TileSummarize) -> usize {
     count
 }
 
-/// 独立した順子を抽出（カウントのみ返す）
-fn count_independent_seq3_fast(t: &mut TileSummarize) -> usize {
-    let mut count = 0;
-    // 一盃口を先に処理してから通常処理
+/// 独立した刻子を抽出する（Vec で返す）
+fn extract_independent_same3_full(t: &mut TileSummarize) -> Result<Vec<Same3>> {
+    let mut result = Vec::new();
+    for i in 0..Tile::LEN as usize {
+        if t[i] >= 3 && is_isolated(t, i) {
+            t[i] -= 3;
+            let tile = i as TileType;
+            result.push(Same3::new(tile, tile, tile)?);
+        }
+    }
+    Ok(result)
+}
+
+/// 独立した順子を抽出する（共通ロジック）
+///
+/// 一盃口を先に処理してから通常処理する。
+/// `on_found` は見つかった順子の先頭インデックスと個数（1 or 2）を受け取る。
+fn extract_independent_seq3_impl(
+    t: &mut TileSummarize,
+    mut on_found: impl FnMut(usize, u32),
+) {
     for n in (1u32..=2).rev() {
         for suit_start in (0..27).step_by(9) {
             for k in 0..=6usize {
@@ -714,317 +710,61 @@ fn count_independent_seq3_fast(t: &mut TileSummarize) -> usize {
                     t[l] -= n;
                     t[l + 1] -= n;
                     t[l + 2] -= n;
-                    count += n as usize;
+                    on_found(l, n);
                 }
             }
         }
     }
+}
+
+/// 独立した順子を抽出する（カウントのみ返す）
+fn extract_independent_seq3(t: &mut TileSummarize) -> usize {
+    let mut count = 0usize;
+    extract_independent_seq3_impl(t, |_l, n| {
+        count += n as usize;
+    });
     count
 }
 
-/// 独立した単独牌を除去（カウントのみ返す）
+/// 独立した順子を抽出する（Vec で返す）
+fn extract_independent_seq3_full(t: &mut TileSummarize) -> Result<Vec<Sequential3>> {
+    let mut result = Vec::new();
+    let mut err: Option<anyhow::Error> = None;
+    extract_independent_seq3_impl(t, |l, n| {
+        if err.is_some() { return; }
+        for _ in 0..n {
+            match Sequential3::new(l as TileType, (l + 1) as TileType, (l + 2) as TileType) {
+                Ok(s) => result.push(s),
+                Err(e) => { err = Some(e); return; }
+            }
+        }
+    });
+    if let Some(e) = err { return Err(e); }
+    Ok(result)
+}
+
+/// 独立した孤立牌を除去する（カウントのみ返す）
 fn remove_independent_singles(t: &mut TileSummarize) -> usize {
     let mut count = 0;
     for i in 0..Tile::LEN as usize {
-        if t[i] != 1 {
-            continue;
-        }
-        let is_isolated = if i >= 27 {
-            true
-        } else {
-            let pos = i % 9;
-            let base = i - pos;
-            let left2 = if pos >= 2 { t[base + pos - 2] == 0 } else { true };
-            let left1 = if pos >= 1 { t[base + pos - 1] == 0 } else { true };
-            let right1 = if pos <= 7 { t[base + pos + 1] == 0 } else { true };
-            let right2 = if pos <= 6 { t[base + pos + 2] == 0 } else { true };
-            left2 && left1 && right1 && right2
-        };
-        if is_isolated {
+        if t[i] == 1 && is_isolated(t, i) {
             t[i] -= 1;
             count += 1;
         }
     }
     count
 }
-/// 再帰的にシャンテン数が最小のものを探す
-fn count_normal_shanten_recursively(
-    idx: TileType,
-    independent_same3: &Vec<Same3>,
-    independent_sequential3: &Vec<Sequential3>,
-    same3: &mut Vec<Same3>,
-    sequential3: &mut Vec<Sequential3>,
-    same2: &mut Vec<Same2>,
-    sequential2: &mut Vec<Sequential2>,
-    summarized_hand: &mut TileSummarize,
 
-    shanten_min: &mut i32,
-    same3_result: &mut Vec<Same3>,
-    sequential3_result: &mut Vec<Sequential3>,
-    same2_result: &mut Vec<Same2>,
-    sequential2_result: &mut Vec<Sequential2>,
-    single_result: &mut Vec<TileType>,
-) -> Result<i32> {
-    count_same_or_sequential_3(
-        idx,
-        independent_same3,
-        independent_sequential3,
-        same3,
-        sequential3,
-        same2,
-        sequential2,
-        summarized_hand,
-        shanten_min,
-        same3_result,
-        sequential3_result,
-        same2_result,
-        sequential2_result,
-        single_result,
-    )?;
-    count_same_or_sequential_2(
-        idx,
-        independent_same3,
-        independent_sequential3,
-        same3,
-        sequential3,
-        same2,
-        sequential2,
-        summarized_hand,
-        shanten_min,
-        same3_result,
-        sequential3_result,
-        same2_result,
-        sequential2_result,
-        single_result,
-    )?;
-    let shanten = calc_normal_shanten(
-        independent_same3,
-        independent_sequential3,
-        same3,
-        sequential3,
-        same2,
-        sequential2,
-    );
-    if shanten < *shanten_min {
-        *shanten_min = shanten;
-        *same3_result = same3.clone();
-        *sequential3_result = sequential3.clone();
-        *same2_result = same2.clone();
-        *sequential2_result = sequential2.clone();
-        single_result.clear();
-        for i in Tile::M1..=Tile::Z7 {
-            for _ in 0..summarized_hand[i as usize] as u32 {
-                single_result.push(i);
-            }
+/// 独立した孤立牌を除去する（Vec で返す）
+fn extract_independent_singles_full(t: &mut TileSummarize) -> Result<Vec<TileType>> {
+    let mut result = Vec::new();
+    for i in 0..Tile::LEN as usize {
+        if t[i] == 1 && is_isolated(t, i) {
+            t[i] -= 1;
+            result.push(i as TileType);
         }
     }
-    Ok(*shanten_min)
-}
-
-/// 面子（刻子および順子）をカウントして引数に与えられた各変数に格納する
-fn count_same_or_sequential_3(
-    idx: TileType,
-    independent_same3: &Vec<Same3>,
-    independent_sequential3: &Vec<Sequential3>,
-    same3: &mut Vec<Same3>,
-    sequential3: &mut Vec<Sequential3>,
-    same2: &mut Vec<Same2>,
-    sequential2: &mut Vec<Sequential2>,
-    summarized_hand: &mut TileSummarize,
-    shanten_min: &mut i32,
-    same3_result: &mut Vec<Same3>,
-    sequential3_result: &mut Vec<Sequential3>,
-    same2_result: &mut Vec<Same2>,
-    sequential2_result: &mut Vec<Sequential2>,
-    single_result: &mut Vec<TileType>,
-) -> Result<()> {
-    for i in idx..=Tile::Z7 {
-        // 刻子カウント
-        if summarized_hand[i as usize] >= 3 {
-            //block3 += 1;
-            same3.push(Same3::new(i, i, i)?);
-            summarized_hand[i as usize] -= 3;
-            *shanten_min = count_normal_shanten_recursively(
-                i,
-                independent_same3,
-                independent_sequential3,
-                same3,
-                sequential3,
-                same2,
-                sequential2,
-                summarized_hand,
-                shanten_min,
-                same3_result,
-                sequential3_result,
-                same2_result,
-                sequential2_result,
-                single_result,
-            )?;
-            summarized_hand[i as usize] += 3;
-            same3.pop();
-        }
-
-        //順子カウント
-        if ((i >= Tile::M1 && i <= Tile::M7)
-            || (i >= Tile::P1 && i <= Tile::P7)
-            || (i >= Tile::S1 && i <= Tile::S7))
-            && summarized_hand[i as usize] >= 1
-            && summarized_hand[i as usize + 1] >= 1
-            && summarized_hand[i as usize + 2] >= 1
-        {
-            //block3 += 1;
-            sequential3.push(Sequential3::new(i, i + 1, i + 2)?);
-            summarized_hand[i as usize] -= 1;
-            summarized_hand[i as usize + 1] -= 1;
-            summarized_hand[i as usize + 2] -= 1;
-            *shanten_min = count_normal_shanten_recursively(
-                i,
-                independent_same3,
-                independent_sequential3,
-                same3,
-                sequential3,
-                same2,
-                sequential2,
-                summarized_hand,
-                shanten_min,
-                same3_result,
-                sequential3_result,
-                same2_result,
-                sequential2_result,
-                single_result,
-            )?;
-            summarized_hand[i as usize] += 1;
-            summarized_hand[i as usize + 1] += 1;
-            summarized_hand[i as usize + 2] += 1;
-            sequential3.pop();
-        }
-    }
-    Ok(())
-}
-
-/// 対子・塔子・嵌張をカウントして引数に与えられた各変数に格納する
-fn count_same_or_sequential_2(
-    idx: TileType,
-    independent_same3: &Vec<Same3>,
-    independent_sequential3: &Vec<Sequential3>,
-    same3: &mut Vec<Same3>,
-    sequential3: &mut Vec<Sequential3>,
-    same2: &mut Vec<Same2>,
-    sequential2: &mut Vec<Sequential2>,
-    summarized_hand: &mut TileSummarize,
-    shanten_min: &mut i32,
-    same3_result: &mut Vec<Same3>,
-    sequential3_result: &mut Vec<Sequential3>,
-    same2_result: &mut Vec<Same2>,
-    sequential2_result: &mut Vec<Sequential2>,
-    single_result: &mut Vec<TileType>,
-) -> Result<()> {
-    for i in idx..=Tile::Z7 {
-        // 対子
-        if summarized_hand[i as usize] == 2 {
-            same2.push(Same2::new(i, i)?);
-            summarized_hand[i as usize] -= 2;
-            *shanten_min = count_normal_shanten_recursively(
-                idx,
-                independent_same3,
-                independent_sequential3,
-                same3,
-                sequential3,
-                same2,
-                sequential2,
-                summarized_hand,
-                shanten_min,
-                same3_result,
-                sequential3_result,
-                same2_result,
-                sequential2_result,
-                single_result,
-            )?;
-            summarized_hand[i as usize] += 2;
-            same2.pop();
-        }
-        // 塔子（隣接する2枚: 例 8m9m）— *8 まで含める
-        let is_sequential_range = (i >= Tile::M1 && i <= Tile::M8)
-            || (i >= Tile::P1 && i <= Tile::P8)
-            || (i >= Tile::S1 && i <= Tile::S8);
-        if is_sequential_range
-            && summarized_hand[i as usize] >= 1
-            && summarized_hand[i as usize + 1] >= 1
-        {
-            sequential2.push(Sequential2::new(i, i + 1)?);
-            summarized_hand[i as usize] -= 1;
-            summarized_hand[i as usize + 1] -= 1;
-            *shanten_min = count_normal_shanten_recursively(
-                idx,
-                independent_same3,
-                independent_sequential3,
-                same3,
-                sequential3,
-                same2,
-                sequential2,
-                summarized_hand,
-                shanten_min,
-                same3_result,
-                sequential3_result,
-                same2_result,
-                sequential2_result,
-                single_result,
-            )?;
-            summarized_hand[i as usize] += 1;
-            summarized_hand[i as usize + 1] += 1;
-            sequential2.pop();
-        }
-        // 嵌張（間が空いた2枚: 例 7m9m）— *7 まで
-        let is_kanchan_range = (i >= Tile::M1 && i <= Tile::M7)
-            || (i >= Tile::P1 && i <= Tile::P7)
-            || (i >= Tile::S1 && i <= Tile::S7);
-        if is_kanchan_range
-            && summarized_hand[i as usize] >= 1
-            && summarized_hand[i as usize + 1] == 0
-            && summarized_hand[i as usize + 2] >= 1
-        {
-            sequential2.push(Sequential2::new(i, i + 2)?);
-            summarized_hand[i as usize] -= 1;
-            summarized_hand[i as usize + 2] -= 1;
-            *shanten_min = count_normal_shanten_recursively(
-                idx,
-                independent_same3,
-                independent_sequential3,
-                same3,
-                sequential3,
-                same2,
-                sequential2,
-                summarized_hand,
-                shanten_min,
-                same3_result,
-                sequential3_result,
-                same2_result,
-                sequential2_result,
-                single_result,
-            )?;
-            summarized_hand[i as usize] += 1;
-            summarized_hand[i as usize + 2] += 1;
-            sequential2.pop();
-        }
-    }
-    Ok(())
-    //return (same2, sequential2);
-}
-
-fn calc_normal_shanten(
-    independent_same3: &Vec<Same3>,
-    independent_sequential3: &Vec<Sequential3>,
-    same3: &Vec<Same3>,
-    sequential3: &Vec<Sequential3>,
-    same2: &Vec<Same2>,
-    sequential2: &Vec<Sequential2>,
-) -> i32 {
-    let block3 =
-        independent_same3.len() + independent_sequential3.len() + same3.len() + sequential3.len();
-    let head = usize::from(!same2.is_empty());
-    let mut block2 = sequential2.len() + same2.len().saturating_sub(head);
-    block2 = block2.min(4usize.saturating_sub(block3));
-    return 8 - (block3 * 2 + block2 + head) as i32;
+    Ok(result)
 }
 
 /// ユニットテスト
