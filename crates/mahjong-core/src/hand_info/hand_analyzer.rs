@@ -942,24 +942,23 @@ mod tests {
         assert!(HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans).unwrap().shanten > 0);
     }
 
-    /// shanten_number() が HandAnalyzer::new() と同じ結果を返すことを検証
+    /// 様々なパターンの手牌でシャンテン数が正しいことを検証する回帰テスト
     #[rstest::rstest]
-    #[case::seven_pairs_tenpai("226699m99p228s66z 1z")]
-    #[case::thirteen_orphans_tenpai("19m19p11s1234567z 5m")]
-    #[case::normal_win_triplets("123m444p789s1112z 2z")]
-    #[case::normal_win_flush("222333444666s6z 6z")]
-    #[case::normal_win_nine_gates("1112345678999m 5m")]
-    #[case::seven_pairs_win("1122m3344p5566s7z 7z")]
-    #[case::thirteen_orphans_win("19m19p19s1234567z 1m")]
-    #[case::normal_tenpai_13_tiles("123m456p789s1234z")]
-    #[case::far_from_ready("147m258p369s1234z")]
-    #[case::with_open_melds("333m456p1789s 333z 1s")]
-    #[case::leftover_tatsu_at_lower_index("23444p22334567s")]
-    #[case::leftover_tatsu_at_lower_index_with_drawn("23444p22334567s 1z")]
-    fn shanten_number_matches_full_analyzer(#[case] hand_str: &str) {
+    #[case::seven_pairs_tenpai("226699m99p228s66z 1z", 0)]
+    #[case::thirteen_orphans_tenpai("19m19p11s1234567z 5m", 0)]
+    #[case::normal_win_triplets("123m444p789s1112z 2z", -1)]
+    #[case::normal_win_flush("222333444666s6z 6z", -1)]
+    #[case::normal_win_nine_gates("1112345678999m 5m", -1)]
+    #[case::seven_pairs_win("1122m3344p5566s7z 7z", -1)]
+    #[case::thirteen_orphans_win("19m19p19s1234567z 1m", -1)]
+    #[case::normal_13_tiles_with_isolated_honors("123m456p789s1234z", 2)]
+    #[case::far_from_ready("147m258p369s1234z", 6)]
+    #[case::with_open_melds("333m456p1789s 333z 1s", -1)]
+    #[case::leftover_tatsu_at_lower_index("23444p22334567s", 0)]
+    #[case::leftover_tatsu_at_lower_index_with_drawn("23444p22334567s 1z", 0)]
+    fn shanten_regression(#[case] hand_str: &str, #[case] expected: i32) {
         let hand = Hand::from(hand_str);
-        let full = HandAnalyzer::new(&hand).unwrap().shanten;
-        let fast = shanten_number(&hand);
-        assert_eq!(full, fast, "shanten mismatch for hand '{hand_str}': full={full}, fast={fast}");
+        let shanten = HandAnalyzer::new(&hand).unwrap().shanten;
+        assert_eq!(shanten, expected, "hand '{hand_str}': expected {expected}, got {shanten}");
     }
 }
