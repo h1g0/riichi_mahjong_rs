@@ -611,9 +611,11 @@ fn shanten_recurse_fast(
     }
 
     // 塔子・対子の探索
+    // 面子抽出後の残り牌は元のインデックスより前に存在し得るため、
+    // 常に先頭から探索する必要がある（例: 234p+234s+567s 抽出後に 23s が残る場合）
     let block3 = indep_same3 + indep_seq3 + same3_count + seq3_count;
     let mut b2 = block2_count;
-    shanten_recurse2_fast(idx, block3, head, &mut b2, t, best);
+    shanten_recurse2_fast(0, block3, head, &mut b2, t, best);
 }
 
 /// 塔子・対子の高速再帰
@@ -1201,25 +1203,23 @@ mod tests {
     }
 
     /// shanten_number() が HandAnalyzer::new() と同じ結果を返すことを検証
-    #[test]
-    fn shanten_number_matches_full_analyzer() {
-        let test_cases = vec![
-            "226699m99p228s66z 1z",   // 七対子テンパイ
-            "19m19p11s1234567z 5m",   // 国士テンパイ
-            "123m444p789s1112z 2z",   // 通常和了
-            "222333444666s6z 6z",     // 通常和了
-            "1112345678999m 5m",      // 通常和了
-            "1122m3344p5566s7z 7z",   // 七対子和了
-            "19m19p19s1234567z 1m",   // 国士和了
-            "123m456p789s1234z",       // 通常テンパイ（13枚）
-            "147m258p369s1234z",       // 遠い手
-            "333m456p1789s 333z 1s",  // 副露あり
-        ];
-        for s in &test_cases {
-            let hand = Hand::from(*s);
-            let full = HandAnalyzer::new(&hand).unwrap().shanten;
-            let fast = shanten_number(&hand);
-            assert_eq!(full, fast, "shanten mismatch for hand '{s}': full={full}, fast={fast}");
-        }
+    #[rstest::rstest]
+    #[case::seven_pairs_tenpai("226699m99p228s66z 1z")]
+    #[case::thirteen_orphans_tenpai("19m19p11s1234567z 5m")]
+    #[case::normal_win_triplets("123m444p789s1112z 2z")]
+    #[case::normal_win_flush("222333444666s6z 6z")]
+    #[case::normal_win_nine_gates("1112345678999m 5m")]
+    #[case::seven_pairs_win("1122m3344p5566s7z 7z")]
+    #[case::thirteen_orphans_win("19m19p19s1234567z 1m")]
+    #[case::normal_tenpai_13_tiles("123m456p789s1234z")]
+    #[case::far_from_ready("147m258p369s1234z")]
+    #[case::with_open_melds("333m456p1789s 333z 1s")]
+    #[case::leftover_tatsu_at_lower_index("23444p22334567s")]
+    #[case::leftover_tatsu_at_lower_index_with_drawn("23444p22334567s 1z")]
+    fn shanten_number_matches_full_analyzer(#[case] hand_str: &str) {
+        let hand = Hand::from(hand_str);
+        let full = HandAnalyzer::new(&hand).unwrap().shanten;
+        let fast = shanten_number(&hand);
+        assert_eq!(full, fast, "shanten mismatch for hand '{hand_str}': full={full}, fast={fast}");
     }
 }
