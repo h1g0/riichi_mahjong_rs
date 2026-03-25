@@ -289,11 +289,19 @@ fn shanten_thirteen_orphans(hand: &Hand) -> i32 {
         return UNAVAILABLE_SHANTEN;
     }
     let to_tiles: [usize; 13] = [
-        Tile::M1 as usize, Tile::M9 as usize,
-        Tile::P1 as usize, Tile::P9 as usize,
-        Tile::S1 as usize, Tile::S9 as usize,
-        Tile::Z1 as usize, Tile::Z2 as usize, Tile::Z3 as usize,
-        Tile::Z4 as usize, Tile::Z5 as usize, Tile::Z6 as usize, Tile::Z7 as usize,
+        Tile::M1 as usize,
+        Tile::M9 as usize,
+        Tile::P1 as usize,
+        Tile::P9 as usize,
+        Tile::S1 as usize,
+        Tile::S9 as usize,
+        Tile::Z1 as usize,
+        Tile::Z2 as usize,
+        Tile::Z3 as usize,
+        Tile::Z4 as usize,
+        Tile::Z5 as usize,
+        Tile::Z6 as usize,
+        Tile::Z7 as usize,
     ];
     let t = hand.summarize_tiles();
     let mut pair: u32 = 0;
@@ -356,8 +364,7 @@ trait ShantenAccumulator: Sized {
     fn finalize(self, pre: Self::Preprocess) -> Self;
 }
 
-// --- CountOnly: カウンタのみ（高速版） ---
-
+// シャンテン数カウントのみの高速版
 struct CountOnlyPreprocess {
     same3: usize,
     seq3: usize,
@@ -365,9 +372,13 @@ struct CountOnlyPreprocess {
 
 impl PreprocessResult for CountOnlyPreprocess {
     #[inline(always)]
-    fn same3_count(&self) -> usize { self.same3 }
+    fn same3_count(&self) -> usize {
+        self.same3
+    }
     #[inline(always)]
-    fn seq3_count(&self) -> usize { self.seq3 }
+    fn seq3_count(&self) -> usize {
+        self.seq3
+    }
 }
 
 struct CountOnly {
@@ -389,48 +400,85 @@ impl ShantenAccumulator for CountOnly {
 
     #[inline(always)]
     fn new_tracking() -> Self {
-        CountOnly { same3: 0, seq3: 0, same2: 0, seq2: 0 }
+        CountOnly {
+            same3: 0,
+            seq3: 0,
+            same2: 0,
+            seq2: 0,
+        }
     }
 
     #[inline(always)]
-    fn push_same3(&mut self, _tile: usize) { self.same3 += 1; }
+    fn push_same3(&mut self, _tile: usize) {
+        self.same3 += 1;
+    }
     #[inline(always)]
-    fn pop_same3(&mut self) { self.same3 -= 1; }
+    fn pop_same3(&mut self) {
+        self.same3 -= 1;
+    }
     #[inline(always)]
-    fn same3_count(&self) -> usize { self.same3 }
+    fn same3_count(&self) -> usize {
+        self.same3
+    }
 
     #[inline(always)]
-    fn push_seq3(&mut self, _tile: usize) { self.seq3 += 1; }
+    fn push_seq3(&mut self, _tile: usize) {
+        self.seq3 += 1;
+    }
     #[inline(always)]
-    fn pop_seq3(&mut self) { self.seq3 -= 1; }
+    fn pop_seq3(&mut self) {
+        self.seq3 -= 1;
+    }
     #[inline(always)]
-    fn seq3_count(&self) -> usize { self.seq3 }
+    fn seq3_count(&self) -> usize {
+        self.seq3
+    }
 
     #[inline(always)]
-    fn push_same2(&mut self, _tile: usize) { self.same2 += 1; }
+    fn push_same2(&mut self, _tile: usize) {
+        self.same2 += 1;
+    }
     #[inline(always)]
-    fn pop_same2(&mut self) { self.same2 -= 1; }
+    fn pop_same2(&mut self) {
+        self.same2 -= 1;
+    }
     #[inline(always)]
-    fn same2_count(&self) -> usize { self.same2 }
+    fn same2_count(&self) -> usize {
+        self.same2
+    }
 
     #[inline(always)]
-    fn push_seq2(&mut self, _tile1: usize, _tile2: usize) { self.seq2 += 1; }
+    fn push_seq2(&mut self, _tile1: usize, _tile2: usize) {
+        self.seq2 += 1;
+    }
     #[inline(always)]
-    fn pop_seq2(&mut self) { self.seq2 -= 1; }
+    fn pop_seq2(&mut self) {
+        self.seq2 -= 1;
+    }
     #[inline(always)]
-    fn seq2_count(&self) -> usize { self.seq2 }
+    fn seq2_count(&self) -> usize {
+        self.seq2
+    }
 
     #[inline(always)]
     fn snapshot_best(&self, _pre: &CountOnlyPreprocess, _t: &TileSummarize, _head: usize) -> Self {
         // カウンタのみなのでスナップショット不要
-        CountOnly { same3: 0, seq3: 0, same2: 0, seq2: 0 }
+        CountOnly {
+            same3: 0,
+            seq3: 0,
+            same2: 0,
+            seq2: 0,
+        }
     }
 
     #[inline(always)]
-    fn finalize(self, _pre: CountOnlyPreprocess) -> Self { self }
+    fn finalize(self, _pre: CountOnlyPreprocess) -> Self {
+        self
+    }
 }
 
-// --- FullTracking: Vec 追跡（役判定・符計算用） ---
+// Vec に個々の面子などを格納する
+// 役判定や符計算用に使用する、ややコストのかかるバージョン
 
 struct FullTrackingPreprocess {
     same3: Vec<Same3>,
@@ -439,8 +487,12 @@ struct FullTrackingPreprocess {
 }
 
 impl PreprocessResult for FullTrackingPreprocess {
-    fn same3_count(&self) -> usize { self.same3.len() }
-    fn seq3_count(&self) -> usize { self.seq3.len() }
+    fn same3_count(&self) -> usize {
+        self.same3.len()
+    }
+    fn seq3_count(&self) -> usize {
+        self.seq3.len()
+    }
 }
 
 struct FullTracking {
@@ -458,7 +510,11 @@ impl ShantenAccumulator for FullTracking {
         let same3 = extract_independent_same3_full(t)?;
         let seq3 = extract_independent_seq3_full(t)?;
         let singles = extract_independent_singles_full(t)?;
-        Ok(FullTrackingPreprocess { same3, seq3, singles })
+        Ok(FullTrackingPreprocess {
+            same3,
+            seq3,
+            singles,
+        })
     }
 
     fn new_tracking() -> Self {
@@ -472,32 +528,61 @@ impl ShantenAccumulator for FullTracking {
     }
 
     fn push_same3(&mut self, tile: usize) {
-        self.same3.push(Same3::new(tile as TileType, tile as TileType, tile as TileType).unwrap());
+        self.same3
+            .push(Same3::new(tile as TileType, tile as TileType, tile as TileType).unwrap());
     }
-    fn pop_same3(&mut self) { self.same3.pop(); }
-    fn same3_count(&self) -> usize { self.same3.len() }
+    fn pop_same3(&mut self) {
+        self.same3.pop();
+    }
+    fn same3_count(&self) -> usize {
+        self.same3.len()
+    }
 
     fn push_seq3(&mut self, tile: usize) {
-        self.sequential3.push(Sequential3::new(
-            tile as TileType, (tile + 1) as TileType, (tile + 2) as TileType,
-        ).unwrap());
+        self.sequential3.push(
+            Sequential3::new(
+                tile as TileType,
+                (tile + 1) as TileType,
+                (tile + 2) as TileType,
+            )
+            .unwrap(),
+        );
     }
-    fn pop_seq3(&mut self) { self.sequential3.pop(); }
-    fn seq3_count(&self) -> usize { self.sequential3.len() }
+    fn pop_seq3(&mut self) {
+        self.sequential3.pop();
+    }
+    fn seq3_count(&self) -> usize {
+        self.sequential3.len()
+    }
 
     fn push_same2(&mut self, tile: usize) {
-        self.same2.push(Same2::new(tile as TileType, tile as TileType).unwrap());
+        self.same2
+            .push(Same2::new(tile as TileType, tile as TileType).unwrap());
     }
-    fn pop_same2(&mut self) { self.same2.pop(); }
-    fn same2_count(&self) -> usize { self.same2.len() }
+    fn pop_same2(&mut self) {
+        self.same2.pop();
+    }
+    fn same2_count(&self) -> usize {
+        self.same2.len()
+    }
 
     fn push_seq2(&mut self, tile1: usize, tile2: usize) {
-        self.sequential2.push(Sequential2::new(tile1 as TileType, tile2 as TileType).unwrap());
+        self.sequential2
+            .push(Sequential2::new(tile1 as TileType, tile2 as TileType).unwrap());
     }
-    fn pop_seq2(&mut self) { self.sequential2.pop(); }
-    fn seq2_count(&self) -> usize { self.sequential2.len() }
+    fn pop_seq2(&mut self) {
+        self.sequential2.pop();
+    }
+    fn seq2_count(&self) -> usize {
+        self.sequential2.len()
+    }
 
-    fn snapshot_best(&self, _pre: &FullTrackingPreprocess, t: &TileSummarize, _head: usize) -> Self {
+    fn snapshot_best(
+        &self,
+        _pre: &FullTrackingPreprocess,
+        t: &TileSummarize,
+        _head: usize,
+    ) -> Self {
         let mut single = Vec::new();
         for i in 0..Tile::LEN as usize {
             for _ in 0..t[i] {
@@ -520,8 +605,6 @@ impl ShantenAccumulator for FullTracking {
         self
     }
 }
-
-// --- 共通再帰ロジック ---
 
 /// 通常形のシャンテン数を計算する共通エントリポイント
 fn calc_normal_shanten<A: ShantenAccumulator>(hand: &Hand) -> Result<(i32, A)> {
@@ -658,8 +741,8 @@ fn is_isolated(t: &TileSummarize, i: usize) -> bool {
     }
     let pos = i % 9;
     let base = i - pos;
-    let left2  = pos < 2 || t[base + pos - 2] == 0;
-    let left1  = pos < 1 || t[base + pos - 1] == 0;
+    let left2 = pos < 2 || t[base + pos - 2] == 0;
+    let left1 = pos < 1 || t[base + pos - 1] == 0;
     let right1 = pos > 7 || t[base + pos + 1] == 0;
     let right2 = pos > 6 || t[base + pos + 2] == 0;
     left2 && left1 && right1 && right2
@@ -694,18 +777,23 @@ fn extract_independent_same3_full(t: &mut TileSummarize) -> Result<Vec<Same3>> {
 ///
 /// 一盃口を先に処理してから通常処理する。
 /// `on_found` は見つかった順子の先頭インデックスと個数（1 or 2）を受け取る。
-fn extract_independent_seq3_impl(
-    t: &mut TileSummarize,
-    mut on_found: impl FnMut(usize, u32),
-) {
+fn extract_independent_seq3_impl(t: &mut TileSummarize, mut on_found: impl FnMut(usize, u32)) {
     for n in (1u32..=2).rev() {
         for suit_start in (0..27).step_by(9) {
             for k in 0..=6usize {
                 let l = suit_start + k;
-                if k >= 2 && t[l - 2] > 0 { continue; }
-                if k >= 1 && t[l - 1] > 0 { continue; }
-                if k <= 5 && t[l + 3] > 0 { continue; }
-                if k <= 4 && t[l + 4] > 0 { continue; }
+                if k >= 2 && t[l - 2] > 0 {
+                    continue;
+                }
+                if k >= 1 && t[l - 1] > 0 {
+                    continue;
+                }
+                if k <= 5 && t[l + 3] > 0 {
+                    continue;
+                }
+                if k <= 4 && t[l + 4] > 0 {
+                    continue;
+                }
                 if t[l] == n && t[l + 1] == n && t[l + 2] == n {
                     t[l] -= n;
                     t[l + 1] -= n;
@@ -731,15 +819,22 @@ fn extract_independent_seq3_full(t: &mut TileSummarize) -> Result<Vec<Sequential
     let mut result = Vec::new();
     let mut err: Option<anyhow::Error> = None;
     extract_independent_seq3_impl(t, |l, n| {
-        if err.is_some() { return; }
+        if err.is_some() {
+            return;
+        }
         for _ in 0..n {
             match Sequential3::new(l as TileType, (l + 1) as TileType, (l + 2) as TileType) {
                 Ok(s) => result.push(s),
-                Err(e) => { err = Some(e); return; }
+                Err(e) => {
+                    err = Some(e);
+                    return;
+                }
             }
         }
     });
-    if let Some(e) = err { return Err(e); }
+    if let Some(e) = err {
+        return Err(e);
+    }
     Ok(result)
 }
 
@@ -938,8 +1033,18 @@ mod tests {
     #[test]
     fn opened_hand_cannot_be_seven_pairs_or_thirteen_orphans() {
         let test = Hand::from("123456789m11p 789s 1p");
-        assert!(HandAnalyzer::new_by_form(&test, Form::SevenPairs).unwrap().shanten > 0);
-        assert!(HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans).unwrap().shanten > 0);
+        assert!(
+            HandAnalyzer::new_by_form(&test, Form::SevenPairs)
+                .unwrap()
+                .shanten
+                > 0
+        );
+        assert!(
+            HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans)
+                .unwrap()
+                .shanten
+                > 0
+        );
     }
 
     /// 様々なパターンの手牌でシャンテン数が正しいことを検証する回帰テスト
@@ -959,6 +1064,9 @@ mod tests {
     fn shanten_regression(#[case] hand_str: &str, #[case] expected: i32) {
         let hand = Hand::from(hand_str);
         let shanten = HandAnalyzer::new(&hand).unwrap().shanten;
-        assert_eq!(shanten, expected, "hand '{hand_str}': expected {expected}, got {shanten}");
+        assert_eq!(
+            shanten, expected,
+            "hand '{hand_str}': expected {expected}, got {shanten}"
+        );
     }
 }
