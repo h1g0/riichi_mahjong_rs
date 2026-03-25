@@ -16,7 +16,7 @@ pub fn check_nagashi_mangan(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     // 流し満貫は状態フラグで判定する

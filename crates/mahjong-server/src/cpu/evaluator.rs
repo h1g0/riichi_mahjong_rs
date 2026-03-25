@@ -4,8 +4,8 @@
 //! 入力は CpuGameState のみ（サーバ内部にはアクセスしない）。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::hand_analyzer::shanten_number;
-use mahjong_core::tile::{dora_indicator_to_dora, Tile, TileType, Wind};
+use mahjong_core::hand_info::hand_analyzer::{ShantenNumber, calc_shanten_number};
+use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
 
 use super::client::CpuConfig;
 use super::defense;
@@ -17,7 +17,7 @@ pub struct DiscardCandidate {
     /// 捨てる牌
     pub tile: Tile,
     /// 捨てた後の向聴数
-    pub shanten: i32,
+    pub shanten: ShantenNumber,
     /// 有効牌の残り枚数（受入数）
     pub acceptance_count: u32,
     /// 推定打点スコア（高いほど良い）
@@ -56,7 +56,7 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
 
         // 向聴数を高速計算（Vec割り当てなし）
         let hand = Hand::new(remaining.clone(), None);
-        let shanten = shanten_number(&hand);
+        let shanten = calc_shanten_number(&hand);
 
         // 有効牌数（受入数）を計算（既知の向聴数を渡して重複計算を回避）
         let acceptance_count = if config.level.uses_acceptance_count() {
@@ -95,7 +95,7 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
 ///
 /// 13枚の手牌に対して、各牌種を加えた時に向聴数が下がるものをカウント。
 /// `current_shanten` は呼び出し元で既に計算済みの向聴数。
-fn count_acceptance(hand_tiles: &[Tile], visible_counts: &[u8; 34], current_shanten: i32) -> u32 {
+fn count_acceptance(hand_tiles: &[Tile], visible_counts: &[u8; 34], current_shanten: ShantenNumber) -> u32 {
     let mut total = 0u32;
     for tile_type in 0..34u32 {
         // 場に4枚全て見えていたら受入不可
@@ -106,7 +106,7 @@ fn count_acceptance(hand_tiles: &[Tile], visible_counts: &[u8; 34], current_shan
 
         // この牌を加えて向聴数が下がるか（高速計算）
         let test_hand = Hand::new(hand_tiles.to_vec(), Some(Tile::new(tile_type)));
-        let new_shanten = shanten_number(&test_hand);
+        let new_shanten = calc_shanten_number(&test_hand);
 
         if new_shanten < current_shanten {
             total += remaining as u32;
@@ -194,7 +194,11 @@ fn is_chunchanpai(tile_type: TileType) -> bool {
 }
 
 /// 打牌候補から最良の1枚を選ぶ
-pub fn select_best_discard(candidates: &[DiscardCandidate], config: &CpuConfig, attacking: bool) -> Option<Tile> {
+pub fn select_best_discard(
+    candidates: &[DiscardCandidate],
+    config: &CpuConfig,
+    attacking: bool,
+) -> Option<Tile> {
     if candidates.is_empty() {
         return None;
     }
@@ -207,7 +211,7 @@ pub fn select_best_discard(candidates: &[DiscardCandidate], config: &CpuConfig, 
             let mut score = 0.0;
 
             // 向聴数が低いほど良い（負の方向にスコアリング）
-            score -= c.shanten as f64 * 100.0;
+            score -= c.shanten.as_i32() as f64 * 100.0;
 
             // 有効牌数が多いほど良い
             score += c.acceptance_count as f64 * params.speed_weight;
@@ -257,15 +261,19 @@ mod tests {
     #[test]
     fn test_is_chunchanpai() {
         assert!(!is_chunchanpai(Tile::M1)); // 1m = 端牌
-        assert!(is_chunchanpai(Tile::M2));  // 2m = 中張牌
-        assert!(is_chunchanpai(Tile::M8));  // 8m = 中張牌
+        assert!(is_chunchanpai(Tile::M2)); // 2m = 中張牌
+        assert!(is_chunchanpai(Tile::M8)); // 8m = 中張牌
         assert!(!is_chunchanpai(Tile::M9)); // 9m = 端牌
         assert!(!is_chunchanpai(Tile::Z1)); // 東 = 字牌
     }
 
     #[test]
     fn test_count_dora_in_hand() {
-        let hand = vec![Tile::new(Tile::M2), Tile::new(Tile::M2), Tile::new(Tile::M3)];
+        let hand = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+        ];
         let indicators = vec![Tile::new(Tile::M1)]; // ドラ表示牌1m → ドラは2m
         assert_eq!(count_dora_in_hand(&hand, &indicators), 2);
     }

@@ -676,7 +676,7 @@ impl GameState {
         }
 
         match HandAnalyzer::new(&hand) {
-            Ok(analyzer) => analyzer.shanten == 0,
+            Ok(analyzer) => analyzer.shanten.is_ready(),
             Err(_) => false,
         }
     }
@@ -746,7 +746,7 @@ impl GameState {
             Ok(a) => a,
             Err(_) => return false,
         };
-        if analyzer.shanten != 0 {
+        if !analyzer.shanten.is_ready() {
             return false;
         }
 
@@ -756,7 +756,7 @@ impl GameState {
             let mut test_hand = hand.clone();
             test_hand.set_drawn(Some(Tile::new(tile_type)));
             if let Ok(a) = HandAnalyzer::new(&test_hand) {
-                if a.shanten == -1 {
+                if a.shanten.has_won() {
                     waiting.push(tile_type);
                 }
             }
