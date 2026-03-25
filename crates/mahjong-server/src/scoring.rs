@@ -169,7 +169,7 @@ pub fn get_waiting_tiles(player: &Player) -> Vec<TileType> {
         let mut hand = player.hand.clone();
         hand.set_drawn(Some(Tile::new(tile_type)));
 
-        if hand_analyzer::shanten_number(&hand) == -1 {
+        if hand_analyzer::calc_shanten_number(&hand) == -1 {
             waiting.push(tile_type);
         }
     }
@@ -333,7 +333,7 @@ pub fn add_dora_to_score(
 
 /// プレイヤーがテンパイしているか判定する（13枚の手牌で）
 pub fn is_tenpai(player: &Player) -> bool {
-    hand_analyzer::shanten_number(&player.hand) == 0
+    hand_analyzer::calc_shanten_number(&player.hand) == 0
 }
 
 /// ロン和了の点数移動を計算する

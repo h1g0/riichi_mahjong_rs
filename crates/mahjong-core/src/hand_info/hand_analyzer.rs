@@ -129,47 +129,40 @@ impl HandAnalyzer {
     /// ```
     pub fn new_by_form(hand: &Hand, form: Form) -> Result<HandAnalyzer> {
         Ok(match form {
-            Form::SevenPairs => HandAnalyzer::calc_seven_pairs(hand)?,
-            Form::ThirteenOrphans => HandAnalyzer::calc_thirteen_orphans(hand)?,
-            Form::Normal => HandAnalyzer::calc_normal_form(hand)?,
+            Form::SevenPairs => HandAnalyzer::analyze_seven_pairs(hand)?,
+            Form::ThirteenOrphans => HandAnalyzer::analyze_thirteen_orphans(hand)?,
+            Form::Normal => HandAnalyzer::analyze_normal_form(hand)?,
         })
     }
 
-    /// 七対子への向聴数を計算する
+    /// 七対子への向聴数を計算・ブロック分解する
     ///
     /// Vecへの詰め込みは`same2`（対子）以外は`single`（単独）に詰め込まれる。
     /// 七対子はVecを使用する役として断么九・混老頭・混一色・清一色と複合しうる
-    fn calc_seven_pairs(hand: &Hand) -> Result<HandAnalyzer> {
+    fn analyze_seven_pairs(hand: &Hand) -> Result<HandAnalyzer> {
         if !hand.opened().is_empty() {
             return Ok(HandAnalyzer::unavailable(Form::SevenPairs));
         }
 
-        let mut pair: u32 = 0;
-        let mut kind: u32 = 0;
         let mut t = hand.summarize_tiles();
-        let mut same2: Vec<Same2> = Vec::new();
+        let (shanten, pair_count) = calc_seven_pairs_shanten(&t);
+        let _ = pair_count; // ブロック分解では直接使わない
 
+        let mut same2: Vec<Same2> = Vec::new();
         for i in 0..Tile::LEN {
-            if t[i] > 0 {
-                kind += 1;
-                if t[i] >= 2 {
-                    pair += 1;
-                    same2.push(Same2::new(i as TileType, i as TileType)?);
-                    t[i] -= 2;
-                }
+            if t[i] >= 2 {
+                same2.push(Same2::new(i as TileType, i as TileType)?);
+                t[i] -= 2;
             }
         }
-        let num_to_win: i32 = (7 - pair + if kind < 7 { 7 - kind } else { 0 }) as i32;
         let mut single: Vec<TileType> = Vec::new();
         for i in 0..Tile::LEN {
-            if t[i] > 0 {
-                for _ in 0..t[i] {
-                    single.push(i as TileType);
-                }
+            for _ in 0..t[i] {
+                single.push(i as TileType);
             }
         }
         Ok(HandAnalyzer {
-            shanten: num_to_win - 1,
+            shanten,
             form: Form::SevenPairs,
             same3: Vec::new(),
             sequential3: Vec::new(),
@@ -181,42 +174,16 @@ impl HandAnalyzer {
 
     /// 国士無双への向聴数を計算する
     ///
-    /// Vecへの詰め込みは未実装（詰め込んでも意味がない）
-    fn calc_thirteen_orphans(hand: &Hand) -> Result<HandAnalyzer> {
+    /// ブロック分解・Vecへの詰め込みは未実装（詰め込んでも意味がない）
+    fn analyze_thirteen_orphans(hand: &Hand) -> Result<HandAnalyzer> {
         if !hand.opened().is_empty() {
             return Ok(HandAnalyzer::unavailable(Form::ThirteenOrphans));
         }
 
-        let to_tiles = [
-            Tile::M1,
-            Tile::M9,
-            Tile::P1,
-            Tile::P9,
-            Tile::S1,
-            Tile::S9,
-            Tile::Z1,
-            Tile::Z2,
-            Tile::Z3,
-            Tile::Z4,
-            Tile::Z5,
-            Tile::Z6,
-            Tile::Z7,
-        ];
-        let mut pair: u32 = 0;
-        let mut kind: u32 = 0;
         let t = hand.summarize_tiles();
-
-        for i in &to_tiles {
-            if t[*i as usize] > 0 {
-                kind = kind + 1;
-                if t[*i as usize] >= 2 {
-                    pair += 1;
-                }
-            }
-        }
-        let num_to_win: i32 = (14 - kind - if pair > 0 { 1 } else { 0 }) as i32;
+        let shanten = calc_thirteen_orphans_shanten(&t);
         Ok(HandAnalyzer {
-            shanten: num_to_win - 1,
+            shanten,
             form: Form::ThirteenOrphans,
             same3: Vec::new(),
             sequential3: Vec::new(),
@@ -226,8 +193,8 @@ impl HandAnalyzer {
         })
     }
 
-    /// 通常の役への向聴数を計算する
-    fn calc_normal_form(hand: &Hand) -> Result<HandAnalyzer> {
+    /// 通常の役への向聴数を計算・ブロック分解する
+    fn analyze_normal_form(hand: &Hand) -> Result<HandAnalyzer> {
         let (shanten, tracking) = calc_normal_shanten::<FullTracking>(hand)?;
         let FullTracking {
             same3,
@@ -253,24 +220,25 @@ pub fn has_won(hand: &HandAnalyzer) -> bool {
     hand.shanten == -1
 }
 
-/// 向聴数のみを高速に計算する（ブロック分解のVec割り当てなし）
+/// 向聴数のみを高速に計算する（ブロック分解・Vec格納なし）
 ///
 /// `HandAnalyzer::new()` と同じ結果を返すが、向聴数の数値のみを返す。
 /// CPU打牌評価など大量に呼び出す箇所で使用する。
-pub fn shanten_number(hand: &Hand) -> i32 {
-    let sp = shanten_seven_pairs(hand);
-    let to = shanten_thirteen_orphans(hand);
+pub fn calc_shanten_number(hand: &Hand) -> i32 {
+    let t = hand.summarize_tiles();
+    let is_closed = hand.opened().is_empty();
+    let sp = if is_closed { calc_seven_pairs_shanten(&t).0 } else { UNAVAILABLE_SHANTEN };
+    let to = if is_closed { calc_thirteen_orphans_shanten(&t) } else { UNAVAILABLE_SHANTEN };
     let nm = calc_normal_shanten::<CountOnly>(hand)
         .map(|(s, _)| s)
         .unwrap_or(UNAVAILABLE_SHANTEN);
     min(min(sp, to), nm)
 }
 
-fn shanten_seven_pairs(hand: &Hand) -> i32 {
-    if !hand.opened().is_empty() {
-        return UNAVAILABLE_SHANTEN;
-    }
-    let t = hand.summarize_tiles();
+/// 七対子のシャンテン数を計算する共通ロジック
+///
+/// 戻り値: `(shanten, pair_count)`
+fn calc_seven_pairs_shanten(t: &TileSummarize) -> (i32, u32) {
     let mut pair: u32 = 0;
     let mut kind: u32 = 0;
     for i in 0..Tile::LEN as usize {
@@ -281,14 +249,13 @@ fn shanten_seven_pairs(hand: &Hand) -> i32 {
             }
         }
     }
-    (7 - pair + if kind < 7 { 7 - kind } else { 0 }) as i32 - 1
+    let shanten = (7 - pair + if kind < 7 { 7 - kind } else { 0 }) as i32 - 1;
+    (shanten, pair)
 }
 
-fn shanten_thirteen_orphans(hand: &Hand) -> i32 {
-    if !hand.opened().is_empty() {
-        return UNAVAILABLE_SHANTEN;
-    }
-    let to_tiles: [usize; 13] = [
+/// 国士無双のシャンテン数を計算する共通ロジック
+fn calc_thirteen_orphans_shanten(t: &TileSummarize) -> i32 {
+    const TO_TILES: [usize; 13] = [
         Tile::M1 as usize,
         Tile::M9 as usize,
         Tile::P1 as usize,
@@ -303,10 +270,9 @@ fn shanten_thirteen_orphans(hand: &Hand) -> i32 {
         Tile::Z6 as usize,
         Tile::Z7 as usize,
     ];
-    let t = hand.summarize_tiles();
     let mut pair: u32 = 0;
     let mut kind: u32 = 0;
-    for &i in &to_tiles {
+    for &i in &TO_TILES {
         if t[i] > 0 {
             kind += 1;
             if t[i] >= 2 {
