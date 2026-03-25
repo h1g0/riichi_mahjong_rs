@@ -1052,8 +1052,8 @@ mod tests {
 
     /// 様々なパターンの手牌でシャンテン数が正しいことを検証する回帰テスト
     #[rstest::rstest]
-    #[case::seven_pairs_tenpai("226699m99p228s66z 1z", 0)]
-    #[case::thirteen_orphans_tenpai("19m19p11s1234567z 5m", 0)]
+    #[case::seven_pairs_ready("226699m99p228s66z 1z", 0)]
+    #[case::thirteen_orphans_ready("19m19p11s1234567z 5m", 0)]
     #[case::normal_win_triplets("123m444p789s1112z 2z", -1)]
     #[case::normal_win_flush("222333444666s6z 6z", -1)]
     #[case::normal_win_nine_gates("1112345678999m 5m", -1)]
