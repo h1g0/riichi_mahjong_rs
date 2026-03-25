@@ -17,7 +17,7 @@ pub fn check_two_sets_of_identical_sequences(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 門前でなければ二盃口は成立しない
@@ -64,7 +64,7 @@ pub fn check_terminal_in_each_set(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 清老頭とは複合しないため、必ず順子が含まれる
@@ -115,7 +115,7 @@ pub fn check_half_flush(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     let mut has_honor = false;

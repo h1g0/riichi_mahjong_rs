@@ -19,7 +19,7 @@ pub fn check_thirteen_orphans(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     return if hand_analyzer.form == Form::ThirteenOrphans {
@@ -49,7 +49,7 @@ pub fn check_four_concealed_triplets(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     if status.has_claimed_open
@@ -78,7 +78,7 @@ pub fn check_four_concealed_triplets_single_wait(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     if status.has_claimed_open || hand_analyzer.same3.len() != 4 {
@@ -102,7 +102,7 @@ pub fn check_big_three_dragons(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 大三元: 三元牌（白・發・中）の3つすべてが刻子
@@ -132,7 +132,7 @@ pub fn check_little_four_winds(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 小四喜: 風牌のうち3つが刻子、1つが雀頭
@@ -173,7 +173,7 @@ pub fn check_big_four_winds(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 大四喜: 風牌4つすべてが刻子
@@ -204,7 +204,7 @@ pub fn check_all_honors(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 字一色: すべての牌が字牌で構成される
@@ -243,7 +243,7 @@ pub fn check_all_terminals(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 清老頭: すべての牌が数牌の1と9のみで構成される（字牌なし・順子なし）
@@ -273,7 +273,7 @@ pub fn check_all_green(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 緑一色: 2s, 3s, 4s, 6s, 8s, 6z（發）のみで構成される
@@ -314,7 +314,7 @@ pub fn check_nine_gates(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 九蓮宝燈: 門前で同一種の数牌のみで、1112345678999+同種1枚の形
@@ -437,7 +437,7 @@ pub fn check_four_kans(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 四槓子: 4つの槓子を持っている
@@ -458,7 +458,7 @@ pub fn check_heavenly_hand(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 天和: 親の配牌時点で和了している（第一ツモ・親・自摸）
@@ -480,7 +480,7 @@ pub fn check_hand_of_earth(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 地和: 子の第一ツモで和了している（第一ツモ・子・自摸）

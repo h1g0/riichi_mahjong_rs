@@ -13,7 +13,7 @@ pub fn check_flush(
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(Kind::Flush, status.has_claimed_open, settings.display_lang);
-    if !has_won(hand_analyzer) {
+    if !hand_analyzer.has_won() {
         return Ok((name, false, 0));
     }
     // 清一色: 1種類の数牌のみで構成される（字牌なし）

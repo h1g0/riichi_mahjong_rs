@@ -215,9 +215,11 @@ impl HandAnalyzer {
     }
 }
 
-/// 和了しているか否か
-pub fn has_won(hand: &HandAnalyzer) -> bool {
-    hand.shanten == -1
+impl HandAnalyzer {
+    /// 和了しているか否か
+    pub fn has_won(&self) -> bool {
+        self.shanten == -1
+    }
 }
 
 /// 向聴数のみを高速に計算する（ブロック分解・Vec格納なし）
