@@ -332,8 +332,8 @@ pub fn add_dora_to_score(
 }
 
 /// プレイヤーがテンパイしているか判定する（13枚の手牌で）
-pub fn is_tenpai(player: &Player) -> bool {
-    hand_analyzer::calc_shanten_number(&player.hand).is_tenpai()
+pub fn is_ready(player: &Player) -> bool {
+    hand_analyzer::calc_shanten_number(&player.hand).is_ready()
 }
 
 /// ロン和了の点数移動を計算する

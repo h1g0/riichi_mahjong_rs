@@ -1154,7 +1154,7 @@ impl Round {
             }
         }
 
-        hand_analyzer::calc_shanten_number(&hand).is_tenpai()
+        hand_analyzer::calc_shanten_number(&hand).is_ready()
     }
 
     /// プレイヤーがリーチ宣言可能か判定する
@@ -1532,7 +1532,7 @@ impl Round {
         let mut noten_players = Vec::new();
 
         for i in 0..4 {
-            if scoring::is_tenpai(&self.players[i]) {
+            if scoring::is_ready(&self.players[i]) {
                 tenpai_players.push(i);
             } else {
                 noten_players.push(i);

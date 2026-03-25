@@ -283,7 +283,7 @@ impl CpuClient {
             let hand = Hand::new(remaining, None);
             let shanten = calc_shanten_number(&hand);
 
-            if shanten.is_tenpai() {
+            if shanten.is_ready() {
                 // 安全度で比較
                 let safety = super::defense::evaluate_safety(tile, &self.state);
                 if best.is_none() || safety > best.unwrap().1 {
@@ -329,7 +329,7 @@ impl CpuClient {
                         .copied()
                         .collect();
                     let hand = Hand::new(remaining, None);
-                    if !calc_shanten_number(&hand).is_tenpai_or_won() {
+                    if !calc_shanten_number(&hand).is_ready_or_won() {
                         continue; // テンパイが崩れるのでカンしない
                     }
                 }
@@ -355,7 +355,7 @@ impl CpuClient {
         let shanten = calc_shanten_number(&hand);
 
         // テンパイなら基本的に攻撃
-        if shanten.is_tenpai_or_won() {
+        if shanten.is_ready_or_won() {
             return true;
         }
 

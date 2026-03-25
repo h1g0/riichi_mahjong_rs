@@ -676,7 +676,7 @@ impl GameState {
         }
 
         match HandAnalyzer::new(&hand) {
-            Ok(analyzer) => analyzer.shanten.is_tenpai(),
+            Ok(analyzer) => analyzer.shanten.is_ready(),
             Err(_) => false,
         }
     }
@@ -746,7 +746,7 @@ impl GameState {
             Ok(a) => a,
             Err(_) => return false,
         };
-        if !analyzer.shanten.is_tenpai() {
+        if !analyzer.shanten.is_ready() {
             return false;
         }
 

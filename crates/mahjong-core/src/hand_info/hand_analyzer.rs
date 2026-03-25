@@ -8,9 +8,7 @@ use crate::hand_info::block::*;
 use crate::tile::*;
 use crate::winning_hand::name::Form;
 
-/// 向聴数を表すニュータイプ
-///
-/// テンパイが`0`、和了が`-1`。意味のあるメソッドを通じて状態を判定できる。
+/// 向聴数
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ShantenNumber(i32);
 
@@ -23,13 +21,13 @@ impl ShantenNumber {
         self.0 == -1
     }
 
-    /// テンパイしているか（shanten == 0）
-    pub fn is_tenpai(&self) -> bool {
+    /// 聴牌しているか（shanten == 0）
+    pub fn is_ready(&self) -> bool {
         self.0 == 0
     }
 
-    /// テンパイ以上か（shanten <= 0）
-    pub fn is_tenpai_or_won(&self) -> bool {
+    /// 聴牌もしくは和了しているか（shanten <= 0）
+    pub fn is_ready_or_won(&self) -> bool {
         self.0 <= 0
     }
 
@@ -60,10 +58,10 @@ impl fmt::Display for ShantenNumber {
 /// 与えられた手牌について、向聴数が最小になる時の面子・対子等の組み合わせを計算して格納する
 ///
 /// 通常形・七対子の場合は面子・対子等の情報もVecに格納される。
-/// 国士無双の場合は（今のところ）向聴数のみが格納される。
+/// 国士無双の場合は向聴数のみが格納される。
 #[derive(Debug, Eq)]
 pub struct HandAnalyzer {
-    /// 向聴数：あと牌を何枚交換すれば聴牌できるかの最小数。テンパイが`0`、和了が`-1`。
+    /// 向聴数：あと牌を何枚交換すれば聴牌できるかの最小数。
     pub shanten: ShantenNumber,
     /// どの和了形か
     pub form: Form,
@@ -209,7 +207,7 @@ impl HandAnalyzer {
 
     /// 国士無双への向聴数を計算する
     ///
-    /// ブロック分解・Vecへの詰め込みは未実装（詰め込んでも意味がない）
+    /// ブロック分解・Vecへの詰め込みはしない（詰め込んでも意味がない）
     fn analyze_thirteen_orphans(hand: &Hand) -> Result<HandAnalyzer> {
         if !hand.opened().is_empty() {
             return Ok(HandAnalyzer::unavailable(Form::ThirteenOrphans));
@@ -250,15 +248,24 @@ impl HandAnalyzer {
     }
 }
 
-/// 向聴数のみを高速に計算する（ブロック分解・Vec格納なし）
+/// 向聴数のみを高速に計算する
 ///
-/// `HandAnalyzer::new()` と同じ結果を返すが、向聴数の数値のみを返す。
+/// `HandAnalyzer::new().shanten` と同じ結果を返すが、
+/// ブロック分解やVecへの格納を行わないため高速。
 /// CPU打牌評価など大量に呼び出す箇所で使用する。
 pub fn calc_shanten_number(hand: &Hand) -> ShantenNumber {
     let t = hand.summarize_tiles();
     let is_closed = hand.opened().is_empty();
-    let sp = if is_closed { calc_seven_pairs_shanten(&t).0 } else { i32::MAX };
-    let to = if is_closed { calc_thirteen_orphans_shanten(&t) } else { i32::MAX };
+    let sp = if is_closed {
+        calc_seven_pairs_shanten(&t).0
+    } else {
+        i32::MAX
+    };
+    let to = if is_closed {
+        calc_thirteen_orphans_shanten(&t)
+    } else {
+        i32::MAX
+    };
     let nm = calc_normal_shanten::<CountOnly>(hand)
         .map(|(s, _)| s)
         .unwrap_or(i32::MAX);
@@ -872,7 +879,7 @@ mod tests {
             HandAnalyzer::new_by_form(&test, Form::SevenPairs)
                 .unwrap()
                 .shanten
-                .is_tenpai()
+                .is_ready()
         );
     }
     #[test]
@@ -884,7 +891,7 @@ mod tests {
             HandAnalyzer::new_by_form(&test, Form::SevenPairs)
                 .unwrap()
                 .shanten
-                .is_tenpai()
+                .is_ready()
         );
     }
     #[test]
@@ -896,7 +903,7 @@ mod tests {
             HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans)
                 .unwrap()
                 .shanten
-                .is_tenpai()
+                .is_ready()
         );
     }
 
@@ -994,7 +1001,7 @@ mod tests {
     fn tenpai_with_89_wait() {
         let test_str = "55m123567p56789s 9m";
         let test = Hand::from(test_str);
-        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_ready());
     }
 
     #[test]
@@ -1002,7 +1009,7 @@ mod tests {
     fn tenpai_with_89s_toitsu() {
         let test_str = "11m234p567p234s89s 1z";
         let test = Hand::from(test_str);
-        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_ready());
     }
 
     #[test]
@@ -1010,20 +1017,20 @@ mod tests {
     fn tenpai_with_89m_toitsu() {
         let test_str = "89m11p234p567s234s 2z";
         let test = Hand::from(test_str);
-        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_ready());
     }
 
     #[test]
     /// 4面子1塔子は和了ではなく聴牌
-    fn four_melds_and_one_taatsu_is_tenpai_not_win() {
+    fn four_melds_and_one_taatsu_is_ready_not_win() {
         let test = Hand::from("234678m56p567s55z 5z");
-        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_ready());
     }
 
     #[test]
     fn kan_hand_with_unrelated_rinshan_tile_is_not_a_win() {
         let test = Hand::from("567p123s678s8s 5555s 1m");
-        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_ready());
     }
 
     #[test]
@@ -1033,13 +1040,13 @@ mod tests {
             !HandAnalyzer::new_by_form(&test, Form::SevenPairs)
                 .unwrap()
                 .shanten
-                .is_tenpai_or_won()
+                .is_ready_or_won()
         );
         assert!(
             !HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans)
                 .unwrap()
                 .shanten
-                .is_tenpai_or_won()
+                .is_ready_or_won()
         );
     }
 
