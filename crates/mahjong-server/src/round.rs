@@ -1154,7 +1154,7 @@ impl Round {
             }
         }
 
-        hand_analyzer::calc_shanten_number(&hand) == 0
+        hand_analyzer::calc_shanten_number(&hand).is_tenpai()
     }
 
     /// プレイヤーがリーチ宣言可能か判定する

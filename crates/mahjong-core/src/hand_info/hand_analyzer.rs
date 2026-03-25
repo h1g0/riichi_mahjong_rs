@@ -1,13 +1,61 @@
 use anyhow::Result;
 
 use std::cmp::*;
+use std::fmt;
 
 use crate::hand::Hand;
 use crate::hand_info::block::*;
 use crate::tile::*;
 use crate::winning_hand::name::Form;
 
-const UNAVAILABLE_SHANTEN: i32 = i32::MAX;
+/// 向聴数を表すニュータイプ
+///
+/// テンパイが`0`、和了が`-1`。意味のあるメソッドを通じて状態を判定できる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ShantenNumber(i32);
+
+impl ShantenNumber {
+    /// 該当なし（副露時の七対子・国士無双など）を表す定数
+    const UNAVAILABLE: ShantenNumber = ShantenNumber(i32::MAX);
+
+    /// 和了しているか（shanten == -1）
+    pub fn has_won(&self) -> bool {
+        self.0 == -1
+    }
+
+    /// テンパイしているか（shanten == 0）
+    pub fn is_tenpai(&self) -> bool {
+        self.0 == 0
+    }
+
+    /// テンパイ以上か（shanten <= 0）
+    pub fn is_tenpai_or_won(&self) -> bool {
+        self.0 <= 0
+    }
+
+    /// 生の`i32`値を返す
+    pub fn as_i32(&self) -> i32 {
+        self.0
+    }
+}
+
+impl PartialEq<i32> for ShantenNumber {
+    fn eq(&self, other: &i32) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialOrd<i32> for ShantenNumber {
+    fn partial_cmp(&self, other: &i32) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(other)
+    }
+}
+
+impl fmt::Display for ShantenNumber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// 与えられた手牌について、向聴数が最小になる時の面子・対子等の組み合わせを計算して格納する
 ///
@@ -15,8 +63,8 @@ const UNAVAILABLE_SHANTEN: i32 = i32::MAX;
 /// 国士無双の場合は（今のところ）向聴数のみが格納される。
 #[derive(Debug, Eq)]
 pub struct HandAnalyzer {
-    /// 向聴数：あと牌を何枚交換すれば聴牌できるかの最小数。聴牌状態が`0`、和了が`-1`。
-    pub shanten: i32,
+    /// 向聴数：あと牌を何枚交換すれば聴牌できるかの最小数。テンパイが`0`、和了が`-1`。
+    pub shanten: ShantenNumber,
     /// どの和了形か
     pub form: Form,
     /// 刻子（同じ牌が3枚）が入るVec
@@ -51,7 +99,7 @@ impl PartialEq for HandAnalyzer {
 impl HandAnalyzer {
     fn unavailable(form: Form) -> HandAnalyzer {
         HandAnalyzer {
-            shanten: UNAVAILABLE_SHANTEN,
+            shanten: ShantenNumber::UNAVAILABLE,
             form,
             same3: Vec::new(),
             sequential3: Vec::new(),
@@ -73,10 +121,7 @@ impl HandAnalyzer {
     /// let nm_test_str = "222333444666s6z 6z";
     /// let nm_test = Hand::from(nm_test_str);
     /// let analyzer = HandAnalyzer::new(&nm_test).unwrap();
-    /// assert_eq!(
-    ///   analyzer.shanten,
-    ///   -1
-    /// );
+    /// assert!(analyzer.shanten.has_won());
     /// assert_eq!(
     ///   analyzer.form,
     ///   Form::Normal
@@ -86,9 +131,9 @@ impl HandAnalyzer {
         let sp = HandAnalyzer::new_by_form(hand, Form::SevenPairs)?;
         let to = HandAnalyzer::new_by_form(hand, Form::ThirteenOrphans)?;
         let normal = HandAnalyzer::new_by_form(hand, Form::Normal)?;
-        // 高点法: 和了している場合（shanten == -1）、通常形を優先する。
+        // 高点法: 和了している場合、通常形を優先する。
         // 二盃口（3翻）は七対子（2翻）より高得点であるため、通常形で和了できるならそちらを採用する。
-        if normal.shanten == -1 {
+        if normal.shanten.has_won() {
             Ok(normal)
         } else {
             Ok(min(min(sp, to), normal))
@@ -106,26 +151,17 @@ impl HandAnalyzer {
     /// // 国士無双で和了る
     /// let to_test_str = "19m19p19s1234567z 1m";
     /// let to_test = Hand::from(to_test_str);
-    /// assert_eq!(
-    ///   HandAnalyzer::new_by_form(&to_test, Form::ThirteenOrphans).unwrap().shanten,
-    ///   -1
-    /// );
+    /// assert!(HandAnalyzer::new_by_form(&to_test, Form::ThirteenOrphans).unwrap().shanten.has_won());
     ///
     /// // 七対子で和了る
     /// let sp_test_str = "1122m3344p5566s7z 7z";
     /// let sp_test = Hand::from(sp_test_str);
-    /// assert_eq!(
-    ///   HandAnalyzer::new_by_form(&sp_test, Form::SevenPairs).unwrap().shanten,
-    ///   -1
-    /// );
+    /// assert!(HandAnalyzer::new_by_form(&sp_test, Form::SevenPairs).unwrap().shanten.has_won());
     ///
     /// // 通常型で和了る
     /// let nm_test_str = "1112345678999m 5m";
     /// let nm_test = Hand::from(nm_test_str);
-    /// assert_eq!(
-    ///   HandAnalyzer::new_by_form(&nm_test, Form::Normal).unwrap().shanten,
-    ///   -1
-    /// );
+    /// assert!(HandAnalyzer::new_by_form(&nm_test, Form::Normal).unwrap().shanten.has_won());
     /// ```
     pub fn new_by_form(hand: &Hand, form: Form) -> Result<HandAnalyzer> {
         Ok(match form {
@@ -145,8 +181,7 @@ impl HandAnalyzer {
         }
 
         let mut t = hand.summarize_tiles();
-        let (shanten, pair_count) = calc_seven_pairs_shanten(&t);
-        let _ = pair_count; // ブロック分解では直接使わない
+        let (shanten_raw, _pair_count) = calc_seven_pairs_shanten(&t);
 
         let mut same2: Vec<Same2> = Vec::new();
         for i in 0..Tile::LEN {
@@ -162,7 +197,7 @@ impl HandAnalyzer {
             }
         }
         Ok(HandAnalyzer {
-            shanten,
+            shanten: ShantenNumber(shanten_raw),
             form: Form::SevenPairs,
             same3: Vec::new(),
             sequential3: Vec::new(),
@@ -181,9 +216,9 @@ impl HandAnalyzer {
         }
 
         let t = hand.summarize_tiles();
-        let shanten = calc_thirteen_orphans_shanten(&t);
+        let shanten_raw = calc_thirteen_orphans_shanten(&t);
         Ok(HandAnalyzer {
-            shanten,
+            shanten: ShantenNumber(shanten_raw),
             form: Form::ThirteenOrphans,
             same3: Vec::new(),
             sequential3: Vec::new(),
@@ -195,7 +230,7 @@ impl HandAnalyzer {
 
     /// 通常の役への向聴数を計算・ブロック分解する
     fn analyze_normal_form(hand: &Hand) -> Result<HandAnalyzer> {
-        let (shanten, tracking) = calc_normal_shanten::<FullTracking>(hand)?;
+        let (shanten_raw, tracking) = calc_normal_shanten::<FullTracking>(hand)?;
         let FullTracking {
             same3,
             sequential3,
@@ -204,7 +239,7 @@ impl HandAnalyzer {
             single,
         } = tracking;
         Ok(HandAnalyzer {
-            shanten,
+            shanten: ShantenNumber(shanten_raw),
             form: Form::Normal,
             same3,
             sequential3,
@@ -215,26 +250,19 @@ impl HandAnalyzer {
     }
 }
 
-impl HandAnalyzer {
-    /// 和了しているか否か
-    pub fn has_won(&self) -> bool {
-        self.shanten == -1
-    }
-}
-
 /// 向聴数のみを高速に計算する（ブロック分解・Vec格納なし）
 ///
 /// `HandAnalyzer::new()` と同じ結果を返すが、向聴数の数値のみを返す。
 /// CPU打牌評価など大量に呼び出す箇所で使用する。
-pub fn calc_shanten_number(hand: &Hand) -> i32 {
+pub fn calc_shanten_number(hand: &Hand) -> ShantenNumber {
     let t = hand.summarize_tiles();
     let is_closed = hand.opened().is_empty();
-    let sp = if is_closed { calc_seven_pairs_shanten(&t).0 } else { UNAVAILABLE_SHANTEN };
-    let to = if is_closed { calc_thirteen_orphans_shanten(&t) } else { UNAVAILABLE_SHANTEN };
+    let sp = if is_closed { calc_seven_pairs_shanten(&t).0 } else { i32::MAX };
+    let to = if is_closed { calc_thirteen_orphans_shanten(&t) } else { i32::MAX };
     let nm = calc_normal_shanten::<CountOnly>(hand)
         .map(|(s, _)| s)
-        .unwrap_or(UNAVAILABLE_SHANTEN);
-    min(min(sp, to), nm)
+        .unwrap_or(i32::MAX);
+    ShantenNumber(min(min(sp, to), nm))
 }
 
 /// 七対子のシャンテン数を計算する共通ロジック
@@ -577,7 +605,7 @@ impl ShantenAccumulator for FullTracking {
 /// 通常形のシャンテン数を計算する共通エントリポイント
 fn calc_normal_shanten<A: ShantenAccumulator>(hand: &Hand) -> Result<(i32, A)> {
     let mut t = hand.summarize_tiles();
-    let mut best = UNAVAILABLE_SHANTEN;
+    let mut best = i32::MAX;
 
     let pre = A::preprocess(&mut t)?;
     let mut acc = A::new_tracking();
@@ -840,11 +868,11 @@ mod tests {
     fn zero_shanten_to_seven_pairs() {
         let test_str = "226699m99p228s66z 1z";
         let test = Hand::from(test_str);
-        assert_eq!(
+        assert!(
             HandAnalyzer::new_by_form(&test, Form::SevenPairs)
                 .unwrap()
-                .shanten,
-            0
+                .shanten
+                .is_tenpai()
         );
     }
     #[test]
@@ -852,11 +880,11 @@ mod tests {
     fn zero_shanten_to_seven_pairs_2() {
         let test_str = "226699m99p222s66z 1z";
         let test = Hand::from(test_str);
-        assert_eq!(
+        assert!(
             HandAnalyzer::new_by_form(&test, Form::SevenPairs)
                 .unwrap()
-                .shanten,
-            0
+                .shanten
+                .is_tenpai()
         );
     }
     #[test]
@@ -864,11 +892,11 @@ mod tests {
     fn zero_shanten_to_orphans() {
         let test_str = "19m19p11s1234567z 5m";
         let test = Hand::from(test_str);
-        assert_eq!(
+        assert!(
             HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans)
                 .unwrap()
-                .shanten,
-            0
+                .shanten
+                .is_tenpai()
         );
     }
 
@@ -881,7 +909,7 @@ mod tests {
             HandAnalyzer::new_by_form(&test, Form::SevenPairs)
                 .unwrap()
                 .shanten,
-            1
+            ShantenNumber(1)
         );
     }
 
@@ -890,11 +918,11 @@ mod tests {
     fn win_by_ready_hand() {
         let test_str = "123m444p789s1112z 2z";
         let test = Hand::from(test_str);
-        assert_eq!(
+        assert!(
             HandAnalyzer::new_by_form(&test, Form::Normal)
                 .unwrap()
-                .shanten,
-            -1
+                .shanten
+                .has_won()
         );
     }
 
@@ -903,11 +931,11 @@ mod tests {
     fn win_by_honor_tiles_players_wind() {
         let test_str = "333m456p1789s 333z 1s";
         let test = Hand::from(test_str);
-        assert_eq!(
+        assert!(
             HandAnalyzer::new_by_form(&test, Form::Normal)
                 .unwrap()
-                .shanten,
-            -1
+                .shanten
+                .has_won()
         );
     }
 
@@ -916,11 +944,11 @@ mod tests {
     fn win_by_honor_tiles_prevailing_wind() {
         let test_str = "234567m6789s 111z 6s";
         let test = Hand::from(test_str);
-        assert_eq!(
+        assert!(
             HandAnalyzer::new_by_form(&test, Form::Normal)
                 .unwrap()
-                .shanten,
-            -1
+                .shanten
+                .has_won()
         );
     }
     #[test]
@@ -928,11 +956,11 @@ mod tests {
     fn win_by_honor_tiles_dragons() {
         let test_str = "5m123456p888s 777z 5m";
         let test = Hand::from(test_str);
-        assert_eq!(
+        assert!(
             HandAnalyzer::new_by_form(&test, Form::Normal)
                 .unwrap()
-                .shanten,
-            -1
+                .shanten
+                .has_won()
         );
     }
     #[test]
@@ -940,11 +968,11 @@ mod tests {
     fn win_by_all_simples() {
         let test_str = "234m8s 567m 333p 456s 8s";
         let test = Hand::from(test_str);
-        assert_eq!(
+        assert!(
             HandAnalyzer::new_by_form(&test, Form::Normal)
                 .unwrap()
-                .shanten,
-            -1
+                .shanten
+                .has_won()
         );
     }
 
@@ -953,11 +981,11 @@ mod tests {
     fn win_by_no_points() {
         let test_str = "123567m234p6799s 5s";
         let test = Hand::from(test_str);
-        assert_eq!(
+        assert!(
             HandAnalyzer::new_by_form(&test, Form::Normal)
                 .unwrap()
-                .shanten,
-            -1
+                .shanten
+                .has_won()
         );
     }
 
@@ -966,7 +994,7 @@ mod tests {
     fn tenpai_with_89_wait() {
         let test_str = "55m123567p56789s 9m";
         let test = Hand::from(test_str);
-        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
     }
 
     #[test]
@@ -974,7 +1002,7 @@ mod tests {
     fn tenpai_with_89s_toitsu() {
         let test_str = "11m234p567p234s89s 1z";
         let test = Hand::from(test_str);
-        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
     }
 
     #[test]
@@ -982,36 +1010,36 @@ mod tests {
     fn tenpai_with_89m_toitsu() {
         let test_str = "89m11p234p567s234s 2z";
         let test = Hand::from(test_str);
-        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
     }
 
     #[test]
     /// 4面子1塔子は和了ではなく聴牌
     fn four_melds_and_one_taatsu_is_tenpai_not_win() {
         let test = Hand::from("234678m56p567s55z 5z");
-        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
     }
 
     #[test]
     fn kan_hand_with_unrelated_rinshan_tile_is_not_a_win() {
         let test = Hand::from("567p123s678s8s 5555s 1m");
-        assert_eq!(HandAnalyzer::new(&test).unwrap().shanten, 0);
+        assert!(HandAnalyzer::new(&test).unwrap().shanten.is_tenpai());
     }
 
     #[test]
     fn opened_hand_cannot_be_seven_pairs_or_thirteen_orphans() {
         let test = Hand::from("123456789m11p 789s 1p");
         assert!(
-            HandAnalyzer::new_by_form(&test, Form::SevenPairs)
+            !HandAnalyzer::new_by_form(&test, Form::SevenPairs)
                 .unwrap()
                 .shanten
-                > 0
+                .is_tenpai_or_won()
         );
         assert!(
-            HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans)
+            !HandAnalyzer::new_by_form(&test, Form::ThirteenOrphans)
                 .unwrap()
                 .shanten
-                > 0
+                .is_tenpai_or_won()
         );
     }
 
@@ -1033,7 +1061,8 @@ mod tests {
         let hand = Hand::from(hand_str);
         let shanten = HandAnalyzer::new(&hand).unwrap().shanten;
         assert_eq!(
-            shanten, expected,
+            shanten,
+            ShantenNumber(expected),
             "hand '{hand_str}': expected {expected}, got {shanten}"
         );
     }

@@ -19,7 +19,7 @@ pub fn check_ready_hand(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if status.has_claimed_open {
@@ -47,7 +47,7 @@ pub fn check_self_pick(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if !status.has_claimed_open && status.is_self_picked {
@@ -67,7 +67,7 @@ pub fn check_one_shot(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if !check_ready_hand(hand_analyzer, status, settings)?.1 {
@@ -89,7 +89,7 @@ pub fn check_last_tile_from_the_wall(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if status.is_last_tile_from_the_wall && status.is_self_picked {
@@ -109,7 +109,7 @@ pub fn check_last_discard(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if status.is_last_discard && !status.is_self_picked {
@@ -129,7 +129,7 @@ pub fn check_dead_wall_draw(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if status.is_dead_wall_draw && status.is_self_picked {
@@ -149,7 +149,7 @@ pub fn check_robbing_a_quad(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if status.is_robbing_a_quad && !status.is_self_picked {
@@ -169,7 +169,7 @@ pub fn check_double_ready(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if status.has_claimed_open {
@@ -193,7 +193,7 @@ pub fn check_no_points_hand(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     // 門前でなければ平和は成立しない
@@ -263,7 +263,7 @@ pub fn check_one_set_of_identical_sequences(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     // 鳴いていたら一盃口は成立しない
@@ -310,7 +310,7 @@ pub fn check_all_simples(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     // 喰いタンなしなら鳴いている時点で抜ける
@@ -357,7 +357,7 @@ pub fn check_honor_tiles_players_wind(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     let mut has_player_wind = false;
@@ -385,7 +385,7 @@ pub fn check_honor_tiles_prevailing_wind(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     let mut has_prevailing_wind = false;
@@ -405,7 +405,7 @@ pub fn check_honor_tiles_prevailing_wind(
 
 /// 面子に三元牌の順子が含まれるか調べる
 pub fn check_honor_tiles_dragons(hand_analyzer: &HandAnalyzer, dragon: Dragon) -> Result<bool> {
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok(false);
     }
     let mut has_dragon = false;

@@ -20,7 +20,7 @@ pub fn check_seven_pairs(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if hand_analyzer.form == Form::SevenPairs {
@@ -41,7 +41,7 @@ pub fn check_three_color_straight(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     // 順子が3つ以上なければ三色同順はありえない
@@ -93,7 +93,7 @@ pub fn check_straight(
         settings.display_lang,
     );
 
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     let mut m = [false; 3];
@@ -135,7 +135,7 @@ pub fn check_all_triplet_hand(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     if hand_analyzer.same3.len() == 4 && hand_analyzer.same2.len() == 1 {
@@ -155,7 +155,7 @@ pub fn check_three_closed_triplets(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
 
@@ -206,7 +206,7 @@ pub fn check_three_color_triplets(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     // 刻子が3つ以上なければ三色同刻はありえない
@@ -251,7 +251,7 @@ pub fn check_terminal_or_honor_in_each_set(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
 
@@ -312,7 +312,7 @@ pub fn check_all_terminals_and_honors(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     // 混老頭は全ての面子・雀頭が么九牌（1,9）または字牌で構成される
@@ -360,7 +360,7 @@ pub fn check_little_three_dragons(
         status.has_claimed_open,
         settings.display_lang,
     );
-    if !hand_analyzer.has_won() {
+    if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
     // 小三元: 三元牌のうち2つが刻子、1つが雀頭
@@ -529,7 +529,7 @@ mod tests {
         let settings = Settings::new();
         status.is_self_picked = is_self_picked;
         status.has_claimed_open = has_claimed_open;
-        assert_eq!(test_analyzer.shanten, -1);
+        assert!(test_analyzer.shanten.has_won());
         assert_eq!(
             check_three_closed_triplets(&test_analyzer, &test, &status, &settings).unwrap(),
             expected

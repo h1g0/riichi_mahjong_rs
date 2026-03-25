@@ -4,7 +4,7 @@
 //! 入力は CpuGameState のみ（サーバ内部にはアクセスしない）。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::hand_analyzer::calc_shanten_number;
+use mahjong_core::hand_info::hand_analyzer::{ShantenNumber, calc_shanten_number};
 use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
 
 use super::client::CpuConfig;
@@ -17,7 +17,7 @@ pub struct DiscardCandidate {
     /// 捨てる牌
     pub tile: Tile,
     /// 捨てた後の向聴数
-    pub shanten: i32,
+    pub shanten: ShantenNumber,
     /// 有効牌の残り枚数（受入数）
     pub acceptance_count: u32,
     /// 推定打点スコア（高いほど良い）
@@ -95,7 +95,7 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
 ///
 /// 13枚の手牌に対して、各牌種を加えた時に向聴数が下がるものをカウント。
 /// `current_shanten` は呼び出し元で既に計算済みの向聴数。
-fn count_acceptance(hand_tiles: &[Tile], visible_counts: &[u8; 34], current_shanten: i32) -> u32 {
+fn count_acceptance(hand_tiles: &[Tile], visible_counts: &[u8; 34], current_shanten: ShantenNumber) -> u32 {
     let mut total = 0u32;
     for tile_type in 0..34u32 {
         // 場に4枚全て見えていたら受入不可
@@ -211,7 +211,7 @@ pub fn select_best_discard(
             let mut score = 0.0;
 
             // 向聴数が低いほど良い（負の方向にスコアリング）
-            score -= c.shanten as f64 * 100.0;
+            score -= c.shanten.as_i32() as f64 * 100.0;
 
             // 有効牌数が多いほど良い
             score += c.acceptance_count as f64 * params.speed_weight;
