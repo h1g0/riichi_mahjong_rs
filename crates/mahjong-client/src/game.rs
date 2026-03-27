@@ -67,6 +67,16 @@ pub struct GameState {
     pub prevailing_wind: Option<Wind>,
     /// ドラ表示牌
     pub dora_indicators: Vec<Tile>,
+    /// 裏ドラ表示牌（リーチ和了時のみ公開）
+    pub uradora_indicators: Vec<Tile>,
+    /// 和了時の手牌情報（結果画面表示用）
+    pub win_hand: Vec<Tile>,
+    /// 和了時の副露
+    pub win_melds: Vec<Vec<Tile>>,
+    /// 和了牌
+    pub win_tile: Option<Tile>,
+    /// ツモ和了かロン和了か（true=ツモ）
+    pub win_is_tsumo: bool,
     /// 山の残り枚数
     pub remaining_tiles: usize,
     /// 選択中の牌のインデックス
@@ -208,6 +218,11 @@ impl GameState {
             scores: [25000; 4],
             prevailing_wind: None,
             dora_indicators: Vec::new(),
+            uradora_indicators: Vec::new(),
+            win_hand: Vec::new(),
+            win_melds: Vec::new(),
+            win_tile: None,
+            win_is_tsumo: false,
             remaining_tiles: 70,
             selected_tile: None,
             selected_drawn: false,
@@ -256,6 +271,7 @@ impl GameState {
                 self.scores = scores;
                 self.prevailing_wind = Some(prevailing_wind);
                 self.dora_indicators = dora_indicators;
+                self.uradora_indicators = Vec::new();
                 self.discards = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
                 self.pending_riichi_player = None;
                 self.result_message = None;
@@ -500,6 +516,19 @@ impl GameState {
             } => {
                 self.scores = scores;
                 self.riichi_sticks = 0;
+                self.uradora_indicators = uradora_indicators.clone();
+                self.win_tile = Some(winning_tile);
+                self.win_is_tsumo = loser.is_none();
+
+                // 和了者の手牌情報を保存
+                if let Some(info) = player_hands.iter().find(|p| p.wind == winner) {
+                    self.win_hand = info.hand.clone();
+                    self.win_melds = info.melds.iter().map(|m| m.tiles.clone()).collect();
+                } else {
+                    self.win_hand.clear();
+                    self.win_melds.clear();
+                }
+
                 self.update_other_player_hands_on_win(&player_hands, winner);
                 let winner_name = self.wind_to_name(winner);
                 let win_type = if loser.is_some() { "ロン" } else { "ツモ" };
@@ -525,16 +554,6 @@ impl GameState {
                     format!("{}符{}翻 {}", fu, han, rank_name)
                 };
 
-                let uradora_text = if uradora_indicators.is_empty() {
-                    String::new()
-                } else {
-                    let tiles: Vec<String> = uradora_indicators
-                        .iter()
-                        .map(|t| tile_to_string(*t))
-                        .collect();
-                    format!("\n裏ドラ表示: {}", tiles.join(" "))
-                };
-
                 let riichi_sticks_text = if riichi_sticks == 0 {
                     String::new()
                 } else {
@@ -542,12 +561,10 @@ impl GameState {
                 };
 
                 let msg = format!(
-                    "{}が{}和了！{}\n和了牌: {}{}{}\n{}\n{} → {}点",
+                    "{}が{}和了！{}{}\n{}\n{} → {}点",
                     winner_name,
                     win_type,
                     loser_text,
-                    tile_to_string(winning_tile),
-                    uradora_text,
                     riichi_sticks_text,
                     yaku_text,
                     rank_display,
