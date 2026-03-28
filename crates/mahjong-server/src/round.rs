@@ -4,6 +4,7 @@
 //! ツモ → 打牌 → 鳴き判定 → 次の手番 のターンフローを制御する。
 
 use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
+use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, TileType, Wind};
 
 use crate::player::Player;
@@ -105,6 +106,8 @@ pub struct Round {
     pub call_state: Option<CallState>,
     /// 直前のツモが嶺上牌か
     pub last_draw_was_dead_wall: bool,
+    /// ゲーム設定
+    pub settings: Settings,
 }
 
 impl Round {
@@ -120,6 +123,7 @@ impl Round {
         honba: usize,
         riichi_sticks: usize,
         round_number: usize,
+        settings: Settings,
     ) -> Self {
         let mut wall = Wall::new();
         let dealt = wall.deal();
@@ -172,6 +176,7 @@ impl Round {
             events,
             call_state: None,
             last_draw_was_dead_wall: false,
+            settings,
         }
     }
 
@@ -489,8 +494,8 @@ impl Round {
                 available_calls[i].push(AvailableCall::Pon);
             }
 
-            // 大明カン判定
-            if player.can_daiminkan(discarded_tile) {
+            // 大明カン判定（場全体で4回カン済みなら不可）
+            if self.total_kan_count() < 4 && player.can_daiminkan(discarded_tile) {
                 available_calls[i].push(AvailableCall::Daiminkan);
             }
 
@@ -1035,6 +1040,11 @@ impl Round {
             return false;
         }
 
+        // 場全体で4回カン済みなら追加のカン不可
+        if self.total_kan_count() >= 4 {
+            return false;
+        }
+
         if self.players[player_idx].ankan_options().contains(&tile_type) {
             self.players[player_idx].do_ankan(tile_type);
         } else if self.players[player_idx].kakan_options().contains(&tile_type) {
@@ -1092,6 +1102,12 @@ impl Round {
     }
 
     fn draw_after_kan(&mut self, player_idx: usize) {
+        // 四槓散了チェック: 4回目のカン直後に判定（設定がありの場合のみ）
+        if self.settings.suukantsanra && self.check_four_kans_draw() {
+            self.declare_special_draw(DrawReason::FourKans);
+            return;
+        }
+
         // 同巡フリテンを解除（嶺上ツモも自分のツモ番）
         self.players[player_idx].is_temporary_furiten = false;
 
@@ -1637,6 +1653,23 @@ impl Round {
         self.players.iter().all(|p| p.is_riichi)
     }
 
+    /// 場全体のカン回数を返す
+    fn total_kan_count(&self) -> usize {
+        self.players.iter().map(|p| p.kan_count()).sum()
+    }
+
+    /// 四槓散了を判定する
+    ///
+    /// 条件: 場全体で4回カンが成立し、かつ2人以上がカンしている
+    /// （1人が4回カンした場合は四槓子の可能性があるため続行）
+    fn check_four_kans_draw(&self) -> bool {
+        if self.total_kan_count() < 4 {
+            return false;
+        }
+        let players_with_kan = self.players.iter().filter(|p| p.kan_count() > 0).count();
+        players_with_kan >= 2
+    }
+
     /// 特殊流局を宣言する
     fn declare_special_draw(&mut self, reason: DrawReason) {
         let scores = self.get_scores();
@@ -1680,7 +1713,7 @@ mod tests {
 
     #[test]
     fn test_round_new() {
-        let round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         assert_eq!(round.prevailing_wind, Wind::East);
         assert_eq!(round.current_player, 0);
         assert_eq!(round.phase, TurnPhase::Draw);
@@ -1697,7 +1730,7 @@ mod tests {
 
     #[test]
     fn test_round_draw() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events(); // 初期イベントをクリア
 
         assert!(round.do_draw());
@@ -1711,7 +1744,7 @@ mod tests {
 
     #[test]
     fn test_round_discard() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events();
         round.do_draw();
         round.drain_events();
@@ -1746,7 +1779,7 @@ mod tests {
 
     #[test]
     fn test_round_turn_flow() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events();
 
         // 4人分のターンを回す
@@ -1785,7 +1818,7 @@ mod tests {
 
     #[test]
     fn test_round_play_to_end() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.play_to_end();
 
         assert!(round.is_over());
@@ -1794,14 +1827,14 @@ mod tests {
 
     #[test]
     fn test_round_scores() {
-        let round = Round::new(Wind::East, 0, [25000, 30000, 20000, 25000], 0, 0, 0);
+        let round = Round::new(Wind::East, 0, [25000, 30000, 20000, 25000], 0, 0, 0, Settings::new());
         let scores = round.get_scores();
         assert_eq!(scores, [25000, 30000, 20000, 25000]);
     }
 
     #[test]
     fn test_round_events_on_start() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         let events = round.drain_events();
 
         // 4人分のGameStartedイベント
@@ -1829,7 +1862,7 @@ mod tests {
     #[test]
     fn test_wait_for_calls_and_pass() {
         // 打牌後に WaitForCalls になった場合、全員パスで Draw に進む
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events();
         round.do_draw();
         round.drain_events();
@@ -1853,7 +1886,7 @@ mod tests {
 
     #[test]
     fn test_check_available_calls_offers_pon_but_not_ron_for_5z() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         let seat_wind = round.players[1].seat_wind;
         let hand = mahjong_core::hand::Hand::from("234678m56p567s55z");
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -1869,7 +1902,7 @@ mod tests {
 
     #[test]
     fn test_do_riichi_requires_tenpai_after_discard() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("123m123p123s45z67m 8m");
         round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -1889,7 +1922,7 @@ mod tests {
 
     #[test]
     fn test_do_riichi_deducts_score_and_adds_stick() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("123m123p123s45z67m 8m");
         round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -1905,7 +1938,7 @@ mod tests {
 
     #[test]
     fn test_check_available_calls_offers_daiminkan() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         let seat_wind = round.players[1].seat_wind;
         let hand = mahjong_core::hand::Hand::from("111m234p567s789m");
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -1918,7 +1951,7 @@ mod tests {
 
     #[test]
     fn test_do_ankan_draws_rinshan_and_reveals_dora() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("111m234p567s789m 1m");
         round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -1936,7 +1969,7 @@ mod tests {
 
     #[test]
     fn test_do_kakan_draws_rinshan_and_reveals_dora() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let mut player = Player::new(seat_wind, vec![], 25000);
         player.hand = mahjong_core::hand::Hand::from("234p567s789m1z 111m 1m");
@@ -1954,7 +1987,7 @@ mod tests {
 
     #[test]
     fn test_do_kakan_keeps_unrelated_drawn_tile_in_hand() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let mut player = Player::new(seat_wind, vec![], 25000);
         player.hand = mahjong_core::hand::Hand::from("127m234p567s1z 111m 9s");
@@ -1976,7 +2009,7 @@ mod tests {
     #[test]
     fn test_temporary_furiten_set_on_ron_pass() {
         // プレイヤー1がロン可能な状態で、パスすると同巡フリテンが設定される
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
 
         // プレイヤー1にテンパイ手を設定: 123m456p789s11z 待ち1z（場風東）
         let seat1 = round.players[1].seat_wind;
@@ -2015,7 +2048,7 @@ mod tests {
 
     #[test]
     fn test_temporary_furiten_cleared_on_draw() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events();
 
         // プレイヤー1に同巡フリテンを設定
@@ -2033,7 +2066,7 @@ mod tests {
     #[test]
     fn test_riichi_furiten_set_on_ron_pass() {
         // リーチ中のプレイヤーがロンを見逃すとリーチ後フリテンが設定される
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
 
         let seat1 = round.players[1].seat_wind;
         let hand1 = mahjong_core::hand::Hand::from("123m456p789s1122z");
@@ -2068,7 +2101,7 @@ mod tests {
 
     #[test]
     fn test_riichi_furiten_persists_after_draw() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events();
 
         // リーチ後フリテンを設定
@@ -2087,7 +2120,7 @@ mod tests {
     #[test]
     fn test_temporary_furiten_blocks_ron() {
         // 同巡フリテンのプレイヤーにはロンが提供されない
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
 
         let seat1 = round.players[1].seat_wind;
         let hand1 = mahjong_core::hand::Hand::from("123m456p789s1122z");
@@ -2108,7 +2141,7 @@ mod tests {
     #[test]
     fn test_kakan_ron_pass_sets_furiten() {
         // 加カンで搶槓可能だがパスした場合、フリテンが設定される
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
 
         let seat0 = round.players[0].seat_wind;
         let mut player0 = Player::new(seat0, vec![], 25000);
@@ -2138,7 +2171,7 @@ mod tests {
         // 再現テスト: 6m7m1p2p3p3p4p5p5p6p7s8s9s ツモ8m
         // shanten=0 で riichi_discards がある（3p,3p,5p,5p,6p）
         // → can_riichi = true であるべき
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
 
         let seat0 = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("67m12334556p789s");
@@ -2164,7 +2197,7 @@ mod tests {
 
     #[test]
     fn test_kakan_offers_rob_ron() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
 
         let seat0 = round.players[0].seat_wind;
         let mut player0 = Player::new(seat0, vec![], 25000);
