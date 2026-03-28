@@ -618,6 +618,7 @@ impl GameState {
                     DrawReason::FourWinds => "四風連打",
                     DrawReason::FourRiichi => "四家立直",
                     DrawReason::NineTerminals => "九種九牌",
+                    DrawReason::FourKans => "四槓散了",
                 };
                 let mut msg = format!("流局（{}）", reason_text);
 

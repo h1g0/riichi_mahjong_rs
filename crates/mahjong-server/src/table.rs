@@ -3,6 +3,7 @@
 //! 半荘（東風戦/東南戦）を通した状態を管理する。
 //! 局の生成・進行・終了判定を行う。
 
+use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, Wind};
 
 use crate::protocol::{ClientAction, ServerEvent};
@@ -15,6 +16,8 @@ pub struct GameSettings {
     pub initial_score: i32,
     /// 東風戦(1)か東南戦(2)か
     pub round_count: u8,
+    /// ルール設定
+    pub rules: Settings,
 }
 
 impl Default for GameSettings {
@@ -22,6 +25,7 @@ impl Default for GameSettings {
         GameSettings {
             initial_score: 25000,
             round_count: 1, // 東風戦
+            rules: Settings::new(),
         }
     }
 }
@@ -74,6 +78,7 @@ impl Table {
             self.honba,
             self.riichi_sticks,
             self.round_number,
+            self.settings.rules.clone(),
         );
         self.round = Some(round);
     }
@@ -347,6 +352,7 @@ mod tests {
         let mut table = Table::new(GameSettings {
             initial_score: 25000,
             round_count: 1, // 東風戦（4局）
+            ..Default::default()
         });
 
         // 4局連続で流局させる

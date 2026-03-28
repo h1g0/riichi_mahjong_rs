@@ -17,6 +17,8 @@ pub enum DrawReason {
     FourRiichi,
     /// 九種九牌
     NineTerminals,
+    /// 四槓散了
+    FourKans,
 }
 
 /// 鳴きの種類
