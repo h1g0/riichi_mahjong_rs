@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::hand::Hand;
 use crate::hand_info::hand_analyzer::HandAnalyzer;
-use crate::hand_info::opened::{OpenFrom, OpenType};
+use crate::hand_info::meld::{MeldFrom, MeldType};
 use crate::hand_info::status::Status;
 use crate::tile::{Dragon, Tile, TileType, Wind};
 use crate::winning_hand::name::Form;
@@ -173,9 +173,9 @@ fn calculate_mentsu_fu(
 ) -> Result<()> {
     // 副露面子の牌種を収集（analyzer.same3 との重複排除用）
     let opened_triplet_tiles: Vec<TileType> = hand
-        .opened()
+        .melds()
         .iter()
-        .filter(|o| o.category == OpenType::Pon || o.category == OpenType::Kan)
+        .filter(|o| o.category == MeldType::Pon || o.category.is_kan())
         .map(|o| o.tiles[0].get())
         .collect();
 
@@ -225,9 +225,9 @@ fn calculate_mentsu_fu(
     }
 
     // 副露面子
-    for open in hand.opened() {
+    for open in hand.melds() {
         match open.category {
-            OpenType::Pon => {
+            MeldType::Pon => {
                 let tile = open.tiles[0].get();
                 let is_terminal_or_honor = is_terminal_or_honor(tile);
                 let fu = if is_terminal_or_honor { 4 } else { 2 };
@@ -238,10 +238,10 @@ fn calculate_mentsu_fu(
                 };
                 details.push(FuDetail { name, fu });
             }
-            OpenType::Kan => {
+            MeldType::Kan | MeldType::Kakan => {
                 let tile = open.tiles[0].get();
                 let is_terminal_or_honor = is_terminal_or_honor(tile);
-                let is_concealed = open.from == OpenFrom::Myself;
+                let is_concealed = open.from == MeldFrom::Myself;
                 let fu = if is_concealed {
                     if is_terminal_or_honor { 32 } else { 16 }
                 } else {
@@ -262,7 +262,7 @@ fn calculate_mentsu_fu(
                 };
                 details.push(FuDetail { name, fu });
             }
-            OpenType::Chi => {
+            MeldType::Chi => {
                 // チーの順子は0符
             }
         }

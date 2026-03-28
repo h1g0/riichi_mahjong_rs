@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::hand::Hand;
 use crate::hand_info::block::BlockProperty;
 use crate::hand_info::hand_analyzer::*;
-use crate::hand_info::opened::{OpenFrom, OpenType};
+use crate::hand_info::meld::{MeldFrom, MeldType};
 use crate::hand_info::status::*;
 use crate::settings::*;
 use crate::tile::{Dragon, Tile};
@@ -161,9 +161,9 @@ pub fn check_three_closed_triplets(
 
     let mut concealed_triplet_count = hand_analyzer.same3.len();
 
-    for open in hand.opened() {
-        let is_open_triplet = matches!(open.category, OpenType::Pon)
-            || (matches!(open.category, OpenType::Kan) && open.from != OpenFrom::Myself);
+    for open in hand.melds() {
+        let is_open_triplet = matches!(open.category, MeldType::Pon)
+            || (open.category.is_kan() && open.from != MeldFrom::Myself);
         if is_open_triplet {
             concealed_triplet_count = concealed_triplet_count.saturating_sub(1);
         }
@@ -172,11 +172,11 @@ pub fn check_three_closed_triplets(
     if !status.is_self_picked {
         if let Some(winning_tile) = hand.drawn() {
             let winning_tile_type = winning_tile.get();
-            let completes_open_triplet = hand.opened().iter().any(|open| {
+            let completes_open_triplet = hand.melds().iter().any(|open| {
                 open.tiles[0].get() == winning_tile_type
-                    && (matches!(open.category, OpenType::Pon)
-                        || (matches!(open.category, OpenType::Kan)
-                            && open.from != OpenFrom::Myself))
+                    && (matches!(open.category, MeldType::Pon)
+                        || (open.category.is_kan()
+                            && open.from != MeldFrom::Myself))
             });
             let completes_concealed_triplet = hand_analyzer
                 .same3

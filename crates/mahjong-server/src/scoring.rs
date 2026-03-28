@@ -270,11 +270,11 @@ pub fn add_dora_to_score(
     if let Some(tile) = extra_tile {
         all_tiles.push(tile);
     }
-    for open in hand.opened() {
+    for open in hand.melds() {
         for &tile in &open.tiles {
             all_tiles.push(tile);
         }
-        if open.category == mahjong_core::hand_info::opened::OpenType::Kan {
+        if open.category.is_kan() && open.tiles.len() == 3 {
             all_tiles.push(open.tiles[0]);
         }
     }
@@ -522,21 +522,23 @@ mod tests {
 
     #[test]
     fn test_check_win_open_tanyao_tsumo() {
-        use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
+        use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 
         let hand = Hand::from("56677m66s 5m");
         let tiles: Vec<Tile> = hand.tiles().to_vec();
         let drawn = hand.drawn();
         let mut player = Player::new(Wind::South, tiles, 25000);
-        player.hand.add_opened(OpenTiles {
-            tiles: [Tile::new(Tile::P4), Tile::new(Tile::P5), Tile::new(Tile::P6)],
-            category: OpenType::Chi,
-            from: OpenFrom::Previous,
+        player.hand.add_meld(Meld {
+            tiles: vec![Tile::new(Tile::P4), Tile::new(Tile::P5), Tile::new(Tile::P6)],
+            category: MeldType::Chi,
+            from: MeldFrom::Previous,
+            called_tile: None,
         });
-        player.hand.add_opened(OpenTiles {
-            tiles: [Tile::new(Tile::M2), Tile::new(Tile::M3), Tile::new(Tile::M4)],
-            category: OpenType::Chi,
-            from: OpenFrom::Previous,
+        player.hand.add_meld(Meld {
+            tiles: vec![Tile::new(Tile::M2), Tile::new(Tile::M3), Tile::new(Tile::M4)],
+            category: MeldType::Chi,
+            from: MeldFrom::Previous,
+            called_tile: None,
         });
         if let Some(d) = drawn {
             player.draw(d);

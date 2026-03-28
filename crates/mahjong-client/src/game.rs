@@ -5,18 +5,10 @@
 use macroquad::prelude::*;
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
-use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
+use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType, Wind};
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 use mahjong_server::protocol::{AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent};
-
-/// 副露（鳴き）の表示情報
-#[derive(Debug, Clone)]
-pub struct MeldInfo {
-    #[allow(dead_code)]
-    pub call_type: CallType,
-    pub tiles: Vec<Tile>,
-}
 
 /// 捨て牌の表示情報
 #[derive(Debug, Clone)]
@@ -33,7 +25,7 @@ pub struct OtherPlayerHand {
     /// 手牌（公開時のみ設定。非公開時は空）
     pub hand: Vec<Tile>,
     /// 副露（鳴き）一覧
-    pub melds: Vec<MeldInfo>,
+    pub melds: Vec<Meld>,
     /// 手牌が公開されているか（和了時・テンパイ時）
     pub revealed: bool,
     /// 非公開時の手牌枚数（裏向き表示用）
@@ -72,7 +64,7 @@ pub struct GameState {
     /// 和了時の手牌情報（結果画面表示用）
     pub win_hand: Vec<Tile>,
     /// 和了時の副露
-    pub win_melds: Vec<Vec<Tile>>,
+    pub win_melds: Vec<Meld>,
     /// 和了牌
     pub win_tile: Option<Tile>,
     /// ツモ和了かロン和了か（true=ツモ）
@@ -110,7 +102,7 @@ pub struct GameState {
     /// 鳴き対象の捨てたプレイヤー
     pub call_discarder: Option<Wind>,
     /// 自分の副露（鳴き）一覧
-    pub melds: Vec<MeldInfo>,
+    pub melds: Vec<Meld>,
     /// 局番号（0=東1局, 1=東2局, ...）
     pub round_number: usize,
     /// 本場数
@@ -125,6 +117,8 @@ pub struct GameState {
     pub other_players: [OtherPlayerHand; 3],
     /// リーチ宣言済みで次の打牌がリーチ宣言牌となるプレイヤーの風（一時フラグ）
     pending_riichi_player: Option<Wind>,
+    /// 直前に捨て牌したプレイヤーの風（鳴き元の判定に使用）
+    last_discarder: Option<Wind>,
     /// 対局開始前設定
     pub setup_state: SetupState,
 }
@@ -247,6 +241,7 @@ impl GameState {
             selected_would_cause_furiten: false,
             other_players: [OtherPlayerHand::new(), OtherPlayerHand::new(), OtherPlayerHand::new()],
             pending_riichi_player: None,
+            last_discarder: None,
             setup_state: SetupState::new(),
         }
     }
@@ -292,6 +287,7 @@ impl GameState {
                 self.is_furiten = false;
                 self.selected_would_cause_furiten = false;
                 self.other_players = [OtherPlayerHand::new(), OtherPlayerHand::new(), OtherPlayerHand::new()];
+                self.last_discarder = None;
             }
 
             ServerEvent::TileDrawn {
@@ -330,6 +326,7 @@ impl GameState {
                 tile,
                 is_tsumogiri,
             } => {
+                self.last_discarder = Some(player);
                 let relative_idx = self.relative_player_index(player);
                 let is_riichi = self.pending_riichi_player == Some(player);
                 if is_riichi {
@@ -372,13 +369,30 @@ impl GameState {
             ServerEvent::PlayerCalled {
                 player,
                 call_type,
-                called_tile: _,
+                called_tile,
                 tiles,
             } => {
                 // 鳴き選択肢をクリア
                 self.available_calls.clear();
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
+
+                // CallType → MeldType 変換
+                let category = Self::call_type_to_meld_type(&call_type);
+
+                // 鳴き元の判定
+                let meld_from = match call_type {
+                    CallType::Ankan => MeldFrom::Myself,
+                    CallType::Kakan => MeldFrom::Myself,
+                    _ => {
+                        if let Some(discarder) = self.call_discarder.or(self.last_discarder) {
+                            Self::compute_meld_direction(player, discarder)
+                        } else {
+                            MeldFrom::Previous
+                        }
+                    }
+                };
+
                 self.call_discarder = None;
 
                 // 他プレイヤーが鳴いた場合、副露情報を記録
@@ -390,43 +404,39 @@ impl GameState {
                         CallType::Ron => {}
                         CallType::Kakan => {
                             if let Some(meld) = other.melds.iter_mut().find(|m| {
-                                m.call_type == CallType::Pon
+                                m.category == MeldType::Pon
                                     && m.tiles.first().map(|t| t.get()) == tiles.first().map(|t| t.get())
                             }) {
-                                meld.call_type = CallType::Kakan;
+                                meld.category = MeldType::Kakan;
                                 meld.tiles = tiles.clone();
-                                // 加カンは手牌1枚減（ポンの3枚→カンの4枚、手牌から1枚使用）
+                                // from はポン時のままにする
                                 other.concealed_count = other.concealed_count.saturating_sub(1);
                             } else {
-                                other.melds.push(MeldInfo {
-                                    call_type: call_type.clone(),
-                                    tiles: tiles.clone(),
+                                other.melds.push(Meld {
+                                    category, tiles: tiles.clone(),
+                                    from: meld_from, called_tile: Some(called_tile),
                                 });
                                 other.concealed_count = other.concealed_count.saturating_sub(1);
                             }
                         }
                         CallType::Ankan => {
-                            other.melds.push(MeldInfo {
-                                call_type: call_type.clone(),
-                                tiles: tiles.clone(),
+                            other.melds.push(Meld {
+                                category, tiles: tiles.clone(),
+                                from: MeldFrom::Myself, called_tile: None,
                             });
-                            // 暗カンは手牌から4枚使うが、ツモ牌を含む
                             other.concealed_count = other.concealed_count.saturating_sub(3);
                         }
                         CallType::Pon | CallType::Chi => {
-                            other.melds.push(MeldInfo {
-                                call_type: call_type.clone(),
-                                tiles: tiles.clone(),
+                            other.melds.push(Meld {
+                                category, tiles: tiles.clone(),
+                                from: meld_from, called_tile: Some(called_tile),
                             });
-                            // ポン/チーは手牌から2枚使用（1枚は捨て牌から取る）
-                            // 鳴き後に打牌するので結果として手牌枚数は同じ
-                            // ただし打牌前は手牌が1枚少ない状態
                             other.concealed_count = other.concealed_count.saturating_sub(2);
                         }
                         CallType::Daiminkan => {
-                            other.melds.push(MeldInfo {
-                                call_type: call_type.clone(),
-                                tiles: tiles.clone(),
+                            other.melds.push(Meld {
+                                category, tiles: tiles.clone(),
+                                from: meld_from, called_tile: Some(called_tile),
                             });
                             other.concealed_count = other.concealed_count.saturating_sub(3);
                         }
@@ -436,13 +446,21 @@ impl GameState {
                 // 自分が鳴いた場合、副露情報を保存し打牌待ちへ
                 if Some(player) == self.seat_wind {
                     match call_type {
-                        CallType::Ron => {
-                            // ロンの場合は局終了イベントが続く
+                        CallType::Ron => {}
+                        CallType::Pon | CallType::Chi | CallType::Daiminkan => {
+                            self.melds.push(Meld {
+                                category, tiles: tiles.clone(),
+                                from: meld_from, called_tile: Some(called_tile),
+                            });
+                            self.is_my_turn = true;
+                            self.drawn = None;
+                            self.clear_riichi_selection();
+                            self.self_kan_options.clear();
                         }
-                        CallType::Pon | CallType::Chi | CallType::Daiminkan | CallType::Ankan => {
-                            self.melds.push(MeldInfo {
-                                call_type: call_type.clone(),
-                                tiles: tiles.clone(),
+                        CallType::Ankan => {
+                            self.melds.push(Meld {
+                                category, tiles: tiles.clone(),
+                                from: MeldFrom::Myself, called_tile: None,
                             });
                             self.is_my_turn = true;
                             self.drawn = None;
@@ -451,15 +469,15 @@ impl GameState {
                         }
                         CallType::Kakan => {
                             if let Some(meld) = self.melds.iter_mut().find(|meld| {
-                                meld.call_type == CallType::Pon
+                                meld.category == MeldType::Pon
                                     && meld.tiles.first().map(|tile| tile.get()) == tiles.first().map(|tile| tile.get())
                             }) {
-                                meld.call_type = CallType::Kakan;
+                                meld.category = MeldType::Kakan;
                                 meld.tiles = tiles.clone();
                             } else {
-                                self.melds.push(MeldInfo {
-                                    call_type: call_type.clone(),
-                                    tiles: tiles.clone(),
+                                self.melds.push(Meld {
+                                    category, tiles: tiles.clone(),
+                                    from: meld_from, called_tile: Some(called_tile),
                                 });
                             }
                             self.is_my_turn = true;
@@ -521,9 +539,16 @@ impl GameState {
                 self.win_is_tsumo = loser.is_none();
 
                 // 和了者の手牌情報を保存
-                if let Some(info) = player_hands.iter().find(|p| p.wind == winner) {
-                    self.win_hand = info.hand.clone();
-                    self.win_melds = info.melds.iter().map(|m| m.tiles.clone()).collect();
+                if let Some(_info) = player_hands.iter().find(|p| p.wind == winner) {
+                    self.win_hand = _info.hand.clone();
+                    // 既存の Meld（from 情報付き）を使用
+                    let relative_idx = self.relative_player_index(winner);
+                    if relative_idx == 0 {
+                        // 自分が和了者
+                        self.win_melds = self.melds.clone();
+                    } else {
+                        self.win_melds = self.other_players[relative_idx - 1].melds.clone();
+                    }
                 } else {
                     self.win_hand.clear();
                     self.win_melds.clear();
@@ -626,10 +651,15 @@ impl GameState {
             }
             let other = &mut self.other_players[relative_idx - 1];
             // 副露を更新
-            other.melds = info.melds.iter().map(|m| MeldInfo {
-                call_type: m.call_type.clone(),
-                tiles: m.tiles.clone(),
-            }).collect();
+            // 副露を更新（既存の from 情報を保持）
+            if other.melds.is_empty() {
+                other.melds = info.melds.iter().map(|m| Meld {
+                    category: Self::call_type_to_meld_type(&m.call_type),
+                    tiles: m.tiles.clone(),
+                    from: MeldFrom::Unknown, // フォールバック
+                    called_tile: None,
+                }).collect();
+            }
             // 和了者の手牌を公開
             if info.wind == winner {
                 other.hand = info.hand.clone();
@@ -647,10 +677,15 @@ impl GameState {
             }
             let other = &mut self.other_players[relative_idx - 1];
             // 副露を更新
-            other.melds = info.melds.iter().map(|m| MeldInfo {
-                call_type: m.call_type.clone(),
-                tiles: m.tiles.clone(),
-            }).collect();
+            // 副露を更新（既存の from 情報を保持）
+            if other.melds.is_empty() {
+                other.melds = info.melds.iter().map(|m| Meld {
+                    category: Self::call_type_to_meld_type(&m.call_type),
+                    tiles: m.tiles.clone(),
+                    from: MeldFrom::Unknown, // フォールバック
+                    called_tile: None,
+                }).collect();
+            }
             // テンパイ者の手牌を公開
             if tenpai.contains(&info.wind) {
                 other.hand = info.hand.clone();
@@ -672,7 +707,7 @@ impl GameState {
             return false;
         }
 
-        let mut hand = Hand::new_with_opened(self.hand.clone(), self.opened_tiles_for_analysis(), self.drawn);
+        let mut hand = Hand::new_with_melds(self.hand.clone(), self.melds_for_analysis(), self.drawn);
         match tile {
             Some(target) => {
                 let drawn = hand.drawn();
@@ -698,26 +733,16 @@ impl GameState {
         }
     }
 
-    fn opened_tiles_for_analysis(&self) -> Vec<OpenTiles> {
+    fn melds_for_analysis(&self) -> Vec<Meld> {
         self.melds
             .iter()
-            .filter_map(|meld| match meld.call_type {
-                CallType::Chi => Some(OpenTiles {
-                    tiles: [meld.tiles[0], meld.tiles[1], meld.tiles[2]],
-                    category: OpenType::Chi,
-                    from: OpenFrom::Unknown,
-                }),
-                CallType::Pon => Some(OpenTiles {
-                    tiles: [meld.tiles[0], meld.tiles[1], meld.tiles[2]],
-                    category: OpenType::Pon,
-                    from: OpenFrom::Unknown,
-                }),
-                CallType::Daiminkan | CallType::Ankan | CallType::Kakan => Some(OpenTiles {
-                    tiles: [meld.tiles[0], meld.tiles[1], meld.tiles[2]],
-                    category: OpenType::Kan,
-                    from: OpenFrom::Unknown,
-                }),
-                CallType::Ron => None,
+            .map(|meld| {
+                let mut m = meld.clone();
+                // HandAnalyzer は3枚で解析するため、カンの場合は3枚に切り詰める
+                if m.category.is_kan() && m.tiles.len() > 3 {
+                    m.tiles.truncate(3);
+                }
+                m
             })
             .collect()
     }
@@ -758,7 +783,7 @@ impl GameState {
         }
 
         // 手牌13枚でテンパイか確認
-        let hand = Hand::new_with_opened(hand_tiles, self.opened_tiles_for_analysis(), None);
+        let hand = Hand::new_with_melds(hand_tiles, self.melds_for_analysis(), None);
         let analyzer = match HandAnalyzer::new(&hand) {
             Ok(a) => a,
             Err(_) => return false,
@@ -827,7 +852,7 @@ impl GameState {
             }
 
             let has_pon = self.melds.iter().any(|meld| {
-                meld.call_type == CallType::Pon
+                meld.category == MeldType::Pon
                     && meld.tiles.first().map(|tile| tile.get()) == Some(idx as u32)
             });
             if has_pon && *count >= 1 {
@@ -1077,6 +1102,30 @@ impl GameState {
         (their_idx + 4 - my_idx) % 4
     }
 
+    /// CallType → MeldType 変換
+    fn call_type_to_meld_type(call_type: &CallType) -> MeldType {
+        match call_type {
+            CallType::Chi => MeldType::Chi,
+            CallType::Pon => MeldType::Pon,
+            CallType::Ankan | CallType::Daiminkan => MeldType::Kan,
+            CallType::Kakan => MeldType::Kakan,
+            CallType::Ron => MeldType::Pon, // フォールバック（使われない）
+        }
+    }
+
+    /// 鳴いたプレイヤー(caller)から見て、鳴き元(discarder)がどの位置かを返す
+    fn compute_meld_direction(caller: Wind, discarder: Wind) -> MeldFrom {
+        let caller_idx = caller.to_index();
+        let discarder_idx = discarder.to_index();
+        let rel = (discarder_idx + 4 - caller_idx) % 4;
+        match rel {
+            3 => MeldFrom::Previous,  // 上家
+            2 => MeldFrom::Opposite,   // 対面
+            1 => MeldFrom::Following, // 下家
+            _ => MeldFrom::Myself,   // 自家（通常ここには来ない）
+        }
+    }
+
     /// 風牌を日本語の名前に変換
     fn wind_to_name(&self, wind: Wind) -> &'static str {
         match wind {
@@ -1151,14 +1200,16 @@ mod tests {
         state.hand = hand.tiles().to_vec();
         state.hand.sort();
         state.drawn = hand.drawn();
-        state.melds.push(MeldInfo {
-            call_type: CallType::Ankan,
+        state.melds.push(Meld {
+            category: MeldType::Kan,
             tiles: vec![
                 Tile::new(Tile::M3),
                 Tile::new(Tile::M3),
                 Tile::new(Tile::M3),
                 Tile::new(Tile::M3),
             ],
+            from: MeldFrom::Myself,
+            called_tile: None,
         });
 
         assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::M5))));

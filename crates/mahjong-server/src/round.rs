@@ -181,15 +181,22 @@ impl Round {
         self.players
             .iter()
             .map(|p| {
-                let melds: Vec<MeldTiles> = p.hand.opened().iter().map(|open| {
-                    let mut tiles: Vec<Tile> = open.tiles.to_vec();
+                let melds: Vec<MeldTiles> = p.hand.melds().iter().map(|open| {
+                    let mut tiles: Vec<Tile> = open.tiles.clone();
                     let call_type = match open.category {
-                        mahjong_core::hand_info::opened::OpenType::Chi => CallType::Chi,
-                        mahjong_core::hand_info::opened::OpenType::Pon => CallType::Pon,
-                        mahjong_core::hand_info::opened::OpenType::Kan => CallType::Ankan,
+                        mahjong_core::hand_info::meld::MeldType::Chi => CallType::Chi,
+                        mahjong_core::hand_info::meld::MeldType::Pon => CallType::Pon,
+                        mahjong_core::hand_info::meld::MeldType::Kan => {
+                            if open.from == mahjong_core::hand_info::meld::MeldFrom::Myself {
+                                CallType::Ankan
+                            } else {
+                                CallType::Daiminkan
+                            }
+                        }
+                        mahjong_core::hand_info::meld::MeldType::Kakan => CallType::Kakan,
                     };
                     // カンの場合は4枚にする
-                    if open.category == mahjong_core::hand_info::opened::OpenType::Kan {
+                    if open.category.is_kan() && tiles.len() == 3 {
                         tiles.push(tiles[0]);
                     }
                     MeldTiles { call_type, tiles }
@@ -772,7 +779,7 @@ impl Round {
 
     /// ポンを実行する
     fn execute_pon(&mut self, caller: usize, discarder: usize, called_tile: Tile) {
-        let from = Player::open_from_relative(caller, discarder);
+        let from = Player::meld_from_relative(caller, discarder);
         self.players[caller].do_pon(called_tile, from);
 
         // 捨て牌を「鳴かれた」としてマーク
@@ -790,7 +797,7 @@ impl Round {
         let caller_wind = self.players[caller].seat_wind;
         let tiles: Vec<Tile> = self.players[caller]
             .hand
-            .opened()
+            .melds()
             .last()
             .unwrap()
             .tiles
@@ -823,7 +830,7 @@ impl Round {
 
     /// 大明カンを実行する
     fn execute_daiminkan(&mut self, caller: usize, discarder: usize, called_tile: Tile) {
-        let from = Player::open_from_relative(caller, discarder);
+        let from = Player::meld_from_relative(caller, discarder);
         self.players[caller].do_daiminkan(called_tile, from);
 
         if let Some(last_discard) = self.players[discarder].discards.last_mut() {
@@ -836,7 +843,7 @@ impl Round {
         }
 
         let caller_wind = self.players[caller].seat_wind;
-        let open = self.players[caller].hand.opened().last().unwrap();
+        let open = self.players[caller].hand.melds().last().unwrap();
         let mut tiles = open.tiles.to_vec();
         tiles.push(called_tile);
 
@@ -889,7 +896,7 @@ impl Round {
         let caller_wind = self.players[caller].seat_wind;
         let tiles: Vec<Tile> = self.players[caller]
             .hand
-            .opened()
+            .melds()
             .last()
             .unwrap()
             .tiles
@@ -928,9 +935,11 @@ impl Round {
         }
 
         let caller_wind = self.players[caller].seat_wind;
-        let open = self.players[caller].hand.opened().iter().rev().find(|open| open.category == mahjong_core::hand_info::opened::OpenType::Kan && open.tiles[0].get() == tile_type).unwrap();
-        let mut tiles = open.tiles.to_vec();
-        tiles.push(Tile::new(tile_type));
+        let open = self.players[caller].hand.melds().iter().rev().find(|open| open.category == mahjong_core::hand_info::meld::MeldType::Kakan && open.tiles[0].get() == tile_type).unwrap();
+        let mut tiles = open.tiles.clone();
+        if tiles.len() == 3 {
+            tiles.push(Tile::new(tile_type));
+        }
 
         for i in 0..4 {
             self.events.push((
@@ -1040,7 +1049,7 @@ impl Round {
         }
 
         let caller_wind = self.players[player_idx].seat_wind;
-        let open = self.players[player_idx].hand.opened().last().unwrap();
+        let open = self.players[player_idx].hand.melds().last().unwrap();
         let mut tiles = open.tiles.to_vec();
         tiles.push(open.tiles[0]);
         let called_tile = Tile::new(tile_type);
@@ -1921,7 +1930,7 @@ mod tests {
         assert!(round.do_kan(Tile::M1));
         assert_eq!(round.phase, TurnPhase::WaitForDiscard);
         assert!(round.players[0].hand.drawn().is_some());
-        assert_eq!(round.players[0].hand.opened().len(), 1);
+        assert_eq!(round.players[0].hand.melds().len(), 1);
         assert_eq!(round.wall.dora_indicators().len(), 2);
     }
 
@@ -1939,7 +1948,7 @@ mod tests {
         assert!(round.do_kan(Tile::M1));
         assert_eq!(round.phase, TurnPhase::WaitForDiscard);
         assert!(round.players[0].hand.drawn().is_some());
-        assert_eq!(round.players[0].hand.opened()[0].category, mahjong_core::hand_info::opened::OpenType::Kan);
+        assert_eq!(round.players[0].hand.melds()[0].category, mahjong_core::hand_info::meld::MeldType::Kakan);
         assert_eq!(round.wall.dora_indicators().len(), 2);
     }
 

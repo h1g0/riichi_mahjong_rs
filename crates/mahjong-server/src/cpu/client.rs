@@ -5,7 +5,7 @@
 
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::calc_shanten_number;
-use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
+use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::Tile;
 
 use crate::protocol::{AvailableCall, ClientAction, ServerEvent};
@@ -463,25 +463,20 @@ impl CpuClient {
         None
     }
 
-    /// 既存の副露を OpenTiles に変換する
-    fn build_existing_opened(&self) -> Vec<OpenTiles> {
-        let mut opened = Vec::new();
+    /// 既存の副露を取得する
+    fn build_existing_melds(&self) -> Vec<Meld> {
         let my_idx = super::state::CpuGameState::wind_to_index(self.state.my_seat_wind);
-        for meld in &self.state.player_melds[my_idx] {
-            if meld.tiles.len() >= 3 {
-                let ot = OpenTiles {
-                    tiles: [meld.tiles[0], meld.tiles[1], meld.tiles[2]],
-                    category: match meld.call_type {
-                        crate::protocol::CallType::Chi => OpenType::Chi,
-                        crate::protocol::CallType::Pon => OpenType::Pon,
-                        _ => OpenType::Kan,
-                    },
-                    from: OpenFrom::Unknown,
-                };
-                opened.push(ot);
-            }
-        }
-        opened
+        self.state.player_melds[my_idx]
+            .iter()
+            .map(|open| {
+                // 手分析用に3枚に切り詰め
+                let mut o = open.clone();
+                if o.tiles.len() > 3 {
+                    o.tiles.truncate(3);
+                }
+                o
+            })
+            .collect()
     }
 
     /// ポンした場合に向聴数が下がるか
@@ -508,14 +503,15 @@ impl CpuClient {
         }
 
         // 既存の副露 + 今回のポンを含めた Hand を作成
-        let mut opened = self.build_existing_opened();
-        opened.push(OpenTiles {
-            tiles: [called_tile, called_tile, called_tile],
-            category: OpenType::Pon,
-            from: OpenFrom::Unknown,
+        let mut melds = self.build_existing_melds();
+        melds.push(Meld {
+            tiles: vec![called_tile, called_tile, called_tile],
+            category: MeldType::Pon,
+            from: MeldFrom::Unknown,
+            called_tile: Some(called_tile),
         });
 
-        let new_hand = Hand::new_with_opened(remaining, opened, None);
+        let new_hand = Hand::new_with_melds(remaining, melds, None);
         calc_shanten_number(&new_hand) < current_shanten
     }
 
@@ -536,14 +532,15 @@ impl CpuClient {
         }
 
         // 既存の副露 + 今回のチーを含めた Hand を作成
-        let mut opened = self.build_existing_opened();
-        opened.push(OpenTiles {
-            tiles: [called_tile, chi_tiles_for_meld[0], chi_tiles_for_meld[1]],
-            category: OpenType::Chi,
-            from: OpenFrom::Previous,
+        let mut melds = self.build_existing_melds();
+        melds.push(Meld {
+            tiles: vec![called_tile, chi_tiles_for_meld[0], chi_tiles_for_meld[1]],
+            category: MeldType::Chi,
+            from: MeldFrom::Previous,
+            called_tile: Some(called_tile),
         });
 
-        let new_hand = Hand::new_with_opened(remaining, opened, None);
+        let new_hand = Hand::new_with_melds(remaining, melds, None);
         calc_shanten_number(&new_hand) < current_shanten
     }
 }
