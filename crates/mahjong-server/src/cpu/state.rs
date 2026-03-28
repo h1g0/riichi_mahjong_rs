@@ -3,18 +3,10 @@
 //! ServerEvent のストリームだけから構築される、プレイヤー視点のゲーム状態。
 //! プレイヤーが画面から読み取れる情報と同等の情報のみを保持する。
 
+use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, Wind};
 
 use crate::protocol::{AvailableCall, CallType, ServerEvent};
-
-/// 副露情報（PlayerCalledイベントから構築）
-#[derive(Debug, Clone)]
-pub struct MeldInfo {
-    /// 鳴きの種類
-    pub call_type: CallType,
-    /// 公開された牌
-    pub tiles: Vec<Tile>,
-}
 
 /// CPUが保持するゲーム状態（全て ServerEvent から構築）
 #[derive(Debug, Clone)]
@@ -45,7 +37,7 @@ pub struct CpuGameState {
     /// 各プレイヤーのリーチ状態
     pub player_riichi: [bool; 4],
     /// 各プレイヤーの副露情報
-    pub player_melds: [Vec<MeldInfo>; 4],
+    pub player_melds: [Vec<Meld>; 4],
     /// ドラ表示牌
     pub dora_indicators: Vec<Tile>,
     /// 場風
@@ -202,23 +194,26 @@ impl CpuGameState {
                 ..
             } => {
                 let idx = Self::wind_to_index(*player);
-                self.player_melds[idx].push(MeldInfo {
-                    call_type: call_type.clone(),
+                let category = match call_type {
+                    CallType::Chi => MeldType::Chi,
+                    CallType::Pon => MeldType::Pon,
+                    CallType::Ankan | CallType::Daiminkan => MeldType::Kan,
+                    CallType::Kakan => MeldType::Kakan,
+                    CallType::Ron => MeldType::Pon, // フォールバック（使われない）
+                };
+                let from = match call_type {
+                    CallType::Ankan => MeldFrom::Myself,
+                    _ => MeldFrom::Unknown,
+                };
+                self.player_melds[idx].push(Meld {
                     tiles: tiles.clone(),
+                    category,
+                    from,
+                    called_tile: Some(*called_tile),
                 });
-
-                // 捨て牌から鳴かれた牌を除去する必要はない
-                // （サーバが is_called フラグを管理するので、CPUは捨て牌リストをそのまま保持）
-
-                // 鳴かれた牌が自分の捨て牌にあった場合の処理は不要
-                // （捨て牌はそのまま保持 — 現物判定に使うため）
 
                 self.pending_calls.clear();
                 self.pending_call_tile = None;
-
-                // 自分が鳴いた場合、called_tile の情報を保持
-                // （HandUpdated で手牌が更新される）
-                let _ = called_tile; // 明示的に使わないことを示す
             }
 
             ServerEvent::PlayerRiichi {

@@ -7,6 +7,8 @@ use mahjong_core::tile::Tile;
 use mahjong_server::cpu::client::CpuConfig;
 use mahjong_server::protocol::AvailableCall;
 
+use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+
 use crate::game::{GamePhase, GameState, SetupState};
 
 /// 牌を描画する色
@@ -478,22 +480,16 @@ fn draw_melds(state: &GameState, tile_textures: &TileTextures) {
         return;
     }
 
-    let meld_tile_w: f32 = 40.0;
-    let meld_tile_h: f32 = 56.0;
+    let tw: f32 = 40.0;
+    let th: f32 = 56.0;
     let meld_y: f32 = 692.0;
     let meld_gap: f32 = 12.0;
     let mut x = 1220.0;
 
     for meld in state.melds.iter().rev() {
-        let tile_count = meld.tiles.len();
-        let meld_width = tile_count as f32 * meld_tile_w;
+        let meld_width = calc_meld_width(meld, tw, th);
         x -= meld_width;
-
-        for (i, tile) in meld.tiles.iter().enumerate() {
-            let tx = x + i as f32 * meld_tile_w;
-            draw_meld_tile(tx, meld_y, tile, meld_tile_w, meld_tile_h, tile_textures);
-        }
-
+        draw_meld_group(meld, x, meld_y, tw, th, tile_textures);
         x -= meld_gap;
     }
 }
@@ -510,6 +506,167 @@ fn draw_meld_tile(
     draw_rectangle(x, y, w - 2.0, h - 2.0, bg);
     draw_rectangle_lines(x, y, w - 2.0, h - 2.0, 2.0, TILE_BORDER);
     draw_tile_sprite(tile_textures.for_tile(tile), x + 2.0, y + 1.0, w - 6.0, h - 6.0, WHITE);
+}
+
+/// 横向きの副露牌を描画する（90°回転）
+fn draw_meld_tile_sideways(
+    x: f32,
+    y: f32,
+    tile: &mahjong_core::tile::Tile,
+    tw: f32,
+    th: f32,
+    tile_textures: &TileTextures,
+) {
+    // 横向き牌のバウンディングボックス: 幅=th, 高さ=tw
+    let bg = Color::new(0.9, 0.95, 1.0, 1.0);
+    draw_rectangle(x, y, th - 2.0, tw - 2.0, bg);
+    draw_rectangle_lines(x, y, th - 2.0, tw - 2.0, 2.0, TILE_BORDER);
+    draw_tile_sprite_rotated(
+        tile_textures.for_tile(tile),
+        x + 1.0, y + 1.0, tw - 6.0, th - 6.0, WHITE,
+        std::f32::consts::FRAC_PI_2,
+    );
+}
+
+/// 裏向きの副露牌を描画する（暗槓用）
+fn draw_meld_tile_back(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    tile_textures: &TileTextures,
+) {
+    let bg = Color::new(0.5, 0.6, 0.5, 1.0);
+    draw_rectangle(x, y, w - 2.0, h - 2.0, bg);
+    draw_rectangle_lines(x, y, w - 2.0, h - 2.0, 2.0, TILE_BORDER);
+    draw_tile_sprite(&tile_textures.back, x + 2.0, y + 1.0, w - 6.0, h - 6.0, WHITE);
+}
+
+/// 鳴き元に応じて横向き牌の位置インデックスを返す
+fn sideways_index(from: MeldFrom, tile_count: usize) -> usize {
+    match from {
+        MeldFrom::Previous => 0,              // 上家: 左端
+        MeldFrom::Opposite => 1,              // 対面: 左から2番目
+        MeldFrom::Following => tile_count - 1, // 下家: 右端
+        _ => 0,                               // Unknown/Myself: フォールバック
+    }
+}
+
+/// 副露グループの描画幅を計算する
+fn calc_meld_width(meld: &Meld, tw: f32, th: f32) -> f32 {
+    match meld.category {
+        MeldType::Kan if meld.from == MeldFrom::Myself => {
+            // 暗槓: 4枚すべて縦向き
+            4.0 * tw
+        }
+        MeldType::Kakan => {
+            // 加槓: 横向き牌の位置に2枚重ね（幅はth）、残りは縦向き
+            2.0 * tw + th
+        }
+        MeldType::Chi | MeldType::Pon => {
+            // チー/ポン: 1枚横向き（幅th）、残り2枚縦向き
+            2.0 * tw + th
+        }
+        MeldType::Kan => {
+            // 大明槓: 1枚横向き（幅th）、残り3枚縦向き
+            3.0 * tw + th
+        }
+    }
+}
+
+/// 副露グループを描画する
+fn draw_meld_group(
+    meld: &Meld,
+    base_x: f32,
+    base_y: f32,
+    tw: f32,
+    th: f32,
+    tile_textures: &TileTextures,
+) {
+    match meld.category {
+        MeldType::Kan if meld.from == MeldFrom::Myself => {
+            // 暗槓: 1,4枚目裏向き、2,3枚目表向き、全て縦向き
+            for i in 0..4 {
+                let x = base_x + i as f32 * tw;
+                if i == 0 || i == 3 {
+                    draw_meld_tile_back(x, base_y, tw, th, tile_textures);
+                } else {
+                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
+                }
+            }
+        }
+        MeldType::Chi => {
+            // チー: 鳴いた牌を左端に横向き、残り2枚を順番に縦向き
+            let mut sorted_tiles = meld.tiles.clone();
+            sorted_tiles.sort();
+            let called = meld.called_tile;
+
+            let mut x = base_x;
+            if let Some(ct) = called {
+                draw_meld_tile_sideways(x, base_y + (th - tw), &ct, tw, th, tile_textures);
+                x += th;
+                let mut skipped = false;
+                for tile in &sorted_tiles {
+                    if !skipped && tile.get() == ct.get() {
+                        skipped = true;
+                        continue;
+                    }
+                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures);
+                    x += tw;
+                }
+            } else {
+                for tile in &sorted_tiles {
+                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures);
+                    x += tw;
+                }
+            }
+        }
+        MeldType::Pon => {
+            // ポン: 鳴き元に応じて横向き牌の位置を決定
+            let side_idx = sideways_index(meld.from, 3);
+            let mut x = base_x;
+            for i in 0..3 {
+                if i == side_idx {
+                    draw_meld_tile_sideways(x, base_y + (th - tw), &meld.tiles[i], tw, th, tile_textures);
+                    x += th;
+                } else {
+                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
+                    x += tw;
+                }
+            }
+        }
+        MeldType::Kan => {
+            // 大明槓: 鳴き元に応じて横向き牌の位置を決定（4枚）
+            let side_idx = sideways_index(meld.from, 4);
+            let mut x = base_x;
+            for i in 0..4 {
+                if i == side_idx {
+                    draw_meld_tile_sideways(x, base_y + (th - tw), &meld.tiles[i], tw, th, tile_textures);
+                    x += th;
+                } else {
+                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
+                    x += tw;
+                }
+            }
+        }
+        MeldType::Kakan => {
+            // 加槓: ポンの横向き位置に2枚重ね
+            let side_idx = sideways_index(meld.from, 3);
+            let mut x = base_x;
+            for i in 0..3 {
+                if i == side_idx {
+                    draw_meld_tile_sideways(x, base_y + (th - tw), &meld.tiles[i], tw, th, tile_textures);
+                    if meld.tiles.len() > 3 {
+                        draw_meld_tile_sideways(x, base_y + (th - tw) - tw, &meld.tiles[3], tw, th, tile_textures);
+                    }
+                    x += th;
+                } else {
+                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
+                    x += tw;
+                }
+            }
+        }
+    }
 }
 
 fn draw_tile(
@@ -624,14 +781,14 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
         } else {
             other.concealed_count
         };
-        let meld_tile_count: usize = other.melds.iter().map(|m| m.tiles.len()).sum();
+        let meld_widths: f32 = other.melds.iter().map(|m| calc_meld_width(m, tw, th)).sum();
         let meld_gaps = if other.melds.is_empty() {
             0.0
         } else {
             meld_gap + (other.melds.len() as f32 - 1.0) * meld_gap
         };
         let total_width =
-            hand_count as f32 * tile_step + meld_tile_count as f32 * tile_step + meld_gaps;
+            hand_count as f32 * tile_step + meld_widths + meld_gaps;
         let start_x = BOARD_CENTER_X - total_width / 2.0;
 
         set_camera(&make_board_camera(PLAYER_ROTATIONS[relative_idx]));
@@ -658,10 +815,8 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
             if i > 0 {
                 x += meld_gap;
             }
-            for tile in &meld.tiles {
-                draw_tile_sprite(tile_textures.for_tile(tile), x, base_y, tw, th, WHITE);
-                x += tile_step;
-            }
+            draw_meld_group(meld, x, base_y, tw, th, tile_textures);
+            x += calc_meld_width(meld, tw, th);
         }
 
         set_default_camera();
@@ -866,7 +1021,7 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
     // 手牌の合計幅を計算して開始位置を決定（ドラ表示もこの左端に揃える）
     let hand_tiles = state.win_hand.len() as f32;
     let win_tile_w = if state.win_tile.is_some() { tw + win_tile_gap } else { 0.0 };
-    let meld_tiles: f32 = state.win_melds.iter().map(|m| m.len() as f32 * tw).sum();
+    let meld_tiles: f32 = state.win_melds.iter().map(|m| calc_meld_width(m, tw, th)).sum();
     let meld_gaps = if state.win_melds.is_empty() {
         0.0
     } else {
@@ -948,10 +1103,8 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
                 if i > 0 {
                     x += meld_gap;
                 }
-                for tile in meld {
-                    draw_tile_sprite(tile_textures.for_tile(tile), x, next_y, tw, th, WHITE);
-                    x += tw;
-                }
+                draw_meld_group(meld, x, next_y, tw, th, tile_textures);
+                x += calc_meld_width(meld, tw, th);
             }
         }
     }

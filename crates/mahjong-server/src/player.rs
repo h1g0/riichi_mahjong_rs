@@ -3,7 +3,7 @@
 //! 各プレイヤーの手牌、捨て牌、点数、リーチ状態などを管理する。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::opened::{OpenFrom, OpenTiles, OpenType};
+use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType, Wind};
 use serde::{Deserialize, Serialize};
 
@@ -140,9 +140,9 @@ impl Player {
 
     /// 門前（鳴いていない）かどうか
     pub fn is_menzen(&self) -> bool {
-        self.hand.opened().iter().all(|o| {
+        self.hand.melds().iter().all(|o| {
             // 暗カンは門前扱い
-            o.from == OpenFrom::Myself
+            o.from == MeldFrom::Myself
         })
     }
 
@@ -252,9 +252,9 @@ impl Player {
         }
 
         self.hand
-            .opened()
+            .melds()
             .iter()
-            .filter(|open| open.category == OpenType::Pon)
+            .filter(|open| open.category == MeldType::Pon)
             .filter_map(|open| {
                 let tile_type = open.tiles[0].get();
                 (counts[tile_type as usize] >= 1).then_some(tile_type)
@@ -291,7 +291,7 @@ impl Player {
     /// ポンを実行する
     ///
     /// 手牌から同じ種類の牌2枚を取り除き、鳴いた牌と合わせて副露に追加する。
-    pub fn do_pon(&mut self, called_tile: Tile, from: OpenFrom) {
+    pub fn do_pon(&mut self, called_tile: Tile, from: MeldFrom) {
         let tt = called_tile.get();
         let mut indices: Vec<usize> = Vec::new();
         for (i, t) in self.hand.tiles().iter().enumerate() {
@@ -305,10 +305,11 @@ impl Player {
 
         self.hand.remove_tiles_by_indices(&mut indices);
 
-        self.hand.add_opened(OpenTiles {
-            tiles: [t1, t2, called_tile],
-            category: OpenType::Pon,
+        self.hand.add_meld(Meld {
+            tiles: vec![t1, t2, called_tile],
+            category: MeldType::Pon,
             from,
+            called_tile: Some(called_tile),
         });
 
         self.is_first_turn = false;
@@ -338,10 +339,11 @@ impl Player {
         let mut chi_tiles = [t1, t2, called_tile];
         chi_tiles.sort();
 
-        self.hand.add_opened(OpenTiles {
-            tiles: chi_tiles,
-            category: OpenType::Chi,
-            from: OpenFrom::Previous, // チーは常に上家から
+        self.hand.add_meld(Meld {
+            tiles: chi_tiles.to_vec(),
+            category: MeldType::Chi,
+            from: MeldFrom::Previous, // チーは常に上家から
+            called_tile: Some(called_tile),
         });
 
         self.is_first_turn = false;
@@ -349,7 +351,7 @@ impl Player {
     }
 
     /// 大明カンを実行する
-    pub fn do_daiminkan(&mut self, called_tile: Tile, from: OpenFrom) {
+    pub fn do_daiminkan(&mut self, called_tile: Tile, from: MeldFrom) {
         let tt = called_tile.get();
         let mut indices: Vec<usize> = Vec::new();
         for (i, t) in self.hand.tiles().iter().enumerate() {
@@ -364,10 +366,11 @@ impl Player {
         let t3 = self.hand.tiles()[indices[2]];
 
         self.hand.remove_tiles_by_indices(&mut indices);
-        self.hand.add_opened(OpenTiles {
-            tiles: [t1, t2, t3],
-            category: OpenType::Kan,
+        self.hand.add_meld(Meld {
+            tiles: vec![t1, t2, t3],
+            category: MeldType::Kan,
             from,
+            called_tile: Some(called_tile),
         });
 
         self.is_first_turn = false;
@@ -401,10 +404,11 @@ impl Player {
         }
 
         self.hand.remove_tiles_by_indices(&mut indices);
-        self.hand.add_opened(OpenTiles {
-            tiles: [kan_tiles[0], kan_tiles[1], kan_tiles[2]],
-            category: OpenType::Kan,
-            from: OpenFrom::Myself,
+        self.hand.add_meld(Meld {
+            tiles: vec![kan_tiles[0], kan_tiles[1], kan_tiles[2]],
+            category: MeldType::Kan,
+            from: MeldFrom::Myself,
+            called_tile: None,
         });
 
         self.is_first_turn = false;
@@ -434,11 +438,11 @@ impl Player {
 
         let open = self
             .hand
-            .opened_mut()
+            .melds_mut()
             .iter_mut()
-            .find(|open| open.category == OpenType::Pon && open.tiles[0].get() == tile_type)
+            .find(|open| open.category == MeldType::Pon && open.tiles[0].get() == tile_type)
             .expect("加カン対象のポンがありません");
-        open.category = OpenType::Kan;
+        open.category = MeldType::Kakan;
 
         self.is_first_turn = false;
         self.is_ippatsu = false;
@@ -447,18 +451,18 @@ impl Player {
     /// 手牌に含まれる槓子の数を返す
     pub fn kan_count(&self) -> usize {
         self.hand
-            .opened()
+            .melds()
             .iter()
-            .filter(|open| open.category == OpenType::Kan)
+            .filter(|open| open.category.is_kan())
             .count()
     }
 
-    /// 捨てたプレイヤーと自分の相対位置から OpenFrom を返す
-    pub fn open_from_relative(caller: usize, discarder: usize) -> OpenFrom {
+    /// 捨てたプレイヤーと自分の相対位置から MeldFrom を返す
+    pub fn meld_from_relative(caller: usize, discarder: usize) -> MeldFrom {
         match (caller + 4 - discarder) % 4 {
-            1 => OpenFrom::Previous,   // 上家（カミチャ）
-            2 => OpenFrom::Opposite,   // 対面（トイメン）
-            3 => OpenFrom::Following,  // 下家（シモチャ）
+            1 => MeldFrom::Previous,   // 上家（カミチャ）
+            2 => MeldFrom::Opposite,   // 対面（トイメン）
+            3 => MeldFrom::Following,  // 下家（シモチャ）
             _ => unreachable!(),
         }
     }
@@ -637,13 +641,13 @@ mod tests {
         let mut player = Player::new(Wind::South, tiles, 25000);
         let called = Tile::new(Tile::M1);
 
-        player.do_pon(called, OpenFrom::Previous);
+        player.do_pon(called, MeldFrom::Previous);
 
         // 手牌が11枚になること（13 - 2 = 11）
         assert_eq!(player.hand.tiles().len(), 11);
         // 副露が1つ
-        assert_eq!(player.hand.opened().len(), 1);
-        assert_eq!(player.hand.opened()[0].category, OpenType::Pon);
+        assert_eq!(player.hand.melds().len(), 1);
+        assert_eq!(player.hand.melds()[0].category, MeldType::Pon);
         // 門前でなくなる
         assert!(!player.is_menzen());
     }
@@ -673,8 +677,8 @@ mod tests {
         // 手牌が11枚になること
         assert_eq!(player.hand.tiles().len(), 11);
         // 副露が1つ
-        assert_eq!(player.hand.opened().len(), 1);
-        assert_eq!(player.hand.opened()[0].category, OpenType::Chi);
+        assert_eq!(player.hand.melds().len(), 1);
+        assert_eq!(player.hand.melds()[0].category, MeldType::Chi);
         // 門前でなくなる
         assert!(!player.is_menzen());
     }
@@ -715,11 +719,11 @@ mod tests {
         let hand = Hand::from("111m234p567s789m1z");
         let mut player = Player::new(Wind::South, hand.tiles().to_vec(), 25000);
 
-        player.do_daiminkan(Tile::new(Tile::M1), OpenFrom::Previous);
+        player.do_daiminkan(Tile::new(Tile::M1), MeldFrom::Previous);
 
         assert_eq!(player.hand.tiles().len(), 10);
-        assert_eq!(player.hand.opened().len(), 1);
-        assert_eq!(player.hand.opened()[0].category, OpenType::Kan);
+        assert_eq!(player.hand.melds().len(), 1);
+        assert_eq!(player.hand.melds()[0].category, MeldType::Kan);
         assert!(!player.is_menzen());
     }
 
@@ -733,8 +737,8 @@ mod tests {
 
         assert_eq!(player.hand.tiles().len(), 10);
         assert!(player.hand.drawn().is_none());
-        assert_eq!(player.hand.opened().len(), 1);
-        assert_eq!(player.hand.opened()[0].category, OpenType::Kan);
+        assert_eq!(player.hand.melds().len(), 1);
+        assert_eq!(player.hand.melds()[0].category, MeldType::Kan);
         assert!(player.is_menzen());
     }
 
@@ -747,8 +751,8 @@ mod tests {
 
         assert_eq!(player.hand.tiles().len(), 10);
         assert!(player.hand.drawn().is_none());
-        assert_eq!(player.hand.opened().len(), 1);
-        assert_eq!(player.hand.opened()[0].category, OpenType::Kan);
+        assert_eq!(player.hand.melds().len(), 1);
+        assert_eq!(player.hand.melds()[0].category, MeldType::Kakan);
         assert!(!player.is_menzen());
     }
 
@@ -762,18 +766,18 @@ mod tests {
         assert!(player.hand.drawn().is_none());
         assert_eq!(player.hand.tiles().len(), 10);
         assert!(player.hand.tiles().contains(&Tile::new(Tile::S9)));
-        assert_eq!(player.hand.opened().len(), 1);
-        assert_eq!(player.hand.opened()[0].category, OpenType::Kan);
+        assert_eq!(player.hand.melds().len(), 1);
+        assert_eq!(player.hand.melds()[0].category, MeldType::Kakan);
     }
 
     #[test]
-    fn test_open_from_relative() {
+    fn test_meld_from_relative() {
         // プレイヤー1から見たプレイヤー0 → 上家（Previous）
-        assert_eq!(Player::open_from_relative(1, 0), OpenFrom::Previous);
+        assert_eq!(Player::meld_from_relative(1, 0), MeldFrom::Previous);
         // プレイヤー2から見たプレイヤー0 → 対面（Opposite）
-        assert_eq!(Player::open_from_relative(2, 0), OpenFrom::Opposite);
+        assert_eq!(Player::meld_from_relative(2, 0), MeldFrom::Opposite);
         // プレイヤー3から見たプレイヤー0 → 下家（Following）
-        assert_eq!(Player::open_from_relative(3, 0), OpenFrom::Following);
+        assert_eq!(Player::meld_from_relative(3, 0), MeldFrom::Following);
     }
 
     #[test]

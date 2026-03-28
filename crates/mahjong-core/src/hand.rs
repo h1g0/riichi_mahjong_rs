@@ -1,4 +1,4 @@
-use crate::hand_info::opened::*;
+use crate::hand_info::meld::*;
 use crate::tile::*;
 use std::collections::VecDeque;
 
@@ -8,7 +8,7 @@ pub struct Hand {
     /// 現在の手牌（副露がなければ13枚）
     tiles: Vec<Tile>,
     /// 副露
-    opened: Vec<OpenTiles>,
+    melds: Vec<Meld>,
     /// ツモってきた牌
     drawn: Option<Tile>,
 }
@@ -29,8 +29,8 @@ impl Hand {
     }
 
     /// 副露を追加する
-    pub fn add_opened(&mut self, open: OpenTiles) {
-        self.opened.push(open);
+    pub fn add_meld(&mut self, open: Meld) {
+        self.melds.push(open);
     }
 
     /// 指定インデックスの牌を手牌から除去する
@@ -44,13 +44,13 @@ impl Hand {
     }
 
     pub fn new(tiles: Vec<Tile>, drawn: Option<Tile>) -> Hand {
-        return Hand::new_with_opened(tiles, Vec::new(), drawn);
+        return Hand::new_with_melds(tiles, Vec::new(), drawn);
     }
-    pub fn new_with_opened(tiles: Vec<Tile>, opened: Vec<OpenTiles>, drawn: Option<Tile>) -> Hand {
+    pub fn new_with_melds(tiles: Vec<Tile>, melds: Vec<Meld>, drawn: Option<Tile>) -> Hand {
         Hand {
             tiles,
             drawn,
-            opened,
+            melds,
         }
     }
 
@@ -60,13 +60,13 @@ impl Hand {
     }
 
     /// 副露を返す
-    pub fn opened(&self) -> &[OpenTiles] {
-        &self.opened
+    pub fn melds(&self) -> &[Meld] {
+        &self.melds
     }
 
     /// 副露の可変参照を返す
-    pub fn opened_mut(&mut self) -> &mut Vec<OpenTiles> {
-        &mut self.opened
+    pub fn melds_mut(&mut self) -> &mut Vec<Meld> {
+        &mut self.melds
     }
 
     /// 手牌をソートする
@@ -86,9 +86,9 @@ impl Hand {
         //
         // 解析用途では副露は常に1面子として扱う。槓子の4枚目まで数えると
         // 「4面子1雀頭に加えて孤立牌が1枚ある」手を和了形と誤認しうる。
-        for i in 0..self.opened.len() {
-            for j in 0..self.opened[i].tiles.len() {
-                result[self.opened[i].tiles[j].get() as usize] += 1;
+        for i in 0..self.melds.len() {
+            for j in 0..self.melds[i].tiles.len() {
+                result[self.melds[i].tiles[j].get() as usize] += 1;
             }
         }
 
@@ -107,16 +107,16 @@ impl Hand {
             result.push(self.tiles[i].to_char());
         }
 
-        for i in 0..self.opened.len() {
+        for i in 0..self.melds.len() {
             result.push_str(&format!(
                 " {}{}{}",
-                self.opened[i].tiles[0].to_char(),
-                self.opened[i].tiles[1].to_char(),
-                self.opened[i].tiles[2].to_char()
+                self.melds[i].tiles[0].to_char(),
+                self.melds[i].tiles[1].to_char(),
+                self.melds[i].tiles[2].to_char()
             ));
             // カンなら4枚目を追加する
-            if self.opened[i].category == OpenType::Kan {
-                result.push(self.opened[i].tiles[0].to_char());
+            if self.melds[i].category.is_kan() {
+                result.push(self.melds[i].tiles[0].to_char());
             }
         }
 
@@ -135,16 +135,16 @@ impl Hand {
             result.push_str(&self.tiles[i].to_string());
         }
 
-        for i in 0..self.opened.len() {
+        for i in 0..self.melds.len() {
             result.push_str(&format!(
                 " {}{}{}",
-                self.opened[i].tiles[0].to_string(),
-                self.opened[i].tiles[1].to_string(),
-                self.opened[i].tiles[2].to_string()
+                self.melds[i].tiles[0].to_string(),
+                self.melds[i].tiles[1].to_string(),
+                self.melds[i].tiles[2].to_string()
             ));
             // カンなら4枚目を追加する
-            if self.opened[i].category == OpenType::Kan {
-                result.push_str(&format!("{}", self.opened[i].tiles[0].to_string(),));
+            if self.melds[i].category.is_kan() {
+                result.push_str(&format!("{}", self.melds[i].tiles[0].to_string(),));
             }
         }
 
@@ -189,10 +189,10 @@ impl Hand {
         let tiles = self.tiles.clone();
         let mut result = Hand::make_short_str(tiles);
 
-        for i in 0..self.opened.len() {
-            let mut op_tiles = Vec::from(self.opened[i].tiles);
-            if self.opened[i].category == OpenType::Kan {
-                op_tiles.push(self.opened[i].tiles[0]);
+        for i in 0..self.melds.len() {
+            let mut op_tiles = self.melds[i].tiles.clone();
+            if self.melds[i].category.is_kan() && op_tiles.len() == 3 {
+                op_tiles.push(self.melds[i].tiles[0]);
             }
             result.push_str(&format!(" {}", Hand::make_short_str(op_tiles)));
         }
@@ -228,7 +228,7 @@ impl Hand {
     pub fn from(hand_str: &str) -> Hand {
         let mut itr = hand_str.split_ascii_whitespace();
         let hand = Hand::str_to_tiles(itr.next().unwrap_or(""));
-        let mut opened: Vec<OpenTiles> = Vec::new();
+        let mut melds: Vec<Meld> = Vec::new();
         let mut drawn: Option<Tile> = None;
 
         while let Some(tile_str) = itr.next() {
@@ -239,35 +239,29 @@ impl Hand {
                     drawn = Some(t);
                 }
                 3 => {
-                    opened.push(OpenTiles {
-                        tiles: [
-                            *tile_vec.get(0).unwrap(),
-                            *tile_vec.get(1).unwrap(),
-                            *tile_vec.get(2).unwrap(),
-                        ],
-                        category: if *tile_vec.get(0).unwrap() == *tile_vec.get(1).unwrap() {
-                            OpenType::Pon
+                    melds.push(Meld {
+                        tiles: tile_vec.clone(),
+                        category: if tile_vec[0] == tile_vec[1] {
+                            MeldType::Pon
                         } else {
-                            OpenType::Chi
+                            MeldType::Chi
                         },
-                        from: OpenFrom::Unknown,
+                        from: MeldFrom::Unknown,
+                        called_tile: None,
                     });
                 }
                 4 => {
-                    opened.push(OpenTiles {
-                        tiles: [
-                            *tile_vec.get(0).unwrap(),
-                            *tile_vec.get(1).unwrap(),
-                            *tile_vec.get(2).unwrap(),
-                        ],
-                        category: OpenType::Kan,
-                        from: OpenFrom::Unknown,
+                    melds.push(Meld {
+                        tiles: tile_vec[..3].to_vec(),
+                        category: MeldType::Kan,
+                        from: MeldFrom::Unknown,
+                        called_tile: None,
                     });
                 }
                 _ => {}
             }
         }
-        return Hand::new_with_opened(hand, opened, drawn);
+        return Hand::new_with_melds(hand, melds, drawn);
     }
 
     pub fn from_summarized(sum: &TileSummarize) -> Hand {
@@ -329,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn from_with_no_opened_test() {
+    fn from_with_no_melds_test() {
         let test_str = "123m456p789s1115z 5z";
         let test = Hand::from(test_str);
         assert_eq!(test.tiles[0], Tile::new(Tile::M1));
@@ -342,16 +336,16 @@ mod tests {
         let test_str = "123m456p1115z 789s 5z";
         let test = Hand::from(test_str);
         assert_eq!(test.tiles[0], Tile::new(Tile::M1));
-        assert_eq!(test.opened[0].category, OpenType::Chi);
+        assert_eq!(test.melds[0].category, MeldType::Chi);
         assert_eq!(
-            test.opened[0].tiles,
-            [
+            test.melds[0].tiles,
+            vec![
                 Tile::new(Tile::S7),
                 Tile::new(Tile::S8),
                 Tile::new(Tile::S9)
             ]
         );
-        assert_eq!(test.opened[0].from, OpenFrom::Unknown);
+        assert_eq!(test.melds[0].from, MeldFrom::Unknown);
         assert_eq!(test.drawn, Some(Tile::new(Tile::Z5)));
         assert_eq!(test.to_short_string(), test_str);
     }
@@ -361,16 +355,16 @@ mod tests {
         let test_str = "123m456p789s5z 111z 5z";
         let test = Hand::from(test_str);
         assert_eq!(test.tiles[0], Tile::new(Tile::M1));
-        assert_eq!(test.opened[0].category, OpenType::Pon);
+        assert_eq!(test.melds[0].category, MeldType::Pon);
         assert_eq!(
-            test.opened[0].tiles,
-            [
+            test.melds[0].tiles,
+            vec![
                 Tile::new(Tile::Z1),
                 Tile::new(Tile::Z1),
                 Tile::new(Tile::Z1)
             ]
         );
-        assert_eq!(test.opened[0].from, OpenFrom::Unknown);
+        assert_eq!(test.melds[0].from, MeldFrom::Unknown);
         assert_eq!(test.drawn, Some(Tile::new(Tile::Z5)));
         assert_eq!(test.to_short_string(), test_str);
     }
@@ -380,16 +374,16 @@ mod tests {
         let test_str = "123m456p789s5z 1111z 5z";
         let test = Hand::from(test_str);
         assert_eq!(test.tiles[0], Tile::new(Tile::M1));
-        assert_eq!(test.opened[0].category, OpenType::Kan);
+        assert_eq!(test.melds[0].category, MeldType::Kan);
         assert_eq!(
-            test.opened[0].tiles,
-            [
+            test.melds[0].tiles,
+            vec![
                 Tile::new(Tile::Z1),
                 Tile::new(Tile::Z1),
                 Tile::new(Tile::Z1)
             ]
         );
-        assert_eq!(test.opened[0].from, OpenFrom::Unknown);
+        assert_eq!(test.melds[0].from, MeldFrom::Unknown);
         assert_eq!(test.drawn, Some(Tile::new(Tile::Z5)));
         assert_eq!(test.to_short_string(), test_str);
     }

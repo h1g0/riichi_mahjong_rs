@@ -174,7 +174,7 @@ impl HandAnalyzer {
     /// Vecへの詰め込みは`same2`（対子）以外は`single`（単独）に詰め込まれる。
     /// 七対子はVecを使用する役として断么九・混老頭・混一色・清一色と複合しうる
     fn analyze_seven_pairs(hand: &Hand) -> Result<HandAnalyzer> {
-        if !hand.opened().is_empty() {
+        if !hand.melds().is_empty() {
             return Ok(HandAnalyzer::unavailable(Form::SevenPairs));
         }
 
@@ -209,7 +209,7 @@ impl HandAnalyzer {
     ///
     /// ブロック分解・Vecへの詰め込みはしない（詰め込んでも意味がない）
     fn analyze_thirteen_orphans(hand: &Hand) -> Result<HandAnalyzer> {
-        if !hand.opened().is_empty() {
+        if !hand.melds().is_empty() {
             return Ok(HandAnalyzer::unavailable(Form::ThirteenOrphans));
         }
 
@@ -255,7 +255,7 @@ impl HandAnalyzer {
 /// CPU打牌評価など大量に呼び出す箇所で使用する。
 pub fn calc_shanten_number(hand: &Hand) -> ShantenNumber {
     let t = hand.summarize_tiles();
-    let is_closed = hand.opened().is_empty();
+    let is_closed = hand.melds().is_empty();
     let sp = if is_closed {
         calc_seven_pairs_shanten(&t).0
     } else {
