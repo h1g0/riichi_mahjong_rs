@@ -11,12 +11,6 @@ use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 
 use crate::game::{GamePhase, GameState, SetupState};
 
-/// 牌を描画する色
-const TILE_BG: Color = Color::new(1.0, 1.0, 0.9, 1.0);
-const TILE_BORDER: Color = Color::new(0.3, 0.3, 0.3, 1.0);
-const SELECTED_BG: Color = Color::new(0.8, 1.0, 0.8, 1.0);
-const RIICHI_SELECTABLE_BG: Color = Color::new(1.0, 0.96, 0.72, 1.0);
-const RIICHI_DISABLED_BG: Color = Color::new(0.78, 0.78, 0.72, 1.0);
 const RIICHI_DISABLED_TINT: Color = Color::new(0.45, 0.45, 0.42, 1.0);
 
 const TILE_W: f32 = 48.0;
@@ -67,53 +61,53 @@ pub struct TileTextures {
 impl TileTextures {
     pub fn load() -> Self {
         let standard_tiles = vec![
-            load_texture_from_png(include_bytes!("../../../assets/tiles/1m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/2m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/3m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/4m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/5m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/6m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/7m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/8m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/9m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/1p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/2p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/3p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/4p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/5p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/6p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/7p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/8p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/9p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/1s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/2s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/3s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/4s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/5s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/6s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/7s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/8s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/9s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/1z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/2z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/3z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/4z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/5z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/6z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/tiles/7z.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/1m.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/2m.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/3m.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/4m.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/5m.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/6m.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/7m.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/8m.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/9m.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/1p.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/2p.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/3p.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/4p.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/5p.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/6p.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/7p.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/8p.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/9p.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/1s.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/2s.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/3s.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/4s.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/5s.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/6s.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/7s.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/8s.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/9s.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/1z.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/2z.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/3z.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/4z.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/5z.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/6z.png")),
+            load_texture_from_png(include_bytes!("../../../assets/images/tiles/7z.png")),
         ];
 
         Self {
             standard_tiles,
-            red_5m: load_texture_from_png(include_bytes!("../../../assets/tiles/r5m.png")),
-            red_5p: load_texture_from_png(include_bytes!("../../../assets/tiles/r5p.png")),
-            red_5s: load_texture_from_png(include_bytes!("../../../assets/tiles/r5s.png")),
-            back: load_texture_from_png(include_bytes!("../../../assets/tiles/back.png")),
+            red_5m: load_texture_from_png(include_bytes!("../../../assets/images/tiles/r5m.png")),
+            red_5p: load_texture_from_png(include_bytes!("../../../assets/images/tiles/r5p.png")),
+            red_5s: load_texture_from_png(include_bytes!("../../../assets/images/tiles/r5s.png")),
+            back: load_texture_from_png(include_bytes!("../../../assets/images/tiles/back.png")),
             stick1000: load_texture_from_png(include_bytes!(
-                "../../../assets/others/stick1000.png"
+                "../../../assets/images/sticks/stick1000.png"
             )),
             stick100: load_texture_from_png(include_bytes!(
-                "../../../assets/others/stick100.png"
+                "../../../assets/images/sticks/stick100.png"
             )),
         }
     }
@@ -134,7 +128,7 @@ impl TileTextures {
 
 fn load_texture_from_png(bytes: &[u8]) -> Texture2D {
     let texture = Texture2D::from_file_with_format(bytes, Some(ImageFormat::Png));
-    texture.set_filter(FilterMode::Linear);
+    texture.set_filter(FilterMode::Nearest);
     texture
 }
 
@@ -441,8 +435,6 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             x,
             hand_y + y_offset,
             tile,
-            selected,
-            riichi_selectable,
             riichi_disabled,
             tile_textures,
         );
@@ -458,8 +450,6 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             drawn_x,
             hand_y + y_offset,
             drawn,
-            selected,
-            riichi_selectable,
             riichi_disabled,
             tile_textures,
         );
@@ -502,10 +492,7 @@ fn draw_meld_tile(
     h: f32,
     tile_textures: &TileTextures,
 ) {
-    let bg = Color::new(0.9, 0.95, 1.0, 1.0);
-    draw_rectangle(x, y, w - 2.0, h - 2.0, bg);
-    draw_rectangle_lines(x, y, w - 2.0, h - 2.0, 2.0, TILE_BORDER);
-    draw_tile_sprite(tile_textures.for_tile(tile), x + 2.0, y + 1.0, w - 6.0, h - 6.0, WHITE);
+    draw_tile_sprite(tile_textures.for_tile(tile), x, y, w - 2.0, h - 2.0, WHITE);
 }
 
 /// 横向きの副露牌を描画する（90°回転）
@@ -518,12 +505,9 @@ fn draw_meld_tile_sideways(
     tile_textures: &TileTextures,
 ) {
     // 横向き牌のバウンディングボックス: 幅=th, 高さ=tw
-    let bg = Color::new(0.9, 0.95, 1.0, 1.0);
-    draw_rectangle(x, y, th - 2.0, tw - 2.0, bg);
-    draw_rectangle_lines(x, y, th - 2.0, tw - 2.0, 2.0, TILE_BORDER);
     draw_tile_sprite_rotated(
         tile_textures.for_tile(tile),
-        x + 1.0, y + 1.0, tw - 6.0, th - 6.0, WHITE,
+        x, y, tw - 2.0, th - 2.0, WHITE,
         std::f32::consts::FRAC_PI_2,
     );
 }
@@ -536,10 +520,7 @@ fn draw_meld_tile_back(
     h: f32,
     tile_textures: &TileTextures,
 ) {
-    let bg = Color::new(0.5, 0.6, 0.5, 1.0);
-    draw_rectangle(x, y, w - 2.0, h - 2.0, bg);
-    draw_rectangle_lines(x, y, w - 2.0, h - 2.0, 2.0, TILE_BORDER);
-    draw_tile_sprite(&tile_textures.back, x + 2.0, y + 1.0, w - 6.0, h - 6.0, WHITE);
+    draw_tile_sprite(&tile_textures.back, x, y, w - 2.0, h - 2.0, WHITE);
 }
 
 /// 鳴き元に応じて横向き牌の位置インデックスを返す
@@ -673,23 +654,9 @@ fn draw_tile(
     x: f32,
     y: f32,
     tile: &mahjong_core::tile::Tile,
-    selected: bool,
-    riichi_selectable: bool,
     riichi_disabled: bool,
     tile_textures: &TileTextures,
 ) {
-    let bg = if selected {
-        SELECTED_BG
-    } else if riichi_selectable {
-        RIICHI_SELECTABLE_BG
-    } else if riichi_disabled {
-        RIICHI_DISABLED_BG
-    } else {
-        TILE_BG
-    };
-    draw_rectangle(x, y, TILE_W - 2.0, TILE_H - 2.0, bg);
-    draw_rectangle_lines(x, y, TILE_W - 2.0, TILE_H - 2.0, 2.0, TILE_BORDER);
-
     let tint = if riichi_disabled {
         RIICHI_DISABLED_TINT
     } else {
@@ -697,10 +664,10 @@ fn draw_tile(
     };
     draw_tile_sprite(
         tile_textures.for_tile(tile),
-        x + 2.0,
-        y + 1.0,
-        TILE_W - 6.0,
-        TILE_H - 6.0,
+        x,
+        y,
+        TILE_W - 2.0,
+        TILE_H - 2.0,
         tint,
     );
 }
