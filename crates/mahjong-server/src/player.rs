@@ -401,6 +401,11 @@ impl Player {
         if drawn_matches {
             kan_tiles.push(drawn.unwrap());
             self.hand.set_drawn(None);
+        } else if let Some(d) = drawn {
+            // ツモ牌がカン牌でない場合、手牌に戻す（嶺上ツモで上書きされないよう）
+            self.hand.tiles_mut().push(d);
+            self.hand.sort();
+            self.hand.set_drawn(None);
         }
 
         self.hand.remove_tiles_by_indices(&mut indices);
