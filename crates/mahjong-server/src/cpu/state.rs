@@ -58,6 +58,8 @@ pub struct CpuGameState {
     // --- 鳴き後打牌フラグ ---
     /// 鳴き後に打牌が必要か
     pub need_discard_after_call: bool,
+    /// 直前の鳴きがカン系（嶺上ツモ待ち）か
+    pub pending_kan_draw: bool,
 }
 
 impl CpuGameState {
@@ -83,6 +85,7 @@ impl CpuGameState {
             pending_calls: Vec::new(),
             pending_call_tile: None,
             need_discard_after_call: false,
+            pending_kan_draw: false,
         }
     }
 
@@ -129,6 +132,7 @@ impl CpuGameState {
                 self.pending_calls.clear();
                 self.pending_call_tile = None;
                 self.need_discard_after_call = false;
+                self.pending_kan_draw = false;
             }
 
             ServerEvent::TileDrawn {
@@ -214,6 +218,11 @@ impl CpuGameState {
 
                 self.pending_calls.clear();
                 self.pending_call_tile = None;
+                // カン系（嶺上ツモ待ち）かどうかを記録する
+                self.pending_kan_draw = matches!(
+                    call_type,
+                    CallType::Ankan | CallType::Daiminkan | CallType::Kakan
+                );
             }
 
             ServerEvent::PlayerRiichi {
@@ -237,8 +246,13 @@ impl CpuGameState {
             ServerEvent::HandUpdated { hand } => {
                 self.my_hand = hand.clone();
                 self.my_drawn = None;
-                // 鳴き後は打牌が必要
-                self.need_discard_after_call = true;
+                if self.pending_kan_draw {
+                    // カン系: 嶺上ツモ（TileDrawn）が来るまで打牌不要
+                    self.pending_kan_draw = false;
+                } else {
+                    // ポン/チー後: 打牌が必要
+                    self.need_discard_after_call = true;
+                }
             }
 
             ServerEvent::RoundWon { scores, .. } => {
