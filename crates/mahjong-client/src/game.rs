@@ -633,6 +633,10 @@ impl GameState {
                     msg.push_str(&format!("\n供託: {}本", riichi_sticks));
                 }
 
+                self.win_hand.clear();
+                self.win_tile = None;
+                self.win_melds.clear();
+                self.uradora_indicators.clear();
                 self.result_message = Some(msg);
                 self.phase = GamePhase::RoundResult;
                 self.is_my_turn = false;

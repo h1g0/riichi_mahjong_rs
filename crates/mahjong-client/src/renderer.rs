@@ -999,8 +999,14 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
     let content_w = total_hand_w.max(dora_w);
     let start_x = (1120.0 - content_w).max(170.0);
 
-    // ドラ表示牌（上段: 5枚）
+    // ドラ表示牌・裏ドラ・手牌は和了時のみ表示（流局時は非表示）
+    let is_win_result = state.win_tile.is_some() || !state.win_hand.is_empty();
+
     let dora_y: f32 = 170.0;
+    let mut next_y = dora_y;
+
+    if is_win_result {
+    // ドラ表示牌（上段: 5枚）
     let revealed_count = state.dora_indicators.len();
     for i in 0..5 {
         let x = start_x + i as f32 * tw;
@@ -1013,10 +1019,11 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
             draw_tile_sprite(&tile_textures.back, x, dora_y, tw, th, WHITE);
         }
     }
+    next_y = dora_y + th;
+    } // end is_win_result (dora)
 
     // 裏ドラ表示牌（リーチ和了時のみ表示）
-    let mut next_y = dora_y + th;
-    if !state.uradora_indicators.is_empty() {
+    if is_win_result && !state.uradora_indicators.is_empty() {
         let ura_count = state.uradora_indicators.len();
         for i in 0..5 {
             let x = start_x + i as f32 * tw;
