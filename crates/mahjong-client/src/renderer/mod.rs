@@ -2,10 +2,19 @@
 //!
 //! 埋め込みPNGを使って麻雀牌を描画する。
 
+mod overlay;
+pub use overlay::{
+    CHI_SEL_TILE_W, CHI_SEL_TILE_H, CHI_SEL_TILE_GAP, CHI_SEL_OPT_SPACING, CHI_SEL_PANEL_H,
+    CALL_BTN_W, CALL_BTN_H, CALL_BTN_SPACING, CALL_PANEL_PAD,
+    CALL_PANEL_TILE_W,
+    CALL_PANEL_RIGHT_X_NO_RON, CALL_PANEL_BOTTOM_Y_NO_RON, CALL_BTN_BASE_Y_NO_RON,
+    CALL_OVERLAY_PANEL_H,
+    AGARI_BTN_W, AGARI_BTN_H, AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_GAP,
+};
+
 use macroquad::prelude::*;
 use mahjong_core::tile::Tile;
 use mahjong_server::cpu::client::CpuConfig;
-use mahjong_server::protocol::AvailableCall;
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 
@@ -42,11 +51,6 @@ fn make_board_camera(rotation_deg: f32) -> Camera2D {
     }
 }
 
-/// 和了ボタンの定数（描画・入力の両方で使用）
-pub const AGARI_BTN_X: f32 = 346.0;
-pub const AGARI_BTN_Y: f32 = 600.0;
-pub const AGARI_BTN_W: f32 = 200.0;
-pub const AGARI_BTN_H: f32 = 60.0;
 
 pub struct TileTextures {
     standard_tiles: Vec<Texture2D>,
@@ -61,53 +65,53 @@ pub struct TileTextures {
 impl TileTextures {
     pub fn load() -> Self {
         let standard_tiles = vec![
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/1m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/2m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/3m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/4m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/5m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/6m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/7m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/8m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/9m.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/1p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/2p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/3p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/4p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/5p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/6p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/7p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/8p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/9p.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/1s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/2s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/3s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/4s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/5s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/6s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/7s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/8s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/9s.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/1z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/2z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/3z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/4z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/5z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/6z.png")),
-            load_texture_from_png(include_bytes!("../../../assets/images/tiles/7z.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/1m.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/2m.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/3m.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/4m.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/5m.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/6m.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/7m.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/8m.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/9m.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/1p.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/2p.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/3p.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/4p.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/5p.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/6p.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/7p.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/8p.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/9p.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/1s.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/2s.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/3s.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/4s.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/5s.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/6s.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/7s.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/8s.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/9s.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/1z.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/2z.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/3z.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/4z.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/5z.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/6z.png")),
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/7z.png")),
         ];
 
         Self {
             standard_tiles,
-            red_5m: load_texture_from_png(include_bytes!("../../../assets/images/tiles/r5m.png")),
-            red_5p: load_texture_from_png(include_bytes!("../../../assets/images/tiles/r5p.png")),
-            red_5s: load_texture_from_png(include_bytes!("../../../assets/images/tiles/r5s.png")),
-            back: load_texture_from_png(include_bytes!("../../../assets/images/tiles/back.png")),
+            red_5m: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/r5m.png")),
+            red_5p: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/r5p.png")),
+            red_5s: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/r5s.png")),
+            back: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/back.png")),
             stick1000: load_texture_from_png(include_bytes!(
-                "../../../assets/images/sticks/stick1000.png"
+                "../../../../assets/images/sticks/stick1000.png"
             )),
             stick100: load_texture_from_png(include_bytes!(
-                "../../../assets/images/sticks/stick100.png"
+                "../../../../assets/images/sticks/stick100.png"
             )),
         }
     }
@@ -157,7 +161,7 @@ pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTex
             draw_other_player_hands(state, tile_textures);
             draw_hand(state, font, tile_textures);
             draw_melds(state, tile_textures);
-            draw_action_buttons(state, font);
+            overlay::draw_action_buttons(state, font, tile_textures);
         }
         GamePhase::RoundResult => {
             draw_dora_indicators(state, font, tile_textures);
@@ -175,11 +179,7 @@ pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTex
 }
 
 /// ドラ表示牌・供託棒・本場を画面左上に描画する
-fn draw_dora_indicators(
-    state: &GameState,
-    font: Option<&Font>,
-    tile_textures: &TileTextures,
-) {
+fn draw_dora_indicators(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
     let dora_w: f32 = 30.0;
     let dora_h: f32 = 42.0;
     let dora_step: f32 = dora_w; // 牌同士がくっつく（隙間なし）
@@ -205,13 +205,14 @@ fn draw_dora_indicators(
         if i < revealed_count {
             draw_tile_sprite(
                 tile_textures.for_tile(&state.dora_indicators[i]),
-                x, base_y, dora_w, dora_h, WHITE,
+                x,
+                base_y,
+                dora_w,
+                dora_h,
+                WHITE,
             );
         } else {
-            draw_tile_sprite(
-                &tile_textures.back,
-                x, base_y, dora_w, dora_h, WHITE,
-            );
+            draw_tile_sprite(&tile_textures.back, x, base_y, dora_w, dora_h, WHITE);
         }
     }
 
@@ -219,7 +220,11 @@ fn draw_dora_indicators(
     let stick_y_top = base_y + 6.0;
     draw_tile_sprite(
         &tile_textures.stick1000,
-        stick_area_x, stick_y_top, stick_w, stick_h, WHITE,
+        stick_area_x,
+        stick_y_top,
+        stick_w,
+        stick_h,
+        WHITE,
     );
     draw_jp_text(
         font,
@@ -234,7 +239,11 @@ fn draw_dora_indicators(
     let stick_y_bottom = stick_y_top + stick_h + 10.0;
     draw_tile_sprite(
         &tile_textures.stick100,
-        stick_area_x, stick_y_bottom, stick_w, stick_h, WHITE,
+        stick_area_x,
+        stick_y_bottom,
+        stick_w,
+        stick_h,
+        WHITE,
     );
     draw_jp_text(
         font,
@@ -376,17 +385,18 @@ fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
                 let y = start_y + row as f32 * row_step + (dth - dtw) / 2.0;
                 draw_tile_sprite_rotated(
                     tile_textures.for_tile(&discard.tile),
-                    x, y, dtw, dth, tint,
+                    x,
+                    y,
+                    dtw,
+                    dth,
+                    tint,
                     std::f32::consts::FRAC_PI_2,
                 );
                 col_offset += dth; // 横倒し牌の幅 = dth（隙間なし）
             } else {
                 let x = start_x + col_offset;
                 let y = start_y + row as f32 * row_step;
-                draw_tile_sprite(
-                    tile_textures.for_tile(&discard.tile),
-                    x, y, dtw, dth, tint,
-                );
+                draw_tile_sprite(tile_textures.for_tile(&discard.tile), x, y, dtw, dth, tint);
                 col_offset += col_step;
             }
         }
@@ -412,8 +422,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
     }
 
     // 選択中の牌を捨てるとフリテンになる場合の警告
-    if state.selected_would_cause_furiten
-        && (state.selected_tile.is_some() || state.selected_drawn)
+    if state.selected_would_cause_furiten && (state.selected_tile.is_some() || state.selected_drawn)
     {
         draw_jp_text(
             font,
@@ -428,16 +437,11 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
     for (i, tile) in state.hand.iter().enumerate() {
         let x = hand_start_x + i as f32 * TILE_W;
         let selected = state.selected_tile == Some(i);
-        let riichi_selectable = state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);
+        let riichi_selectable =
+            state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);
         let y_offset = if selected { -10.0 } else { 0.0 };
         let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
-        draw_tile(
-            x,
-            hand_y + y_offset,
-            tile,
-            riichi_disabled,
-            tile_textures,
-        );
+        draw_tile(x, hand_y + y_offset, tile, riichi_disabled, tile_textures);
     }
 
     if let Some(drawn) = &state.drawn {
@@ -507,29 +511,27 @@ fn draw_meld_tile_sideways(
     // 横向き牌のバウンディングボックス: 幅=th, 高さ=tw
     draw_tile_sprite_rotated(
         tile_textures.for_tile(tile),
-        x, y, tw - 2.0, th - 2.0, WHITE,
+        x,
+        y,
+        tw - 2.0,
+        th - 2.0,
+        WHITE,
         std::f32::consts::FRAC_PI_2,
     );
 }
 
 /// 裏向きの副露牌を描画する（暗槓用）
-fn draw_meld_tile_back(
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    tile_textures: &TileTextures,
-) {
+fn draw_meld_tile_back(x: f32, y: f32, w: f32, h: f32, tile_textures: &TileTextures) {
     draw_tile_sprite(&tile_textures.back, x, y, w - 2.0, h - 2.0, WHITE);
 }
 
 /// 鳴き元に応じて横向き牌の位置インデックスを返す
 fn sideways_index(from: MeldFrom, tile_count: usize) -> usize {
     match from {
-        MeldFrom::Previous => 0,              // 上家: 左端
-        MeldFrom::Opposite => 1,              // 対面: 左から2番目
+        MeldFrom::Previous => 0,               // 上家: 左端
+        MeldFrom::Opposite => 1,               // 対面: 左から2番目
         MeldFrom::Following => tile_count - 1, // 下家: 右端
-        _ => 0,                               // Unknown/Myself: フォールバック
+        _ => 0,                                // Unknown/Myself: フォールバック
     }
 }
 
@@ -608,7 +610,14 @@ fn draw_meld_group(
             let mut x = base_x;
             for i in 0..3 {
                 if i == side_idx {
-                    draw_meld_tile_sideways(x, base_y + (th - tw), &meld.tiles[i], tw, th, tile_textures);
+                    draw_meld_tile_sideways(
+                        x,
+                        base_y + (th - tw),
+                        &meld.tiles[i],
+                        tw,
+                        th,
+                        tile_textures,
+                    );
                     x += th;
                 } else {
                     draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
@@ -622,7 +631,14 @@ fn draw_meld_group(
             let mut x = base_x;
             for i in 0..4 {
                 if i == side_idx {
-                    draw_meld_tile_sideways(x, base_y + (th - tw), &meld.tiles[i], tw, th, tile_textures);
+                    draw_meld_tile_sideways(
+                        x,
+                        base_y + (th - tw),
+                        &meld.tiles[i],
+                        tw,
+                        th,
+                        tile_textures,
+                    );
                     x += th;
                 } else {
                     draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
@@ -636,9 +652,23 @@ fn draw_meld_group(
             let mut x = base_x;
             for i in 0..3 {
                 if i == side_idx {
-                    draw_meld_tile_sideways(x, base_y + (th - tw), &meld.tiles[i], tw, th, tile_textures);
+                    draw_meld_tile_sideways(
+                        x,
+                        base_y + (th - tw),
+                        &meld.tiles[i],
+                        tw,
+                        th,
+                        tile_textures,
+                    );
                     if meld.tiles.len() > 3 {
-                        draw_meld_tile_sideways(x, base_y + (th - tw) - tw, &meld.tiles[3], tw, th, tile_textures);
+                        draw_meld_tile_sideways(
+                            x,
+                            base_y + (th - tw) - tw,
+                            &meld.tiles[3],
+                            tw,
+                            th,
+                            tile_textures,
+                        );
                     }
                     x += th;
                 } else {
@@ -754,8 +784,7 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
         } else {
             meld_gap + (other.melds.len() as f32 - 1.0) * meld_gap
         };
-        let total_width =
-            hand_count as f32 * tile_step + meld_widths + meld_gaps;
+        let total_width = hand_count as f32 * tile_step + meld_widths + meld_gaps;
         let start_x = BOARD_CENTER_X - total_width / 2.0;
 
         set_camera(&make_board_camera(PLAYER_ROTATIONS[relative_idx]));
@@ -790,192 +819,6 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
     }
 }
 
-/// 和了ボタンを描画する（ロン・ツモ共通）
-fn draw_agari_button(font: Option<&Font>) {
-    let bg = Color::new(0.9, 0.05, 0.05, 1.0);
-    let border = Color::new(1.0, 0.85, 0.0, 1.0);
-
-    // 背景（角丸風に外枠を太くして目立たせる）
-    draw_rectangle(AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_W, AGARI_BTN_H, bg);
-    draw_rectangle_lines(AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_W, AGARI_BTN_H, 4.0, border);
-
-    // テキスト「和 了」を大きく中央に表示
-    draw_jp_text(
-        font,
-        "和　了",
-        AGARI_BTN_X + 50.0,
-        AGARI_BTN_Y + 42.0,
-        AGARI_FONT,
-        WHITE,
-    );
-}
-
-fn draw_action_buttons(state: &GameState, font: Option<&Font>) {
-    if !state.available_calls.is_empty() {
-        draw_call_buttons(state, font);
-        return;
-    }
-
-    if !state.is_my_turn {
-        draw_jp_text(
-            font,
-            "他のプレイヤーの手番です...",
-            480.0,
-            640.0,
-            FONT_SIZE,
-            Color::new(0.8, 0.8, 0.8, 0.7),
-        );
-        return;
-    }
-
-    if state.riichi_selection_mode {
-        draw_jp_text(
-            font,
-            "【リーチ】聴牌になる牌を選んで打牌",
-            330.0,
-            640.0,
-            FONT_SIZE,
-            Color::new(1.0, 0.9, 0.3, 1.0),
-        );
-    } else if state.is_riichi {
-        draw_jp_text(
-            font,
-            "【リーチ中】自動ツモ切り",
-            400.0,
-            640.0,
-            FONT_SIZE,
-            Color::new(1.0, 0.3, 0.3, 1.0),
-        );
-    }
-
-    if state.drawn.is_some() {
-        // 和了ボタン（ツモ）を目立つ位置に表示
-        if state.can_tsumo {
-            draw_agari_button(font);
-        }
-
-        if state.can_riichi {
-            let riichi_bg = Color::new(0.1, 0.6, 0.1, 1.0);
-            draw_rectangle(1000.0, 720.0, 80.0, 40.0, riichi_bg);
-            draw_rectangle_lines(1000.0, 720.0, 80.0, 40.0, 2.0, WHITE);
-            draw_jp_text(font, "リーチ", 1008.0, 747.0, SMALL_FONT, WHITE);
-        }
-
-        for (idx, tile) in state.self_kan_options.iter().enumerate() {
-            let x = 720.0 + idx as f32 * 110.0;
-            let kan_bg = Color::new(0.1, 0.3, 0.8, 1.0);
-            draw_rectangle(x, 670.0, 100.0, 40.0, kan_bg);
-            draw_rectangle_lines(x, 670.0, 100.0, 40.0, 2.0, WHITE);
-            draw_jp_text(
-                font,
-                &format!("{}カン", tile.to_string()),
-                x + 10.0,
-                697.0,
-                SMALL_FONT,
-                WHITE,
-            );
-        }
-
-        if state.riichi_selection_mode {
-            draw_jp_text(
-                font,
-                "黄色の牌だけがリーチ打牌できます。リーチボタンでも解除できます。",
-                100.0,
-                770.0,
-                SMALL_FONT,
-                Color::new(0.9, 0.9, 0.5, 0.8),
-            );
-        } else if !state.is_riichi {
-            draw_jp_text(
-                font,
-                "牌をクリックで選択、もう一度クリックで打牌",
-                100.0,
-                770.0,
-                SMALL_FONT,
-                Color::new(0.8, 0.8, 0.8, 0.7),
-            );
-        }
-    }
-}
-
-fn draw_call_buttons(state: &GameState, font: Option<&Font>) {
-    let has_ron = state
-        .available_calls
-        .iter()
-        .any(|c| matches!(c, AvailableCall::Ron));
-    let has_non_ron = state
-        .available_calls
-        .iter()
-        .any(|c| !matches!(c, AvailableCall::Ron));
-
-    // ロンがある場合は和了ボタンを大きく表示
-    if has_ron {
-        draw_agari_button(font);
-    }
-
-    // ロン以外の鳴きがある場合のみ「鳴きますか？」を表示
-    if has_non_ron {
-        if let Some(target) = &state.call_target_tile {
-            let tile_str = crate::game::tile_to_string(*target);
-            draw_jp_text(
-                font,
-                &format!("捨て牌: {}  鳴きますか？", tile_str),
-                400.0,
-                600.0,
-                FONT_SIZE,
-                Color::new(1.0, 0.9, 0.3, 1.0),
-            );
-        }
-    }
-
-    // ロンがある場合は和了ボタンの右側に配置、なければ従来位置
-    let base_x = if has_ron {
-        AGARI_BTN_X + AGARI_BTN_W + 20.0
-    } else {
-        400.0
-    };
-    let base_y = if has_ron { AGARI_BTN_Y + 10.0 } else { 620.0 };
-    let btn_w = 100.0;
-    let btn_h = 40.0;
-    let btn_spacing = 10.0;
-
-    let call_btn_bg = Color::new(0.8, 0.2, 0.2, 1.0);
-    let pass_btn_bg = Color::new(0.4, 0.4, 0.4, 1.0);
-
-    let mut btn_idx = 0;
-
-    for call in &state.available_calls {
-        // ロンは和了ボタンで表示済みなのでスキップ
-        if matches!(call, AvailableCall::Ron) {
-            continue;
-        }
-        let x = base_x + btn_idx as f32 * (btn_w + btn_spacing);
-        match call {
-            AvailableCall::Ron => unreachable!(),
-            AvailableCall::Pon => {
-                draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
-                draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
-                draw_jp_text(font, "ポン", x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
-            }
-            AvailableCall::Daiminkan => {
-                draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
-                draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
-                draw_jp_text(font, "カン", x + 18.0, base_y + 27.0, SMALL_FONT, WHITE);
-            }
-            AvailableCall::Chi { .. } => {
-                draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
-                draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
-                draw_jp_text(font, "チー", x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
-            }
-        }
-        btn_idx += 1;
-    }
-
-    let pass_x = base_x + btn_idx as f32 * (btn_w + btn_spacing);
-    draw_rectangle(pass_x, base_y, btn_w, btn_h, pass_btn_bg);
-    draw_rectangle_lines(pass_x, base_y, btn_w, btn_h, 2.0, WHITE);
-    draw_jp_text(font, "パス", pass_x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
-}
 
 fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
     draw_rectangle(150.0, 150.0, 980.0, 420.0, Color::new(0.0, 0.0, 0.0, 0.85));
@@ -987,8 +830,16 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
 
     // 手牌の合計幅を計算して開始位置を決定（ドラ表示もこの左端に揃える）
     let hand_tiles = state.win_hand.len() as f32;
-    let win_tile_w = if state.win_tile.is_some() { tw + win_tile_gap } else { 0.0 };
-    let meld_tiles: f32 = state.win_melds.iter().map(|m| calc_meld_width(m, tw, th)).sum();
+    let win_tile_w = if state.win_tile.is_some() {
+        tw + win_tile_gap
+    } else {
+        0.0
+    };
+    let meld_tiles: f32 = state
+        .win_melds
+        .iter()
+        .map(|m| calc_meld_width(m, tw, th))
+        .sum();
     let meld_gaps = if state.win_melds.is_empty() {
         0.0
     } else {
@@ -1006,20 +857,24 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
     let mut next_y = dora_y;
 
     if is_win_result {
-    // ドラ表示牌（上段: 5枚）
-    let revealed_count = state.dora_indicators.len();
-    for i in 0..5 {
-        let x = start_x + i as f32 * tw;
-        if i < revealed_count {
-            draw_tile_sprite(
-                tile_textures.for_tile(&state.dora_indicators[i]),
-                x, dora_y, tw, th, WHITE,
-            );
-        } else {
-            draw_tile_sprite(&tile_textures.back, x, dora_y, tw, th, WHITE);
+        // ドラ表示牌（上段: 5枚）
+        let revealed_count = state.dora_indicators.len();
+        for i in 0..5 {
+            let x = start_x + i as f32 * tw;
+            if i < revealed_count {
+                draw_tile_sprite(
+                    tile_textures.for_tile(&state.dora_indicators[i]),
+                    x,
+                    dora_y,
+                    tw,
+                    th,
+                    WHITE,
+                );
+            } else {
+                draw_tile_sprite(&tile_textures.back, x, dora_y, tw, th, WHITE);
+            }
         }
-    }
-    next_y = dora_y + th;
+        next_y = dora_y + th;
     } // end is_win_result (dora)
 
     // 裏ドラ表示牌（リーチ和了時のみ表示）
@@ -1030,7 +885,11 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
             if i < ura_count {
                 draw_tile_sprite(
                     tile_textures.for_tile(&state.uradora_indicators[i]),
-                    x, next_y, tw, th, WHITE,
+                    x,
+                    next_y,
+                    tw,
+                    th,
+                    WHITE,
                 );
             } else {
                 draw_tile_sprite(&tile_textures.back, x, next_y, tw, th, WHITE);
@@ -1057,7 +916,11 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
             draw_tile_sprite(tile_textures.for_tile(win_tile), x, next_y, tw, th, WHITE);
 
             // 和了牌の下に「ツモ」or「ロン」
-            let win_label = if state.win_is_tsumo { "ツモ" } else { "ロン" };
+            let win_label = if state.win_is_tsumo {
+                "ツモ"
+            } else {
+                "ロン"
+            };
             let dims = measure_text(win_label, font, 12, 1.0);
             draw_jp_text(
                 font,
@@ -1176,7 +1039,14 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
 
     // 背景パネル
     draw_rectangle(190.0, 80.0, 900.0, 640.0, Color::new(0.0, 0.0, 0.0, 0.85));
-    draw_rectangle_lines(190.0, 80.0, 900.0, 640.0, 2.0, Color::new(0.5, 0.5, 0.5, 1.0));
+    draw_rectangle_lines(
+        190.0,
+        80.0,
+        900.0,
+        640.0,
+        2.0,
+        Color::new(0.5, 0.5, 0.5, 1.0),
+    );
 
     // タイトル
     draw_jp_text(font, "対局設定", 540.0, 130.0, 36, WHITE);
@@ -1189,10 +1059,24 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         let base_y = 180.0;
 
         // CPU名（ベースライン基準なので +24 で文字下端を揃える）
-        draw_jp_text(font, name, cx + 30.0, base_y + 24.0, 24, Color::new(1.0, 0.9, 0.3, 1.0));
+        draw_jp_text(
+            font,
+            name,
+            cx + 30.0,
+            base_y + 24.0,
+            24,
+            Color::new(1.0, 0.9, 0.3, 1.0),
+        );
 
         // 強さ
-        draw_jp_text(font, "強さ:", cx, base_y + 70.0, FONT_SIZE, Color::new(0.8, 0.8, 0.8, 1.0));
+        draw_jp_text(
+            font,
+            "強さ:",
+            cx,
+            base_y + 70.0,
+            FONT_SIZE,
+            Color::new(0.8, 0.8, 0.8, 1.0),
+        );
         for level_idx in 0..SetupState::level_count() {
             let btn_y = base_y + 80.0 + level_idx as f32 * 42.0;
             let selected = setup.cpu_levels[cpu_idx] == level_idx;
@@ -1209,7 +1093,14 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         }
 
         // 性格
-        draw_jp_text(font, "性格:", cx, base_y + 230.0, FONT_SIZE, Color::new(0.8, 0.8, 0.8, 1.0));
+        draw_jp_text(
+            font,
+            "性格:",
+            cx,
+            base_y + 230.0,
+            FONT_SIZE,
+            Color::new(0.8, 0.8, 0.8, 1.0),
+        );
         for pers_idx in 0..SetupState::personality_count() {
             let btn_y = base_y + 240.0 + pers_idx as f32 * 42.0;
             let selected = setup.cpu_personalities[cpu_idx] == pers_idx;
@@ -1226,11 +1117,36 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
     }
 
     // 対局開始ボタン
-    let start_btn = SetupButton { x: 490.0, y: 630.0, w: 300.0, h: 56.0 };
-    draw_rectangle(start_btn.x, start_btn.y, start_btn.w, start_btn.h, Color::new(0.6, 0.15, 0.15, 1.0));
-    draw_rectangle_lines(start_btn.x, start_btn.y, start_btn.w, start_btn.h, 2.0, Color::new(0.9, 0.3, 0.3, 1.0));
+    let start_btn = SetupButton {
+        x: 490.0,
+        y: 630.0,
+        w: 300.0,
+        h: 56.0,
+    };
+    draw_rectangle(
+        start_btn.x,
+        start_btn.y,
+        start_btn.w,
+        start_btn.h,
+        Color::new(0.6, 0.15, 0.15, 1.0),
+    );
+    draw_rectangle_lines(
+        start_btn.x,
+        start_btn.y,
+        start_btn.w,
+        start_btn.h,
+        2.0,
+        Color::new(0.9, 0.3, 0.3, 1.0),
+    );
     // ボタン(56px)内でフォント(28px)を垂直中央: btn_y + (56+28)/2 = btn_y + 38
-    draw_jp_text(font, "対局開始", start_btn.x + 80.0, start_btn.y + 38.0, 28, WHITE);
+    draw_jp_text(
+        font,
+        "対局開始",
+        start_btn.x + 80.0,
+        start_btn.y + 38.0,
+        28,
+        WHITE,
+    );
 }
 
 /// 設定画面の入力を処理する。対局開始が押された場合 Some(configs) を返す。
@@ -1250,8 +1166,10 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
         // 強さボタン
         for level_idx in 0..SetupState::level_count() {
             let btn = SetupButton {
-                x: cx, y: base_y + 80.0 + level_idx as f32 * 42.0,
-                w: 200.0, h: 34.0,
+                x: cx,
+                y: base_y + 80.0 + level_idx as f32 * 42.0,
+                w: 200.0,
+                h: 34.0,
             };
             if btn.contains(mx, my) {
                 setup.cpu_levels[cpu_idx] = level_idx;
@@ -1262,8 +1180,10 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
         // 性格ボタン
         for pers_idx in 0..SetupState::personality_count() {
             let btn = SetupButton {
-                x: cx, y: base_y + 240.0 + pers_idx as f32 * 42.0,
-                w: 200.0, h: 34.0,
+                x: cx,
+                y: base_y + 240.0 + pers_idx as f32 * 42.0,
+                w: 200.0,
+                h: 34.0,
             };
             if btn.contains(mx, my) {
                 setup.cpu_personalities[cpu_idx] = pers_idx;
@@ -1273,7 +1193,12 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
     }
 
     // 対局開始ボタン
-    let start_btn = SetupButton { x: 490.0, y: 630.0, w: 300.0, h: 56.0 };
+    let start_btn = SetupButton {
+        x: 490.0,
+        y: 630.0,
+        w: 300.0,
+        h: 56.0,
+    };
     if start_btn.contains(mx, my) {
         let configs = setup.build_configs();
         state.phase = GamePhase::WaitingForStart;
