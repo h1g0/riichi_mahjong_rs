@@ -3,14 +3,7 @@
 //! 埋め込みPNGを使って麻雀牌を描画する。
 
 mod overlay;
-pub use overlay::{
-    CHI_SEL_TILE_W, CHI_SEL_TILE_H, CHI_SEL_TILE_GAP, CHI_SEL_OPT_SPACING, CHI_SEL_PANEL_H,
-    CALL_BTN_W, CALL_BTN_H, CALL_BTN_SPACING, CALL_PANEL_PAD,
-    CALL_PANEL_TILE_W,
-    CALL_PANEL_RIGHT_X_NO_RON, CALL_PANEL_BOTTOM_Y_NO_RON, CALL_BTN_BASE_Y_NO_RON,
-    CALL_OVERLAY_PANEL_H,
-    AGARI_BTN_W, AGARI_BTN_H, AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_GAP,
-};
+pub use overlay::OverlayClick;
 
 use macroquad::prelude::*;
 use mahjong_core::tile::Tile;
@@ -146,13 +139,15 @@ fn draw_jp_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16,
     draw_text_ex(text, x, y, params);
 }
 
-pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
+pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) -> Option<OverlayClick> {
     match state.phase {
         GamePhase::Setup => {
             draw_setup(state, font);
+            None
         }
         GamePhase::WaitingForStart => {
             draw_jp_text(font, "ゲーム開始中...", 540.0, 400.0, 30, WHITE);
+            None
         }
         GamePhase::Playing => {
             draw_dora_indicators(state, font, tile_textures);
@@ -161,7 +156,7 @@ pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTex
             draw_other_player_hands(state, tile_textures);
             draw_hand(state, font, tile_textures);
             draw_melds(state, tile_textures);
-            overlay::draw_action_buttons(state, font, tile_textures);
+            overlay::draw_action_buttons(state, font, tile_textures)
         }
         GamePhase::RoundResult => {
             draw_dora_indicators(state, font, tile_textures);
@@ -171,9 +166,11 @@ pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTex
             draw_hand(state, font, tile_textures);
             draw_melds(state, tile_textures);
             draw_result(state, font, tile_textures);
+            None
         }
         GamePhase::GameOver => {
             draw_game_over(state, font);
+            None
         }
     }
 }

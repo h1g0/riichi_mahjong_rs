@@ -896,57 +896,82 @@ impl GameState {
         discarded_tile
     }
 
-    /// 入力処理: クリックで牌を選択し、アクションを返す
-    pub fn handle_input(&mut self) -> Option<ClientAction> {
+    /// 入力処理: オーバーレイのクリック結果と手牌クリックを処理してアクションを返す
+    pub fn handle_input(&mut self, overlay_click: Option<crate::renderer::OverlayClick>) -> Option<ClientAction> {
+        use crate::renderer::OverlayClick;
+
         if self.phase != GamePhase::Playing {
             return None;
         }
 
-        if self.chi_option_selecting {
-            return self.handle_chi_selection_input();
-        }
-
-        if self.pon_option_selecting {
-            return self.handle_pon_selection_input();
-        }
-
-        if !self.available_calls.is_empty() {
-            return self.handle_call_input();
-        }
-
-        if !self.is_my_turn {
-            return None;
-        }
-
-        if self.is_riichi && self.drawn.is_some() && !self.can_tsumo {
+        // リーチ中はツモ切り自動処理（マウス入力不要）
+        if self.is_my_turn && self.is_riichi && self.drawn.is_some() && !self.can_tsumo {
             self.drawn.take();
             return Some(ClientAction::Discard { tile: None });
         }
 
-        if is_mouse_button_pressed(MouseButton::Left) {
-            let (mx, my) = mouse_position();
-
-            if self.can_tsumo {
-                // 和了ボタン（手牌上部の大きなボタン）
-                if mx >= crate::renderer::AGARI_BTN_X
-                    && mx <= crate::renderer::AGARI_BTN_X + crate::renderer::AGARI_BTN_W
-                    && my >= crate::renderer::AGARI_BTN_Y
-                    && my <= crate::renderer::AGARI_BTN_Y + crate::renderer::AGARI_BTN_H
-                {
-                    return Some(ClientAction::Tsumo);
+        // オーバーレイのクリック判定（draw_game が返した結果を処理）
+        if let Some(click) = overlay_click {
+            if self.chi_option_selecting {
+                match click {
+                    OverlayClick::Action(action) => {
+                        self.chi_option_selecting = false;
+                        self.chi_pending_options.clear();
+                        self.available_calls.clear();
+                        self.call_target_tile = None;
+                        return Some(action);
+                    }
+                    OverlayClick::CancelMeldSelection => {
+                        self.chi_option_selecting = false;
+                        self.chi_pending_options.clear();
+                    }
+                    _ => {}
                 }
+                return None;
             }
 
-            if self.can_riichi {
-                let riichi_x = 1000.0;
-                let riichi_y = 720.0;
-                let btn_w = 80.0;
-                let btn_h = 40.0;
-                if mx >= riichi_x
-                    && mx <= riichi_x + btn_w
-                    && my >= riichi_y
-                    && my <= riichi_y + btn_h
-                {
+            if self.pon_option_selecting {
+                match click {
+                    OverlayClick::Action(action) => {
+                        self.pon_option_selecting = false;
+                        self.pon_pending_options.clear();
+                        self.available_calls.clear();
+                        self.call_target_tile = None;
+                        return Some(action);
+                    }
+                    OverlayClick::CancelMeldSelection => {
+                        self.pon_option_selecting = false;
+                        self.pon_pending_options.clear();
+                    }
+                    _ => {}
+                }
+                return None;
+            }
+
+            if !self.available_calls.is_empty() {
+                match click {
+                    OverlayClick::Action(action) => {
+                        self.available_calls.clear();
+                        self.call_target_tile = None;
+                        return Some(action);
+                    }
+                    OverlayClick::ShowChiSelection { options } => {
+                        self.chi_pending_options = options;
+                        self.chi_option_selecting = true;
+                    }
+                    OverlayClick::ShowPonSelection { options } => {
+                        self.pon_pending_options = options;
+                        self.pon_option_selecting = true;
+                    }
+                    _ => {}
+                }
+                return None;
+            }
+
+            // 自分のターン：ツモ・リーチ・暗カン
+            match click {
+                OverlayClick::Action(action) => return Some(action),
+                OverlayClick::ToggleRiichi => {
                     if self.riichi_selection_mode {
                         self.clear_riichi_selection();
                     } else {
@@ -954,314 +979,84 @@ impl GameState {
                     }
                     return None;
                 }
+                _ => {}
             }
+        }
 
-            for (idx, tile) in self.self_kan_options.iter().enumerate() {
-                let x = 720.0 + idx as f32 * 110.0;
-                let y = 670.0;
-                let btn_w = 100.0;
-                let btn_h = 40.0;
-                if mx >= x && mx <= x + btn_w && my >= y && my <= y + btn_h {
-                    return Some(ClientAction::Kan {
-                        tile_index: tile.get() as usize,
-                    });
+        // オーバーレイがクリックされていない場合は手牌のクリックを処理
+        if !self.is_my_turn || !is_mouse_button_pressed(MouseButton::Left) {
+            return None;
+        }
+
+        // チー・ポン・鳴きパネル表示中は手牌クリックを無視
+        if self.chi_option_selecting || self.pon_option_selecting || !self.available_calls.is_empty() {
+            return None;
+        }
+
+        if self.is_riichi {
+            return None;
+        }
+
+        let (mx, my) = mouse_position();
+
+        // 手牌クリック
+        let hand_start_x = 100.0;
+        let hand_y = 680.0;
+        let tile_w = 48.0;
+        let tile_h = 68.0;
+        let hand_len = self.hand.len();
+
+        for i in 0..hand_len {
+            let x = hand_start_x + i as f32 * tile_w;
+            if mx >= x && mx <= x + tile_w && my >= hand_y && my <= hand_y + tile_h {
+                if self.riichi_selection_mode && !self.riichi_selectable_tiles.contains(&i) {
+                    return None;
                 }
-            }
 
-            if self.is_riichi {
+                if self.selected_tile == Some(i) {
+                    let discarded_tile = self.apply_local_discard_from_hand(i);
+                    if self.riichi_selection_mode {
+                        self.clear_riichi_selection();
+                        return Some(ClientAction::Riichi { tile: Some(discarded_tile) });
+                    }
+                    return Some(ClientAction::Discard { tile: Some(discarded_tile) });
+                }
+
+                self.selected_tile = Some(i);
+                self.selected_drawn = false;
+                self.selected_would_cause_furiten =
+                    self.would_discard_cause_furiten(Some(self.hand[i]));
                 return None;
             }
+        }
 
-            let hand_start_x = 100.0;
-            let hand_y = 680.0;
-            let tile_w = 48.0;
-            let tile_h = 68.0;
-            let hand_len = self.hand.len();
+        if self.drawn.is_some() {
+            let drawn_x = hand_start_x + hand_len as f32 * tile_w + 20.0;
+            if mx >= drawn_x && mx <= drawn_x + tile_w && my >= hand_y && my <= hand_y + tile_h {
+                if self.riichi_selection_mode && !self.riichi_selectable_drawn {
+                    return None;
+                }
 
-            for i in 0..hand_len {
-                let x = hand_start_x + i as f32 * tile_w;
-                if mx >= x && mx <= x + tile_w && my >= hand_y && my <= hand_y + tile_h {
-                    if self.riichi_selection_mode && !self.riichi_selectable_tiles.contains(&i) {
-                        return None;
-                    }
-
-                    if self.selected_tile == Some(i) {
-                        let discarded_tile = self.apply_local_discard_from_hand(i);
-                        if self.riichi_selection_mode {
-                            self.clear_riichi_selection();
-                            return Some(ClientAction::Riichi {
-                                tile: Some(discarded_tile),
-                            });
-                        }
-                        return Some(ClientAction::Discard {
-                            tile: Some(discarded_tile),
-                        });
-                    }
-
-                    self.selected_tile = Some(i);
+                if self.selected_drawn {
                     self.selected_drawn = false;
-                    self.selected_would_cause_furiten =
-                        self.would_discard_cause_furiten(Some(self.hand[i]));
-                    return None;
+                    self.drawn.take();
+                    if self.riichi_selection_mode {
+                        self.clear_riichi_selection();
+                        return Some(ClientAction::Riichi { tile: None });
+                    }
+                    return Some(ClientAction::Discard { tile: None });
                 }
-            }
 
-            if self.drawn.is_some() {
-                let drawn_x = hand_start_x + hand_len as f32 * tile_w + 20.0;
-                if mx >= drawn_x
-                    && mx <= drawn_x + tile_w
-                    && my >= hand_y
-                    && my <= hand_y + tile_h
-                {
-                    if self.riichi_selection_mode && !self.riichi_selectable_drawn {
-                        return None;
-                    }
-
-                    if self.selected_drawn {
-                        self.selected_drawn = false;
-                        self.drawn.take();
-                        if self.riichi_selection_mode {
-                            self.clear_riichi_selection();
-                            return Some(ClientAction::Riichi { tile: None });
-                        }
-                        return Some(ClientAction::Discard { tile: None });
-                    }
-
-                    self.selected_drawn = true;
-                    self.selected_tile = None;
-                    self.selected_would_cause_furiten =
-                        self.would_discard_cause_furiten(None);
-                    return None;
-                }
-            }
-        }
-
-        None
-    }
-
-    /// 鳴きボタンの入力処理
-    fn handle_call_input(&mut self) -> Option<ClientAction> {
-        if !is_mouse_button_pressed(MouseButton::Left) {
-            return None;
-        }
-
-        let (mx, my) = mouse_position();
-
-        let btn_w = crate::renderer::CALL_BTN_W;
-        let btn_h = crate::renderer::CALL_BTN_H;
-        let btn_spacing = crate::renderer::CALL_BTN_SPACING;
-
-        // 鳴きボタンの個数から base_x を計算（ロン有無に関わらず同一レイアウト）
-        let has_ron = self
-            .available_calls
-            .iter()
-            .any(|c| matches!(c, AvailableCall::Ron));
-        let non_ron_count = self.available_calls.iter().filter(|c| !matches!(c, AvailableCall::Ron)).count();
-        let total_btn_count = non_ron_count + 1; // +1 for pass
-        let btns_w = total_btn_count as f32 * btn_w + (total_btn_count - 1) as f32 * btn_spacing;
-        let pad = crate::renderer::CALL_PANEL_PAD;
-        let tile_area_w = crate::renderer::CALL_PANEL_TILE_W + 12.0; // tile_gap
-        let panel_w = tile_area_w + btns_w + pad * 2.0;
-        let panel_x = crate::renderer::CALL_PANEL_RIGHT_X_NO_RON - panel_w;
-        let base_x = panel_x + pad + tile_area_w;
-        let base_y = crate::renderer::CALL_BTN_BASE_Y_NO_RON;
-
-        // 和了ボタン（ロン）の判定 — 鳴きあり時はパネル上、ロンのみ時は右下
-        if has_ron {
-            let panel_y = crate::renderer::CALL_PANEL_BOTTOM_Y_NO_RON - crate::renderer::CALL_OVERLAY_PANEL_H;
-            let agari_y = if non_ron_count > 0 {
-                panel_y - crate::renderer::AGARI_BTN_GAP - crate::renderer::AGARI_BTN_H
-            } else {
-                crate::renderer::AGARI_BTN_Y
-            };
-            if mx >= crate::renderer::AGARI_BTN_X
-                && mx <= crate::renderer::AGARI_BTN_X + crate::renderer::AGARI_BTN_W
-                && my >= agari_y
-                && my <= agari_y + crate::renderer::AGARI_BTN_H
-            {
-                self.available_calls.clear();
-                return Some(ClientAction::Ron);
-            }
-        }
-
-        let mut btn_idx = 0;
-
-        for call in &self.available_calls {
-            if matches!(call, AvailableCall::Ron) {
-                continue;
-            }
-            let x = base_x + btn_idx as f32 * (btn_w + btn_spacing);
-            if mx >= x && mx <= x + btn_w && my >= base_y && my <= base_y + btn_h {
-                match call {
-                    AvailableCall::Ron => unreachable!(),
-                    AvailableCall::Pon { options } => {
-                        if options.len() == 1 {
-                            // 選択肢が1つのみなら即確定
-                            let tiles = options[0];
-                            self.available_calls.clear();
-                            return Some(ClientAction::Pon { tiles });
-                        } else if !options.is_empty() {
-                            // 複数の選択肢がある場合は選択UIを表示
-                            self.pon_pending_options = options.clone();
-                            self.pon_option_selecting = true;
-                        }
-                    }
-                    AvailableCall::Daiminkan => {
-                        let tile = self.call_target_tile?;
-                        self.available_calls.clear();
-                        return Some(ClientAction::Kan {
-                            tile_index: tile.get() as usize,
-                        });
-                    }
-                    AvailableCall::Chi { options } => {
-                        if options.len() == 1 {
-                            // 選択肢が1つのみなら即確定
-                            let tiles = options[0];
-                            self.available_calls.clear();
-                            return Some(ClientAction::Chi { tiles });
-                        } else if !options.is_empty() {
-                            // 複数の選択肢がある場合は選択UIを表示
-                            self.chi_pending_options = options.clone();
-                            self.chi_option_selecting = true;
-                        }
-                    }
-                }
-            }
-            btn_idx += 1;
-        }
-
-        // パスボタン（最後に配置）
-        let pass_x = base_x + btn_idx as f32 * (btn_w + btn_spacing);
-        if mx >= pass_x && mx <= pass_x + btn_w && my >= base_y && my <= base_y + btn_h {
-            self.available_calls.clear();
-            self.call_target_tile = None;
-            return Some(ClientAction::Pass);
-        }
-
-        None
-    }
-
-    /// チー選択UI（複数の組み合わせから選択）の入力処理
-    ///
-    /// renderer::CHI_SEL_* 定数で定義されたレイアウトと一致させること。
-    fn handle_chi_selection_input(&mut self) -> Option<ClientAction> {
-        if !is_mouse_button_pressed(MouseButton::Left) {
-            return None;
-        }
-        let (mx, my) = mouse_position();
-
-        let opt_count = self.chi_pending_options.len();
-        let tile_w: f32 = crate::renderer::CHI_SEL_TILE_W;
-        let tile_h: f32 = crate::renderer::CHI_SEL_TILE_H;
-        let tile_gap: f32 = crate::renderer::CHI_SEL_TILE_GAP;
-        let opt_w: f32 = tile_w * 3.0 + tile_gap * 2.0;
-        let opt_spacing: f32 = crate::renderer::CHI_SEL_OPT_SPACING;
-        let panel_w: f32 = opt_w * opt_count as f32 + opt_spacing * (opt_count as f32 - 1.0) + 80.0;
-        let panel_h: f32 = crate::renderer::CHI_SEL_PANEL_H;
-        let panel_x: f32 = crate::renderer::CALL_PANEL_RIGHT_X_NO_RON - panel_w;
-        let panel_y: f32 = crate::renderer::CALL_PANEL_BOTTOM_Y_NO_RON - panel_h;
-
-        let opts_start_x = panel_x + 40.0;
-        let opts_y = panel_y + 52.0;
-
-        let called_tile = match self.call_target_tile {
-            Some(t) => t,
-            None => {
-                self.chi_option_selecting = false;
-                self.chi_pending_options.clear();
+                self.selected_drawn = true;
+                self.selected_tile = None;
+                self.selected_would_cause_furiten = self.would_discard_cause_furiten(None);
                 return None;
             }
-        };
-
-        for (idx, &opt) in self.chi_pending_options.iter().enumerate() {
-            let ox = opts_start_x + idx as f32 * (opt_w + opt_spacing);
-            if mx >= ox && mx <= ox + opt_w && my >= opts_y && my <= opts_y + tile_h {
-                // この組み合わせを選択
-                let tiles = opt;
-                self.chi_option_selecting = false;
-                self.chi_pending_options.clear();
-                self.available_calls.clear();
-                self.call_target_tile = None;
-                return Some(ClientAction::Chi { tiles });
-            }
-            // called_tile のエリアもクリック可能にする（3枚分の横幅全体を反応させる）
-            let _ = called_tile; // used above
-        }
-
-        // キャンセルボタン
-        let cancel_w: f32 = 120.0;
-        let cancel_h: f32 = 36.0;
-        let cancel_x = panel_x + (panel_w - cancel_w) / 2.0;
-        let cancel_y = panel_y + panel_h - cancel_h - 14.0;
-        if mx >= cancel_x && mx <= cancel_x + cancel_w && my >= cancel_y && my <= cancel_y + cancel_h
-        {
-            self.chi_option_selecting = false;
-            self.chi_pending_options.clear();
         }
 
         None
     }
 
-    /// ポン選択UI（赤ドラ有無の組み合わせから選択）の入力処理
-    ///
-    /// renderer::CHI_SEL_* 定数と同じレイアウトを使用する。
-    fn handle_pon_selection_input(&mut self) -> Option<ClientAction> {
-        if !is_mouse_button_pressed(MouseButton::Left) {
-            return None;
-        }
-        let (mx, my) = mouse_position();
-
-        let opt_count = self.pon_pending_options.len();
-        let tile_w: f32 = crate::renderer::CHI_SEL_TILE_W;
-        let tile_h: f32 = crate::renderer::CHI_SEL_TILE_H;
-        let tile_gap: f32 = crate::renderer::CHI_SEL_TILE_GAP;
-        let opt_w: f32 = tile_w * 3.0 + tile_gap * 2.0;
-        let opt_spacing: f32 = crate::renderer::CHI_SEL_OPT_SPACING;
-        let panel_w: f32 = opt_w * opt_count as f32 + opt_spacing * (opt_count as f32 - 1.0) + 80.0;
-        let panel_h: f32 = crate::renderer::CHI_SEL_PANEL_H;
-        let panel_x: f32 = crate::renderer::CALL_PANEL_RIGHT_X_NO_RON - panel_w;
-        let panel_y: f32 = crate::renderer::CALL_PANEL_BOTTOM_Y_NO_RON - panel_h;
-
-        let opts_start_x = panel_x + 40.0;
-        let opts_y = panel_y + 52.0;
-
-        let called_tile = match self.call_target_tile {
-            Some(t) => t,
-            None => {
-                self.pon_option_selecting = false;
-                self.pon_pending_options.clear();
-                return None;
-            }
-        };
-
-        for (idx, &opt) in self.pon_pending_options.iter().enumerate() {
-            let ox = opts_start_x + idx as f32 * (opt_w + opt_spacing);
-            if mx >= ox && mx <= ox + opt_w && my >= opts_y && my <= opts_y + tile_h {
-                let tiles = opt;
-                self.pon_option_selecting = false;
-                self.pon_pending_options.clear();
-                self.available_calls.clear();
-                self.call_target_tile = None;
-                return Some(ClientAction::Pon { tiles });
-            }
-            let _ = called_tile;
-        }
-
-        // キャンセルボタン
-        let cancel_w: f32 = 120.0;
-        let cancel_h: f32 = 36.0;
-        let cancel_x = panel_x + (panel_w - cancel_w) / 2.0;
-        let cancel_y = panel_y + panel_h - cancel_h - 14.0;
-        if mx >= cancel_x && mx <= cancel_x + cancel_w && my >= cancel_y && my <= cancel_y + cancel_h
-        {
-            self.pon_option_selecting = false;
-            self.pon_pending_options.clear();
-        }
-
-        None
-    }
-
-    /// 風牌を相対位置（自分=0, 下家=1, 対面=2, 上家=3）に変換
     fn relative_player_index(&self, wind: Wind) -> usize {
         let my_idx = self
             .seat_wind
