@@ -42,6 +42,8 @@ async fn main() {
     loop {
         clear_background(Color::from_rgba(0, 100, 0, 255));
 
+        let overlay_click = renderer::draw_game(&game_state, font.as_ref(), &tile_textures);
+
         match game_state.phase {
             GamePhase::Setup => {
                 // 設定画面の入力処理
@@ -59,7 +61,7 @@ async fn main() {
 
             GamePhase::Playing => {
                 if let Some(ref mut adp) = adapter {
-                    let action = game_state.handle_input();
+                    let action = game_state.handle_input(overlay_click);
                     if let Some(act) = action {
                         adp.send_action(act);
                     }
@@ -99,8 +101,6 @@ async fn main() {
 
             GamePhase::WaitingForStart => {}
         }
-
-        renderer::draw_game(&game_state, font.as_ref(), &tile_textures);
 
         next_frame().await;
     }
