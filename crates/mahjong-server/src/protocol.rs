@@ -3,7 +3,7 @@
 //! 将来的なオンライン対戦を見据えたメッセージ定義。
 //! LocalAdapter ではこれらのメッセージを直接やり取りする。
 
-use mahjong_core::tile::{Tile, TileType, Wind};
+use mahjong_core::tile::{Tile, Wind};
 use serde::{Deserialize, Serialize};
 
 /// 流局の理由
@@ -63,12 +63,12 @@ pub struct MeldTiles {
 pub enum AvailableCall {
     /// ロン和了可能
     Ron,
-    /// ポン可能
-    Pon,
+    /// ポン可能（使える手牌の組み合わせのリスト: 各要素は手牌から使う2枚の実際の牌）
+    Pon { options: Vec<[Tile; 2]> },
     /// 大明カン可能
     Daiminkan,
-    /// チー可能（使える手牌の組み合わせのリスト: 各要素は [TileType; 2]）
-    Chi { options: Vec<[TileType; 2]> },
+    /// チー可能（使える手牌の組み合わせのリスト: 各要素は手牌から使う2枚の実際の牌）
+    Chi { options: Vec<[Tile; 2]> },
 }
 
 /// サーバからクライアントへのイベント
@@ -236,12 +236,15 @@ pub enum ClientAction {
 
     /// チーを宣言する
     Chi {
-        /// 使用する手牌の牌種2つ（TileType値）
-        tiles: [TileType; 2],
+        /// 使用する手牌の2枚（実際の牌。赤ドラも区別する）
+        tiles: [Tile; 2],
     },
 
     /// ポンを宣言する
-    Pon,
+    Pon {
+        /// 使用する手牌の2枚（実際の牌。赤ドラも区別する）
+        tiles: [Tile; 2],
+    },
 
     /// カンを宣言する（暗カン/明カン/加カン）
     Kan {

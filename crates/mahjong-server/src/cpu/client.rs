@@ -211,9 +211,18 @@ impl CpuClient {
         }
 
         // ポン判断
-        if calls.iter().any(|c| matches!(c, AvailableCall::Pon)) {
-            if self.should_pon() {
-                return ClientAction::Pon;
+        for call in calls {
+            if let AvailableCall::Pon { options } = call {
+                if self.should_pon() {
+                    // 赤ドラを含む組み合わせを優先する
+                    let tiles = options
+                        .iter()
+                        .find(|o| o[0].is_red_dora() || o[1].is_red_dora())
+                        .copied()
+                        .unwrap_or(options[0]);
+                    return ClientAction::Pon { tiles };
+                }
+                break;
             }
         }
 
@@ -431,7 +440,7 @@ impl CpuClient {
     }
 
     /// チーの選択肢から最適なものを選ぶ（鳴くべきでなければNone）
-    fn select_chi_option(&self, options: &[[u32; 2]]) -> Option<[u32; 2]> {
+    fn select_chi_option(&self, options: &[[Tile; 2]]) -> Option<[Tile; 2]> {
         let params = &self.config.params;
 
         // 高打点志向は基本的にチーしない
@@ -462,6 +471,8 @@ impl CpuClient {
 
         None
     }
+
+
 
     /// 既存の副露を取得する
     fn build_existing_melds(&self) -> Vec<Meld> {
@@ -516,15 +527,15 @@ impl CpuClient {
     }
 
     /// チーした場合に向聴数が下がるか
-    fn call_reduces_shanten_chi(&self, called_tile: Tile, hand_tiles: [u32; 2]) -> bool {
+    fn call_reduces_shanten_chi(&self, called_tile: Tile, hand_tiles: [Tile; 2]) -> bool {
         let current_hand = Hand::new(self.state.my_hand.clone(), None);
         let current_shanten = calc_shanten_number(&current_hand);
 
-        // チー後の手牌（指定の2枚を除去）
+        // チー後の手牌（指定の2枚を除去。赤ドラも区別して一致させる）
         let mut remaining = self.state.my_hand.clone();
         let mut chi_tiles_for_meld = Vec::new();
-        for &tt in &hand_tiles {
-            if let Some(pos) = remaining.iter().position(|t| t.get() == tt) {
+        for &target in &hand_tiles {
+            if let Some(pos) = remaining.iter().position(|t| *t == target) {
                 chi_tiles_for_meld.push(remaining.remove(pos));
             } else {
                 return false;

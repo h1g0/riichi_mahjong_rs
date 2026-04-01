@@ -119,6 +119,14 @@ pub struct GameState {
     pending_riichi_player: Option<Wind>,
     /// 直前に捨て牌したプレイヤーの風（鳴き元の判定に使用）
     last_discarder: Option<Wind>,
+    /// チーの組み合わせ選択UI表示中か（複数の選択肢がある場合）
+    pub chi_option_selecting: bool,
+    /// チー選択UIに表示する選択肢（手牌から使う2枚の牌）
+    pub chi_pending_options: Vec<[Tile; 2]>,
+    /// ポンの組み合わせ選択UI表示中か（赤ドラの有無で選択肢が分かれる場合）
+    pub pon_option_selecting: bool,
+    /// ポン選択UIに表示する選択肢（手牌から使う2枚の牌）
+    pub pon_pending_options: Vec<[Tile; 2]>,
     /// 対局開始前設定
     pub setup_state: SetupState,
 }
@@ -242,6 +250,10 @@ impl GameState {
             other_players: [OtherPlayerHand::new(), OtherPlayerHand::new(), OtherPlayerHand::new()],
             pending_riichi_player: None,
             last_discarder: None,
+            chi_option_selecting: false,
+            chi_pending_options: Vec::new(),
+            pon_option_selecting: false,
+            pon_pending_options: Vec::new(),
             setup_state: SetupState::new(),
         }
     }
@@ -272,6 +284,10 @@ impl GameState {
                 self.result_message = None;
                 self.phase = GamePhase::Playing;
                 self.available_calls.clear();
+                self.chi_option_selecting = false;
+                self.chi_pending_options.clear();
+                self.pon_option_selecting = false;
+                self.pon_pending_options.clear();
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
                 self.call_discarder = None;
@@ -886,6 +902,14 @@ impl GameState {
             return None;
         }
 
+        if self.chi_option_selecting {
+            return self.handle_chi_selection_input();
+        }
+
+        if self.pon_option_selecting {
+            return self.handle_pon_selection_input();
+        }
+
         if !self.available_calls.is_empty() {
             return self.handle_call_input();
         }
@@ -1023,35 +1047,42 @@ impl GameState {
 
         let (mx, my) = mouse_position();
 
-        // 和了ボタン（ロン）の判定 — 手牌上部の大きなボタン
+        let btn_w = crate::renderer::CALL_BTN_W;
+        let btn_h = crate::renderer::CALL_BTN_H;
+        let btn_spacing = crate::renderer::CALL_BTN_SPACING;
+
+        // 鳴きボタンの個数から base_x を計算（ロン有無に関わらず同一レイアウト）
         let has_ron = self
             .available_calls
             .iter()
             .any(|c| matches!(c, AvailableCall::Ron));
-        if has_ron
-            && mx >= crate::renderer::AGARI_BTN_X
-            && mx <= crate::renderer::AGARI_BTN_X + crate::renderer::AGARI_BTN_W
-            && my >= crate::renderer::AGARI_BTN_Y
-            && my <= crate::renderer::AGARI_BTN_Y + crate::renderer::AGARI_BTN_H
-        {
-            self.available_calls.clear();
-            return Some(ClientAction::Ron);
-        }
+        let non_ron_count = self.available_calls.iter().filter(|c| !matches!(c, AvailableCall::Ron)).count();
+        let total_btn_count = non_ron_count + 1; // +1 for pass
+        let btns_w = total_btn_count as f32 * btn_w + (total_btn_count - 1) as f32 * btn_spacing;
+        let pad = crate::renderer::CALL_PANEL_PAD;
+        let tile_area_w = crate::renderer::CALL_PANEL_TILE_W + 12.0; // tile_gap
+        let panel_w = tile_area_w + btns_w + pad * 2.0;
+        let panel_x = crate::renderer::CALL_PANEL_RIGHT_X_NO_RON - panel_w;
+        let base_x = panel_x + pad + tile_area_w;
+        let base_y = crate::renderer::CALL_BTN_BASE_Y_NO_RON;
 
-        // 鳴きボタンの配置 — ロンがある場合は和了ボタンの右側に配置
-        let base_x = if has_ron {
-            crate::renderer::AGARI_BTN_X + crate::renderer::AGARI_BTN_W + 20.0
-        } else {
-            400.0
-        };
-        let base_y = if has_ron {
-            crate::renderer::AGARI_BTN_Y + 10.0
-        } else {
-            620.0
-        };
-        let btn_w = 100.0;
-        let btn_h = 40.0;
-        let btn_spacing = 10.0;
+        // 和了ボタン（ロン）の判定 — 鳴きあり時はパネル上、ロンのみ時は右下
+        if has_ron {
+            let panel_y = crate::renderer::CALL_PANEL_BOTTOM_Y_NO_RON - crate::renderer::CALL_OVERLAY_PANEL_H;
+            let agari_y = if non_ron_count > 0 {
+                panel_y - crate::renderer::AGARI_BTN_GAP - crate::renderer::AGARI_BTN_H
+            } else {
+                crate::renderer::AGARI_BTN_Y
+            };
+            if mx >= crate::renderer::AGARI_BTN_X
+                && mx <= crate::renderer::AGARI_BTN_X + crate::renderer::AGARI_BTN_W
+                && my >= agari_y
+                && my <= agari_y + crate::renderer::AGARI_BTN_H
+            {
+                self.available_calls.clear();
+                return Some(ClientAction::Ron);
+            }
+        }
 
         let mut btn_idx = 0;
 
@@ -1063,9 +1094,17 @@ impl GameState {
             if mx >= x && mx <= x + btn_w && my >= base_y && my <= base_y + btn_h {
                 match call {
                     AvailableCall::Ron => unreachable!(),
-                    AvailableCall::Pon => {
-                        self.available_calls.clear();
-                        return Some(ClientAction::Pon);
+                    AvailableCall::Pon { options } => {
+                        if options.len() == 1 {
+                            // 選択肢が1つのみなら即確定
+                            let tiles = options[0];
+                            self.available_calls.clear();
+                            return Some(ClientAction::Pon { tiles });
+                        } else if !options.is_empty() {
+                            // 複数の選択肢がある場合は選択UIを表示
+                            self.pon_pending_options = options.clone();
+                            self.pon_option_selecting = true;
+                        }
                     }
                     AvailableCall::Daiminkan => {
                         let tile = self.call_target_tile?;
@@ -1075,10 +1114,15 @@ impl GameState {
                         });
                     }
                     AvailableCall::Chi { options } => {
-                        // 最初の選択肢を使う（複数ある場合はMVPでは最初を選択）
-                        if let Some(&tiles) = options.first() {
+                        if options.len() == 1 {
+                            // 選択肢が1つのみなら即確定
+                            let tiles = options[0];
                             self.available_calls.clear();
                             return Some(ClientAction::Chi { tiles });
+                        } else if !options.is_empty() {
+                            // 複数の選択肢がある場合は選択UIを表示
+                            self.chi_pending_options = options.clone();
+                            self.chi_option_selecting = true;
                         }
                     }
                 }
@@ -1092,6 +1136,126 @@ impl GameState {
             self.available_calls.clear();
             self.call_target_tile = None;
             return Some(ClientAction::Pass);
+        }
+
+        None
+    }
+
+    /// チー選択UI（複数の組み合わせから選択）の入力処理
+    ///
+    /// renderer::CHI_SEL_* 定数で定義されたレイアウトと一致させること。
+    fn handle_chi_selection_input(&mut self) -> Option<ClientAction> {
+        if !is_mouse_button_pressed(MouseButton::Left) {
+            return None;
+        }
+        let (mx, my) = mouse_position();
+
+        let opt_count = self.chi_pending_options.len();
+        let tile_w: f32 = crate::renderer::CHI_SEL_TILE_W;
+        let tile_h: f32 = crate::renderer::CHI_SEL_TILE_H;
+        let tile_gap: f32 = crate::renderer::CHI_SEL_TILE_GAP;
+        let opt_w: f32 = tile_w * 3.0 + tile_gap * 2.0;
+        let opt_spacing: f32 = crate::renderer::CHI_SEL_OPT_SPACING;
+        let panel_w: f32 = opt_w * opt_count as f32 + opt_spacing * (opt_count as f32 - 1.0) + 80.0;
+        let panel_h: f32 = crate::renderer::CHI_SEL_PANEL_H;
+        let panel_x: f32 = crate::renderer::CALL_PANEL_RIGHT_X_NO_RON - panel_w;
+        let panel_y: f32 = crate::renderer::CALL_PANEL_BOTTOM_Y_NO_RON - panel_h;
+
+        let opts_start_x = panel_x + 40.0;
+        let opts_y = panel_y + 52.0;
+
+        let called_tile = match self.call_target_tile {
+            Some(t) => t,
+            None => {
+                self.chi_option_selecting = false;
+                self.chi_pending_options.clear();
+                return None;
+            }
+        };
+
+        for (idx, &opt) in self.chi_pending_options.iter().enumerate() {
+            let ox = opts_start_x + idx as f32 * (opt_w + opt_spacing);
+            if mx >= ox && mx <= ox + opt_w && my >= opts_y && my <= opts_y + tile_h {
+                // この組み合わせを選択
+                let tiles = opt;
+                self.chi_option_selecting = false;
+                self.chi_pending_options.clear();
+                self.available_calls.clear();
+                self.call_target_tile = None;
+                return Some(ClientAction::Chi { tiles });
+            }
+            // called_tile のエリアもクリック可能にする（3枚分の横幅全体を反応させる）
+            let _ = called_tile; // used above
+        }
+
+        // キャンセルボタン
+        let cancel_w: f32 = 120.0;
+        let cancel_h: f32 = 36.0;
+        let cancel_x = panel_x + (panel_w - cancel_w) / 2.0;
+        let cancel_y = panel_y + panel_h - cancel_h - 14.0;
+        if mx >= cancel_x && mx <= cancel_x + cancel_w && my >= cancel_y && my <= cancel_y + cancel_h
+        {
+            self.chi_option_selecting = false;
+            self.chi_pending_options.clear();
+        }
+
+        None
+    }
+
+    /// ポン選択UI（赤ドラ有無の組み合わせから選択）の入力処理
+    ///
+    /// renderer::CHI_SEL_* 定数と同じレイアウトを使用する。
+    fn handle_pon_selection_input(&mut self) -> Option<ClientAction> {
+        if !is_mouse_button_pressed(MouseButton::Left) {
+            return None;
+        }
+        let (mx, my) = mouse_position();
+
+        let opt_count = self.pon_pending_options.len();
+        let tile_w: f32 = crate::renderer::CHI_SEL_TILE_W;
+        let tile_h: f32 = crate::renderer::CHI_SEL_TILE_H;
+        let tile_gap: f32 = crate::renderer::CHI_SEL_TILE_GAP;
+        let opt_w: f32 = tile_w * 3.0 + tile_gap * 2.0;
+        let opt_spacing: f32 = crate::renderer::CHI_SEL_OPT_SPACING;
+        let panel_w: f32 = opt_w * opt_count as f32 + opt_spacing * (opt_count as f32 - 1.0) + 80.0;
+        let panel_h: f32 = crate::renderer::CHI_SEL_PANEL_H;
+        let panel_x: f32 = crate::renderer::CALL_PANEL_RIGHT_X_NO_RON - panel_w;
+        let panel_y: f32 = crate::renderer::CALL_PANEL_BOTTOM_Y_NO_RON - panel_h;
+
+        let opts_start_x = panel_x + 40.0;
+        let opts_y = panel_y + 52.0;
+
+        let called_tile = match self.call_target_tile {
+            Some(t) => t,
+            None => {
+                self.pon_option_selecting = false;
+                self.pon_pending_options.clear();
+                return None;
+            }
+        };
+
+        for (idx, &opt) in self.pon_pending_options.iter().enumerate() {
+            let ox = opts_start_x + idx as f32 * (opt_w + opt_spacing);
+            if mx >= ox && mx <= ox + opt_w && my >= opts_y && my <= opts_y + tile_h {
+                let tiles = opt;
+                self.pon_option_selecting = false;
+                self.pon_pending_options.clear();
+                self.available_calls.clear();
+                self.call_target_tile = None;
+                return Some(ClientAction::Pon { tiles });
+            }
+            let _ = called_tile;
+        }
+
+        // キャンセルボタン
+        let cancel_w: f32 = 120.0;
+        let cancel_h: f32 = 36.0;
+        let cancel_x = panel_x + (panel_w - cancel_w) / 2.0;
+        let cancel_y = panel_y + panel_h - cancel_h - 14.0;
+        if mx >= cancel_x && mx <= cancel_x + cancel_w && my >= cancel_y && my <= cancel_y + cancel_h
+        {
+            self.pon_option_selecting = false;
+            self.pon_pending_options.clear();
         }
 
         None
@@ -1143,25 +1307,6 @@ impl GameState {
 }
 
 /// 牌を文字列に変換
-pub fn tile_to_string(tile: Tile) -> String {
-    let tile_type = tile.get();
-    let names = [
-        "一萬", "二萬", "三萬", "四萬", "五萬", "六萬", "七萬", "八萬", "九萬",
-        "一筒", "二筒", "三筒", "四筒", "五筒", "六筒", "七筒", "八筒", "九筒",
-        "一索", "二索", "三索", "四索", "五索", "六索", "七索", "八索", "九索",
-        "東", "南", "西", "北", "白", "發", "中",
-    ];
-    if (tile_type as usize) < names.len() {
-        let name = names[tile_type as usize].to_string();
-        if tile.is_red_dora() {
-            format!("{}(赤)", name)
-        } else {
-            name
-        }
-    } else {
-        "?".to_string()
-    }
-}
 
 
 
