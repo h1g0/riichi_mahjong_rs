@@ -134,7 +134,12 @@ impl Table {
 
             // === 鳴きアクション（WaitForCalls フェーズで対象プレイヤーのみ） ===
             ClientAction::Ron => round.respond_to_call(player_idx, CallResponse::Ron),
-            ClientAction::Pon => round.respond_to_call(player_idx, CallResponse::Pon),
+            ClientAction::Pon { tiles } => round.respond_to_call(
+                player_idx,
+                CallResponse::Pon {
+                    hand_tile_types: tiles,
+                },
+            ),
             ClientAction::Chi { tiles } => round.respond_to_call(
                 player_idx,
                 CallResponse::Chi {

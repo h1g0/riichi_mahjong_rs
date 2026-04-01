@@ -70,12 +70,12 @@ pub struct CallState {
     pub responded: [bool; 4],
     /// ロンを宣言したプレイヤー（複数ロン対応用）
     pub ron_declared: Vec<usize>,
-    /// ポンを宣言したプレイヤー
-    pub pon_declared: Option<usize>,
+    /// ポンを宣言したプレイヤーと使う手牌2枚
+    pub pon_declared: Option<(usize, [Tile; 2])>,
     /// 大明カンを宣言したプレイヤー
     pub daiminkan_declared: Option<usize>,
-    /// チーを宣言したプレイヤーと使う牌種
-    pub chi_declared: Option<(usize, [TileType; 2])>,
+    /// チーを宣言したプレイヤーと使う手牌2枚
+    pub chi_declared: Option<(usize, [Tile; 2])>,
     /// 全員応答後の進行先
     resolution: CallResolution,
 }
@@ -490,8 +490,9 @@ impl Round {
             }
 
             // ポン判定
-            if player.can_pon(discarded_tile) {
-                available_calls[i].push(AvailableCall::Pon);
+            let pon_opts = player.pon_options(discarded_tile);
+            if !pon_opts.is_empty() {
+                available_calls[i].push(AvailableCall::Pon { options: pon_opts });
             }
 
             // 大明カン判定（場全体で4回カン済みなら不可）
@@ -558,12 +559,17 @@ impl Round {
                     return false;
                 }
             }
-            CallResponse::Pon => {
-                if call_state.available_calls[player_idx]
-                    .iter()
-                    .any(|c| matches!(c, AvailableCall::Pon))
-                {
-                    call_state.pon_declared = Some(player_idx);
+            CallResponse::Pon { hand_tile_types } => {
+                // ポンの組み合わせが有効か確認
+                let valid = call_state.available_calls[player_idx].iter().any(|c| {
+                    if let AvailableCall::Pon { options } = c {
+                        options.contains(&hand_tile_types)
+                    } else {
+                        false
+                    }
+                });
+                if valid {
+                    call_state.pon_declared = Some((player_idx, hand_tile_types));
                 } else {
                     return false;
                 }
@@ -659,8 +665,8 @@ impl Round {
         }
 
         // 3. ポン
-        if let Some(caller) = call_state.pon_declared {
-            self.execute_pon(caller, call_state.discarder, call_state.discarded_tile);
+        if let Some((caller, hand_tile_types)) = call_state.pon_declared {
+            self.execute_pon(caller, call_state.discarder, call_state.discarded_tile, hand_tile_types);
             return;
         }
 
@@ -783,9 +789,9 @@ impl Round {
     }
 
     /// ポンを実行する
-    fn execute_pon(&mut self, caller: usize, discarder: usize, called_tile: Tile) {
+    fn execute_pon(&mut self, caller: usize, discarder: usize, called_tile: Tile, hand_tile_types: [Tile; 2]) {
         let from = Player::meld_from_relative(caller, discarder);
-        self.players[caller].do_pon(called_tile, from);
+        self.players[caller].do_pon(called_tile, hand_tile_types, from);
 
         // 捨て牌を「鳴かれた」としてマーク
         if let Some(last_discard) = self.players[discarder].discards.last_mut() {
@@ -882,7 +888,7 @@ impl Round {
         caller: usize,
         discarder: usize,
         called_tile: Tile,
-        hand_tile_types: [TileType; 2],
+        hand_tile_types: [Tile; 2],
     ) {
         self.players[caller].do_chi(called_tile, hand_tile_types);
 
@@ -1697,12 +1703,12 @@ impl Round {
 pub enum CallResponse {
     /// ロン
     Ron,
-    /// ポン
-    Pon,
+    /// ポン（手牌から使う牌2枚。赤ドラも区別する）
+    Pon { hand_tile_types: [Tile; 2] },
     /// 大明カン
     Daiminkan,
-    /// チー（手牌から使う牌の種類2つ）
-    Chi { hand_tile_types: [TileType; 2] },
+    /// チー（手牌から使う牌2枚。赤ドラも区別する）
+    Chi { hand_tile_types: [Tile; 2] },
     /// パス
     Pass,
 }
@@ -1894,7 +1900,7 @@ mod tests {
         let call_state = round.check_available_calls(Tile::new(Tile::Z5), 0);
         assert!(call_state.available_calls[1]
             .iter()
-            .any(|call| matches!(call, AvailableCall::Pon)));
+            .any(|call| matches!(call, AvailableCall::Pon { .. })));
         assert!(!call_state.available_calls[1]
             .iter()
             .any(|call| matches!(call, AvailableCall::Ron)));

@@ -165,11 +165,50 @@ impl Player {
         count >= 2
     }
 
+    /// ポン可能な手牌の組み合わせを返す
+    ///
+    /// 通常は1通りだが、手牌に赤ドラと通常牌の両方がある場合は
+    /// 「赤ドラを含む刻子」と「赤ドラを含まない刻子」の2通りを返す。
+    pub fn pon_options(&self, tile: Tile) -> Vec<[Tile; 2]> {
+        let tiles_of_type: Vec<Tile> = self
+            .hand
+            .tiles()
+            .iter()
+            .filter(|t| t.get() == tile.get())
+            .cloned()
+            .collect();
+
+        if tiles_of_type.len() < 2 {
+            return vec![];
+        }
+
+        // (赤ドラを含むペアか否か) で重複を除いた組み合わせを列挙する
+        let mut has_with_red = false;
+        let mut has_without_red = false;
+        let mut options = vec![];
+
+        for i in 0..tiles_of_type.len() {
+            for j in (i + 1)..tiles_of_type.len() {
+                let includes_red =
+                    tiles_of_type[i].is_red_dora() || tiles_of_type[j].is_red_dora();
+                if includes_red && !has_with_red {
+                    has_with_red = true;
+                    options.push([tiles_of_type[i], tiles_of_type[j]]);
+                } else if !includes_red && !has_without_red {
+                    has_without_red = true;
+                    options.push([tiles_of_type[i], tiles_of_type[j]]);
+                }
+            }
+        }
+
+        options
+    }
+
     /// チー可能な組み合わせを返す
     ///
     /// 各要素は [TileType; 2] で、手牌から使う2枚の牌の種類を表す。
     /// 字牌はチー不可。
-    pub fn chi_options(&self, tile: Tile) -> Vec<[TileType; 2]> {
+    pub fn chi_options(&self, tile: Tile) -> Vec<[Tile; 2]> {
         if tile.is_honor() {
             return vec![];
         }
@@ -182,37 +221,39 @@ impl Player {
         let suit_start = (tt / 9) * 9;
         let suit_end = suit_start + 9;
 
+        // パターン (a, b) に対して、手牌から実際の牌インスタンスを列挙して選択肢を追加する。
+        // 同じ牌種に赤ドラと通常牌の両方がある場合は別の選択肢として追加する。
+        let mut add_pattern = |a: TileType, b: TileType| {
+            let tiles_a: Vec<Tile> = tiles.iter().filter(|t| t.get() == a).cloned().collect();
+            let tiles_b: Vec<Tile> = tiles.iter().filter(|t| t.get() == b).cloned().collect();
+            if tiles_a.is_empty() || tiles_b.is_empty() {
+                return;
+            }
+            // (赤ドラか否か, 赤ドラか否か) の組み合わせで重複を除く
+            let mut seen = std::collections::HashSet::new();
+            for ta in &tiles_a {
+                for tb in &tiles_b {
+                    let key = (ta.is_red_dora(), tb.is_red_dora());
+                    if seen.insert(key) {
+                        options.push([*ta, *tb]);
+                    }
+                }
+            }
+        };
+
         // パターン1: [tt-2, tt-1] + tt （例: 鳴く牌が3m, 手牌に1m2mがある）
         if tt >= suit_start + 2 {
-            let a = tt - 2;
-            let b = tt - 1;
-            if tiles.iter().any(|t| t.get() == a)
-                && tiles.iter().any(|t| t.get() == b)
-            {
-                options.push([a, b]);
-            }
+            add_pattern(tt - 2, tt - 1);
         }
 
         // パターン2: [tt-1, tt+1] + tt （例: 鳴く牌が5m, 手牌に4m6mがある）
         if tt >= suit_start + 1 && tt + 1 < suit_end {
-            let a = tt - 1;
-            let b = tt + 1;
-            if tiles.iter().any(|t| t.get() == a)
-                && tiles.iter().any(|t| t.get() == b)
-            {
-                options.push([a, b]);
-            }
+            add_pattern(tt - 1, tt + 1);
         }
 
         // パターン3: [tt+1, tt+2] + tt （例: 鳴く牌が1m, 手牌に2m3mがある）
         if tt + 2 < suit_end {
-            let a = tt + 1;
-            let b = tt + 2;
-            if tiles.iter().any(|t| t.get() == a)
-                && tiles.iter().any(|t| t.get() == b)
-            {
-                options.push([a, b]);
-            }
+            add_pattern(tt + 1, tt + 2);
         }
 
         options
@@ -291,12 +332,14 @@ impl Player {
     /// ポンを実行する
     ///
     /// 手牌から同じ種類の牌2枚を取り除き、鳴いた牌と合わせて副露に追加する。
-    pub fn do_pon(&mut self, called_tile: Tile, from: MeldFrom) {
-        let tt = called_tile.get();
+    pub fn do_pon(&mut self, called_tile: Tile, hand_tiles: [Tile; 2], from: MeldFrom) {
         let mut indices: Vec<usize> = Vec::new();
-        for (i, t) in self.hand.tiles().iter().enumerate() {
-            if t.get() == tt && indices.len() < 2 {
-                indices.push(i);
+        for &target in &hand_tiles {
+            for (i, t) in self.hand.tiles().iter().enumerate() {
+                if *t == target && !indices.contains(&i) {
+                    indices.push(i);
+                    break;
+                }
             }
         }
 
@@ -319,11 +362,11 @@ impl Player {
     /// チーを実行する
     ///
     /// 手牌から指定種類の牌2枚を取り除き、鳴いた牌と合わせて副露に追加する。
-    pub fn do_chi(&mut self, called_tile: Tile, hand_tile_types: [TileType; 2]) {
+    pub fn do_chi(&mut self, called_tile: Tile, hand_tiles: [Tile; 2]) {
         let mut indices: Vec<usize> = Vec::new();
-        for &tt in &hand_tile_types {
+        for &target in &hand_tiles {
             for (i, t) in self.hand.tiles().iter().enumerate() {
-                if t.get() == tt && !indices.contains(&i) {
+                if *t == target && !indices.contains(&i) {
                     indices.push(i);
                     break;
                 }
@@ -613,8 +656,8 @@ mod tests {
         // 4mでチー: [2m,3m] or [3m,5m]
         let options = player.chi_options(Tile::new(Tile::M4));
         assert_eq!(options.len(), 2);
-        assert!(options.contains(&[Tile::M2, Tile::M3]));
-        assert!(options.contains(&[Tile::M3, Tile::M5]));
+        assert!(options.iter().any(|o| o[0].get() == Tile::M2 && o[1].get() == Tile::M3));
+        assert!(options.iter().any(|o| o[0].get() == Tile::M3 && o[1].get() == Tile::M5));
 
         // 字牌はチー不可
         let options = player.chi_options(Tile::new(Tile::Z1));
@@ -623,7 +666,8 @@ mod tests {
         // 1mでチー: [2m,3m]
         let options = player.chi_options(Tile::new(Tile::M1));
         assert_eq!(options.len(), 1);
-        assert_eq!(options[0], [Tile::M2, Tile::M3]);
+        assert_eq!(options[0][0].get(), Tile::M2);
+        assert_eq!(options[0][1].get(), Tile::M3);
     }
 
     #[test]
@@ -646,7 +690,7 @@ mod tests {
         let mut player = Player::new(Wind::South, tiles, 25000);
         let called = Tile::new(Tile::M1);
 
-        player.do_pon(called, MeldFrom::Previous);
+        player.do_pon(called, [Tile::new(Tile::M1), Tile::new(Tile::M1)], MeldFrom::Previous);
 
         // 手牌が11枚になること（13 - 2 = 11）
         assert_eq!(player.hand.tiles().len(), 11);
@@ -677,7 +721,7 @@ mod tests {
         let mut player = Player::new(Wind::South, tiles, 25000);
         let called = Tile::new(Tile::M4);
 
-        player.do_chi(called, [Tile::M3, Tile::M5]);
+        player.do_chi(called, [Tile::new(Tile::M3), Tile::new(Tile::M5)]);
 
         // 手牌が11枚になること
         assert_eq!(player.hand.tiles().len(), 11);
