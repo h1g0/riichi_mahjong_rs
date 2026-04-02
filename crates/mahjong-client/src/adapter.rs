@@ -104,7 +104,10 @@ impl LocalAdapter {
                 // ツモフェーズ: 牌を引く（全プレイヤー共通）
                 round.do_draw();
             }
-            TurnPhase::WaitForDiscard | TurnPhase::WaitForCalls | TurnPhase::RoundOver => {
+            TurnPhase::WaitForDiscard
+            | TurnPhase::WaitForCalls
+            | TurnPhase::WaitForNineTerminals
+            | TurnPhase::RoundOver => {
                 // 人間プレイヤーの入力待ち or 既に処理済み
             }
         }

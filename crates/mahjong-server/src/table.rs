@@ -162,6 +162,11 @@ impl Table {
                     false
                 }
             }
+
+            // === 九種九牌アクション ===
+            ClientAction::NineTerminals { declare } => {
+                round.do_nine_terminals(player_idx, declare)
+            }
         }
     }
 

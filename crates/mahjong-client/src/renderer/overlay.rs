@@ -62,6 +62,10 @@ pub enum OverlayClick {
     ShowPonSelection { options: Vec<[Tile; 2]> },
     /// 選択UIをキャンセルして鳴きパネルに戻る
     CancelMeldSelection,
+    /// 九種九牌を宣言して流局する
+    NineTerminalsDeclare,
+    /// 九種九牌を宣言せず続行する
+    NineTerminalsPass,
 }
 
 // ─── エントリポイント ─────────────────────────────────────────────────────────
@@ -74,6 +78,11 @@ pub(super) fn draw_action_buttons(
 ) -> Option<OverlayClick> {
     let clicked = is_mouse_button_pressed(MouseButton::Left);
     let (mx, my) = mouse_position();
+
+    // 九種九牌選択オーバーレイ
+    if state.nine_terminals_pending {
+        return draw_nine_terminals_overlay(font, clicked, mx, my);
+    }
 
     // 選択オーバーレイ表示中は call_overlay の代わりに選択UIを右下に表示
     if state.chi_option_selecting {
@@ -474,4 +483,76 @@ fn draw_meld_selection_overlay(
     }
 
     result
+}
+
+// ─── 九種九牌オーバーレイ ──────────────────────────────────────────────────────
+
+fn draw_nine_terminals_overlay(
+    font: Option<&Font>,
+    clicked: bool,
+    mx: f32,
+    my: f32,
+) -> Option<OverlayClick> {
+    const PANEL_W: f32 = 360.0;
+    const PANEL_H: f32 = 140.0;
+    const PANEL_X: f32 = CALL_PANEL_RIGHT_X_NO_RON - PANEL_W;
+    const PANEL_Y: f32 = CALL_PANEL_BOTTOM_Y_NO_RON - PANEL_H;
+
+    draw_rectangle(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, Color::new(0.0, 0.0, 0.0, 0.90));
+    draw_rectangle_lines(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, 2.0, Color::new(1.0, 0.85, 0.3, 1.0));
+
+    draw_jp_text(
+        font,
+        "九種九牌",
+        PANEL_X + 16.0,
+        PANEL_Y + 30.0,
+        FONT_SIZE,
+        Color::new(1.0, 0.95, 0.5, 1.0),
+    );
+    draw_jp_text(
+        font,
+        "流局しますか？",
+        PANEL_X + 16.0,
+        PANEL_Y + 54.0,
+        FONT_SIZE,
+        WHITE,
+    );
+
+    const BTN_W: f32 = 140.0;
+    const BTN_H: f32 = 38.0;
+    const BTN_Y: f32 = PANEL_Y + PANEL_H - BTN_H - 14.0;
+    const BTN_GAP: f32 = 12.0;
+    let declare_x = PANEL_X + 16.0;
+    let pass_x = declare_x + BTN_W + BTN_GAP;
+
+    let declare_hovered = hit_rect(mx, my, declare_x, BTN_Y, BTN_W, BTN_H);
+    let declare_bg = if declare_hovered {
+        Color::new(0.9, 0.15, 0.15, 1.0)
+    } else {
+        Color::new(0.7, 0.1, 0.1, 1.0)
+    };
+    draw_rectangle(declare_x, BTN_Y, BTN_W, BTN_H, declare_bg);
+    draw_rectangle_lines(declare_x, BTN_Y, BTN_W, BTN_H, 2.0, WHITE);
+    draw_jp_text(font, "流局する", declare_x + 22.0, BTN_Y + 26.0, FONT_SIZE, WHITE);
+
+    let pass_hovered = hit_rect(mx, my, pass_x, BTN_Y, BTN_W, BTN_H);
+    let pass_bg = if pass_hovered {
+        Color::new(0.4, 0.4, 0.4, 1.0)
+    } else {
+        Color::new(0.25, 0.25, 0.25, 1.0)
+    };
+    draw_rectangle(pass_x, BTN_Y, BTN_W, BTN_H, pass_bg);
+    draw_rectangle_lines(pass_x, BTN_Y, BTN_W, BTN_H, 2.0, WHITE);
+    draw_jp_text(font, "続ける", pass_x + 26.0, BTN_Y + 26.0, FONT_SIZE, WHITE);
+
+    if clicked {
+        if declare_hovered {
+            return Some(OverlayClick::NineTerminalsDeclare);
+        }
+        if pass_hovered {
+            return Some(OverlayClick::NineTerminalsPass);
+        }
+    }
+
+    None
 }

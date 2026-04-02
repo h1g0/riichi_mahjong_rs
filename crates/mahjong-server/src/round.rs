@@ -21,6 +21,8 @@ pub enum TurnPhase {
     WaitForDiscard,
     /// 鳴き待ち: 打牌後、他プレイヤーの鳴き応答を待つ
     WaitForCalls,
+    /// 九種九牌待ち: プレイヤーが流局を宣言するか選択するのを待つ
+    WaitForNineTerminals,
     /// 局終了
     RoundOver,
 }
@@ -369,6 +371,13 @@ impl Round {
                     },
                 ));
             }
+        }
+
+        // 九種九牌チェック: 初回ツモかつ条件を満たす場合に選択を促す
+        if self.settings.nine_terminals_draw && self.check_nine_terminals() {
+            self.phase = TurnPhase::WaitForNineTerminals;
+            self.events
+                .push((self.current_player, ServerEvent::NineTerminalsAvailable));
         }
 
         true
@@ -1109,7 +1118,7 @@ impl Round {
 
     fn draw_after_kan(&mut self, player_idx: usize) {
         // 四槓散了チェック: 4回目のカン直後に判定（設定がありの場合のみ）
-        if self.settings.suukantsanra && self.check_four_kans_draw() {
+        if self.settings.four_kans_draw && self.check_four_kans_draw() {
             self.declare_special_draw(DrawReason::FourKans);
             return;
         }
@@ -1546,6 +1555,10 @@ impl Round {
                         }
                     }
                 }
+                TurnPhase::WaitForNineTerminals => {
+                    // テスト用: 常に流局宣言する
+                    self.do_nine_terminals(self.current_player, true);
+                }
                 TurnPhase::RoundOver => break,
             }
         }
@@ -1616,13 +1629,13 @@ impl Round {
     /// 特殊流局をチェックする（四風連打、四家立直）
     fn check_special_draws(&mut self) {
         // 四風連打チェック: 全員が1枚ずつ捨てて、全て同じ風牌
-        if self.check_four_winds_draw() {
+        if self.settings.four_winds_draw && self.check_four_winds_draw() {
             self.declare_special_draw(DrawReason::FourWinds);
             return;
         }
 
         // 四家立直チェック: 全員がリーチ宣言済み
-        if self.check_four_riichi_draw() {
+        if self.settings.four_riichi_draw && self.check_four_riichi_draw() {
             self.declare_special_draw(DrawReason::FourRiichi);
         }
     }
@@ -1657,6 +1670,49 @@ impl Round {
     /// 条件: 全4プレイヤーがリーチ宣言済み
     fn check_four_riichi_draw(&self) -> bool {
         self.players.iter().all(|p| p.is_riichi)
+    }
+
+    /// 九種九牌の宣言条件を判定する
+    ///
+    /// 条件: 現在のプレイヤーが一度も捨牌しておらず、
+    /// 手牌＋ツモ牌に9種類以上のヤオ九牌（老頭牌・字牌）がある
+    fn check_nine_terminals(&self) -> bool {
+        let player = &self.players[self.current_player];
+        // 初回ツモのみ（捨牌済みなら宣言不可）
+        if !player.discards.is_empty() {
+            return false;
+        }
+        let mut tile_types = std::collections::HashSet::new();
+        for tile in player.hand.tiles() {
+            if tile.is_1_9_honor() {
+                tile_types.insert(tile.get());
+            }
+        }
+        if let Some(tile) = player.hand.drawn() {
+            if tile.is_1_9_honor() {
+                tile_types.insert(tile.get());
+            }
+        }
+        tile_types.len() >= 9
+    }
+
+    /// 九種九牌の宣言を処理する
+    ///
+    /// - `declare=true`: 流局を宣言する
+    /// - `declare=false`: 続行する（通常の打牌フェーズへ移行）
+    pub fn do_nine_terminals(&mut self, player_idx: usize, declare: bool) -> bool {
+        if self.phase != TurnPhase::WaitForNineTerminals {
+            return false;
+        }
+        if self.current_player != player_idx {
+            return false;
+        }
+        if declare {
+            self.declare_special_draw(DrawReason::NineTerminals);
+        } else {
+            self.phase = TurnPhase::WaitForDiscard;
+        }
+        true
     }
 
     /// 場全体のカン回数を返す
@@ -2233,6 +2289,165 @@ mod tests {
             }
             _ => panic!("expected ron result after robbing a quad"),
         }
+    }
+
+    // ─── 九種九牌テスト ───────────────────────────────────────────────────────────
+
+    /// 九種九牌の条件を満たす手牌をセットアップするヘルパー
+    ///
+    /// 1m9m1p9p1s9s1z2z3z4z5z6z7z (13種全ヤオ九牌) + ツモ牌1枚
+    fn setup_nine_terminals_hand(round: &mut Round, player_idx: usize) {
+        let seat = round.players[player_idx].seat_wind;
+        let mut player = Player::new(seat, vec![], 25000);
+        // 14枚: 1m9m1p9p1s9s1z2z3z4z5z6z7z + ツモ1m（重複は問題なし）
+        player.hand = mahjong_core::hand::Hand::from("1m9m1p9p1s9s1z2z3z4z5z6z7z 1m");
+        round.players[player_idx] = player;
+        round.current_player = player_idx;
+        round.phase = TurnPhase::WaitForDiscard;
+    }
+
+    #[test]
+    fn test_check_nine_terminals_qualifies() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        setup_nine_terminals_hand(&mut round, 0);
+        // 初回ツモ（捨て牌0枚）かつヤオ九牌9種以上
+        assert!(round.check_nine_terminals());
+    }
+
+    #[test]
+    fn test_check_nine_terminals_insufficient_types() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let seat = round.players[0].seat_wind;
+        let mut player = Player::new(seat, vec![], 25000);
+        // ヤオ九牌が8種類のみ（6z・7zがなく中張牌が多い）
+        // 1m,9m,1p,9p,1s,9s,1z,2z = 8種
+        player.hand = mahjong_core::hand::Hand::from("1m9m1p9p1s9s1z2z5m5p5s5s 1m");
+        round.players[0] = player;
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+        assert!(!round.check_nine_terminals());
+    }
+
+    #[test]
+    fn test_check_nine_terminals_after_discard() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        setup_nine_terminals_hand(&mut round, 0);
+        // 捨て牌を1枚追加（既に1巡した状態を再現）
+        round.players[0].discards.push(crate::player::Discard {
+            tile: Tile::new(Tile::M5),
+            is_tsumogiri: true,
+            is_riichi_declaration: false,
+            is_called: false,
+        });
+        // 捨て牌済みなので宣言不可
+        assert!(!round.check_nine_terminals());
+    }
+
+    #[test]
+    fn test_do_nine_terminals_declare() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        setup_nine_terminals_hand(&mut round, 0);
+        round.phase = TurnPhase::WaitForNineTerminals;
+        round.drain_events();
+
+        assert!(round.do_nine_terminals(0, true));
+        assert_eq!(round.phase, TurnPhase::RoundOver);
+        assert!(matches!(round.result, Some(RoundResult::SpecialDraw)));
+
+        let events = round.drain_events();
+        let has_round_draw = events.iter().any(|(_idx, e)| {
+            matches!(e, ServerEvent::RoundDraw { reason: DrawReason::NineTerminals, .. })
+        });
+        assert!(has_round_draw, "九種九牌流局イベントが生成されていない");
+    }
+
+    #[test]
+    fn test_do_nine_terminals_continue() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        setup_nine_terminals_hand(&mut round, 0);
+        round.phase = TurnPhase::WaitForNineTerminals;
+        round.drain_events();
+
+        assert!(round.do_nine_terminals(0, false));
+        // 続行 → 打牌フェーズへ
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+        assert!(round.result.is_none());
+    }
+
+    #[test]
+    fn test_do_nine_terminals_wrong_player() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        setup_nine_terminals_hand(&mut round, 0);
+        round.phase = TurnPhase::WaitForNineTerminals;
+
+        // 別プレイヤーからのアクションは無効
+        assert!(!round.do_nine_terminals(1, true));
+        assert_eq!(round.phase, TurnPhase::WaitForNineTerminals);
+    }
+
+    #[test]
+    fn test_do_draw_triggers_nine_terminals_phase() {
+        // 牌山の先頭を7z（13種目のヤオ九牌）に設定する
+        // Wall::from_tiles は先頭から draw() するため、先頭に7zを置く
+        let mut wall_tiles: Vec<Tile> = vec![Tile::new(Tile::Z7)];
+        // 残りは適当な牌で埋める（最低 14 枚の王牌分が必要）
+        for _ in 0..(70 + 14) {
+            wall_tiles.push(Tile::new(Tile::M5));
+        }
+        let wall = Wall::from_tiles(wall_tiles);
+
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        round.wall = wall;
+
+        // 手牌をヤオ九牌12種に設定（ツモで7zが来て13種になる）
+        let seat = round.players[0].seat_wind;
+        let mut player = Player::new(seat, vec![], 25000);
+        player.hand = mahjong_core::hand::Hand::from("1m9m1p9p1s9s1z2z3z4z5z6z5m");
+        round.players[0] = player;
+        round.current_player = 0;
+        round.phase = TurnPhase::Draw;
+        round.drain_events();
+
+        round.do_draw();
+
+        assert_eq!(
+            round.phase,
+            TurnPhase::WaitForNineTerminals,
+            "九種九牌条件達成時にWaitForNineTerminalsになるべき"
+        );
+
+        let events = round.drain_events();
+        let has_available = events
+            .iter()
+            .any(|(_idx, e)| matches!(e, ServerEvent::NineTerminalsAvailable));
+        assert!(has_available, "NineTerminalsAvailableイベントが生成されていない");
+    }
+
+    #[test]
+    fn test_nine_terminals_disabled_by_setting() {
+        let mut wall_tiles: Vec<Tile> = vec![Tile::new(Tile::Z7)];
+        for _ in 0..(70 + 14) {
+            wall_tiles.push(Tile::new(Tile::M5));
+        }
+        let wall = Wall::from_tiles(wall_tiles);
+
+        let mut settings = Settings::new();
+        settings.nine_terminals_draw = false;
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        round.wall = wall;
+
+        let seat = round.players[0].seat_wind;
+        let mut player = Player::new(seat, vec![], 25000);
+        player.hand = mahjong_core::hand::Hand::from("1m9m1p9p1s9s1z2z3z4z5z6z5m");
+        round.players[0] = player;
+        round.current_player = 0;
+        round.phase = TurnPhase::Draw;
+        round.drain_events();
+
+        round.do_draw();
+
+        // 設定オフなら通常の打牌フェーズになる
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
     }
 }
 
