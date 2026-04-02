@@ -198,6 +198,9 @@ pub enum ServerEvent {
         player_hands: Vec<PlayerHandInfo>,
     },
 
+    /// 九種九牌の宣言可能通知（自分が宣言できる状態）
+    NineTerminalsAvailable,
+
     /// 局終了（流局）
     RoundDraw {
         /// 点数移動後の各プレイヤーの点数
@@ -254,5 +257,10 @@ pub enum ClientAction {
 
     /// パス（鳴きやロンをしない）
     Pass,
+
+    /// 九種九牌を宣言する（true=流局, false=続行）
+    NineTerminals {
+        declare: bool,
+    },
 }
 

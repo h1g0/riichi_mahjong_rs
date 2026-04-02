@@ -135,6 +135,7 @@ impl CpuClient {
                     None
                 }
             }
+            ServerEvent::NineTerminalsAvailable => Some(self.decide_nine_terminals()),
             _ => None,
         }
     }
@@ -393,6 +394,14 @@ impl CpuClient {
         }
 
         true
+    }
+
+    /// 九種九牌を宣言すべきか判断する
+    ///
+    /// 高打点型は国士無双を狙うため続行、それ以外は流局する。
+    fn decide_nine_terminals(&self) -> ClientAction {
+        let declare = self.config.personality != CpuPersonality::HighValue;
+        ClientAction::NineTerminals { declare }
     }
 
     /// ポンすべきか判断する

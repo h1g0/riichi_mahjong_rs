@@ -127,6 +127,8 @@ pub struct GameState {
     pub pon_option_selecting: bool,
     /// ポン選択UIに表示する選択肢（手牌から使う2枚の牌）
     pub pon_pending_options: Vec<[Tile; 2]>,
+    /// 九種九牌の宣言選択中か
+    pub nine_terminals_pending: bool,
     /// 対局開始前設定
     pub setup_state: SetupState,
 }
@@ -254,6 +256,7 @@ impl GameState {
             chi_pending_options: Vec::new(),
             pon_option_selecting: false,
             pon_pending_options: Vec::new(),
+            nine_terminals_pending: false,
             setup_state: SetupState::new(),
         }
     }
@@ -288,6 +291,7 @@ impl GameState {
                 self.chi_pending_options.clear();
                 self.pon_option_selecting = false;
                 self.pon_pending_options.clear();
+                self.nine_terminals_pending = false;
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
                 self.call_discarder = None;
@@ -324,6 +328,10 @@ impl GameState {
                 self.available_calls.clear();
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
+            }
+
+            ServerEvent::NineTerminalsAvailable => {
+                self.nine_terminals_pending = true;
             }
 
             ServerEvent::OtherPlayerDrew {
@@ -912,6 +920,21 @@ impl GameState {
 
         // オーバーレイのクリック判定（draw_game が返した結果を処理）
         if let Some(click) = overlay_click {
+            if self.nine_terminals_pending {
+                match click {
+                    OverlayClick::NineTerminalsDeclare => {
+                        self.nine_terminals_pending = false;
+                        return Some(ClientAction::NineTerminals { declare: true });
+                    }
+                    OverlayClick::NineTerminalsPass => {
+                        self.nine_terminals_pending = false;
+                        return Some(ClientAction::NineTerminals { declare: false });
+                    }
+                    _ => {}
+                }
+                return None;
+            }
+
             if self.chi_option_selecting {
                 match click {
                     OverlayClick::Action(action) => {
@@ -988,8 +1011,8 @@ impl GameState {
             return None;
         }
 
-        // チー・ポン・鳴きパネル表示中は手牌クリックを無視
-        if self.chi_option_selecting || self.pon_option_selecting || !self.available_calls.is_empty() {
+        // 九種九牌・チー・ポン・鳴きパネル表示中は手牌クリックを無視
+        if self.nine_terminals_pending || self.chi_option_selecting || self.pon_option_selecting || !self.available_calls.is_empty() {
             return None;
         }
 

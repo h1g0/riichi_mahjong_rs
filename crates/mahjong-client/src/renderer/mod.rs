@@ -44,7 +44,6 @@ fn make_board_camera(rotation_deg: f32) -> Camera2D {
     }
 }
 
-
 pub struct TileTextures {
     standard_tiles: Vec<Texture2D>,
     red_5m: Texture2D,
@@ -96,9 +95,15 @@ impl TileTextures {
 
         Self {
             standard_tiles,
-            red_5m: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/r5m.png")),
-            red_5p: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/r5p.png")),
-            red_5s: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/r5s.png")),
+            red_5m: load_texture_from_png(include_bytes!(
+                "../../../../assets/images/tiles/r5m.png"
+            )),
+            red_5p: load_texture_from_png(include_bytes!(
+                "../../../../assets/images/tiles/r5p.png"
+            )),
+            red_5s: load_texture_from_png(include_bytes!(
+                "../../../../assets/images/tiles/r5s.png"
+            )),
             back: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/back.png")),
             stick1000: load_texture_from_png(include_bytes!(
                 "../../../../assets/images/sticks/stick1000.png"
@@ -125,7 +130,7 @@ impl TileTextures {
 
 fn load_texture_from_png(bytes: &[u8]) -> Texture2D {
     let texture = Texture2D::from_file_with_format(bytes, Some(ImageFormat::Png));
-    texture.set_filter(FilterMode::Nearest);
+    texture.set_filter(FilterMode::Linear);
     texture
 }
 
@@ -139,7 +144,11 @@ fn draw_jp_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16,
     draw_text_ex(text, x, y, params);
 }
 
-pub fn draw_game(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) -> Option<OverlayClick> {
+pub fn draw_game(
+    state: &GameState,
+    font: Option<&Font>,
+    tile_textures: &TileTextures,
+) -> Option<OverlayClick> {
     match state.phase {
         GamePhase::Setup => {
             draw_setup(state, font);
@@ -815,7 +824,6 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
         set_default_camera();
     }
 }
-
 
 fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
     draw_rectangle(150.0, 150.0, 980.0, 420.0, Color::new(0.0, 0.0, 0.0, 0.85));

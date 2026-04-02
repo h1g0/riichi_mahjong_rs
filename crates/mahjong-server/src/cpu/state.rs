@@ -262,6 +262,10 @@ impl CpuGameState {
             ServerEvent::RoundDraw { scores, .. } => {
                 self.scores = *scores;
             }
+
+            ServerEvent::NineTerminalsAvailable => {
+                // 状態更新不要（decide_nine_terminals で対応）
+            }
         }
     }
 
