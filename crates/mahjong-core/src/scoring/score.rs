@@ -119,7 +119,7 @@ pub fn calculate_score(
 fn extract_yaku_list(
     yaku_result: &HashMap<Kind, (&'static str, bool, u32)>,
 ) -> Vec<(&'static str, u32)> {
-    let mut list: Vec<(&'static str, u32)> = Vec::new();
+    let mut list: Vec<(&Kind, &'static str, u32)> = Vec::new();
     let mut has_yakuman = false;
 
     // まず役満があるか確認
@@ -130,19 +130,19 @@ fn extract_yaku_list(
         }
     }
 
-    for (_, (name, is_valid, han)) in yaku_result {
+    for (kind, (name, is_valid, han)) in yaku_result {
         if *is_valid && *han > 0 {
             // 役満がある場合は通常役を除外
             if has_yakuman && *han < 13 {
                 continue;
             }
-            list.push((name, *han));
+            list.push((kind, name, *han));
         }
     }
 
-    // 翻数の降順でソートし、同じ翻数の場合は名前でソート
-    list.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    list
+    // 翻数の昇順でソートし、同じ翻数の場合はKind列挙型の定義順でソート
+    list.sort_by(|a, b| a.2.cmp(&b.2).then(a.0.cmp(b.0)));
+    list.into_iter().map(|(_, name, han)| (name, han)).collect()
 }
 
 /// 等級を決定する
@@ -477,5 +477,45 @@ mod tests {
         assert_eq!(round_up_to_100(base * 2), 500);
         // 子: 240 * 1 = 240 -> 300
         assert_eq!(round_up_to_100(base), 300);
+    }
+
+    /// 役リストは翻数昇順に並ぶ: 断么九(1翻)が七対子(2翻)より先
+    #[test]
+    fn test_yaku_list_order_han_ascending() {
+        // 2244668m224466p + ロン8m = 七対子(2翻) + 断么九(1翻)
+        let hand = Hand::from("2244668m224466p 8m");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+        let mut status = Status::new();
+        status.is_self_picked = false;
+        status.player_wind = Wind::South;
+        status.prevailing_wind = Wind::East;
+        let settings = Settings::new();
+        let result = calculate_score(&analyzer, &hand, &status, &settings)
+            .unwrap()
+            .unwrap();
+        // 翻数昇順: 断么九(1翻) → 七対子(2翻)
+        assert_eq!(result.yaku_list[0], ("断么九", 1));
+        assert_eq!(result.yaku_list[1], ("七対子", 2));
+    }
+
+    /// 同翻の役はKind列挙型の定義順に並ぶ: 立直(ReadyHand)が平和(NoPointsHand)より先
+    #[test]
+    fn test_yaku_list_order_same_han_uses_kind_order() {
+        // 立直(1翻) + 平和(1翻): Kind定義順でReadyHand < NoPointsHand
+        let hand = Hand::from("123456m234p6799s 5s");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+        let mut status = Status::new();
+        status.has_claimed_ready = true;
+        status.is_self_picked = false;
+        status.player_wind = Wind::South;
+        status.prevailing_wind = Wind::East;
+        let settings = Settings::new();
+        let result = calculate_score(&analyzer, &hand, &status, &settings)
+            .unwrap()
+            .unwrap();
+        let names: Vec<&str> = result.yaku_list.iter().map(|(n, _)| *n).collect();
+        let riichi_pos = names.iter().position(|&n| n == "立直").unwrap();
+        let pinfu_pos = names.iter().position(|&n| n == "平和").unwrap();
+        assert!(riichi_pos < pinfu_pos, "立直はKind定義順で平和より先に来る");
     }
 }
