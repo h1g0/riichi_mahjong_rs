@@ -16,18 +16,21 @@ pub enum Form {
 /// 和了役を表す列挙型
 ///
 /// <https://en.wikipedia.org/wiki/Japanese_Mahjong_yaku>による英語名
-#[derive(Debug, PartialEq, Eq, Hash, EnumCountMacro, EnumIter)]
+/// ここでの定義順で同翻役のリザルト画面の役の表示順も決定する
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, EnumCountMacro, EnumIter)]
 pub enum Kind {
     /// 立直
     ReadyHand,
+    /// ダブル立直
+    DoubleReady,
+    /// 一発
+    OneShot,
+    /// 門前清自摸和
+    SelfPick,
     /// 七対子
     SevenPairs,
     /// 流し満貫
     NagashiMangan,
-    /// 門前清自摸和
-    SelfPick,
-    /// 一発
-    OneShot,
     /// 海底撈月
     LastTileFromTheWall,
     /// 河底撈魚
@@ -36,8 +39,6 @@ pub enum Kind {
     DeadWallDraw,
     /// 搶槓
     RobbingAQuad,
-    /// ダブル立直
-    DoubleReady,
     /// 平和
     NoPointsHand,
     /// 一盃口
@@ -349,4 +350,3 @@ fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
         Kind::HandOfEarth => "地和",
     }
 }
-

@@ -296,17 +296,6 @@ pub fn add_dora_to_score(
     // 赤ドラをカウント
     let red_dora_count = all_tiles.iter().filter(|t| t.is_red_dora()).count() as u32;
 
-    // 翻を追加
-    if dora_count > 0 {
-        score_result.yaku_list.push(("ドラ", dora_count));
-    }
-    if uradora_count > 0 {
-        score_result.yaku_list.push(("裏ドラ", uradora_count));
-    }
-    if red_dora_count > 0 {
-        score_result.yaku_list.push(("赤ドラ", red_dora_count));
-    }
-
     let extra_han = dora_count + uradora_count + red_dora_count;
     if extra_han == 0 {
         return;
@@ -325,10 +314,16 @@ pub fn add_dora_to_score(
     score_result.non_dealer_tsumo_dealer = round_up_to_100(base_points * 2);
     score_result.non_dealer_tsumo_non_dealer = round_up_to_100(base_points);
 
-    // ソートし直す（翻数降順、同翻なら名前昇順）
-    score_result
-        .yaku_list
-        .sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    // ドラ・赤ドラ・裏ドラをこの順で末尾に追加
+    if dora_count > 0 {
+        score_result.yaku_list.push(("ドラ", dora_count));
+    }
+    if red_dora_count > 0 {
+        score_result.yaku_list.push(("赤ドラ", red_dora_count));
+    }
+    if uradora_count > 0 {
+        score_result.yaku_list.push(("裏ドラ", uradora_count));
+    }
 }
 
 /// プレイヤーがテンパイしているか判定する（13枚の手牌で）
@@ -569,6 +564,54 @@ mod tests {
 
         let waiting = get_waiting_tiles(&player);
         assert_eq!(waiting, vec![Tile::P4, Tile::P7]);
+    }
+
+    /// 通常役の後にドラ→赤ドラ→裏ドラの順で並ぶことを確認する
+    #[test]
+    fn test_dora_order_in_yaku_list() {
+        use mahjong_core::tile::Wind;
+
+        let fu_result = FuResult {
+            total: 30,
+            details: vec![FuDetail { name: "副底", fu: 20 }],
+        };
+        let mut score = ScoreResult {
+            han: 1,
+            fu: 30,
+            rank: ScoreRank::Normal,
+            dealer_ron: 1500,
+            dealer_tsumo_all: 500,
+            non_dealer_ron: 1000,
+            non_dealer_tsumo_dealer: 500,
+            non_dealer_tsumo_non_dealer: 300,
+            yaku_list: vec![("断么九", 1)],
+            fu_result,
+        };
+
+        // 手牌にM2（ドラ）・赤M5（赤ドラ）・S7（裏ドラ対象）を含む
+        let tiles = vec![
+            Tile::new(Tile::M2), Tile::new(Tile::M3), Tile::new(Tile::M4),
+            Tile::new(Tile::P2), Tile::new(Tile::P3), Tile::new(Tile::P4),
+            Tile::new(Tile::S2), Tile::new(Tile::S3), Tile::new(Tile::S4),
+            Tile::new(Tile::M6), Tile::new(Tile::M7), Tile::new(Tile::M8),
+            Tile::new(Tile::S7),
+        ];
+        let mut player = Player::new(Wind::South, tiles, 25000);
+        player.draw(Tile::new_red(Tile::M5)); // 赤ドラ
+
+        // ドラ表示牌M1 → ドラはM2（1枚）
+        // 裏ドラ表示牌S6 → 裏ドラはS7（1枚）
+        // 赤ドラ: 赤M5（1枚）
+        let dora_indicators = vec![Tile::new(Tile::M1)];
+        let uradora_indicators = vec![Tile::new(Tile::S6)];
+
+        add_dora_to_score(&mut score, &player.hand, None, &dora_indicators, &uradora_indicators);
+
+        assert_eq!(score.yaku_list.len(), 4);
+        assert_eq!(score.yaku_list[0], ("断么九", 1));
+        assert_eq!(score.yaku_list[1], ("ドラ", 1));
+        assert_eq!(score.yaku_list[2], ("赤ドラ", 1));
+        assert_eq!(score.yaku_list[3], ("裏ドラ", 1));
     }
 }
 
