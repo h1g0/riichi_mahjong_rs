@@ -963,14 +963,12 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
         }
     }
 
-    draw_jp_text(
-        font,
-        "クリックで次の局へ",
-        480.0,
-        530.0,
-        FONT_SIZE,
-        Color::new(0.8, 0.8, 0.8, 0.7),
-    );
+    let next_label = if state.win_result_index + 1 < state.win_results.len() {
+        "クリックで次の和了へ"
+    } else {
+        "クリックで次の局へ"
+    };
+    draw_jp_text(font, next_label, 480.0, 530.0, FONT_SIZE, Color::new(0.8, 0.8, 0.8, 0.7));
 }
 
 fn draw_game_over(state: &GameState, font: Option<&Font>) {

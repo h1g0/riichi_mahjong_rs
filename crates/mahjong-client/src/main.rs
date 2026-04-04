@@ -77,14 +77,17 @@ async fn main() {
 
             GamePhase::RoundResult => {
                 if is_mouse_button_pressed(MouseButton::Left) {
-                    if let Some(ref mut adp) = adapter {
-                        if adp.is_game_over() {
-                            game_state.phase = GamePhase::GameOver;
-                        } else {
-                            adp.next_round();
-                            let events = adp.poll_events(0);
-                            for event in events {
-                                game_state.handle_event(event);
+                    // まだ表示していない和了者がいれば次のページへ、なければ次の局へ
+                    if !game_state.advance_win_result() {
+                        if let Some(ref mut adp) = adapter {
+                            if adp.is_game_over() {
+                                game_state.phase = GamePhase::GameOver;
+                            } else {
+                                adp.next_round();
+                                let events = adp.poll_events(0);
+                                for event in events {
+                                    game_state.handle_event(event);
+                                }
                             }
                         }
                     }

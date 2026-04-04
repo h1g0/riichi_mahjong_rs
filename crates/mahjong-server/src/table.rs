@@ -164,9 +164,7 @@ impl Table {
             }
 
             // === 九種九牌アクション ===
-            ClientAction::NineTerminals { declare } => {
-                round.do_nine_terminals(player_idx, declare)
-            }
+            ClientAction::NineTerminals { declare } => round.do_nine_terminals(player_idx, declare),
         }
     }
 
@@ -215,12 +213,20 @@ impl Table {
                 // 途中流局: 本場を増やし、局は進めない（連荘扱い）
                 self.honba += 1;
             }
-            Some(RoundResult::Tsumo { winner, .. }) | Some(RoundResult::Ron { winner, .. }) => {
+            Some(RoundResult::Tsumo { winner, .. }) => {
                 if winner == self.dealer {
-                    // 親が上がった場合は連荘（同じ局、本場+1）
                     self.honba += 1;
                 } else {
-                    // 親が上がっていなければ親交代、本場リセット
+                    self.honba = 0;
+                    self.dealer = (self.dealer + 1) % 4;
+                    self.advance_round_number();
+                }
+            }
+            Some(RoundResult::Ron { winners, .. }) => {
+                // 和了者の中に親がいれば連荘（1人ロンでも複数ロンでも共通）
+                if winners.iter().any(|&w| w == self.dealer) {
+                    self.honba += 1;
+                } else {
                     self.honba = 0;
                     self.dealer = (self.dealer + 1) % 4;
                     self.advance_round_number();
@@ -365,11 +371,14 @@ mod tests {
             ..Default::default()
         });
 
-        // 4局連続で流局させる
+        // 4局連続でノーテン流局（親交代あり）させてゲーム終了を確認する
         for _ in 0..4 {
             table.start_round();
             let round = table.current_round_mut().unwrap();
-            round.play_to_end();
+            round.phase = TurnPhase::RoundOver;
+            round.result = Some(RoundResult::ExhaustiveDraw {
+                dealer_tenpai: false,
+            });
             table.finish_round();
         }
 
@@ -385,7 +394,7 @@ mod tests {
         round.players[0].score = -100;
         round.phase = TurnPhase::RoundOver;
         round.result = Some(RoundResult::Ron {
-            winner: 1,
+            winners: vec![1],
             loser: 0,
             winning_tile: Tile::new(Tile::M1),
         });

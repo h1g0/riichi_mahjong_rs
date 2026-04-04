@@ -19,6 +19,8 @@ pub enum DrawReason {
     NineTerminals,
     /// 四槓散了
     FourKans,
+    /// 三家和
+    TripleRon,
 }
 
 /// 鳴きの種類

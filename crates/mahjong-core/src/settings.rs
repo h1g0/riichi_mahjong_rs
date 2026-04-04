@@ -29,6 +29,14 @@ pub struct Settings {
     /// 九種九牌ありかなしか（デフォルトはあり）
     /// ありの場合: 配牌時にヤオ九牌が9種以上あれば流局宣言可能
     pub nine_terminals_draw: bool,
+    /// 三家和流局ありかなしか（デフォルトはなし）
+    /// ありの場合: 1人の捨て牌に対して3人全員がロン宣言したら流局
+    pub triple_ron_draw: bool,
+    /// 複数同時ロン（ダブロン・トリロン）を許可するか（デフォルトはあり）
+    /// ありの場合: 2人または3人がロン宣言した場合、全員の和了を認める
+    /// なしの場合: 打順が最も早い1人のみ和了を認める（上家取り）
+    /// ※ triple_ron_draw=true かつ 3人ロンの場合は、こちらより三家和流局が優先される
+    pub multiple_ron: bool,
 }
 
 impl Settings {
@@ -40,6 +48,8 @@ impl Settings {
             four_winds_draw: true,
             four_riichi_draw: false,
             nine_terminals_draw: true,
+            triple_ron_draw: false,
+            multiple_ron: true,
         }
     }
 }
