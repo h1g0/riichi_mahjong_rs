@@ -10,6 +10,17 @@ use mahjong_core::tile::{Tile, TileType, Wind};
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 use mahjong_server::protocol::{AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent};
 
+/// 1人分の和了結果（結果画面の1ページ分）
+#[derive(Debug, Clone)]
+pub struct WinResult {
+    pub win_hand: Vec<Tile>,
+    pub win_melds: Vec<Meld>,
+    pub win_tile: Option<Tile>,
+    pub win_is_tsumo: bool,
+    pub uradora_indicators: Vec<Tile>,
+    pub result_message: String,
+}
+
 /// 捨て牌の表示情報
 #[derive(Debug, Clone)]
 pub struct DiscardInfo {
@@ -91,6 +102,10 @@ pub struct GameState {
     pub riichi_selectable_drawn: bool,
     /// 局の結果メッセージ
     pub result_message: Option<String>,
+    /// 和了結果一覧（ダブロン・トリロン時は複数）
+    pub win_results: Vec<WinResult>,
+    /// 現在表示中の和了結果インデックス
+    pub win_result_index: usize,
     /// 自分の手番か
     pub is_my_turn: bool,
     /// ゲームフェーズ
@@ -238,6 +253,8 @@ impl GameState {
             riichi_selectable_tiles: Vec::new(),
             riichi_selectable_drawn: false,
             result_message: None,
+            win_results: Vec::new(),
+            win_result_index: 0,
             is_my_turn: false,
             phase: GamePhase::Setup,
             available_calls: Vec::new(),
@@ -285,6 +302,8 @@ impl GameState {
                 self.discards = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
                 self.pending_riichi_player = None;
                 self.result_message = None;
+                self.win_results.clear();
+                self.win_result_index = 0;
                 self.phase = GamePhase::Playing;
                 self.available_calls.clear();
                 self.chi_option_selecting = false;
@@ -558,27 +577,24 @@ impl GameState {
             } => {
                 self.scores = scores;
                 self.riichi_sticks = 0;
-                self.uradora_indicators = uradora_indicators.clone();
-                self.win_tile = Some(winning_tile);
-                self.win_is_tsumo = loser.is_none();
 
-                // 和了者の手牌情報を保存
-                if let Some(_info) = player_hands.iter().find(|p| p.wind == winner) {
-                    self.win_hand = _info.hand.clone();
-                    // 既存の Meld（from 情報付き）を使用
-                    let relative_idx = self.relative_player_index(winner);
-                    if relative_idx == 0 {
-                        // 自分が和了者
-                        self.win_melds = self.melds.clone();
+                // 手牌情報を取得
+                let (win_hand, win_melds) =
+                    if let Some(info) = player_hands.iter().find(|p| p.wind == winner) {
+                        let hand = info.hand.clone();
+                        let relative_idx = self.relative_player_index(winner);
+                        let melds = if relative_idx == 0 {
+                            self.melds.clone()
+                        } else {
+                            self.other_players[relative_idx - 1].melds.clone()
+                        };
+                        (hand, melds)
                     } else {
-                        self.win_melds = self.other_players[relative_idx - 1].melds.clone();
-                    }
-                } else {
-                    self.win_hand.clear();
-                    self.win_melds.clear();
-                }
+                        (Vec::new(), Vec::new())
+                    };
 
                 self.update_other_player_hands_on_win(&player_hands, winner);
+
                 let winner_name = self.wind_to_name(winner);
                 let win_type = if loser.is_some() { "ロン" } else { "ツモ" };
                 let loser_text = if let Some(l) = loser {
@@ -587,7 +603,6 @@ impl GameState {
                     String::new()
                 };
 
-                // 役一覧を構築
                 let mut yaku_text = String::new();
                 for (name, y_han) in &yaku_list {
                     if !yaku_text.is_empty() {
@@ -596,7 +611,6 @@ impl GameState {
                     yaku_text.push_str(&format!("{} {}翻", name, y_han));
                 }
 
-                // 点数表示
                 let rank_display = if rank_name.is_empty() {
                     format!("{}符{}翻", fu, han)
                 } else {
@@ -611,20 +625,29 @@ impl GameState {
 
                 let msg = format!(
                     "{}が{}和了！{}{}\n{}\n{} → {}点",
-                    winner_name,
-                    win_type,
-                    loser_text,
-                    riichi_sticks_text,
-                    yaku_text,
-                    rank_display,
-                    score_points
+                    winner_name, win_type, loser_text, riichi_sticks_text, yaku_text,
+                    rank_display, score_points
                 );
-                self.result_message = Some(msg);
-                self.phase = GamePhase::RoundResult;
-                self.is_my_turn = false;
-                self.available_calls.clear();
-                self.clear_riichi_selection();
-                self.self_kan_options.clear();
+
+                self.win_results.push(WinResult {
+                    win_hand,
+                    win_melds,
+                    win_tile: Some(winning_tile),
+                    win_is_tsumo: loser.is_none(),
+                    uradora_indicators,
+                    result_message: msg,
+                });
+
+                // 最初のRoundWonでフェーズ遷移・表示を初期化
+                if self.phase != GamePhase::RoundResult {
+                    self.win_result_index = 0;
+                    self.apply_current_win_result();
+                    self.phase = GamePhase::RoundResult;
+                    self.is_my_turn = false;
+                    self.available_calls.clear();
+                    self.clear_riichi_selection();
+                    self.self_kan_options.clear();
+                }
             }
 
             ServerEvent::RoundDraw {
@@ -643,6 +666,7 @@ impl GameState {
                     DrawReason::FourRiichi => "四家立直",
                     DrawReason::NineTerminals => "九種九牌",
                     DrawReason::FourKans => "四槓散了",
+                    DrawReason::TripleRon => "三家和",
                 };
                 let mut msg = format!("流局（{}）", reason_text);
 
@@ -668,6 +692,34 @@ impl GameState {
                 self.clear_riichi_selection();
                 self.self_kan_options.clear();
             }
+        }
+    }
+
+    /// 現在の win_result_index が指すページを GameState の表示用フィールドに反映する
+    fn apply_current_win_result(&mut self) {
+        if let Some(wr) = self.win_results.get(self.win_result_index) {
+            let wr = wr.clone();
+            self.win_hand = wr.win_hand;
+            self.win_melds = wr.win_melds;
+            self.win_tile = wr.win_tile;
+            self.win_is_tsumo = wr.win_is_tsumo;
+            self.uradora_indicators = wr.uradora_indicators;
+            self.result_message = Some(wr.result_message);
+        }
+    }
+
+    /// 次の和了結果ページへ進む
+    ///
+    /// 次のページがある場合: 表示を更新して true を返す
+    /// 最後のページだった場合: false を返す（呼び出し元が next_round() を呼ぶ）
+    pub fn advance_win_result(&mut self) -> bool {
+        let next = self.win_result_index + 1;
+        if next < self.win_results.len() {
+            self.win_result_index = next;
+            self.apply_current_win_result();
+            true
+        } else {
+            false
         }
     }
 

@@ -8,7 +8,9 @@ use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, TileType, Wind};
 
 use crate::player::Player;
-use crate::protocol::{AvailableCall, CallType, DrawReason, MeldTiles, PlayerHandInfo, ServerEvent};
+use crate::protocol::{
+    AvailableCall, CallType, DrawReason, MeldTiles, PlayerHandInfo, ServerEvent,
+};
 use crate::scoring;
 use crate::wall::Wall;
 
@@ -31,13 +33,11 @@ pub enum TurnPhase {
 #[derive(Debug, Clone)]
 pub enum RoundResult {
     /// ツモ和了
-    Tsumo {
-        winner: usize,
-        winning_tile: Tile,
-    },
-    /// ロン和了
+    Tsumo { winner: usize, winning_tile: Tile },
+    /// ロン和了（1人・ダブロン・トリロン共通）
     Ron {
-        winner: usize,
+        /// 和了プレイヤーのインデックス（打順優先順: 下家→対面→上家）
+        winners: Vec<usize>,
         loser: usize,
         winning_tile: Tile,
     },
@@ -188,26 +188,31 @@ impl Round {
         self.players
             .iter()
             .map(|p| {
-                let melds: Vec<MeldTiles> = p.hand.melds().iter().map(|open| {
-                    let mut tiles: Vec<Tile> = open.tiles.clone();
-                    let call_type = match open.category {
-                        mahjong_core::hand_info::meld::MeldType::Chi => CallType::Chi,
-                        mahjong_core::hand_info::meld::MeldType::Pon => CallType::Pon,
-                        mahjong_core::hand_info::meld::MeldType::Kan => {
-                            if open.from == mahjong_core::hand_info::meld::MeldFrom::Myself {
-                                CallType::Ankan
-                            } else {
-                                CallType::Daiminkan
+                let melds: Vec<MeldTiles> = p
+                    .hand
+                    .melds()
+                    .iter()
+                    .map(|open| {
+                        let mut tiles: Vec<Tile> = open.tiles.clone();
+                        let call_type = match open.category {
+                            mahjong_core::hand_info::meld::MeldType::Chi => CallType::Chi,
+                            mahjong_core::hand_info::meld::MeldType::Pon => CallType::Pon,
+                            mahjong_core::hand_info::meld::MeldType::Kan => {
+                                if open.from == mahjong_core::hand_info::meld::MeldFrom::Myself {
+                                    CallType::Ankan
+                                } else {
+                                    CallType::Daiminkan
+                                }
                             }
+                            mahjong_core::hand_info::meld::MeldType::Kakan => CallType::Kakan,
+                        };
+                        // カンの場合は4枚にする
+                        if open.category.is_kan() && tiles.len() == 3 {
+                            tiles.push(tiles[0]);
                         }
-                        mahjong_core::hand_info::meld::MeldType::Kakan => CallType::Kakan,
-                    };
-                    // カンの場合は4枚にする
-                    if open.category.is_kan() && tiles.len() == 3 {
-                        tiles.push(tiles[0]);
-                    }
-                    MeldTiles { call_type, tiles }
-                }).collect();
+                        MeldTiles { call_type, tiles }
+                    })
+                    .collect();
 
                 PlayerHandInfo {
                     wind: p.seat_wind,
@@ -235,7 +240,13 @@ impl Round {
 
     /// デバッグ用に自分のツモ時の判定状態を出力する
     #[cfg(debug_assertions)]
-    fn log_draw_diagnostics(&self, player_idx: usize, source: &str, can_tsumo: bool, can_riichi: bool) {
+    fn log_draw_diagnostics(
+        &self,
+        player_idx: usize,
+        source: &str,
+        can_tsumo: bool,
+        can_riichi: bool,
+    ) {
         if player_idx != 0 {
             return;
         }
@@ -312,7 +323,6 @@ impl Round {
             }
         }
     }
-
 
     /// ツモフェーズを実行する
     /// 山から1枚引いて現在のプレイヤーに配る
@@ -461,12 +471,8 @@ impl Round {
     /// 打牌後の鳴き候補を全てチェックする
     fn check_available_calls(&self, discarded_tile: Tile, discarder: usize) -> CallState {
         let is_last_tile = self.wall.is_empty();
-        let mut available_calls: [Vec<AvailableCall>; 4] = [
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        ];
+        let mut available_calls: [Vec<AvailableCall>; 4] =
+            [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         let mut responded = [true; 4]; // デフォルトは応答済み（対象外）
 
         for i in 0..4 {
@@ -479,12 +485,8 @@ impl Round {
             // リーチ中は鳴き不可（ロンのみ可）
             // ロン判定: フリテンでなく、和了形であること
             if !player.is_furiten() {
-                let win_result = scoring::check_ron(
-                    player,
-                    discarded_tile,
-                    self.prevailing_wind,
-                    is_last_tile,
-                );
+                let win_result =
+                    scoring::check_ron(player, discarded_tile, self.prevailing_wind, is_last_tile);
                 if win_result.is_win {
                     available_calls[i].push(AvailableCall::Ron);
                 }
@@ -648,16 +650,31 @@ impl Round {
 
         // 1. ロン（最優先）
         if !call_state.ron_declared.is_empty() {
-            let is_robbing_a_quad = matches!(call_state.resolution, CallResolution::AfterKakan { .. });
+            let is_robbing_a_quad =
+                matches!(call_state.resolution, CallResolution::AfterKakan { .. });
             let discarder = call_state.discarder;
-            let winner = call_state
-                .ron_declared
-                .iter()
-                .min_by_key(|&&p| (p + 4 - discarder) % 4)
-                .copied()
-                .unwrap();
+            let winning_tile = call_state.discarded_tile;
+            let ron_count = call_state.ron_declared.len();
 
-            self.execute_ron(winner, discarder, call_state.discarded_tile, is_robbing_a_quad);
+            // 打順優先順（下家→対面→上家）でソート
+            let mut sorted_winners = call_state.ron_declared.clone();
+            sorted_winners.sort_by_key(|&p| (p + 4 - discarder) % 4);
+
+            if ron_count >= 3 && self.settings.triple_ron_draw {
+                // 三家和流局（最優先）
+                self.declare_special_draw(DrawReason::TripleRon);
+                return;
+            }
+
+            // 複数同時ロンが有効かつ2人以上: 全員和了
+            let winners = if ron_count >= 2 && self.settings.multiple_ron {
+                sorted_winners
+            } else {
+                // 上家取り: 最優先の1人のみ和了
+                vec![sorted_winners[0]]
+            };
+
+            self.execute_ron(winners, discarder, winning_tile, is_robbing_a_quad);
             return;
         }
 
@@ -665,7 +682,6 @@ impl Round {
             self.execute_kakan(caller, tile_type);
             return;
         }
-
 
         // 2. 大明カン
         if let Some(caller) = call_state.daiminkan_declared {
@@ -675,13 +691,23 @@ impl Round {
 
         // 3. ポン
         if let Some((caller, hand_tile_types)) = call_state.pon_declared {
-            self.execute_pon(caller, call_state.discarder, call_state.discarded_tile, hand_tile_types);
+            self.execute_pon(
+                caller,
+                call_state.discarder,
+                call_state.discarded_tile,
+                hand_tile_types,
+            );
             return;
         }
 
         // 4. チー
         if let Some((caller, hand_tile_types)) = call_state.chi_declared {
-            self.execute_chi(caller, call_state.discarder, call_state.discarded_tile, hand_tile_types);
+            self.execute_chi(
+                caller,
+                call_state.discarder,
+                call_state.discarded_tile,
+                hand_tile_types,
+            );
             return;
         }
 
@@ -693,112 +719,167 @@ impl Round {
         self.check_special_draws();
     }
 
-    /// ロン和了を実行する
-    fn execute_ron(&mut self, winner: usize, loser: usize, winning_tile: Tile, is_robbing_a_quad: bool) {
+    /// ロン和了を実行する（通常・ダブロン・トリロン共通）
+    ///
+    /// - winners: ロン和了者の打順優先順（下家→対面→上家）でソート済みのインデックスリスト
+    /// - 本場ボーナスと供託棒は最初の和了者（打順最優先）のみが取得する
+    fn execute_ron(
+        &mut self,
+        winners: Vec<usize>,
+        loser: usize,
+        winning_tile: Tile,
+        is_robbing_a_quad: bool,
+    ) {
         let is_last_tile = self.wall.is_empty();
+        let dora_indicators = self.wall.dora_indicators();
+        let riichi_sticks = self.riichi_sticks;
+        let player_hands = self.build_player_hands();
 
-        // 一時的にdrawnを設定して点数計算
-        let win_result = scoring::check_ron_with_flags(
-            &self.players[winner],
-            winning_tile,
-            self.prevailing_wind,
-            is_last_tile,
-            is_robbing_a_quad,
-        );
+        struct WinnerData {
+            winner: usize,
+            score_result: mahjong_core::scoring::score::ScoreResult,
+            deltas: [i32; 4],
+            uradora_indicators: Vec<Tile>,
+            score_points: i32,
+        }
 
-        if !win_result.is_win {
-            // ロンできないはずだが安全のため
+        // 打順が最も早い和了者を rank=0 として本場・供託ボーナスの基準にする
+        let mut winner_data: Vec<WinnerData> = Vec::new();
+
+        for (rank, &winner) in winners.iter().enumerate() {
+            let honba_for_this = if rank == 0 { self.honba } else { 0 };
+
+            let win_result = scoring::check_ron_with_flags(
+                &self.players[winner],
+                winning_tile,
+                self.prevailing_wind,
+                is_last_tile,
+                is_robbing_a_quad,
+            );
+
+            if !win_result.is_win {
+                continue;
+            }
+
+            let mut score_result = win_result.score_result.unwrap();
+
+            let uradora_indicators = if self.players[winner].is_riichi {
+                self.wall.uradora_indicators()
+            } else {
+                vec![]
+            };
+
+            scoring::add_dora_to_score(
+                &mut score_result,
+                &self.players[winner].hand,
+                Some(winning_tile),
+                &dora_indicators,
+                &uradora_indicators,
+            );
+
+            let winner_is_dealer = self.players[winner].is_dealer();
+            let deltas = scoring::calculate_ron_score_deltas(
+                winner,
+                loser,
+                &score_result,
+                winner_is_dealer,
+                honba_for_this,
+            );
+
+            // 供託棒は打順最優先の和了者（winner_data の先頭）のみ取得
+            let riichi_bonus = if winner_data.is_empty() {
+                (riichi_sticks as i32) * 1000
+            } else {
+                0
+            };
+            let score_points = deltas[winner] + riichi_bonus;
+
+            winner_data.push(WinnerData {
+                winner,
+                score_result,
+                deltas,
+                uradora_indicators,
+                score_points,
+            });
+        }
+
+        // 安全のため: 和了成立者が0人ならフェーズを進めて返す
+        if winner_data.is_empty() {
             self.current_player = (loser + 1) % 4;
             self.phase = TurnPhase::Draw;
             return;
         }
 
-        let mut score_result = win_result.score_result.unwrap();
-
-        // ドラ・赤ドラ・裏ドラを加算
-        let dora_indicators = self.wall.dora_indicators();
-        let uradora_indicators = if self.players[winner].is_riichi {
-            self.wall.uradora_indicators()
-        } else {
-            vec![]
-        };
-        scoring::add_dora_to_score(
-            &mut score_result,
-            &self.players[winner].hand,
-            Some(winning_tile),
-            &dora_indicators,
-            &uradora_indicators,
-        );
-
-        let winner_is_dealer = self.players[winner].is_dealer();
-
-        let deltas = scoring::calculate_ron_score_deltas(
-            winner,
-            loser,
-            &score_result,
-            winner_is_dealer,
-            self.honba,
-        );
-        let riichi_sticks = self.riichi_sticks;
-
-        for i in 0..4 {
-            self.players[i].score += deltas[i];
+        // 全スコアデルタを合算して適用
+        for wd in &winner_data {
+            for i in 0..4 {
+                self.players[i].score += wd.deltas[i];
+            }
         }
+        // 供託棒は打順最優先の和了者に付与
         if riichi_sticks > 0 {
-            self.players[winner].score += (riichi_sticks as i32) * 1000;
+            self.players[winner_data[0].winner].score += (riichi_sticks as i32) * 1000;
             self.riichi_sticks = 0;
         }
 
         if !is_robbing_a_quad {
-            // 捨て牌を「鳴かれた」としてマーク
             if let Some(last_discard) = self.players[loser].discards.last_mut() {
                 last_discard.is_called = true;
             }
         }
 
         let scores = self.get_scores();
-        let winner_wind = self.players[winner].seat_wind;
         let loser_wind = self.players[loser].seat_wind;
 
-        // 役情報を構築
-        let yaku_list: Vec<(String, u32)> = score_result
-            .yaku_list
-            .iter()
-            .map(|(name, han)| (name.to_string(), *han))
-            .collect();
-        let rank_name = scoring::rank_to_string(&score_result.rank).to_string();
-        let player_hands = self.build_player_hands();
+        // 各和了者にRoundWonイベントを送信
+        for (idx, wd) in winner_data.iter().enumerate() {
+            let winner_wind = self.players[wd.winner].seat_wind;
+            let yaku_list: Vec<(String, u32)> = wd
+                .score_result
+                .yaku_list
+                .iter()
+                .map(|(name, han)| (name.to_string(), *han))
+                .collect();
+            let rank_name = scoring::rank_to_string(&wd.score_result.rank).to_string();
+            let event_riichi_sticks = if idx == 0 { riichi_sticks } else { 0 };
 
-        for i in 0..4 {
-            self.events.push((
-                i,
-                ServerEvent::RoundWon {
-                    winner: winner_wind,
-                    loser: Some(loser_wind),
-                    winning_tile,
-                    scores,
-                    yaku_list: yaku_list.clone(),
-                    han: score_result.han,
-                    fu: score_result.fu,
-                    score_points: deltas[winner] + (riichi_sticks as i32) * 1000,
-                    rank_name: rank_name.clone(),
-                    uradora_indicators: uradora_indicators.clone(),
-                    riichi_sticks,
-                    player_hands: player_hands.clone(),
-                },
-            ));
+            for i in 0..4 {
+                self.events.push((
+                    i,
+                    ServerEvent::RoundWon {
+                        winner: winner_wind,
+                        loser: Some(loser_wind),
+                        winning_tile,
+                        scores,
+                        yaku_list: yaku_list.clone(),
+                        han: wd.score_result.han,
+                        fu: wd.score_result.fu,
+                        score_points: wd.score_points,
+                        rank_name: rank_name.clone(),
+                        uradora_indicators: wd.uradora_indicators.clone(),
+                        riichi_sticks: event_riichi_sticks,
+                        player_hands: player_hands.clone(),
+                    },
+                ));
+            }
         }
 
         self.phase = TurnPhase::RoundOver;
         self.result = Some(RoundResult::Ron {
-            winner,
+            winners,
             loser,
             winning_tile,
         });
     }
 
     /// ポンを実行する
-    fn execute_pon(&mut self, caller: usize, discarder: usize, called_tile: Tile, hand_tile_types: [Tile; 2]) {
+    fn execute_pon(
+        &mut self,
+        caller: usize,
+        discarder: usize,
+        called_tile: Tile,
+        hand_tile_types: [Tile; 2],
+    ) {
         let from = Player::meld_from_relative(caller, discarder);
         self.players[caller].do_pon(called_tile, hand_tile_types, from);
 
@@ -955,7 +1036,16 @@ impl Round {
         }
 
         let caller_wind = self.players[caller].seat_wind;
-        let open = self.players[caller].hand.melds().iter().rev().find(|open| open.category == mahjong_core::hand_info::meld::MeldType::Kakan && open.tiles[0].get() == tile_type).unwrap();
+        let open = self.players[caller]
+            .hand
+            .melds()
+            .iter()
+            .rev()
+            .find(|open| {
+                open.category == mahjong_core::hand_info::meld::MeldType::Kakan
+                    && open.tiles[0].get() == tile_type
+            })
+            .unwrap();
         let mut tiles = open.tiles.clone();
         if tiles.len() == 3 {
             tiles.push(Tile::new(tile_type));
@@ -987,7 +1077,8 @@ impl Round {
     fn check_kakan_ron_and_resolve(&mut self, caller: usize, tile_type: TileType) {
         let called_tile = Tile::new(tile_type);
         let is_last_tile = self.wall.is_empty();
-        let mut available_calls: [Vec<AvailableCall>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let mut available_calls: [Vec<AvailableCall>; 4] =
+            [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         let mut responded = [true; 4];
 
         for i in 0..4 {
@@ -1060,9 +1151,15 @@ impl Round {
             return false;
         }
 
-        if self.players[player_idx].ankan_options().contains(&tile_type) {
+        if self.players[player_idx]
+            .ankan_options()
+            .contains(&tile_type)
+        {
             self.players[player_idx].do_ankan(tile_type);
-        } else if self.players[player_idx].kakan_options().contains(&tile_type) {
+        } else if self.players[player_idx]
+            .kakan_options()
+            .contains(&tile_type)
+        {
             self.check_kakan_ron_and_resolve(player_idx, tile_type);
             return true;
         } else {
@@ -1210,7 +1307,10 @@ impl Round {
 
         if player.is_riichi {
             if player_idx == 0 {
-                eprintln!("[riichi-reject] reason=already_riichi player={}", player_idx);
+                eprintln!(
+                    "[riichi-reject] reason=already_riichi player={}",
+                    player_idx
+                );
             }
             return false;
         }
@@ -1662,7 +1762,9 @@ impl Round {
             return false;
         }
 
-        self.players.iter().all(|p| p.discards[0].tile.get() == first_tile.get())
+        self.players
+            .iter()
+            .all(|p| p.discards[0].tile.get() == first_tile.get())
     }
 
     /// 四家立直を判定する
@@ -1889,7 +1991,15 @@ mod tests {
 
     #[test]
     fn test_round_scores() {
-        let round = Round::new(Wind::East, 0, [25000, 30000, 20000, 25000], 0, 0, 0, Settings::new());
+        let round = Round::new(
+            Wind::East,
+            0,
+            [25000, 30000, 20000, 25000],
+            0,
+            0,
+            0,
+            Settings::new(),
+        );
         let scores = round.get_scores();
         assert_eq!(scores, [25000, 30000, 20000, 25000]);
     }
@@ -1954,12 +2064,16 @@ mod tests {
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
 
         let call_state = round.check_available_calls(Tile::new(Tile::Z5), 0);
-        assert!(call_state.available_calls[1]
-            .iter()
-            .any(|call| matches!(call, AvailableCall::Pon { .. })));
-        assert!(!call_state.available_calls[1]
-            .iter()
-            .any(|call| matches!(call, AvailableCall::Ron)));
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Pon { .. }))
+        );
+        assert!(
+            !call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Ron))
+        );
     }
 
     #[test]
@@ -1980,7 +2094,6 @@ mod tests {
         assert!(round.do_riichi(Some(Tile::new(Tile::Z4))));
         assert!(round.players[0].is_riichi);
     }
-
 
     #[test]
     fn test_do_riichi_deducts_score_and_adds_stick() {
@@ -2006,9 +2119,11 @@ mod tests {
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
 
         let call_state = round.check_available_calls(Tile::new(Tile::M1), 0);
-        assert!(call_state.available_calls[1]
-            .iter()
-            .any(|call| matches!(call, AvailableCall::Daiminkan)));
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Daiminkan))
+        );
     }
 
     #[test]
@@ -2043,7 +2158,10 @@ mod tests {
         assert!(round.do_kan(Tile::M1));
         assert_eq!(round.phase, TurnPhase::WaitForDiscard);
         assert!(round.players[0].hand.drawn().is_some());
-        assert_eq!(round.players[0].hand.melds()[0].category, mahjong_core::hand_info::meld::MeldType::Kakan);
+        assert_eq!(
+            round.players[0].hand.melds()[0].category,
+            mahjong_core::hand_info::meld::MeldType::Kakan
+        );
         assert_eq!(round.wall.dora_indicators().len(), 2);
     }
 
@@ -2062,10 +2180,12 @@ mod tests {
         assert_eq!(round.phase, TurnPhase::WaitForDiscard);
         assert!(round.players[0].hand.drawn().is_some());
         assert_eq!(round.players[0].hand.tiles().len(), 10);
-        assert!(round.players[0]
-            .hand
-            .tiles()
-            .contains(&mahjong_core::tile::Tile::new(Tile::S9)));
+        assert!(
+            round.players[0]
+                .hand
+                .tiles()
+                .contains(&mahjong_core::tile::Tile::new(Tile::S9))
+        );
     }
 
     #[test]
@@ -2221,7 +2341,11 @@ mod tests {
         assert!(round.do_kan(Tile::M1));
         assert_eq!(round.phase, TurnPhase::WaitForCalls);
         let call_state = round.call_state.as_ref().unwrap();
-        assert!(call_state.available_calls[1].iter().any(|call| matches!(call, AvailableCall::Ron)));
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Ron))
+        );
 
         // ロンせずパス → フリテンが設定されること
         assert!(round.respond_to_call(1, CallResponse::Pass));
@@ -2277,13 +2401,21 @@ mod tests {
         assert!(round.do_kan(Tile::M1));
         assert_eq!(round.phase, TurnPhase::WaitForCalls);
         let call_state = round.call_state.as_ref().unwrap();
-        assert!(call_state.available_calls[1].iter().any(|call| matches!(call, AvailableCall::Ron)));
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Ron))
+        );
 
         assert!(round.respond_to_call(1, CallResponse::Ron));
         assert_eq!(round.phase, TurnPhase::RoundOver);
         match round.result {
-            Some(RoundResult::Ron { winner, loser, winning_tile }) => {
-                assert_eq!(winner, 1);
+            Some(RoundResult::Ron {
+                ref winners,
+                loser,
+                winning_tile,
+            }) => {
+                assert_eq!(winners, &vec![1]);
                 assert_eq!(loser, 0);
                 assert_eq!(winning_tile, Tile::new(Tile::M1));
             }
@@ -2356,7 +2488,13 @@ mod tests {
 
         let events = round.drain_events();
         let has_round_draw = events.iter().any(|(_idx, e)| {
-            matches!(e, ServerEvent::RoundDraw { reason: DrawReason::NineTerminals, .. })
+            matches!(
+                e,
+                ServerEvent::RoundDraw {
+                    reason: DrawReason::NineTerminals,
+                    ..
+                }
+            )
         });
         assert!(has_round_draw, "九種九牌流局イベントが生成されていない");
     }
@@ -2420,7 +2558,10 @@ mod tests {
         let has_available = events
             .iter()
             .any(|(_idx, e)| matches!(e, ServerEvent::NineTerminalsAvailable));
-        assert!(has_available, "NineTerminalsAvailableイベントが生成されていない");
+        assert!(
+            has_available,
+            "NineTerminalsAvailableイベントが生成されていない"
+        );
     }
 
     #[test]
@@ -2449,6 +2590,323 @@ mod tests {
         // 設定オフなら通常の打牌フェーズになる
         assert_eq!(round.phase, TurnPhase::WaitForDiscard);
     }
+
+    // ─── 三家和流局テスト ─────────────────────────────────────────────────────────
+
+    /// 3人がロン可能な状態を作るヘルパー
+    ///
+    /// - プレイヤー0: 打牌側（5sを捨てる）
+    /// - プレイヤー1,2,3: 5sでロン可能な手牌（タンヤオ形）
+    ///
+    /// 全員の手牌は同じ点数になる（非親・同一役・同一符）ため点数テストに使える。
+    fn setup_triple_ron(round: &mut Round) {
+        // プレイヤー0: 5sをツモ切り
+        let seat0 = round.players[0].seat_wind;
+        let mut p0 = Player::new(seat0, vec![], 25000);
+        // 12枚クローズ + ツモ牌5s
+        p0.hand = mahjong_core::hand::Hand::from("234m456m234p456p 5s");
+        round.players[0] = p0;
+
+        // プレイヤー1,2,3: 5sでロン可能な手牌（234m456m234p456p5s で 55s 待ち）
+        // 全員タンヤオ（2〜8のみ）で同一役・同一符
+        for i in 1..=3 {
+            let seat = round.players[i].seat_wind;
+            let mut p = Player::new(seat, vec![], 25000);
+            p.hand = mahjong_core::hand::Hand::from("234m456m234p456p5s");
+            round.players[i] = p;
+        }
+
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+    }
+
+    #[test]
+    fn test_triple_ron_draw_enabled() {
+        let mut settings = Settings::new();
+        settings.triple_ron_draw = true;
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        // プレイヤー0が1mを捨てる
+        assert!(round.do_discard(None));
+        assert_eq!(round.phase, TurnPhase::WaitForCalls);
+
+        // 3人全員がロン宣言
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Ron));
+
+        // 三家和流局になること
+        assert_eq!(round.phase, TurnPhase::RoundOver);
+        assert!(matches!(round.result, Some(RoundResult::SpecialDraw)));
+
+        let events = round.drain_events();
+        let has_triple_ron = events.iter().any(|(_idx, e)| {
+            matches!(
+                e,
+                ServerEvent::RoundDraw {
+                    reason: DrawReason::TripleRon,
+                    ..
+                }
+            )
+        });
+        assert!(has_triple_ron, "三家和流局イベントが生成されていない");
+    }
+
+    #[test]
+    fn test_triple_ron_draw_takes_priority_over_multiple_ron() {
+        // triple_ron_draw=true かつ multiple_ron=true の両方が有効な場合、
+        // 三家和流局が優先されてトリロン（全員和了）にはならないことを明示的に確認する
+        let mut settings = Settings::new();
+        settings.triple_ron_draw = true;
+        settings.multiple_ron = true;
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        assert!(round.do_discard(None));
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Ron));
+
+        assert_eq!(round.phase, TurnPhase::RoundOver);
+        assert!(
+            matches!(round.result, Some(RoundResult::SpecialDraw)),
+            "triple_ron_draw が multiple_ron より優先されること"
+        );
+        let events = round.drain_events();
+        assert!(events.iter().any(|(_, e)| matches!(
+            e,
+            ServerEvent::RoundDraw {
+                reason: DrawReason::TripleRon,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn test_triple_ron_draw_disabled_multiple_ron_disabled_picks_winner() {
+        // triple_ron_draw=false, multiple_ron=false の場合は上家取り（頭ハネ）の1人ロン
+        let mut settings = Settings::new();
+        settings.triple_ron_draw = false;
+        settings.multiple_ron = false;
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        assert!(round.do_discard(None));
+        assert_eq!(round.phase, TurnPhase::WaitForCalls);
+
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Ron));
+
+        // multiple_ron=false → 上家（プレイヤー1）が優先してロン
+        assert_eq!(round.phase, TurnPhase::RoundOver);
+        match &round.result {
+            Some(RoundResult::Ron { winners, loser, .. }) => {
+                assert_eq!(winners, &vec![1]);
+                assert_eq!(*loser, 0);
+            }
+            _ => panic!("ロン結果が期待されたが別の結果: {:?}", round.result),
+        }
+    }
+
+    #[test]
+    fn test_two_ron_no_draw() {
+        // 2人ロンは三家和流局にならない（triple_ron_draw=true でも2人なら流局しない）
+        let mut settings = Settings::new();
+        settings.triple_ron_draw = true;
+        // multiple_ron=true（デフォルト）なので両方和了
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        assert!(round.do_discard(None));
+        assert_eq!(round.phase, TurnPhase::WaitForCalls);
+
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Pass));
+
+        // 2人ロンは流局でなくダブロン
+        assert_eq!(round.phase, TurnPhase::RoundOver);
+        match &round.result {
+            Some(RoundResult::Ron { winners, loser, .. }) => {
+                assert_eq!(winners, &vec![1, 2]);
+                assert_eq!(*loser, 0);
+            }
+            _ => panic!("Ron結果が期待されたが別の結果: {:?}", round.result),
+        }
+    }
+
+    #[test]
+    fn test_two_ron_disabled_picks_winner() {
+        // multiple_ron=false の場合は上家取り（頭ハネ）の1人ロン
+        let mut settings = Settings::new();
+        settings.multiple_ron = false;
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        assert!(round.do_discard(None));
+        assert_eq!(round.phase, TurnPhase::WaitForCalls);
+
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Pass));
+
+        // multiple_ron=false → 上家（プレイヤー1）のみロン
+        assert_eq!(round.phase, TurnPhase::RoundOver);
+        match &round.result {
+            Some(RoundResult::Ron { winners, loser, .. }) => {
+                assert_eq!(winners, &vec![1]);
+                assert_eq!(*loser, 0);
+            }
+            _ => panic!("Ron結果が期待されたが別の結果: {:?}", round.result),
+        }
+    }
+
+    #[test]
+    fn test_double_ron_both_win() {
+        // multiple_ron=true（デフォルト）: 2人ロンで両方和了
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        assert!(round.do_discard(None));
+
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Pass));
+
+        assert_eq!(round.phase, TurnPhase::RoundOver);
+        match &round.result {
+            Some(RoundResult::Ron { winners, loser, .. }) => {
+                assert_eq!(winners, &vec![1, 2], "打順優先順で並んでいること");
+                assert_eq!(*loser, 0);
+            }
+            _ => panic!("Ron結果が期待されたが別の結果: {:?}", round.result),
+        }
+    }
+
+    #[test]
+    fn test_triple_ron_all_win() {
+        // multiple_ron=true かつ triple_ron_draw=false: 3人ロンで全員和了
+        let mut settings = Settings::new();
+        settings.multiple_ron = true;
+        settings.triple_ron_draw = false;
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        assert!(round.do_discard(None));
+
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Ron));
+
+        assert_eq!(round.phase, TurnPhase::RoundOver);
+        match &round.result {
+            Some(RoundResult::Ron { winners, loser, .. }) => {
+                assert_eq!(winners, &vec![1, 2, 3]);
+                assert_eq!(*loser, 0);
+            }
+            _ => panic!("Ron結果が期待されたが別の結果: {:?}", round.result),
+        }
+    }
+
+    #[test]
+    fn test_double_ron_scores() {
+        // ダブロン時のスコア: 各和了者が放銃者から独立して点数を受け取る
+        // 本場ボーナスは上家取りで最初の和了者（プレイヤー1）のみ
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 1, 0, 0, Settings::new()); // honba=1
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        let initial_score_loser = round.players[0].score;
+        let initial_score_p1 = round.players[1].score;
+        let initial_score_p2 = round.players[2].score;
+
+        assert!(round.do_discard(None));
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Pass));
+
+        // プレイヤー1: 本場ボーナスあり (honba=1 → 300点加算)
+        // プレイヤー2: 本場ボーナスなし
+        let p1_gain = round.players[1].score - initial_score_p1;
+        let p2_gain = round.players[2].score - initial_score_p2;
+        assert!(
+            p1_gain > p2_gain,
+            "最初の和了者が本場ボーナスを得ること: p1={}, p2={}",
+            p1_gain,
+            p2_gain
+        );
+        assert_eq!(
+            p1_gain - p2_gain,
+            300,
+            "本場ボーナスの差は1本場=300点であること"
+        );
+
+        // 放銃者は両方の点数を払う
+        let loser_loss = initial_score_loser - round.players[0].score;
+        let total_gain = p1_gain + p2_gain;
+        assert_eq!(
+            loser_loss, total_gain,
+            "放銃者の支払いが全和了者の取得合計と一致すること"
+        );
+    }
+
+    #[test]
+    fn test_double_ron_events_generated() {
+        // ダブロン時に各和了者分のRoundWonイベントが生成されること
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        assert!(round.do_discard(None));
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Pass));
+
+        let events = round.drain_events();
+        let won_events: Vec<_> = events
+            .iter()
+            .filter(|(idx, e)| *idx == 0 && matches!(e, ServerEvent::RoundWon { .. }))
+            .collect();
+        assert_eq!(
+            won_events.len(),
+            2,
+            "ダブロンで2件のRoundWonイベントが生成されること"
+        );
+    }
+
+    #[test]
+    fn test_multi_ron_riichi_sticks_first_winner_only() {
+        // 供託棒は最初の和了者（プレイヤー1）のみ取得
+        let settings = Settings::new();
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 2, 0, settings); // riichi_sticks=2
+        setup_triple_ron(&mut round);
+        round.drain_events();
+
+        let initial_p1 = round.players[1].score;
+        let initial_p2 = round.players[2].score;
+
+        assert!(round.do_discard(None));
+        assert!(round.respond_to_call(1, CallResponse::Ron));
+        assert!(round.respond_to_call(2, CallResponse::Ron));
+        assert!(round.respond_to_call(3, CallResponse::Pass));
+
+        let p1_gain = round.players[1].score - initial_p1;
+        let p2_gain = round.players[2].score - initial_p2;
+        // プレイヤー1は供託2本（2000点）分多く得点しているはず
+        assert_eq!(
+            p1_gain - p2_gain,
+            2000,
+            "供託2本はプレイヤー1のみ取得: 差は2000点"
+        );
+        assert_eq!(round.riichi_sticks, 0, "供託棒はすべて消費されること");
+    }
 }
-
-
