@@ -3,7 +3,12 @@
 //! 1局分のゲーム進行を管理する。
 //! ツモ → 打牌 → 鳴き判定 → 次の手番 のターンフローを制御する。
 
-use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
+#[cfg(debug_assertions)]
+mod diagnostics;
+#[cfg(test)]
+mod test_helpers;
+
+use mahjong_core::hand_info::hand_analyzer;
 use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, TileType, Wind};
 
@@ -236,92 +241,6 @@ impl Round {
     /// 戻り値: (対象プレイヤーインデックス, イベント) のリスト
     pub fn drain_events(&mut self) -> Vec<(usize, ServerEvent)> {
         std::mem::take(&mut self.events)
-    }
-
-    /// デバッグ用に自分のツモ時の判定状態を出力する
-    #[cfg(debug_assertions)]
-    fn log_draw_diagnostics(
-        &self,
-        player_idx: usize,
-        source: &str,
-        can_tsumo: bool,
-        can_riichi: bool,
-    ) {
-        if player_idx != 0 {
-            return;
-        }
-
-        let player = &self.players[player_idx];
-        let analyzer = HandAnalyzer::new(&player.hand);
-        let win_result = scoring::check_win(
-            player,
-            self.prevailing_wind,
-            true,
-            self.wall.is_empty(),
-            self.last_draw_was_dead_wall,
-        );
-        let riichi_discards: Vec<String> = player
-            .hand
-            .tiles()
-            .iter()
-            .copied()
-            .filter(|&tile| self.can_player_riichi_with_discard(player_idx, Some(tile)))
-            .map(|tile| tile.to_string())
-            .collect();
-        let can_riichi_with_drawn = self
-            .can_player_riichi_with_discard(player_idx, None)
-            .then(|| String::from("tsumo"));
-
-        match analyzer {
-            Ok(analyzer) => {
-                let yaku_summary = win_result
-                    .score_result
-                    .as_ref()
-                    .map(|score| {
-                        score
-                            .yaku_list
-                            .iter()
-                            .map(|(name, han)| format!("{}:{}", name, han))
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    })
-                    .unwrap_or_default();
-                let drawn = player
-                    .hand
-                    .drawn()
-                    .map(|tile| tile.to_string())
-                    .unwrap_or_else(|| String::from("none"));
-                let mut riichi_options = riichi_discards;
-                if let Some(drawn_label) = can_riichi_with_drawn {
-                    riichi_options.push(drawn_label);
-                }
-
-                eprintln!(
-                    "[draw-diag] source={} hand={} drawn={} shanten={} can_tsumo={} is_win={} can_riichi={} riichi_discards=[{}] yaku=[{}] remaining={} score={}",
-                    source,
-                    player.hand.to_string(),
-                    drawn,
-                    analyzer.shanten,
-                    can_tsumo,
-                    win_result.is_win,
-                    can_riichi,
-                    riichi_options.join(","),
-                    yaku_summary,
-                    self.wall.remaining(),
-                    player.score,
-                );
-            }
-            Err(err) => {
-                eprintln!(
-                    "[draw-diag] source={} hand={} analyzer_error={} can_tsumo={} can_riichi={}",
-                    source,
-                    player.hand.to_string(),
-                    err,
-                    can_tsumo,
-                    can_riichi,
-                );
-            }
-        }
     }
 
     /// ツモフェーズを実行する
@@ -1603,65 +1522,6 @@ impl Round {
 
         // ツモ切り
         self.do_discard(None)
-    }
-
-    /// WaitForCalls フェーズでCPUプレイヤーを全員パスさせる
-    ///
-    /// human_player 以外のプレイヤーで鳴き候補がある者を自動パスさせる。
-    /// 全員パスしたらフェーズが自動進行する。
-    pub fn auto_pass_cpu(&mut self, human_player: usize) {
-        if self.phase != TurnPhase::WaitForCalls {
-            return;
-        }
-
-        for i in 0..4 {
-            if i == human_player {
-                continue;
-            }
-            // まだ応答していないCPUプレイヤーをパスさせる
-            if let Some(ref call_state) = self.call_state {
-                if !call_state.responded[i] {
-                    self.respond_to_call(i, CallResponse::Pass);
-                    // resolve_calls で call_state が消えたら終了
-                    if self.call_state.is_none() {
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    /// 局を最後まで自動進行する（全員ツモ切り・鳴きなし）
-    /// テスト・デバッグ用
-    pub fn play_to_end(&mut self) {
-        while self.phase != TurnPhase::RoundOver {
-            match self.phase {
-                TurnPhase::Draw => {
-                    self.do_draw();
-                }
-                TurnPhase::WaitForDiscard => {
-                    self.do_discard(None);
-                }
-                TurnPhase::WaitForCalls => {
-                    // 全員パス
-                    for i in 0..4 {
-                        if let Some(ref cs) = self.call_state {
-                            if !cs.responded[i] {
-                                self.respond_to_call(i, CallResponse::Pass);
-                                if self.call_state.is_none() {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                TurnPhase::WaitForNineTerminals => {
-                    // テスト用: 常に流局宣言する
-                    self.do_nine_terminals(self.current_player, true);
-                }
-                TurnPhase::RoundOver => break,
-            }
-        }
     }
 
     /// 局が終了したかどうか
