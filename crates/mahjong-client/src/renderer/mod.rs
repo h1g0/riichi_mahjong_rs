@@ -396,7 +396,7 @@ fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
                     dtw,
                     dth,
                     tint,
-                    std::f32::consts::FRAC_PI_2,
+                    -std::f32::consts::FRAC_PI_2,
                 );
                 col_offset += dth; // 横倒し牌の幅 = dth（隙間なし）
             } else {
@@ -522,7 +522,7 @@ fn draw_meld_tile_sideways(
         tw - 2.0,
         th - 2.0,
         WHITE,
-        std::f32::consts::FRAC_PI_2,
+        -std::f32::consts::FRAC_PI_2,
     );
 }
 
