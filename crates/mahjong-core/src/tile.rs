@@ -236,6 +236,25 @@ impl Tile {
     }
 }
 
+/// 数牌のスート内での数字（1〜9）を返す
+///
+/// 例: `Tile::M7`、`Tile::P7`、`Tile::S7` はいずれも `Some(7)` を返す。
+/// 字牌の場合は `None` を返す。
+pub fn suit_rank(tile: TileType) -> Option<u32> {
+    match tile {
+        Tile::M1 | Tile::P1 | Tile::S1 => Some(1),
+        Tile::M2 | Tile::P2 | Tile::S2 => Some(2),
+        Tile::M3 | Tile::P3 | Tile::S3 => Some(3),
+        Tile::M4 | Tile::P4 | Tile::S4 => Some(4),
+        Tile::M5 | Tile::P5 | Tile::S5 => Some(5),
+        Tile::M6 | Tile::P6 | Tile::S6 => Some(6),
+        Tile::M7 | Tile::P7 | Tile::S7 => Some(7),
+        Tile::M8 | Tile::P8 | Tile::S8 => Some(8),
+        Tile::M9 | Tile::P9 | Tile::S9 => Some(9),
+        _ => None,
+    }
+}
+
 /// ドラ表示牌から実際のドラを返す
 pub fn dora_indicator_to_dora(indicator: TileType) -> TileType {
     match indicator {
@@ -538,5 +557,52 @@ mod tests {
         assert_eq!(Wind::East.to_index(), 0);
         assert_eq!(Wind::from_index(2), Wind::West);
         assert_eq!(Wind::from_index(4), Wind::East);
+    }
+
+    #[test]
+    fn suit_rank_manzu() {
+        assert_eq!(suit_rank(Tile::M1), Some(1));
+        assert_eq!(suit_rank(Tile::M2), Some(2));
+        assert_eq!(suit_rank(Tile::M3), Some(3));
+        assert_eq!(suit_rank(Tile::M4), Some(4));
+        assert_eq!(suit_rank(Tile::M5), Some(5));
+        assert_eq!(suit_rank(Tile::M6), Some(6));
+        assert_eq!(suit_rank(Tile::M7), Some(7));
+        assert_eq!(suit_rank(Tile::M8), Some(8));
+        assert_eq!(suit_rank(Tile::M9), Some(9));
+    }
+
+    #[test]
+    fn suit_rank_pinzu() {
+        assert_eq!(suit_rank(Tile::P1), Some(1));
+        assert_eq!(suit_rank(Tile::P2), Some(2));
+        assert_eq!(suit_rank(Tile::P3), Some(3));
+        assert_eq!(suit_rank(Tile::P4), Some(4));
+        assert_eq!(suit_rank(Tile::P5), Some(5));
+        assert_eq!(suit_rank(Tile::P6), Some(6));
+        assert_eq!(suit_rank(Tile::P7), Some(7));
+        assert_eq!(suit_rank(Tile::P8), Some(8));
+        assert_eq!(suit_rank(Tile::P9), Some(9));
+    }
+
+    #[test]
+    fn suit_rank_souzu() {
+        assert_eq!(suit_rank(Tile::S1), Some(1));
+        assert_eq!(suit_rank(Tile::S2), Some(2));
+        assert_eq!(suit_rank(Tile::S3), Some(3));
+        assert_eq!(suit_rank(Tile::S4), Some(4));
+        assert_eq!(suit_rank(Tile::S5), Some(5));
+        assert_eq!(suit_rank(Tile::S6), Some(6));
+        assert_eq!(suit_rank(Tile::S7), Some(7));
+        assert_eq!(suit_rank(Tile::S8), Some(8));
+        assert_eq!(suit_rank(Tile::S9), Some(9));
+    }
+
+    #[test]
+    fn suit_rank_honor_returns_none() {
+        // 字牌（風牌・三元牌）はすべて None
+        for tile in Tile::Z1..=Tile::Z7 {
+            assert_eq!(suit_rank(tile), None, "tile {tile} should return None");
+        }
     }
 }

@@ -4,7 +4,7 @@ use crate::hand::Hand;
 use crate::hand_info::hand_analyzer::HandAnalyzer;
 use crate::hand_info::meld::{MeldFrom, MeldType};
 use crate::hand_info::status::Status;
-use crate::tile::{Dragon, Tile, TileType, Wind};
+use crate::tile::{suit_rank, Dragon, Tile, TileType, Wind};
 use crate::winning_hand::name::Form;
 
 /// 符計算の結果
@@ -134,11 +134,7 @@ fn is_pinfu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> bool {
     // 両面待ちであること
     if let Some(winning_tile) = hand.drawn() {
         for seq in &analyzer.sequential3 {
-            let tiles = seq.get();
-            if winning_tile.get() == tiles[0] && tiles[0] % 9 != 6 {
-                return true;
-            }
-            if winning_tile.get() == tiles[2] && tiles[2] % 9 != 2 {
+            if seq.is_two_sided_wait(winning_tile.get()) {
                 return true;
             }
         }
@@ -339,15 +335,15 @@ fn calculate_machi_fu(
                 });
                 return Ok(());
             }
-            // 辺張待ち: 12の3待ち or 89の7待ち
-            if wt == tiles[2] && tiles[2] % 9 == 2 {
+            // 辺張待ち: 123の3待ち or 789の7待ち
+            if wt == tiles[2] && suit_rank(tiles[2]) == Some(3) {
                 details.push(FuDetail {
                     name: "辺張待ち",
                     fu: 2,
                 });
                 return Ok(());
             }
-            if wt == tiles[0] && tiles[0] % 9 == 6 {
+            if wt == tiles[0] && suit_rank(tiles[0]) == Some(7) {
                 details.push(FuDetail {
                     name: "辺張待ち",
                     fu: 2,
