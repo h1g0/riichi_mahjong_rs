@@ -372,6 +372,21 @@ impl Sequential3 {
     pub fn get(&self) -> [TileType; 3] {
         self.tiles
     }
+
+    /// 指定した牌がこの順子の両面待ち牌かを返す
+    ///
+    /// 辺張（123の3待ち・789の7待ち）と嵌張は両面待ちではない
+    pub fn is_two_sided_wait(&self, winning_tile: TileType) -> bool {
+        // 低位端（辺張: 789の7待ちは suit_rank == 7）
+        if winning_tile == self.tiles[0] && suit_rank(self.tiles[0]) != Some(7) {
+            return true;
+        }
+        // 高位端（辺張: 123の3待ちは suit_rank == 3）
+        if winning_tile == self.tiles[2] && suit_rank(self.tiles[2]) != Some(3) {
+            return true;
+        }
+        false
+    }
 }
 impl Ord for Sequential3 {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -510,5 +525,58 @@ mod tests {
     #[should_panic]
     fn test_sequential3_errors_when_other_kind2() {
         Sequential3::new(Tile::P9, Tile::S1, Tile::S2).unwrap();
+    }
+
+    fn seq3(t1: u32, t2: u32, t3: u32) -> Sequential3 {
+        Sequential3::new(t1, t2, t3).unwrap()
+    }
+
+    // is_two_sided_wait: 両面待ち
+    #[test]
+    fn test_two_sided_wait_low_end() {
+        // 456の4待ち — 低位端、両面成立
+        assert!(seq3(Tile::M4, Tile::M5, Tile::M6).is_two_sided_wait(Tile::M4));
+    }
+    #[test]
+    fn test_two_sided_wait_high_end() {
+        // 456の6待ち — 高位端、両面成立
+        assert!(seq3(Tile::M4, Tile::M5, Tile::M6).is_two_sided_wait(Tile::M6));
+    }
+
+    // is_two_sided_wait: 辺張（両面でない）
+    #[test]
+    fn test_penchan_low_end_not_two_sided() {
+        // 123の3待ち — 高位端が % 9 == 2 なので辺張
+        assert!(!seq3(Tile::M1, Tile::M2, Tile::M3).is_two_sided_wait(Tile::M3));
+    }
+    #[test]
+    fn test_penchan_high_end_not_two_sided() {
+        // 789の7待ち — 低位端が % 9 == 6 なので辺張
+        assert!(!seq3(Tile::M7, Tile::M8, Tile::M9).is_two_sided_wait(Tile::M7));
+    }
+
+    // is_two_sided_wait: 嵌張（両面でない）
+    #[test]
+    fn test_kanchan_not_two_sided() {
+        // 468の5待ち — 中牌は低位端でも高位端でもない
+        assert!(!seq3(Tile::M4, Tile::M5, Tile::M6).is_two_sided_wait(Tile::M5));
+    }
+
+    // is_two_sided_wait: 上がり牌がこの順子に含まれない
+    #[test]
+    fn test_unrelated_tile_not_two_sided() {
+        assert!(!seq3(Tile::M4, Tile::M5, Tile::M6).is_two_sided_wait(Tile::M1));
+    }
+
+    // is_two_sided_wait: 筒子・索子でも正しく動作する
+    #[test]
+    fn test_two_sided_wait_pinzu() {
+        assert!(seq3(Tile::P5, Tile::P6, Tile::P7).is_two_sided_wait(Tile::P5));
+        assert!(seq3(Tile::P5, Tile::P6, Tile::P7).is_two_sided_wait(Tile::P7));
+    }
+    #[test]
+    fn test_two_sided_wait_souzu() {
+        assert!(seq3(Tile::S2, Tile::S3, Tile::S4).is_two_sided_wait(Tile::S2));
+        assert!(seq3(Tile::S2, Tile::S3, Tile::S4).is_two_sided_wait(Tile::S4));
     }
 }

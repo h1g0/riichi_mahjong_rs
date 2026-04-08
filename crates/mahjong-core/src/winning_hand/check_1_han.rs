@@ -224,28 +224,10 @@ pub fn check_no_points_hand(
     }
     // 平和は両面待ちのみ成立（辺張・嵌張・単騎は不可）
     if let Some(winning_tile) = raw_hand.drawn() {
-        let mut has_open_wait = false;
-        for seq in &hand_analyzer.sequential3 {
-            let tiles = seq.get();
-            if winning_tile.get() == tiles[1] {
-                // 嵌張待ち
-                continue;
-            }
-            if winning_tile.get() == tiles[0] {
-                // 789の7待ちは辺張
-                if tiles[0] % 9 != 6 {
-                    has_open_wait = true;
-                    break;
-                }
-            }
-            if winning_tile.get() == tiles[2] {
-                // 123の3待ちは辺張
-                if tiles[2] % 9 != 2 {
-                    has_open_wait = true;
-                    break;
-                }
-            }
-        }
+        let has_open_wait = hand_analyzer
+            .sequential3
+            .iter()
+            .any(|seq| seq.is_two_sided_wait(winning_tile.get()));
         if !has_open_wait {
             return Ok((name, false, 0));
         }
