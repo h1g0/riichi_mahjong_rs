@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::tile::{Tile, TileSummarize, TileType, Wind};
+use crate::tile::Wind;
 
 /// 手牌の（牌以外の）状態
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,40 +59,27 @@ impl Status {
     }
 }
 
-/// 与えられた牌と手牌の構成から両面待ちか判定する
-pub fn is_two_sided_wait(tile: TileType, counts: &TileSummarize) -> bool {
-    // 字牌は両面待ちになり得ない
-    if !(Tile::M1..=Tile::S9).contains(&tile) {
-        return false;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_status_new_defaults() {
+        let s = Status::new();
+        assert!(!s.has_claimed_ready);
+        assert!(!s.has_claimed_open);
+        assert!(!s.is_self_picked);
+        assert!(!s.is_one_shot);
+        assert!(matches!(s.player_wind, Wind::East));
+        assert!(matches!(s.prevailing_wind, Wind::East));
+        assert!(!s.is_last_tile_from_the_wall);
+        assert!(!s.is_last_discard);
+        assert!(!s.is_dead_wall_draw);
+        assert!(!s.is_robbing_a_quad);
+        assert!(!s.is_double_ready);
+        assert!(!s.is_dealer);
+        assert!(!s.is_first_turn);
+        assert!(!s.is_nagashi_mangan);
+        assert_eq!(s.kan_count, 0);
     }
-
-    let offset = if (Tile::M1..=Tile::M9).contains(&tile) {
-        tile - Tile::M1 + 1
-    } else if (Tile::P1..=Tile::P9).contains(&tile) {
-        tile - Tile::P1 + 1
-    } else {
-        tile - Tile::S1 + 1
-    };
-
-    // 左側が存在する形 : [tile-2][tile-1] + tile
-    // offset == 3 は辺張（12の3待ち）なので除外
-    if offset >= 3
-        && counts[(tile - 1) as usize] > 0
-        && counts[(tile - 2) as usize] > 0
-        && offset != 3
-    {
-        return true;
-    }
-
-    // 右側が存在する形 : tile + [tile+1][tile+2]
-    // offset == 7 は辺張（89の7待ち）なので除外
-    if offset <= 7
-        && counts[(tile + 1) as usize] > 0
-        && counts[(tile + 2) as usize] > 0
-        && offset != 7
-    {
-        return true;
-    }
-
-    false
 }
