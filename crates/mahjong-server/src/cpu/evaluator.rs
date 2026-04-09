@@ -138,7 +138,7 @@ fn estimate_hand_value(hand_tiles: &[Tile], state: &CpuGameState) -> f64 {
     }
 
     // タンヤオ可能性（中張牌のみ）
-    let all_tanyao = hand_tiles.iter().all(|t| is_chunchanpai(t.get()));
+    let all_tanyao = hand_tiles.iter().all(|t| !t.is_1_9_honor());
     if all_tanyao {
         value += 1.5;
     }
@@ -184,14 +184,6 @@ fn get_yakuhai_types(seat_wind: Wind, prevailing_wind: Wind) -> Vec<TileType> {
     types
 }
 
-/// 中張牌（2-8）かどうか
-fn is_chunchanpai(tile_type: TileType) -> bool {
-    if tile_type >= 27 {
-        return false; // 字牌
-    }
-    let num = tile_type % 9;
-    num >= 1 && num <= 7 // 2-8 (0-indexed: 1-7)
-}
 
 /// 打牌候補から最良の1枚を選ぶ
 pub fn select_best_discard(
@@ -271,33 +263,6 @@ mod tests {
 
     fn weak_config() -> CpuConfig {
         CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced)
-    }
-
-    // --- is_chunchanpai ---
-
-    #[test]
-    fn test_is_chunchanpai() {
-        assert!(!is_chunchanpai(Tile::M1));
-        assert!(is_chunchanpai(Tile::M2));
-        assert!(is_chunchanpai(Tile::M8));
-        assert!(!is_chunchanpai(Tile::M9));
-        assert!(!is_chunchanpai(Tile::Z1));
-    }
-
-    #[test]
-    fn test_is_chunchanpai_all_suits() {
-        // 各スートの1・9は端牌
-        for t in [Tile::M1, Tile::P1, Tile::S1, Tile::M9, Tile::P9, Tile::S9] {
-            assert!(!is_chunchanpai(t), "expected false for tile {t}");
-        }
-        // 各スートの2〜8は中張牌
-        for t in [Tile::M2, Tile::P5, Tile::S8] {
-            assert!(is_chunchanpai(t), "expected true for tile {t}");
-        }
-        // 字牌はすべて false
-        for t in Tile::Z1..=Tile::Z7 {
-            assert!(!is_chunchanpai(t), "expected false for honor tile {t}");
-        }
     }
 
     // --- count_dora_in_hand ---
