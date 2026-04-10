@@ -215,6 +215,8 @@ pub enum ServerEvent {
         riichi_sticks: usize,
         /// 全プレイヤーの手牌情報
         player_hands: Vec<PlayerHandInfo>,
+        /// 九種九牌を宣言したプレイヤーの風（九種九牌流局の場合のみ）
+        declarer: Option<Wind>,
     },
 }
 
