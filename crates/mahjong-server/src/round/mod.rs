@@ -581,7 +581,7 @@ impl Round {
 
             if ron_count >= 3 && self.settings.triple_ron_draw {
                 // 三家和流局（最優先）
-                self.declare_special_draw(DrawReason::TripleRon);
+                self.declare_special_draw(DrawReason::TripleRon, None);
                 return;
             }
 
@@ -1135,7 +1135,7 @@ impl Round {
     fn draw_after_kan(&mut self, player_idx: usize) {
         // 四槓散了チェック: 4回目のカン直後に判定（設定がありの場合のみ）
         if self.settings.four_kans_draw && self.check_four_kans_draw() {
-            self.declare_special_draw(DrawReason::FourKans);
+            self.declare_special_draw(DrawReason::FourKans, None);
             return;
         }
 
@@ -1581,6 +1581,7 @@ impl Round {
                     tenpai: tenpai_winds.clone(),
                     riichi_sticks: self.riichi_sticks,
                     player_hands: player_hands.clone(),
+                    declarer: None,
                 },
             ));
         }
@@ -1590,13 +1591,13 @@ impl Round {
     fn check_special_draws(&mut self) {
         // 四風連打チェック: 全員が1枚ずつ捨てて、全て同じ風牌
         if self.settings.four_winds_draw && self.check_four_winds_draw() {
-            self.declare_special_draw(DrawReason::FourWinds);
+            self.declare_special_draw(DrawReason::FourWinds, None);
             return;
         }
 
         // 四家立直チェック: 全員がリーチ宣言済み
         if self.settings.four_riichi_draw && self.check_four_riichi_draw() {
-            self.declare_special_draw(DrawReason::FourRiichi);
+            self.declare_special_draw(DrawReason::FourRiichi, None);
         }
     }
 
@@ -1670,7 +1671,8 @@ impl Round {
             return false;
         }
         if declare {
-            self.declare_special_draw(DrawReason::NineTerminals);
+            let declarer_wind = self.players[player_idx].seat_wind;
+            self.declare_special_draw(DrawReason::NineTerminals, Some(declarer_wind));
         } else {
             self.phase = TurnPhase::WaitForDiscard;
         }
@@ -1695,7 +1697,7 @@ impl Round {
     }
 
     /// 特殊流局を宣言する
-    fn declare_special_draw(&mut self, reason: DrawReason) {
+    fn declare_special_draw(&mut self, reason: DrawReason, declarer: Option<Wind>) {
         let scores = self.get_scores();
         let player_hands = self.build_player_hands();
         self.phase = TurnPhase::RoundOver;
@@ -1710,6 +1712,7 @@ impl Round {
                     tenpai: Vec::new(),
                     riichi_sticks: self.riichi_sticks,
                     player_hands: player_hands.clone(),
+                    declarer,
                 },
             ));
         }

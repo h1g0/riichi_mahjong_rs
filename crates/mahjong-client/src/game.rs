@@ -656,10 +656,11 @@ impl GameState {
                 tenpai,
                 riichi_sticks,
                 player_hands,
+                declarer,
             } => {
                 self.scores = scores;
                 self.riichi_sticks = riichi_sticks;
-                self.update_other_player_hands_on_draw(&player_hands, &tenpai);
+                self.update_other_player_hands_on_draw(&player_hands, &tenpai, declarer);
                 let reason_text = match reason {
                     DrawReason::Exhaustive => "荒牌流局",
                     DrawReason::FourWinds => "四風連打",
@@ -749,15 +750,14 @@ impl GameState {
         }
     }
 
-    /// 流局時に他プレイヤーの手牌を更新する（テンパイ者の手牌を公開）
-    fn update_other_player_hands_on_draw(&mut self, player_hands: &[PlayerHandInfo], tenpai: &[Wind]) {
+    /// 流局時に他プレイヤーの手牌を更新する（テンパイ者・九種九牌宣言者の手牌を公開）
+    fn update_other_player_hands_on_draw(&mut self, player_hands: &[PlayerHandInfo], tenpai: &[Wind], declarer: Option<Wind>) {
         for info in player_hands {
             let relative_idx = self.relative_player_index(info.wind);
             if relative_idx == 0 {
                 continue; // 自分はスキップ
             }
             let other = &mut self.other_players[relative_idx - 1];
-            // 副露を更新
             // 副露を更新（既存の from 情報を保持）
             if other.melds.is_empty() {
                 other.melds = info.melds.iter().map(|m| Meld {
@@ -767,8 +767,8 @@ impl GameState {
                     called_tile: None,
                 }).collect();
             }
-            // テンパイ者の手牌を公開
-            if tenpai.contains(&info.wind) {
+            // テンパイ者または九種九牌宣言者の手牌を公開
+            if tenpai.contains(&info.wind) || declarer == Some(info.wind) {
                 other.hand = info.hand.clone();
                 other.revealed = true;
             }
