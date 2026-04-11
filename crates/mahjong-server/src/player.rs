@@ -161,7 +161,12 @@ impl Player {
 
     /// ポン可能か判定する
     pub fn can_pon(&self, tile: Tile) -> bool {
-        let count = self.hand.tiles().iter().filter(|t| t.get() == tile.get()).count();
+        let count = self
+            .hand
+            .tiles()
+            .iter()
+            .filter(|t| t.get() == tile.get())
+            .count();
         count >= 2
     }
 
@@ -189,8 +194,7 @@ impl Player {
 
         for i in 0..tiles_of_type.len() {
             for j in (i + 1)..tiles_of_type.len() {
-                let includes_red =
-                    tiles_of_type[i].is_red_dora() || tiles_of_type[j].is_red_dora();
+                let includes_red = tiles_of_type[i].is_red_dora() || tiles_of_type[j].is_red_dora();
                 if includes_red && !has_with_red {
                     has_with_red = true;
                     options.push([tiles_of_type[i], tiles_of_type[j]]);
@@ -261,7 +265,12 @@ impl Player {
 
     /// 大明カン可能か判定する
     pub fn can_daiminkan(&self, tile: Tile) -> bool {
-        let count = self.hand.tiles().iter().filter(|t| t.get() == tile.get()).count();
+        let count = self
+            .hand
+            .tiles()
+            .iter()
+            .filter(|t| t.get() == tile.get())
+            .count();
         count >= 3
     }
 
@@ -301,6 +310,21 @@ impl Player {
                 (counts[tile_type as usize] >= 1).then_some(tile_type)
             })
             .collect()
+    }
+
+    /// 加カンで追加する実際の牌を返す（赤ドラも区別する）
+    pub fn kakan_added_tile(&self, tile_type: TileType) -> Option<Tile> {
+        if let Some(drawn) = self.hand.drawn() {
+            if drawn.get() == tile_type {
+                return Some(drawn);
+            }
+        }
+
+        self.hand
+            .tiles()
+            .iter()
+            .copied()
+            .find(|tile| tile.get() == tile_type)
     }
 
     /// フリテン状態か判定する
@@ -437,10 +461,7 @@ impl Player {
             "暗カンに必要な4枚が揃っていません"
         );
 
-        let mut kan_tiles: Vec<Tile> = indices
-            .iter()
-            .map(|&idx| self.hand.tiles()[idx])
-            .collect();
+        let mut kan_tiles: Vec<Tile> = indices.iter().map(|&idx| self.hand.tiles()[idx]).collect();
         if drawn_matches {
             kan_tiles.push(drawn.unwrap());
             self.hand.set_drawn(None);
@@ -451,9 +472,11 @@ impl Player {
             self.hand.set_drawn(None);
         }
 
+        let stored_tiles = Self::stored_kan_tiles(kan_tiles);
+
         self.hand.remove_tiles_by_indices(&mut indices);
         self.hand.add_meld(Meld {
-            tiles: vec![kan_tiles[0], kan_tiles[1], kan_tiles[2]],
+            tiles: stored_tiles,
             category: MeldType::Kan,
             from: MeldFrom::Myself,
             called_tile: None,
@@ -465,9 +488,15 @@ impl Player {
 
     /// 加カンを実行する
     pub fn do_kakan(&mut self, tile_type: TileType) {
-        let drawn_matches = self.hand.drawn().map(|t| t.get() == tile_type).unwrap_or(false);
-        if drawn_matches {
+        let drawn_matches = self
+            .hand
+            .drawn()
+            .map(|t| t.get() == tile_type)
+            .unwrap_or(false);
+        let added_tile = if drawn_matches {
+            let tile = self.hand.drawn().expect("加カンに必要なツモ牌がありません");
             self.hand.set_drawn(None);
+            tile
         } else {
             let idx = self
                 .hand
@@ -475,14 +504,15 @@ impl Player {
                 .iter()
                 .position(|t| t.get() == tile_type)
                 .expect("加カンに必要な牌が手牌にありません");
-            self.hand.tiles_mut().remove(idx);
+            let tile = self.hand.tiles_mut().remove(idx);
 
             if let Some(drawn_tile) = self.hand.drawn() {
                 self.hand.tiles_mut().push(drawn_tile);
                 self.hand.sort();
                 self.hand.set_drawn(None);
             }
-        }
+            tile
+        };
 
         let open = self
             .hand
@@ -491,9 +521,19 @@ impl Player {
             .find(|open| open.category == MeldType::Pon && open.tiles[0].get() == tile_type)
             .expect("加カン対象のポンがありません");
         open.category = MeldType::Kakan;
+        open.called_tile = Some(added_tile);
 
         self.is_first_turn = false;
         self.is_ippatsu = false;
+    }
+
+    fn stored_kan_tiles(mut kan_tiles: Vec<Tile>) -> Vec<Tile> {
+        let mut stored = Vec::with_capacity(3);
+        if let Some(red_pos) = kan_tiles.iter().position(|tile| tile.is_red_dora()) {
+            stored.push(kan_tiles.remove(red_pos));
+        }
+        stored.extend(kan_tiles.into_iter().take(3 - stored.len()));
+        stored
     }
 
     /// 手牌に含まれる槓子の数を返す
@@ -508,9 +548,9 @@ impl Player {
     /// 捨てたプレイヤーと自分の相対位置から MeldFrom を返す
     pub fn meld_from_relative(caller: usize, discarder: usize) -> MeldFrom {
         match (caller + 4 - discarder) % 4 {
-            1 => MeldFrom::Previous,   // 上家（カミチャ）
-            2 => MeldFrom::Opposite,   // 対面（トイメン）
-            3 => MeldFrom::Following,  // 下家（シモチャ）
+            1 => MeldFrom::Previous,  // 上家（カミチャ）
+            2 => MeldFrom::Opposite,  // 対面（トイメン）
+            3 => MeldFrom::Following, // 下家（シモチャ）
             _ => unreachable!(),
         }
     }
@@ -656,8 +696,12 @@ mod tests {
         // 4mでチー: [2m,3m] or [3m,5m]
         let options = player.chi_options(Tile::new(Tile::M4));
         assert_eq!(options.len(), 2);
-        assert!(options.iter().any(|o| o[0].get() == Tile::M2 && o[1].get() == Tile::M3));
-        assert!(options.iter().any(|o| o[0].get() == Tile::M3 && o[1].get() == Tile::M5));
+        assert!(options
+            .iter()
+            .any(|o| o[0].get() == Tile::M2 && o[1].get() == Tile::M3));
+        assert!(options
+            .iter()
+            .any(|o| o[0].get() == Tile::M3 && o[1].get() == Tile::M5));
 
         // 字牌はチー不可
         let options = player.chi_options(Tile::new(Tile::Z1));
@@ -690,7 +734,11 @@ mod tests {
         let mut player = Player::new(Wind::South, tiles, 25000);
         let called = Tile::new(Tile::M1);
 
-        player.do_pon(called, [Tile::new(Tile::M1), Tile::new(Tile::M1)], MeldFrom::Previous);
+        player.do_pon(
+            called,
+            [Tile::new(Tile::M1), Tile::new(Tile::M1)],
+            MeldFrom::Previous,
+        );
 
         // 手牌が11枚になること（13 - 2 = 11）
         assert_eq!(player.hand.tiles().len(), 11);
@@ -792,6 +840,37 @@ mod tests {
     }
 
     #[test]
+    fn test_do_ankan_preserves_red_drawn_tile_in_meld() {
+        let tiles = vec![
+            Tile::new(Tile::M5),
+            Tile::new(Tile::M5),
+            Tile::new(Tile::M5),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::Z1),
+        ];
+        let mut player = Player::new(Wind::South, tiles, 25000);
+        player.draw(Tile::new_red(Tile::M5));
+
+        player.do_ankan(Tile::M5);
+
+        assert!(
+            player.hand.melds()[0]
+                .tiles
+                .iter()
+                .any(|tile| tile.is_red_dora()),
+            "暗カンの赤ドラ牌が副露情報に残ること"
+        );
+    }
+
+    #[test]
     fn test_do_kakan() {
         let mut player = Player::new(Wind::South, vec![], 25000);
         player.hand = Hand::from("234p567s789m1z 111m 1m");
@@ -817,6 +896,21 @@ mod tests {
         assert!(player.hand.tiles().contains(&Tile::new(Tile::S9)));
         assert_eq!(player.hand.melds().len(), 1);
         assert_eq!(player.hand.melds()[0].category, MeldType::Kakan);
+    }
+
+    #[test]
+    fn test_do_kakan_tracks_added_red_tile() {
+        let mut player = Player::new(Wind::South, vec![], 25000);
+        player.hand = Hand::from("234p567s789m1z 555m");
+        player.draw(Tile::new_red(Tile::M5));
+
+        player.do_kakan(Tile::M5);
+
+        assert_eq!(player.hand.melds()[0].category, MeldType::Kakan);
+        assert_eq!(
+            player.hand.melds()[0].called_tile,
+            Some(Tile::new_red(Tile::M5))
+        );
     }
 
     #[test]

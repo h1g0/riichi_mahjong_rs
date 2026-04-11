@@ -9,6 +9,7 @@ mod diagnostics;
 mod test_helpers;
 
 use mahjong_core::hand_info::hand_analyzer;
+use mahjong_core::hand_info::meld::Meld;
 use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, TileType, Wind};
 
@@ -198,7 +199,7 @@ impl Round {
                     .melds()
                     .iter()
                     .map(|open| {
-                        let mut tiles: Vec<Tile> = open.tiles.clone();
+                        let tiles: Vec<Tile> = Self::expanded_meld_tiles(open);
                         let call_type = match open.category {
                             mahjong_core::hand_info::meld::MeldType::Chi => CallType::Chi,
                             mahjong_core::hand_info::meld::MeldType::Pon => CallType::Pon,
@@ -211,10 +212,6 @@ impl Round {
                             }
                             mahjong_core::hand_info::meld::MeldType::Kakan => CallType::Kakan,
                         };
-                        // カンの場合は4枚にする
-                        if open.category.is_kan() && tiles.len() == 3 {
-                            tiles.push(tiles[0]);
-                        }
                         MeldTiles { call_type, tiles }
                     })
                     .collect();
@@ -226,6 +223,26 @@ impl Round {
                 }
             })
             .collect()
+    }
+
+    fn expanded_meld_tiles(open: &Meld) -> Vec<Tile> {
+        let mut tiles = open.tiles.clone();
+        if open.category.is_kan() && tiles.len() == 3 {
+            tiles.push(Self::kan_fourth_tile(open));
+        }
+        tiles
+    }
+
+    fn kan_fourth_tile(open: &Meld) -> Tile {
+        if let Some(tile) = open.called_tile {
+            return tile;
+        }
+
+        open.tiles
+            .iter()
+            .copied()
+            .find(|tile| !tile.is_red_dora())
+            .unwrap_or(open.tiles[0])
     }
 
     pub fn get_scores(&self) -> [i32; 4] {
@@ -404,8 +421,13 @@ impl Round {
             // リーチ中は鳴き不可（ロンのみ可）
             // ロン判定: フリテンでなく、和了形であること
             if !player.is_furiten() {
-                let win_result =
-                    scoring::check_ron(player, discarded_tile, self.prevailing_wind, is_last_tile);
+                let win_result = scoring::check_ron_with_settings(
+                    player,
+                    discarded_tile,
+                    self.prevailing_wind,
+                    is_last_tile,
+                    &self.settings,
+                );
                 if win_result.is_win {
                     available_calls[i].push(AvailableCall::Ron);
                 }
@@ -668,12 +690,13 @@ impl Round {
         for (rank, &winner) in winners.iter().enumerate() {
             let honba_for_this = if rank == 0 { self.honba } else { 0 };
 
-            let win_result = scoring::check_ron_with_flags(
+            let win_result = scoring::check_ron_with_flags_and_settings(
                 &self.players[winner],
                 winning_tile,
                 self.prevailing_wind,
                 is_last_tile,
                 is_robbing_a_quad,
+                &self.settings,
             );
 
             if !win_result.is_win {
@@ -864,8 +887,7 @@ impl Round {
 
         let caller_wind = self.players[caller].seat_wind;
         let open = self.players[caller].hand.melds().last().unwrap();
-        let mut tiles = open.tiles.to_vec();
-        tiles.push(called_tile);
+        let tiles = Self::expanded_meld_tiles(open);
 
         for i in 0..4 {
             self.events.push((
@@ -965,10 +987,8 @@ impl Round {
                     && open.tiles[0].get() == tile_type
             })
             .unwrap();
-        let mut tiles = open.tiles.clone();
-        if tiles.len() == 3 {
-            tiles.push(Tile::new(tile_type));
-        }
+        let tiles = Self::expanded_meld_tiles(open);
+        let added_tile = Self::kan_fourth_tile(open);
 
         for i in 0..4 {
             self.events.push((
@@ -976,7 +996,7 @@ impl Round {
                 ServerEvent::PlayerCalled {
                     player: caller_wind,
                     call_type: CallType::Kakan,
-                    called_tile: Tile::new(tile_type),
+                    called_tile: added_tile,
                     tiles: tiles.clone(),
                 },
             ));
@@ -994,7 +1014,9 @@ impl Round {
     }
 
     fn check_kakan_ron_and_resolve(&mut self, caller: usize, tile_type: TileType) {
-        let called_tile = Tile::new(tile_type);
+        let called_tile = self.players[caller]
+            .kakan_added_tile(tile_type)
+            .unwrap_or_else(|| Tile::new(tile_type));
         let is_last_tile = self.wall.is_empty();
         let mut available_calls: [Vec<AvailableCall>; 4] =
             [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
@@ -1007,12 +1029,13 @@ impl Round {
 
             let player = &self.players[i];
             if !player.is_furiten() {
-                let win_result = scoring::check_ron_with_flags(
+                let win_result = scoring::check_ron_with_flags_and_settings(
                     player,
                     called_tile,
                     self.prevailing_wind,
                     is_last_tile,
                     true,
+                    &self.settings,
                 );
                 if win_result.is_win {
                     available_calls[i].push(AvailableCall::Ron);
@@ -1091,8 +1114,7 @@ impl Round {
 
         let caller_wind = self.players[player_idx].seat_wind;
         let open = self.players[player_idx].hand.melds().last().unwrap();
-        let mut tiles = open.tiles.to_vec();
-        tiles.push(open.tiles[0]);
+        let tiles = Self::expanded_meld_tiles(open);
         let called_tile = Tile::new(tile_type);
 
         for i in 0..4 {
@@ -1388,12 +1410,13 @@ impl Round {
         }
         let player = &self.players[self.current_player];
         let is_last_tile = self.wall.is_empty();
-        let result = scoring::check_win(
+        let result = scoring::check_win_with_settings(
             player,
             self.prevailing_wind,
             true,
             is_last_tile,
             self.last_draw_was_dead_wall,
+            &self.settings,
         );
         result.is_win
     }
@@ -1407,12 +1430,13 @@ impl Round {
 
         let player = &self.players[self.current_player];
         let is_last_tile = self.wall.is_empty();
-        let win_result = scoring::check_win(
+        let win_result = scoring::check_win_with_settings(
             player,
             self.prevailing_wind,
             true,
             is_last_tile,
             self.last_draw_was_dead_wall,
+            &self.settings,
         );
 
         if !win_result.is_win {
@@ -1927,15 +1951,76 @@ mod tests {
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
 
         let call_state = round.check_available_calls(Tile::new(Tile::Z5), 0);
-        assert!(
-            call_state.available_calls[1]
-                .iter()
-                .any(|call| matches!(call, AvailableCall::Pon { .. }))
-        );
+        assert!(call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Pon { .. })));
+        assert!(!call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Ron)));
+    }
+
+    fn open_tanyao_player(seat_wind: Wind, with_drawn: bool) -> Player {
+        use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+
+        let hand = mahjong_core::hand::Hand::from("56677m66s 5m");
+        let mut player = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+        player.hand.add_meld(Meld {
+            tiles: vec![
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+            ],
+            category: MeldType::Chi,
+            from: MeldFrom::Previous,
+            called_tile: None,
+        });
+        player.hand.add_meld(Meld {
+            tiles: vec![
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M4),
+            ],
+            category: MeldType::Chi,
+            from: MeldFrom::Previous,
+            called_tile: None,
+        });
+        if with_drawn {
+            player.draw(hand.drawn().unwrap());
+        }
+        player
+    }
+
+    #[test]
+    fn test_open_tanyao_disabled_blocks_tsumo() {
+        let mut settings = Settings::new();
+        settings.opened_all_simples = false;
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+
+        let seat_wind = round.players[0].seat_wind;
+        round.players[0] = open_tanyao_player(seat_wind, true);
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+
+        assert!(!round.can_tsumo());
+        assert!(!round.do_tsumo());
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+    }
+
+    #[test]
+    fn test_open_tanyao_disabled_does_not_offer_ron() {
+        let mut settings = Settings::new();
+        settings.opened_all_simples = false;
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+
+        let seat_wind = round.players[1].seat_wind;
+        round.players[1] = open_tanyao_player(seat_wind, false);
+
+        let call_state = round.check_available_calls(Tile::new(Tile::M5), 0);
         assert!(
             !call_state.available_calls[1]
                 .iter()
-                .any(|call| matches!(call, AvailableCall::Ron))
+                .any(|call| matches!(call, AvailableCall::Ron)),
+            "喰いタンなしではオープン断么九のみのロンを提示しない"
         );
     }
 
@@ -1982,11 +2067,9 @@ mod tests {
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
 
         let call_state = round.check_available_calls(Tile::new(Tile::M1), 0);
-        assert!(
-            call_state.available_calls[1]
-                .iter()
-                .any(|call| matches!(call, AvailableCall::Daiminkan))
-        );
+        assert!(call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Daiminkan)));
     }
 
     #[test]
@@ -2043,12 +2126,10 @@ mod tests {
         assert_eq!(round.phase, TurnPhase::WaitForDiscard);
         assert!(round.players[0].hand.drawn().is_some());
         assert_eq!(round.players[0].hand.tiles().len(), 10);
-        assert!(
-            round.players[0]
-                .hand
-                .tiles()
-                .contains(&mahjong_core::tile::Tile::new(Tile::S9))
-        );
+        assert!(round.players[0]
+            .hand
+            .tiles()
+            .contains(&mahjong_core::tile::Tile::new(Tile::S9)));
     }
 
     #[test]
@@ -2204,11 +2285,9 @@ mod tests {
         assert!(round.do_kan(Tile::M1));
         assert_eq!(round.phase, TurnPhase::WaitForCalls);
         let call_state = round.call_state.as_ref().unwrap();
-        assert!(
-            call_state.available_calls[1]
-                .iter()
-                .any(|call| matches!(call, AvailableCall::Ron))
-        );
+        assert!(call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Ron)));
 
         // ロンせずパス → フリテンが設定されること
         assert!(round.respond_to_call(1, CallResponse::Pass));
@@ -2264,11 +2343,9 @@ mod tests {
         assert!(round.do_kan(Tile::M1));
         assert_eq!(round.phase, TurnPhase::WaitForCalls);
         let call_state = round.call_state.as_ref().unwrap();
-        assert!(
-            call_state.available_calls[1]
-                .iter()
-                .any(|call| matches!(call, AvailableCall::Ron))
-        );
+        assert!(call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Ron)));
 
         assert!(round.respond_to_call(1, CallResponse::Ron));
         assert_eq!(round.phase, TurnPhase::RoundOver);

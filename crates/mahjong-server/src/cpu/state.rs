@@ -34,6 +34,8 @@ pub struct CpuGameState {
     pub scores: [i32; 4],
     /// 各プレイヤーの捨て牌（風のインデックス順: 東=0, 南=1, 西=2, 北=3）
     pub all_discards: [Vec<Tile>; 4],
+    /// 鳴かれて副露側にも現れる捨て牌
+    called_discards: Vec<Tile>,
     /// 各プレイヤーのリーチ状態
     pub player_riichi: [bool; 4],
     /// 各プレイヤーの副露情報
@@ -75,6 +77,7 @@ impl CpuGameState {
             is_furiten: false,
             scores: [0; 4],
             all_discards: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+            called_discards: Vec::new(),
             player_riichi: [false; 4],
             player_melds: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             dora_indicators: Vec::new(),
@@ -122,6 +125,7 @@ impl CpuGameState {
                 self.is_furiten = false;
                 self.scores = *scores;
                 self.all_discards = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+                self.called_discards.clear();
                 self.player_riichi = [false; 4];
                 self.player_melds = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
                 self.dora_indicators = dora_indicators.clone();
@@ -183,9 +187,7 @@ impl CpuGameState {
                 }
             }
 
-            ServerEvent::CallAvailable {
-                tile, calls, ..
-            } => {
+            ServerEvent::CallAvailable { tile, calls, .. } => {
                 self.pending_calls = calls.clone();
                 self.pending_call_tile = Some(*tile);
             }
@@ -209,12 +211,37 @@ impl CpuGameState {
                     CallType::Ankan => MeldFrom::Myself,
                     _ => MeldFrom::Unknown,
                 };
-                self.player_melds[idx].push(Meld {
-                    tiles: tiles.clone(),
-                    category,
-                    from,
-                    called_tile: Some(*called_tile),
-                });
+                if matches!(
+                    call_type,
+                    CallType::Chi | CallType::Pon | CallType::Daiminkan
+                ) {
+                    self.called_discards.push(*called_tile);
+                }
+
+                if *call_type == CallType::Kakan {
+                    if let Some(meld) = self.player_melds[idx].iter_mut().find(|meld| {
+                        meld.category == MeldType::Pon
+                            && meld.tiles.first().map(|tile| tile.get()) == Some(called_tile.get())
+                    }) {
+                        meld.category = MeldType::Kakan;
+                        meld.tiles = tiles.clone();
+                        meld.called_tile = Some(*called_tile);
+                    } else {
+                        self.player_melds[idx].push(Meld {
+                            tiles: tiles.clone(),
+                            category,
+                            from,
+                            called_tile: Some(*called_tile),
+                        });
+                    }
+                } else {
+                    self.player_melds[idx].push(Meld {
+                        tiles: tiles.clone(),
+                        category,
+                        from,
+                        called_tile: Some(*called_tile),
+                    });
+                }
 
                 self.pending_calls.clear();
                 self.pending_call_tile = None;
@@ -303,6 +330,11 @@ impl CpuGameState {
             counts[tile.get() as usize] += 1;
         }
 
+        for tile in &self.called_discards {
+            let count = &mut counts[tile.get() as usize];
+            *count = count.saturating_sub(1);
+        }
+
         counts
     }
 }
@@ -311,6 +343,7 @@ impl CpuGameState {
 mod tests {
     use super::*;
     use crate::protocol::ServerEvent;
+    use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
     use mahjong_core::tile::{Tile, Wind};
 
     #[test]
@@ -397,6 +430,53 @@ mod tests {
 
         let counts = state.visible_tile_counts();
         assert_eq!(counts[Tile::M1 as usize], 3);
+    }
+
+    #[test]
+    fn test_called_tile_visible_count_not_double_counted() {
+        let mut state = CpuGameState::new();
+        state.update(&ServerEvent::TileDiscarded {
+            player: Wind::East,
+            tile: Tile::new(Tile::M1),
+            is_tsumogiri: false,
+        });
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::South,
+            call_type: CallType::Pon,
+            called_tile: Tile::new(Tile::M1),
+            tiles: vec![Tile::new(Tile::M1); 3],
+        });
+
+        let counts = state.visible_tile_counts();
+        assert_eq!(counts[Tile::M1 as usize], 3);
+        assert_eq!(
+            state.all_discards[0].len(),
+            1,
+            "守備評価用の捨て牌は保持する"
+        );
+    }
+
+    #[test]
+    fn test_kakan_updates_existing_meld() {
+        let mut state = CpuGameState::new();
+        state.player_melds[0].push(Meld {
+            tiles: vec![Tile::new(Tile::M1); 3],
+            category: MeldType::Pon,
+            from: MeldFrom::Unknown,
+            called_tile: Some(Tile::new(Tile::M1)),
+        });
+
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::East,
+            call_type: CallType::Kakan,
+            called_tile: Tile::new(Tile::M1),
+            tiles: vec![Tile::new(Tile::M1); 4],
+        });
+
+        assert_eq!(state.player_melds[0].len(), 1);
+        assert_eq!(state.player_melds[0][0].category, MeldType::Kakan);
+        assert_eq!(state.player_melds[0][0].tiles.len(), 4);
+        assert_eq!(state.visible_tile_counts()[Tile::M1 as usize], 4);
     }
 
     #[test]
