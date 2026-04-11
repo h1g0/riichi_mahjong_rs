@@ -125,7 +125,6 @@ pub enum Kind {
 /// assert_eq!(get(Kind::ThreeColorStraight, true, Lang::En), "Three Color Straight (Open)");
 /// assert_eq!(get(Kind::ThreeColorStraight, false, Lang::En), "Three Color Straight");
 /// ```
-
 pub fn get(hand_kind: Kind, has_openned: bool, lang: Lang) -> &'static str {
     match lang {
         Lang::En => get_en(hand_kind, has_openned),

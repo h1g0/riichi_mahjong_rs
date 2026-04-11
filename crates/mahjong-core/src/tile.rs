@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// 牌の種類を示す型
 pub type TileType = u32;
@@ -97,10 +98,10 @@ impl Tile {
     ];
 
     pub fn new(tile_type: TileType) -> Tile {
-        return Tile {
+        Tile {
             index: tile_type,
             red_dora: false,
-        };
+        }
     }
 
     /// 赤ドラの牌を作成する
@@ -112,7 +113,7 @@ impl Tile {
     }
 
     pub fn get(&self) -> TileType {
-        return self.index;
+        self.index
     }
 
     /// 赤ドラか否かを返す
@@ -127,44 +128,44 @@ impl Tile {
 
     /// 萬子か否かを返す
     pub fn is_character(&self) -> bool {
-        return matches!(self.index, Tile::M1..=Tile::M9);
+        matches!(self.index, Tile::M1..=Tile::M9)
     }
     /// 筒子か否かを返す
     pub fn is_circle(&self) -> bool {
-        return matches!(self.index, Tile::P1..=Tile::P9);
+        matches!(self.index, Tile::P1..=Tile::P9)
     }
     /// 索子か否かを返す
     pub fn is_bamboo(&self) -> bool {
-        return matches!(self.index, Tile::S1..=Tile::S9);
+        matches!(self.index, Tile::S1..=Tile::S9)
     }
     /// 風牌か否かを返す
     pub fn is_wind(&self) -> bool {
-        return matches!(self.index, Tile::Z1..=Tile::Z4);
+        matches!(self.index, Tile::Z1..=Tile::Z4)
     }
     /// 三元牌か否かを返す
     pub fn is_dragon(&self) -> bool {
-        return matches!(self.index, Tile::Z5..=Tile::Z7);
+        matches!(self.index, Tile::Z5..=Tile::Z7)
     }
     /// 字牌か否かを返す
     pub fn is_honor(&self) -> bool {
-        return self.is_wind() || self.is_dragon();
+        self.is_wind() || self.is_dragon()
     }
 
     /// 老頭牌か否かを返す
     pub fn is_1_or_9(&self) -> bool {
-        return matches!(
+        matches!(
             self.index,
             Tile::M1 | Tile::M9 | Tile::P1 | Tile::P9 | Tile::S1 | Tile::S9
-        );
+        )
     }
     /// 么九牌（老頭牌＋字牌）か否かを返す
     pub fn is_1_9_honor(&self) -> bool {
-        return self.is_1_or_9() || self.is_honor();
+        self.is_1_or_9() || self.is_honor()
     }
 
     /// 対子（同じ2枚）か否かを返す
     pub fn is_same_to(&self, tile: Tile) -> bool {
-        return self.get() == tile.get();
+        self.get() == tile.get()
     }
     /// 搭子（連続した2枚）か否かを返す
     pub fn is_sequential_to(&self, tile: Tile) -> bool {
@@ -182,14 +183,11 @@ impl Tile {
         } else if self.get() == tile.get() - 1 || self.get() == tile.get() + 1 {
             return true;
         }
-        return false;
+        false
     }
 
     pub fn to_char(&self) -> char {
-        return Tile::CHARS[self.index as usize];
-    }
-    pub fn to_string(&self) -> String {
-        return Tile::ASCII[self.index as usize].to_string();
+        Tile::CHARS[self.index as usize]
     }
 
     pub fn from(tile_name: &str) -> Option<Tile> {
@@ -232,7 +230,13 @@ impl Tile {
                 return None;
             }
         };
-        return Some(Tile::new(t));
+        Some(Tile::new(t))
+    }
+}
+
+impl fmt::Display for Tile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(Tile::ASCII[self.index as usize])
     }
 }
 
@@ -370,18 +374,11 @@ mod tests {
     fn suit_char_test() {
         for i in Tile::M1..=Tile::M9 {
             let t = Tile::new(i);
-            assert_eq!(t.is_character(), true);
-            assert_eq!(t.is_bamboo(), false);
-            assert_eq!(t.is_circle(), false);
-            assert_eq!(t.is_honor(), false);
-            assert_eq!(
-                t.is_1_or_9(),
-                if i == Tile::M1 || i == Tile::M9 {
-                    true
-                } else {
-                    false
-                }
-            );
+            assert!(t.is_character());
+            assert!(!t.is_bamboo());
+            assert!(!t.is_circle());
+            assert!(!t.is_honor());
+            assert_eq!(t.is_1_or_9(), i == Tile::M1 || i == Tile::M9);
         }
     }
 
@@ -390,18 +387,11 @@ mod tests {
     fn suit_circle_test() {
         for i in Tile::P1..=Tile::P9 {
             let t = Tile::new(i);
-            assert_eq!(t.is_character(), false);
-            assert_eq!(t.is_bamboo(), false);
-            assert_eq!(t.is_circle(), true);
-            assert_eq!(t.is_honor(), false);
-            assert_eq!(
-                t.is_1_or_9(),
-                if i == Tile::P1 || i == Tile::P9 {
-                    true
-                } else {
-                    false
-                }
-            );
+            assert!(!t.is_character());
+            assert!(!t.is_bamboo());
+            assert!(t.is_circle());
+            assert!(!t.is_honor());
+            assert_eq!(t.is_1_or_9(), i == Tile::P1 || i == Tile::P9);
         }
     }
     /// 索子の属性テスト
@@ -409,18 +399,11 @@ mod tests {
     fn suit_bamboo_test() {
         for i in Tile::S1..=Tile::S9 {
             let t = Tile::new(i);
-            assert_eq!(t.is_character(), false);
-            assert_eq!(t.is_bamboo(), true);
-            assert_eq!(t.is_circle(), false);
-            assert_eq!(t.is_honor(), false);
-            assert_eq!(
-                t.is_1_or_9(),
-                if i == Tile::S1 || i == Tile::S9 {
-                    true
-                } else {
-                    false
-                }
-            );
+            assert!(!t.is_character());
+            assert!(t.is_bamboo());
+            assert!(!t.is_circle());
+            assert!(!t.is_honor());
+            assert_eq!(t.is_1_or_9(), i == Tile::S1 || i == Tile::S9);
         }
     }
     /// 風牌の属性テスト
@@ -428,12 +411,12 @@ mod tests {
     fn suit_wind_test() {
         for i in Tile::Z1..=Tile::Z4 {
             let t = Tile::new(i);
-            assert_eq!(t.is_character(), false);
-            assert_eq!(t.is_bamboo(), false);
-            assert_eq!(t.is_circle(), false);
-            assert_eq!(t.is_wind(), true);
-            assert_eq!(t.is_dragon(), false);
-            assert_eq!(t.is_honor(), true);
+            assert!(!t.is_character());
+            assert!(!t.is_bamboo());
+            assert!(!t.is_circle());
+            assert!(t.is_wind());
+            assert!(!t.is_dragon());
+            assert!(t.is_honor());
         }
     }
     /// 三元牌の属性テスト
@@ -441,12 +424,12 @@ mod tests {
     fn suit_dragon_test() {
         for i in Tile::Z5..=Tile::Z7 {
             let t = Tile::new(i);
-            assert_eq!(t.is_character(), false);
-            assert_eq!(t.is_bamboo(), false);
-            assert_eq!(t.is_circle(), false);
-            assert_eq!(t.is_wind(), false);
-            assert_eq!(t.is_dragon(), true);
-            assert_eq!(t.is_honor(), true);
+            assert!(!t.is_character());
+            assert!(!t.is_bamboo());
+            assert!(!t.is_circle());
+            assert!(!t.is_wind());
+            assert!(t.is_dragon());
+            assert!(t.is_honor());
         }
     }
     /// 字牌の属性テスト
@@ -454,10 +437,10 @@ mod tests {
     fn suit_honor_test() {
         for i in Tile::Z1..=Tile::Z7 {
             let t = Tile::new(i);
-            assert_eq!(t.is_character(), false);
-            assert_eq!(t.is_bamboo(), false);
-            assert_eq!(t.is_circle(), false);
-            assert_eq!(t.is_honor(), true);
+            assert!(!t.is_character());
+            assert!(!t.is_bamboo());
+            assert!(!t.is_circle());
+            assert!(t.is_honor());
         }
     }
 
@@ -465,61 +448,34 @@ mod tests {
     #[test]
     fn sameness_test() {
         // 1m→1mは対子
-        assert_eq!(Tile::new(Tile::M1).is_same_to(Tile::new(Tile::M1)), true);
+        assert!(Tile::new(Tile::M1).is_same_to(Tile::new(Tile::M1)));
         // 1m→1pは対子ではない
-        assert_eq!(Tile::new(Tile::M1).is_same_to(Tile::new(Tile::P1)), false);
+        assert!(!Tile::new(Tile::M1).is_same_to(Tile::new(Tile::P1)));
         // 1z→1zは対子
-        assert_eq!(Tile::new(Tile::Z1).is_same_to(Tile::new(Tile::Z1)), true);
+        assert!(Tile::new(Tile::Z1).is_same_to(Tile::new(Tile::Z1)));
     }
 
     /// 搭子テスト
     #[test]
     fn sequential_test() {
         // 1m→2mは搭子
-        assert_eq!(
-            Tile::new(Tile::M1).is_sequential_to(Tile::new(Tile::M2)),
-            true
-        );
+        assert!(Tile::new(Tile::M1).is_sequential_to(Tile::new(Tile::M2)));
         // 3p→3pは搭子ではない
-        assert_eq!(
-            Tile::new(Tile::P3).is_sequential_to(Tile::new(Tile::P3)),
-            false
-        );
+        assert!(!Tile::new(Tile::P3).is_sequential_to(Tile::new(Tile::P3)));
         // 7s→8sは搭子
-        assert_eq!(
-            Tile::new(Tile::S7).is_sequential_to(Tile::new(Tile::S8)),
-            true
-        );
+        assert!(Tile::new(Tile::S7).is_sequential_to(Tile::new(Tile::S8)));
         // 1m→1pは搭子ではない
-        assert_eq!(
-            Tile::new(Tile::M1).is_sequential_to(Tile::new(Tile::P1)),
-            false
-        );
+        assert!(!Tile::new(Tile::M1).is_sequential_to(Tile::new(Tile::P1)));
         // 9m→8mは搭子
-        assert_eq!(
-            Tile::new(Tile::M9).is_sequential_to(Tile::new(Tile::M8)),
-            true
-        );
+        assert!(Tile::new(Tile::M9).is_sequential_to(Tile::new(Tile::M8)));
         // 9m→1pは搭子ではない
-        assert_eq!(
-            Tile::new(Tile::M9).is_sequential_to(Tile::new(Tile::P1)),
-            false
-        );
+        assert!(!Tile::new(Tile::M9).is_sequential_to(Tile::new(Tile::P1)));
         // 1s→9pは搭子ではない
-        assert_eq!(
-            Tile::new(Tile::S1).is_sequential_to(Tile::new(Tile::P9)),
-            false
-        );
+        assert!(!Tile::new(Tile::S1).is_sequential_to(Tile::new(Tile::P9)));
         // 9s→1zは搭子ではない
-        assert_eq!(
-            Tile::new(Tile::S9).is_sequential_to(Tile::new(Tile::Z1)),
-            false
-        );
+        assert!(!Tile::new(Tile::S9).is_sequential_to(Tile::new(Tile::Z1)));
         // 1z→2zは搭子ではない
-        assert_eq!(
-            Tile::new(Tile::Z1).is_sequential_to(Tile::new(Tile::Z2)),
-            false
-        );
+        assert!(!Tile::new(Tile::Z1).is_sequential_to(Tile::new(Tile::Z2)));
     }
 
     /// ドラ表示牌テスト
@@ -540,11 +496,11 @@ mod tests {
     #[test]
     fn red_dora_test() {
         let red5m = Tile::new_red(Tile::M5);
-        assert_eq!(red5m.is_red_dora(), true);
+        assert!(red5m.is_red_dora());
         assert_eq!(red5m.get(), Tile::M5);
 
         let normal5m = Tile::new(Tile::M5);
-        assert_eq!(normal5m.is_red_dora(), false);
+        assert!(!normal5m.is_red_dora());
     }
 
     /// Windテスト

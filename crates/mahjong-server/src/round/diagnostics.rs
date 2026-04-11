@@ -70,7 +70,7 @@ impl Round {
                 eprintln!(
                     "[draw-diag] source={} hand={} drawn={} shanten={} can_tsumo={} is_win={} can_riichi={} riichi_discards=[{}] yaku=[{}] remaining={} score={}",
                     source,
-                    player.hand.to_string(),
+                    player.hand,
                     drawn,
                     analyzer.shanten,
                     can_tsumo,
@@ -85,11 +85,7 @@ impl Round {
             Err(err) => {
                 eprintln!(
                     "[draw-diag] source={} hand={} analyzer_error={} can_tsumo={} can_riichi={}",
-                    source,
-                    player.hand.to_string(),
-                    err,
-                    can_tsumo,
-                    can_riichi,
+                    source, player.hand, err, can_tsumo, can_riichi,
                 );
             }
         }

@@ -16,12 +16,12 @@ impl Round {
                 TurnPhase::WaitForCalls => {
                     // 全員パス
                     for i in 0..4 {
-                        if let Some(ref cs) = self.call_state {
-                            if !cs.responded[i] {
-                                self.respond_to_call(i, CallResponse::Pass);
-                                if self.call_state.is_none() {
-                                    break;
-                                }
+                        if let Some(ref cs) = self.call_state
+                            && !cs.responded[i]
+                        {
+                            self.respond_to_call(i, CallResponse::Pass);
+                            if self.call_state.is_none() {
+                                break;
                             }
                         }
                     }
@@ -47,12 +47,12 @@ impl Round {
             if i == human_player {
                 continue;
             }
-            if let Some(ref call_state) = self.call_state {
-                if !call_state.responded[i] {
-                    self.respond_to_call(i, CallResponse::Pass);
-                    if self.call_state.is_none() {
-                        return;
-                    }
+            if let Some(ref call_state) = self.call_state
+                && !call_state.responded[i]
+            {
+                self.respond_to_call(i, CallResponse::Pass);
+                if self.call_state.is_none() {
+                    return;
                 }
             }
         }

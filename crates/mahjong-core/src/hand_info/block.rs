@@ -1,5 +1,5 @@
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::anyhow;
 use std::cmp::Ordering;
 
 use crate::tile::*;
@@ -189,10 +189,13 @@ impl Same3 {
         is_proper_tile(tile2)?;
         is_proper_tile(tile3)?;
         if tile1 != tile2 || tile1 != tile3 {
-            return Err(anyhow!("Not same tiles in `Same3`: {}, {}, {}!", tile1, tile2, tile3));
+            return Err(anyhow!(
+                "Not same tiles in `Same3`: {}, {}, {}!",
+                tile1,
+                tile2,
+                tile3
+            ));
         }
-
-
 
         Ok(Same3 {
             tiles: [tile1, tile2, tile3],
@@ -269,15 +272,27 @@ impl Sequential2 {
         is_proper_tile(tile2)?;
         // まず連続でなければパニック
         if !(tile2 == tile1 + 1 || tile2 == tile1 + 2) {
-            return Err(anyhow!("Not sequential tiles in `Sequential2`: {}, {} !",tile1, tile2));
+            return Err(anyhow!(
+                "Not sequential tiles in `Sequential2`: {}, {} !",
+                tile1,
+                tile2
+            ));
         }
 
         // 字牌は順子にならない
         if has_honor(tile1)? || has_honor(tile2)? {
-            return Err(anyhow!("Cannot assign Honor tiles to `Sequential2`: {}, {} !",tile1, tile2));
+            return Err(anyhow!(
+                "Cannot assign Honor tiles to `Sequential2`: {}, {} !",
+                tile1,
+                tile2
+            ));
         }
         if !is_same_suit(tile1, tile2)? {
-            return Err(anyhow!("Cannot assign different suits to `Sequential2`: {}, {} !",tile1, tile2));
+            return Err(anyhow!(
+                "Cannot assign different suits to `Sequential2`: {}, {} !",
+                tile1,
+                tile2
+            ));
         }
         Ok(Sequential2 {
             tiles: [tile1, tile2],
@@ -346,23 +361,37 @@ pub struct Sequential3 {
 }
 impl Sequential3 {
     pub fn new(tile1: TileType, tile2: TileType, tile3: TileType) -> Result<Sequential3> {
-
         is_proper_tile(tile1)?;
         is_proper_tile(tile2)?;
         is_proper_tile(tile3)?;
 
         // 連続でなければエラー
         if tile2 != tile1 + 1 || tile3 != tile2 + 1 {
-            return Err(anyhow!("Not sequential tiles in `Sequential3`:{}, {}, {} !",tile1, tile2, tile3));
+            return Err(anyhow!(
+                "Not sequential tiles in `Sequential3`:{}, {}, {} !",
+                tile1,
+                tile2,
+                tile3
+            ));
         }
 
         // 字牌は順子にならない
         if has_honor(tile1)? || has_honor(tile2)? || has_honor(tile3)? {
-            return Err(anyhow!("Cannot assign Honor tiles to `Sequential3`: {}, {}, {} !",tile1, tile2, tile3));
+            return Err(anyhow!(
+                "Cannot assign Honor tiles to `Sequential3`: {}, {}, {} !",
+                tile1,
+                tile2,
+                tile3
+            ));
         }
 
         if !is_same_suit(tile1, tile2)? || !is_same_suit(tile2, tile3)? {
-            return Err(anyhow!("Cannot assign different suits to `Sequential3`: {}, {}, {} !",tile1, tile2, tile3));
+            return Err(anyhow!(
+                "Cannot assign different suits to `Sequential3`: {}, {}, {} !",
+                tile1,
+                tile2,
+                tile3
+            ));
         }
         Ok(Sequential3 {
             tiles: [tile1, tile2, tile3],
@@ -502,7 +531,9 @@ mod tests {
     #[test]
     fn test_sequential3_normal() {
         assert_eq!(
-            Sequential3::new(Tile::M1, Tile::M2, Tile::M3).unwrap().get(),
+            Sequential3::new(Tile::M1, Tile::M2, Tile::M3)
+                .unwrap()
+                .get(),
             [Tile::M1, Tile::M2, Tile::M3]
         );
     }

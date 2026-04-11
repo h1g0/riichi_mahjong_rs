@@ -54,11 +54,11 @@ fn evaluate_safety_against_player(
     if tt >= 27 {
         let visible = state.visible_tile_counts()[tt as usize];
         return match visible {
-            4 => 1.0,   // 全部見えている（ありえないが念のため）
-            3 => 0.95,  // 残り1枚 → ほぼ安全
-            2 => 0.6,   // 残り2枚
-            1 => 0.4,   // 残り3枚
-            _ => 0.3,   // 1枚も見えていない
+            4 => 1.0,  // 全部見えている（ありえないが念のため）
+            3 => 0.95, // 残り1枚 → ほぼ安全
+            2 => 0.6,  // 残り2枚
+            1 => 0.4,  // 残り3枚
+            _ => 0.3,  // 1枚も見えていない
         };
     }
 
@@ -76,10 +76,10 @@ fn evaluate_safety_against_player(
     // 5. 端牌 vs 中張牌
     let num = tt % 9;
     match num {
-        0 | 8 => 0.4,       // 1, 9
-        1 | 7 => 0.3,       // 2, 8
-        2 | 6 => 0.2,       // 3, 7
-        _ => 0.15,           // 4, 5, 6
+        0 | 8 => 0.4, // 1, 9
+        1 | 7 => 0.3, // 2, 8
+        2 | 6 => 0.2, // 3, 7
+        _ => 0.15,    // 4, 5, 6
     }
 }
 
@@ -104,7 +104,7 @@ fn is_suji(tile_type: TileType, opponent_discards: &[Tile]) -> bool {
         2 => Some(suit_start + 5), // 3 → 6
         3 => {
             // 4 → 1 or 7
-            if opponent_discards.iter().any(|d| d.get() == suit_start + 0)
+            if opponent_discards.iter().any(|d| d.get() == suit_start)
                 || opponent_discards.iter().any(|d| d.get() == suit_start + 6)
             {
                 return true;
@@ -172,7 +172,7 @@ fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
         1 => {
             // 2: 123, 234。
             total_patterns = 2;
-            if visible_counts[(suit_start + 0) as usize] >= 4
+            if visible_counts[suit_start as usize] >= 4
                 || visible_counts[(suit_start + 2) as usize] >= 4
             {
                 blocked_patterns += 1;
@@ -217,8 +217,7 @@ fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
                 blocked_patterns += 1;
             }
             // 中央の順子
-            if num >= 1
-                && num <= 7
+            if (1..=7).contains(&num)
                 && (visible_counts[(suit_start + num - 1) as usize] >= 4
                     || visible_counts[(suit_start + num + 1) as usize] >= 4)
             {

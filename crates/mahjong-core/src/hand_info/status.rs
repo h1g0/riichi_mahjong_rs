@@ -37,6 +37,12 @@ pub struct Status {
     pub kan_count: u32,
 }
 
+impl Default for Status {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Status {
     pub fn new() -> Status {
         Status {

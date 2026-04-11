@@ -278,12 +278,12 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
     let my_wind_idx = state.seat_wind.map(|w| w.to_index()).unwrap_or(0);
     let label_dist: f32 = 64.0; // 中心からラベルまでの距離
 
-    for player_idx in 0..4 {
+    for (player_idx, &rotation) in PLAYER_ROTATIONS.iter().enumerate() {
         let display_wind = mahjong_core::tile::Wind::from_index(my_wind_idx + player_idx);
         let score = state.scores[player_idx];
         let label = format!("{} {}点", wind_to_str(display_wind), score);
 
-        set_camera(&make_board_camera(PLAYER_ROTATIONS[player_idx]));
+        set_camera(&make_board_camera(rotation));
 
         let dims = measure_text(&label, font, SMALL_FONT, 1.0);
         draw_jp_text(
@@ -349,10 +349,10 @@ fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
     let start_x = BOARD_CENTER_X - half_width;
     let start_y = BOARD_CENTER_Y + discard_offset;
 
-    for player_idx in 0..4 {
+    for (player_idx, &rotation) in PLAYER_ROTATIONS.iter().enumerate() {
         let discards = &state.discards[player_idx];
 
-        set_camera(&make_board_camera(PLAYER_ROTATIONS[player_idx]));
+        set_camera(&make_board_camera(rotation));
 
         // リーチ棒描画（リーチ宣言済みの場合のみ）
         let has_riichi = discards.iter().any(|d| d.is_riichi);
@@ -968,7 +968,14 @@ fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextu
     } else {
         "クリックで次の局へ"
     };
-    draw_jp_text(font, next_label, 480.0, 530.0, FONT_SIZE, Color::new(0.8, 0.8, 0.8, 0.7));
+    draw_jp_text(
+        font,
+        next_label,
+        480.0,
+        530.0,
+        FONT_SIZE,
+        Color::new(0.8, 0.8, 0.8, 0.7),
+    );
 }
 
 fn draw_game_over(state: &GameState, font: Option<&Font>) {
@@ -1163,9 +1170,7 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
     let col_x = [250.0, 520.0, 790.0];
     let base_y = 180.0;
 
-    for cpu_idx in 0..3 {
-        let cx = col_x[cpu_idx];
-
+    for (cpu_idx, &cx) in col_x.iter().enumerate() {
         // 強さボタン
         for level_idx in 0..SetupState::level_count() {
             let btn = SetupButton {

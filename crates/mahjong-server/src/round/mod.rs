@@ -138,7 +138,7 @@ impl Round {
 
         // 座席の風を割り当て: dealer=東, 反時計回りに南西北
         let winds = [
-            Wind::from_index((0 + 4 - dealer) % 4),
+            Wind::from_index((4 - dealer) % 4),
             Wind::from_index((1 + 4 - dealer) % 4),
             Wind::from_index((2 + 4 - dealer) % 4),
             Wind::from_index((3 + 4 - dealer) % 4),
@@ -155,12 +155,12 @@ impl Round {
 
         // 各プレイヤーにゲーム開始イベントを送信
         let mut events = Vec::new();
-        for i in 0..4 {
+        for (i, player) in players.iter().enumerate() {
             events.push((
                 i,
                 ServerEvent::GameStarted {
-                    seat_wind: players[i].seat_wind,
-                    hand: players[i].hand.tiles().to_vec(),
+                    seat_wind: player.seat_wind,
+                    hand: player.hand.tiles().to_vec(),
                     scores: initial_scores,
                     prevailing_wind,
                     dora_indicators: dora_indicators.clone(),
@@ -764,10 +764,8 @@ impl Round {
             self.riichi_sticks = 0;
         }
 
-        if !is_robbing_a_quad {
-            if let Some(last_discard) = self.players[loser].discards.last_mut() {
-                last_discard.is_called = true;
-            }
+        if !is_robbing_a_quad && let Some(last_discard) = self.players[loser].discards.last_mut() {
+            last_discard.is_called = true;
         }
 
         let scores = self.get_scores();
@@ -1048,14 +1046,14 @@ impl Round {
         if has_any_calls {
             self.phase = TurnPhase::WaitForCalls;
             let caller_wind = self.players[caller].seat_wind;
-            for i in 0..4 {
-                if !available_calls[i].is_empty() {
+            for (i, calls) in available_calls.iter().enumerate() {
+                if !calls.is_empty() {
                     self.events.push((
                         i,
                         ServerEvent::CallAvailable {
                             tile: called_tile,
                             discarder: caller_wind,
-                            calls: available_calls[i].clone(),
+                            calls: calls.clone(),
                         },
                     ));
                 }
@@ -1477,8 +1475,8 @@ impl Round {
         let riichi_sticks = self.riichi_sticks;
 
         // 点数を適用
-        for i in 0..4 {
-            self.players[i].score += deltas[i];
+        for (player, &delta) in self.players.iter_mut().zip(deltas.iter()) {
+            player.score += delta;
         }
         if riichi_sticks > 0 {
             self.players[winner].score += (riichi_sticks as i32) * 1000;
@@ -1675,10 +1673,10 @@ impl Round {
                 tile_types.insert(tile.get());
             }
         }
-        if let Some(tile) = player.hand.drawn() {
-            if tile.is_1_9_honor() {
-                tile_types.insert(tile.get());
-            }
+        if let Some(tile) = player.hand.drawn()
+            && tile.is_1_9_honor()
+        {
+            tile_types.insert(tile.get());
         }
         tile_types.len() >= 9
     }
@@ -1813,12 +1811,12 @@ mod tests {
         // 鳴き待ちなら全員パスして進める
         if round.phase == TurnPhase::WaitForCalls {
             for i in 0..4 {
-                if let Some(ref cs) = round.call_state {
-                    if !cs.responded[i] {
-                        round.respond_to_call(i, CallResponse::Pass);
-                        if round.call_state.is_none() {
-                            break;
-                        }
+                if let Some(ref cs) = round.call_state
+                    && !cs.responded[i]
+                {
+                    round.respond_to_call(i, CallResponse::Pass);
+                    if round.call_state.is_none() {
+                        break;
                     }
                 }
             }
@@ -1849,12 +1847,12 @@ mod tests {
             // WaitForCalls なら全員パス
             if round.phase == TurnPhase::WaitForCalls {
                 for i in 0..4 {
-                    if let Some(ref cs) = round.call_state {
-                        if !cs.responded[i] {
-                            round.respond_to_call(i, CallResponse::Pass);
-                            if round.call_state.is_none() {
-                                break;
-                            }
+                    if let Some(ref cs) = round.call_state
+                        && !cs.responded[i]
+                    {
+                        round.respond_to_call(i, CallResponse::Pass);
+                        if round.call_state.is_none() {
+                            break;
                         }
                     }
                 }
@@ -1930,12 +1928,12 @@ mod tests {
         if round.phase == TurnPhase::WaitForCalls {
             // 全員パス
             for i in 0..4 {
-                if let Some(ref cs) = round.call_state {
-                    if !cs.responded[i] {
-                        assert!(round.respond_to_call(i, CallResponse::Pass));
-                        if round.call_state.is_none() {
-                            break;
-                        }
+                if let Some(ref cs) = round.call_state
+                    && !cs.responded[i]
+                {
+                    assert!(round.respond_to_call(i, CallResponse::Pass));
+                    if round.call_state.is_none() {
+                        break;
                     }
                 }
             }
@@ -1951,12 +1949,16 @@ mod tests {
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
 
         let call_state = round.check_available_calls(Tile::new(Tile::Z5), 0);
-        assert!(call_state.available_calls[1]
-            .iter()
-            .any(|call| matches!(call, AvailableCall::Pon { .. })));
-        assert!(!call_state.available_calls[1]
-            .iter()
-            .any(|call| matches!(call, AvailableCall::Ron)));
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Pon { .. }))
+        );
+        assert!(
+            !call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Ron))
+        );
     }
 
     fn open_tanyao_player(seat_wind: Wind, with_drawn: bool) -> Player {
@@ -2067,9 +2069,11 @@ mod tests {
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
 
         let call_state = round.check_available_calls(Tile::new(Tile::M1), 0);
-        assert!(call_state.available_calls[1]
-            .iter()
-            .any(|call| matches!(call, AvailableCall::Daiminkan)));
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Daiminkan))
+        );
     }
 
     #[test]
@@ -2126,10 +2130,12 @@ mod tests {
         assert_eq!(round.phase, TurnPhase::WaitForDiscard);
         assert!(round.players[0].hand.drawn().is_some());
         assert_eq!(round.players[0].hand.tiles().len(), 10);
-        assert!(round.players[0]
-            .hand
-            .tiles()
-            .contains(&mahjong_core::tile::Tile::new(Tile::S9)));
+        assert!(
+            round.players[0]
+                .hand
+                .tiles()
+                .contains(&mahjong_core::tile::Tile::new(Tile::S9))
+        );
     }
 
     #[test]
@@ -2157,12 +2163,12 @@ mod tests {
         round.phase = TurnPhase::WaitForCalls;
         round.call_state = Some(call_state);
         for i in 0..4 {
-            if let Some(ref cs) = round.call_state {
-                if !cs.responded[i] {
-                    round.respond_to_call(i, CallResponse::Pass);
-                    if round.call_state.is_none() {
-                        break;
-                    }
+            if let Some(ref cs) = round.call_state
+                && !cs.responded[i]
+            {
+                round.respond_to_call(i, CallResponse::Pass);
+                if round.call_state.is_none() {
+                    break;
                 }
             }
         }
@@ -2210,12 +2216,12 @@ mod tests {
         round.phase = TurnPhase::WaitForCalls;
         round.call_state = Some(call_state);
         for i in 0..4 {
-            if let Some(ref cs) = round.call_state {
-                if !cs.responded[i] {
-                    round.respond_to_call(i, CallResponse::Pass);
-                    if round.call_state.is_none() {
-                        break;
-                    }
+            if let Some(ref cs) = round.call_state
+                && !cs.responded[i]
+            {
+                round.respond_to_call(i, CallResponse::Pass);
+                if round.call_state.is_none() {
+                    break;
                 }
             }
         }
@@ -2285,9 +2291,11 @@ mod tests {
         assert!(round.do_kan(Tile::M1));
         assert_eq!(round.phase, TurnPhase::WaitForCalls);
         let call_state = round.call_state.as_ref().unwrap();
-        assert!(call_state.available_calls[1]
-            .iter()
-            .any(|call| matches!(call, AvailableCall::Ron)));
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Ron))
+        );
 
         // ロンせずパス → フリテンが設定されること
         assert!(round.respond_to_call(1, CallResponse::Pass));
@@ -2343,9 +2351,11 @@ mod tests {
         assert!(round.do_kan(Tile::M1));
         assert_eq!(round.phase, TurnPhase::WaitForCalls);
         let call_state = round.call_state.as_ref().unwrap();
-        assert!(call_state.available_calls[1]
-            .iter()
-            .any(|call| matches!(call, AvailableCall::Ron)));
+        assert!(
+            call_state.available_calls[1]
+                .iter()
+                .any(|call| matches!(call, AvailableCall::Ron))
+        );
 
         assert!(round.respond_to_call(1, CallResponse::Ron));
         assert_eq!(round.phase, TurnPhase::RoundOver);

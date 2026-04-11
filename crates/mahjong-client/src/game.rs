@@ -8,7 +8,9 @@ use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType, Wind};
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
-use mahjong_server::protocol::{AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent};
+use mahjong_server::protocol::{
+    AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent,
+};
 
 /// 1人分の和了結果（結果画面の1ページ分）
 #[derive(Debug, Clone)]
@@ -160,8 +162,8 @@ pub struct SetupState {
 impl SetupState {
     pub fn new() -> Self {
         SetupState {
-            cpu_levels: [1, 1, 1],         // 全員 Normal
-            cpu_personalities: [0, 1, 2],  // Balanced, Speedy, HighValue
+            cpu_levels: [1, 1, 1],        // 全員 Normal
+            cpu_personalities: [0, 1, 2], // Balanced, Speedy, HighValue
         }
     }
 
@@ -184,8 +186,12 @@ impl SetupState {
         }
     }
 
-    pub fn level_count() -> usize { 3 }
-    pub fn personality_count() -> usize { 4 }
+    pub fn level_count() -> usize {
+        3
+    }
+    pub fn personality_count() -> usize {
+        4
+    }
 
     /// 設定からCpuConfigの配列を生成する
     pub fn build_configs(&self) -> [CpuConfig; 3] {
@@ -205,9 +211,18 @@ impl SetupState {
             }
         };
         [
-            CpuConfig::new(to_level(self.cpu_levels[0]), to_personality(self.cpu_personalities[0])),
-            CpuConfig::new(to_level(self.cpu_levels[1]), to_personality(self.cpu_personalities[1])),
-            CpuConfig::new(to_level(self.cpu_levels[2]), to_personality(self.cpu_personalities[2])),
+            CpuConfig::new(
+                to_level(self.cpu_levels[0]),
+                to_personality(self.cpu_personalities[0]),
+            ),
+            CpuConfig::new(
+                to_level(self.cpu_levels[1]),
+                to_personality(self.cpu_personalities[1]),
+            ),
+            CpuConfig::new(
+                to_level(self.cpu_levels[2]),
+                to_personality(self.cpu_personalities[2]),
+            ),
         ]
     }
 }
@@ -266,7 +281,11 @@ impl GameState {
             riichi_sticks: 0,
             is_furiten: false,
             selected_would_cause_furiten: false,
-            other_players: [OtherPlayerHand::new(), OtherPlayerHand::new(), OtherPlayerHand::new()],
+            other_players: [
+                OtherPlayerHand::new(),
+                OtherPlayerHand::new(),
+                OtherPlayerHand::new(),
+            ],
             pending_riichi_player: None,
             last_discarder: None,
             chi_option_selecting: false,
@@ -325,7 +344,11 @@ impl GameState {
                 self.riichi_sticks = riichi_sticks;
                 self.is_furiten = false;
                 self.selected_would_cause_furiten = false;
-                self.other_players = [OtherPlayerHand::new(), OtherPlayerHand::new(), OtherPlayerHand::new()];
+                self.other_players = [
+                    OtherPlayerHand::new(),
+                    OtherPlayerHand::new(),
+                    OtherPlayerHand::new(),
+                ];
                 self.last_discarder = None;
             }
 
@@ -384,8 +407,9 @@ impl GameState {
                 // 他プレイヤーが捨てた場合、隠し手牌の枚数を更新
                 if relative_idx > 0 {
                     let other_idx = relative_idx - 1;
-                    self.other_players[other_idx].concealed_count =
-                        self.other_players[other_idx].concealed_count.saturating_sub(1);
+                    self.other_players[other_idx].concealed_count = self.other_players[other_idx]
+                        .concealed_count
+                        .saturating_sub(1);
                 }
 
                 // 自分が捨てた場合
@@ -448,7 +472,8 @@ impl GameState {
                         CallType::Kakan => {
                             if let Some(meld) = other.melds.iter_mut().find(|m| {
                                 m.category == MeldType::Pon
-                                    && m.tiles.first().map(|t| t.get()) == tiles.first().map(|t| t.get())
+                                    && m.tiles.first().map(|t| t.get())
+                                        == tiles.first().map(|t| t.get())
                             }) {
                                 meld.category = MeldType::Kakan;
                                 meld.tiles = tiles.clone();
@@ -456,30 +481,38 @@ impl GameState {
                                 other.concealed_count = other.concealed_count.saturating_sub(1);
                             } else {
                                 other.melds.push(Meld {
-                                    category, tiles: tiles.clone(),
-                                    from: meld_from, called_tile: Some(called_tile),
+                                    category,
+                                    tiles: tiles.clone(),
+                                    from: meld_from,
+                                    called_tile: Some(called_tile),
                                 });
                                 other.concealed_count = other.concealed_count.saturating_sub(1);
                             }
                         }
                         CallType::Ankan => {
                             other.melds.push(Meld {
-                                category, tiles: tiles.clone(),
-                                from: MeldFrom::Myself, called_tile: None,
+                                category,
+                                tiles: tiles.clone(),
+                                from: MeldFrom::Myself,
+                                called_tile: None,
                             });
                             other.concealed_count = other.concealed_count.saturating_sub(3);
                         }
                         CallType::Pon | CallType::Chi => {
                             other.melds.push(Meld {
-                                category, tiles: tiles.clone(),
-                                from: meld_from, called_tile: Some(called_tile),
+                                category,
+                                tiles: tiles.clone(),
+                                from: meld_from,
+                                called_tile: Some(called_tile),
                             });
                             other.concealed_count = other.concealed_count.saturating_sub(2);
                         }
                         CallType::Daiminkan => {
                             other.melds.push(Meld {
-                                category, tiles: tiles.clone(),
-                                from: meld_from, called_tile: Some(called_tile),
+                                category,
+                                tiles: tiles.clone(),
+                                from: meld_from,
+                                called_tile: Some(called_tile),
                             });
                             other.concealed_count = other.concealed_count.saturating_sub(3);
                         }
@@ -492,8 +525,10 @@ impl GameState {
                         CallType::Ron => {}
                         CallType::Pon | CallType::Chi | CallType::Daiminkan => {
                             self.melds.push(Meld {
-                                category, tiles: tiles.clone(),
-                                from: meld_from, called_tile: Some(called_tile),
+                                category,
+                                tiles: tiles.clone(),
+                                from: meld_from,
+                                called_tile: Some(called_tile),
                             });
                             self.is_my_turn = true;
                             self.drawn = None;
@@ -502,8 +537,10 @@ impl GameState {
                         }
                         CallType::Ankan => {
                             self.melds.push(Meld {
-                                category, tiles: tiles.clone(),
-                                from: MeldFrom::Myself, called_tile: None,
+                                category,
+                                tiles: tiles.clone(),
+                                from: MeldFrom::Myself,
+                                called_tile: None,
                             });
                             self.is_my_turn = true;
                             self.drawn = None;
@@ -513,14 +550,17 @@ impl GameState {
                         CallType::Kakan => {
                             if let Some(meld) = self.melds.iter_mut().find(|meld| {
                                 meld.category == MeldType::Pon
-                                    && meld.tiles.first().map(|tile| tile.get()) == tiles.first().map(|tile| tile.get())
+                                    && meld.tiles.first().map(|tile| tile.get())
+                                        == tiles.first().map(|tile| tile.get())
                             }) {
                                 meld.category = MeldType::Kakan;
                                 meld.tiles = tiles.clone();
                             } else {
                                 self.melds.push(Meld {
-                                    category, tiles: tiles.clone(),
-                                    from: meld_from, called_tile: Some(called_tile),
+                                    category,
+                                    tiles: tiles.clone(),
+                                    from: meld_from,
+                                    called_tile: Some(called_tile),
                                 });
                             }
                             self.is_my_turn = true;
@@ -625,8 +665,13 @@ impl GameState {
 
                 let msg = format!(
                     "{}が{}和了！{}{}\n{}\n{} → {}点",
-                    winner_name, win_type, loser_text, riichi_sticks_text, yaku_text,
-                    rank_display, score_points
+                    winner_name,
+                    win_type,
+                    loser_text,
+                    riichi_sticks_text,
+                    yaku_text,
+                    rank_display,
+                    score_points
                 );
 
                 self.win_results.push(WinResult {
@@ -672,10 +717,8 @@ impl GameState {
                 let mut msg = format!("流局（{}）", reason_text);
 
                 if !tenpai.is_empty() {
-                    let tenpai_names: Vec<&str> = tenpai
-                        .iter()
-                        .map(|w| self.wind_to_name(*w))
-                        .collect();
+                    let tenpai_names: Vec<&str> =
+                        tenpai.iter().map(|w| self.wind_to_name(*w)).collect();
                     msg.push_str(&format!("\nテンパイ: {}", tenpai_names.join(", ")));
                 }
                 if riichi_sticks > 0 {
@@ -735,12 +778,16 @@ impl GameState {
             // 副露を更新
             // 副露を更新（既存の from 情報を保持）
             if other.melds.is_empty() {
-                other.melds = info.melds.iter().map(|m| Meld {
-                    category: Self::call_type_to_meld_type(&m.call_type),
-                    tiles: m.tiles.clone(),
-                    from: MeldFrom::Unknown, // フォールバック
-                    called_tile: None,
-                }).collect();
+                other.melds = info
+                    .melds
+                    .iter()
+                    .map(|m| Meld {
+                        category: Self::call_type_to_meld_type(&m.call_type),
+                        tiles: m.tiles.clone(),
+                        from: MeldFrom::Unknown, // フォールバック
+                        called_tile: None,
+                    })
+                    .collect();
             }
             // 和了者の手牌を公開
             if info.wind == winner {
@@ -751,7 +798,12 @@ impl GameState {
     }
 
     /// 流局時に他プレイヤーの手牌を更新する（テンパイ者・九種九牌宣言者の手牌を公開）
-    fn update_other_player_hands_on_draw(&mut self, player_hands: &[PlayerHandInfo], tenpai: &[Wind], declarer: Option<Wind>) {
+    fn update_other_player_hands_on_draw(
+        &mut self,
+        player_hands: &[PlayerHandInfo],
+        tenpai: &[Wind],
+        declarer: Option<Wind>,
+    ) {
         for info in player_hands {
             let relative_idx = self.relative_player_index(info.wind);
             if relative_idx == 0 {
@@ -760,12 +812,16 @@ impl GameState {
             let other = &mut self.other_players[relative_idx - 1];
             // 副露を更新（既存の from 情報を保持）
             if other.melds.is_empty() {
-                other.melds = info.melds.iter().map(|m| Meld {
-                    category: Self::call_type_to_meld_type(&m.call_type),
-                    tiles: m.tiles.clone(),
-                    from: MeldFrom::Unknown, // フォールバック
-                    called_tile: None,
-                }).collect();
+                other.melds = info
+                    .melds
+                    .iter()
+                    .map(|m| Meld {
+                        category: Self::call_type_to_meld_type(&m.call_type),
+                        tiles: m.tiles.clone(),
+                        from: MeldFrom::Unknown, // フォールバック
+                        called_tile: None,
+                    })
+                    .collect();
             }
             // テンパイ者または九種九牌宣言者の手牌を公開
             if tenpai.contains(&info.wind) || declarer == Some(info.wind) {
@@ -788,7 +844,8 @@ impl GameState {
             return false;
         }
 
-        let mut hand = Hand::new_with_melds(self.hand.clone(), self.melds_for_analysis(), self.drawn);
+        let mut hand =
+            Hand::new_with_melds(self.hand.clone(), self.melds_for_analysis(), self.drawn);
         match tile {
             Some(target) => {
                 let drawn = hand.drawn();
@@ -878,10 +935,10 @@ impl GameState {
         for tile_type in 0..Tile::LEN as u32 {
             let mut test_hand = hand.clone();
             test_hand.set_drawn(Some(Tile::new(tile_type)));
-            if let Ok(a) = HandAnalyzer::new(&test_hand) {
-                if a.shanten.has_won() {
-                    waiting.push(tile_type);
-                }
+            if let Ok(a) = HandAnalyzer::new(&test_hand)
+                && a.shanten.has_won()
+            {
+                waiting.push(tile_type);
             }
         }
 
@@ -918,7 +975,7 @@ impl GameState {
             return;
         }
 
-        let mut counts = [0u8; Tile::LEN as usize];
+        let mut counts = [0u8; Tile::LEN];
         for tile in &self.hand {
             counts[tile.get() as usize] += 1;
         }
@@ -957,7 +1014,10 @@ impl GameState {
     }
 
     /// 入力処理: オーバーレイのクリック結果と手牌クリックを処理してアクションを返す
-    pub fn handle_input(&mut self, overlay_click: Option<crate::renderer::OverlayClick>) -> Option<ClientAction> {
+    pub fn handle_input(
+        &mut self,
+        overlay_click: Option<crate::renderer::OverlayClick>,
+    ) -> Option<ClientAction> {
         use crate::renderer::OverlayClick;
 
         if self.phase != GamePhase::Playing {
@@ -1064,7 +1124,11 @@ impl GameState {
         }
 
         // 九種九牌・チー・ポン・鳴きパネル表示中は手牌クリックを無視
-        if self.nine_terminals_pending || self.chi_option_selecting || self.pon_option_selecting || !self.available_calls.is_empty() {
+        if self.nine_terminals_pending
+            || self.chi_option_selecting
+            || self.pon_option_selecting
+            || !self.available_calls.is_empty()
+        {
             return None;
         }
 
@@ -1092,9 +1156,13 @@ impl GameState {
                     let discarded_tile = self.apply_local_discard_from_hand(i);
                     if self.riichi_selection_mode {
                         self.clear_riichi_selection();
-                        return Some(ClientAction::Riichi { tile: Some(discarded_tile) });
+                        return Some(ClientAction::Riichi {
+                            tile: Some(discarded_tile),
+                        });
                     }
-                    return Some(ClientAction::Discard { tile: Some(discarded_tile) });
+                    return Some(ClientAction::Discard {
+                        tile: Some(discarded_tile),
+                    });
                 }
 
                 self.selected_tile = Some(i);
@@ -1133,10 +1201,7 @@ impl GameState {
     }
 
     fn relative_player_index(&self, wind: Wind) -> usize {
-        let my_idx = self
-            .seat_wind
-            .map(|w| w.to_index())
-            .unwrap_or(0);
+        let my_idx = self.seat_wind.map(|w| w.to_index()).unwrap_or(0);
         let their_idx = wind.to_index();
         (their_idx + 4 - my_idx) % 4
     }
@@ -1159,9 +1224,9 @@ impl GameState {
         let rel = (discarder_idx + 4 - caller_idx) % 4;
         match rel {
             3 => MeldFrom::Previous,  // 上家
-            2 => MeldFrom::Opposite,   // 対面
+            2 => MeldFrom::Opposite,  // 対面
             1 => MeldFrom::Following, // 下家
-            _ => MeldFrom::Myself,   // 自家（通常ここには来ない）
+            _ => MeldFrom::Myself,    // 自家（通常ここには来ない）
         }
     }
 
@@ -1175,11 +1240,6 @@ impl GameState {
         }
     }
 }
-
-/// 牌を文字列に変換
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -1195,8 +1255,14 @@ mod tests {
         state.enter_riichi_selection();
 
         assert_eq!(state.riichi_selectable_tiles.len(), 2);
-        assert_eq!(state.hand[state.riichi_selectable_tiles[0]], Tile::new(Tile::Z4));
-        assert_eq!(state.hand[state.riichi_selectable_tiles[1]], Tile::new(Tile::Z5));
+        assert_eq!(
+            state.hand[state.riichi_selectable_tiles[0]],
+            Tile::new(Tile::Z4)
+        );
+        assert_eq!(
+            state.hand[state.riichi_selectable_tiles[1]],
+            Tile::new(Tile::Z5)
+        );
         assert!(!state.riichi_selectable_drawn);
     }
 
@@ -1236,4 +1302,3 @@ mod tests {
         assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::M7))));
     }
 }
-

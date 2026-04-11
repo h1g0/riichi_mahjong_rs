@@ -22,11 +22,11 @@ pub fn check_thirteen_orphans(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    return if hand_analyzer.form == Form::ThirteenOrphans {
+    if hand_analyzer.form == Form::ThirteenOrphans {
         Ok((name, true, 13))
     } else {
         Ok((name, false, 0))
-    };
+    }
 }
 fn is_four_concealed_triplets_single_wait(hand_analyzer: &HandAnalyzer, hand: &Hand) -> bool {
     hand.drawn().is_some_and(|winning_tile| {
@@ -219,7 +219,7 @@ pub fn check_all_honors(
         }
     }
     // 順子があったら字一色ではない
-    if hand_analyzer.sequential3.len() > 0 {
+    if !hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
     // 七対子形の場合もチェック（same2が7つの場合）
@@ -247,7 +247,7 @@ pub fn check_all_terminals(
         return Ok((name, false, 0));
     }
     // 清老頭: すべての牌が数牌の1と9のみで構成される（字牌なし・順子なし）
-    if hand_analyzer.sequential3.len() > 0 {
+    if !hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
     for same in &hand_analyzer.same3 {

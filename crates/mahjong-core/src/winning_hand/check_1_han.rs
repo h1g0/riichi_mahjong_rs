@@ -398,11 +398,7 @@ pub fn check_honor_tiles_dragons(hand_analyzer: &HandAnalyzer, dragon: Dragon) -
         }
     }
 
-    if has_dragon {
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    if has_dragon { Ok(true) } else { Ok(false) }
 }
 
 /// 役牌（白）

@@ -68,7 +68,7 @@ pub fn check_terminal_in_each_set(
         return Ok((name, false, 0));
     }
     // 清老頭とは複合しないため、必ず順子が含まれる
-    if hand_analyzer.sequential3.len() == 0 {
+    if hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
 
@@ -225,17 +225,15 @@ mod tests {
         let mut status = Status::new();
         let settings = Settings::new();
         status.has_claimed_open = false;
-        assert_eq!(
+        assert!(
             check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings)
                 .unwrap()
-                .1,
-            true
+                .1
         );
-        assert_eq!(
-            check_terminal_in_each_set(&test_analyzer, &status, &settings)
+        assert!(
+            !check_terminal_in_each_set(&test_analyzer, &status, &settings)
                 .unwrap()
-                .1,
-            false
+                .1
         );
     }
     #[test]
@@ -247,17 +245,15 @@ mod tests {
         let mut status = Status::new();
         let settings = Settings::new();
         status.has_claimed_open = false;
-        assert_eq!(
-            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings)
+        assert!(
+            !check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings)
                 .unwrap()
-                .1,
-            false
+                .1
         );
-        assert_eq!(
+        assert!(
             check_terminal_in_each_set(&test_analyzer, &status, &settings)
                 .unwrap()
-                .1,
-            true
+                .1
         );
     }
     #[test]

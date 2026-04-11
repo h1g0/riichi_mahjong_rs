@@ -339,6 +339,12 @@ impl CpuGameState {
     }
 }
 
+impl Default for CpuGameState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
