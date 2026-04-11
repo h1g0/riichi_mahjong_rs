@@ -47,6 +47,7 @@ python -m http.server 8080
 ## GitHub CLI
 
 `gh` is available at `/c/Program Files/GitHub CLI/gh.exe`. Add to PATH if needed:
+
 ```sh
 export PATH="/c/Program Files/GitHub CLI:$PATH"
 ```
@@ -66,6 +67,17 @@ export PATH="/c/Program Files/GitHub CLI:$PATH"
 - After completing an implementation, verify that the build succeeds and all unit tests pass (`cargo build && cargo test`).
 - Add unit tests for any new functionality.
 - Add regression tests for any bug fixes.
+
+### Pre-Commit Checklist
+
+Before committing, ensure there are no formatting issues or warnings:
+
+```sh
+cargo fmt
+cargo clippy
+```
+
+Both commands must complete without errors or warnings.
 
 ### Coding Conventions
 
