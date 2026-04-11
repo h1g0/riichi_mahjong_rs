@@ -6,6 +6,7 @@
 
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
+use mahjong_core::hand_info::meld::Meld;
 use mahjong_core::hand_info::status::Status;
 use mahjong_core::scoring::score::{
     calculate_base_points, calculate_score, determine_rank, round_up_to_100, ScoreRank, ScoreResult,
@@ -34,6 +35,26 @@ pub fn check_win(
     is_tsumo: bool,
     is_last_tile: bool,
     is_dead_wall_draw: bool,
+) -> WinCheckResult {
+    let settings = Settings::new();
+    check_win_with_settings(
+        player,
+        prevailing_wind,
+        is_tsumo,
+        is_last_tile,
+        is_dead_wall_draw,
+        &settings,
+    )
+}
+
+/// プレイヤーの手牌が和了しているか、指定ルールで判定する
+pub fn check_win_with_settings(
+    player: &Player,
+    prevailing_wind: Wind,
+    is_tsumo: bool,
+    is_last_tile: bool,
+    is_dead_wall_draw: bool,
+    settings: &Settings,
 ) -> WinCheckResult {
     let hand = &player.hand;
 
@@ -72,9 +93,7 @@ pub fn check_win(
     status.is_dead_wall_draw = is_dead_wall_draw;
     status.kan_count = player.kan_count() as u32;
 
-    let settings = Settings::new();
-
-    match calculate_score(&analyzer, hand, &status, &settings) {
+    match calculate_score(&analyzer, hand, &status, settings) {
         Ok(Some(result)) => WinCheckResult {
             is_win: true,
             score_result: Some(result),
@@ -96,7 +115,33 @@ pub fn check_ron(
     prevailing_wind: Wind,
     is_last_tile: bool,
 ) -> WinCheckResult {
-    check_ron_with_flags(player, discarded_tile, prevailing_wind, is_last_tile, false)
+    let settings = Settings::new();
+    check_ron_with_flags_and_settings(
+        player,
+        discarded_tile,
+        prevailing_wind,
+        is_last_tile,
+        false,
+        &settings,
+    )
+}
+
+/// ロン和了が可能か指定ルールで判定する
+pub fn check_ron_with_settings(
+    player: &Player,
+    discarded_tile: Tile,
+    prevailing_wind: Wind,
+    is_last_tile: bool,
+    settings: &Settings,
+) -> WinCheckResult {
+    check_ron_with_flags_and_settings(
+        player,
+        discarded_tile,
+        prevailing_wind,
+        is_last_tile,
+        false,
+        settings,
+    )
 }
 
 /// ロン和了が可能か判定する（搶槓などの状態フラグ付き）
@@ -106,6 +151,26 @@ pub fn check_ron_with_flags(
     prevailing_wind: Wind,
     is_last_tile: bool,
     is_robbing_a_quad: bool,
+) -> WinCheckResult {
+    let settings = Settings::new();
+    check_ron_with_flags_and_settings(
+        player,
+        discarded_tile,
+        prevailing_wind,
+        is_last_tile,
+        is_robbing_a_quad,
+        &settings,
+    )
+}
+
+/// ロン和了が可能か指定ルールと状態フラグで判定する
+pub fn check_ron_with_flags_and_settings(
+    player: &Player,
+    discarded_tile: Tile,
+    prevailing_wind: Wind,
+    is_last_tile: bool,
+    is_robbing_a_quad: bool,
+    settings: &Settings,
 ) -> WinCheckResult {
     // 手牌をクローンして捨て牌をdrawnとしてセット
     let mut hand = player.hand.clone();
@@ -144,9 +209,7 @@ pub fn check_ron_with_flags(
     status.is_robbing_a_quad = is_robbing_a_quad;
     status.kan_count = player.kan_count() as u32;
 
-    let settings = Settings::new();
-
-    match calculate_score(&analyzer, &hand, &status, &settings) {
+    match calculate_score(&analyzer, &hand, &status, settings) {
         Ok(Some(result)) => WinCheckResult {
             is_win: true,
             score_result: Some(result),
@@ -275,7 +338,7 @@ pub fn add_dora_to_score(
             all_tiles.push(tile);
         }
         if open.category.is_kan() && open.tiles.len() == 3 {
-            all_tiles.push(open.tiles[0]);
+            all_tiles.push(kan_fourth_tile(open));
         }
     }
 
@@ -326,6 +389,18 @@ pub fn add_dora_to_score(
     }
 }
 
+fn kan_fourth_tile(open: &Meld) -> Tile {
+    if let Some(tile) = open.called_tile {
+        return tile;
+    }
+
+    open.tiles
+        .iter()
+        .copied()
+        .find(|tile| !tile.is_red_dora())
+        .unwrap_or(open.tiles[0])
+}
+
 /// プレイヤーがテンパイしているか判定する（13枚の手牌で）
 pub fn is_ready(player: &Player) -> bool {
     hand_analyzer::calc_shanten_number(&player.hand).is_ready()
@@ -366,6 +441,7 @@ pub fn calculate_ron_score_deltas(
 mod tests {
     use super::*;
     use mahjong_core::hand::Hand;
+    use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
     use mahjong_core::scoring::fu::{FuDetail, FuResult};
     use mahjong_core::scoring::score::ScoreRank;
     use mahjong_core::tile::Tile;
@@ -517,20 +593,26 @@ mod tests {
 
     #[test]
     fn test_check_win_open_tanyao_tsumo() {
-        use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
-
         let hand = Hand::from("56677m66s 5m");
         let tiles: Vec<Tile> = hand.tiles().to_vec();
         let drawn = hand.drawn();
         let mut player = Player::new(Wind::South, tiles, 25000);
         player.hand.add_meld(Meld {
-            tiles: vec![Tile::new(Tile::P4), Tile::new(Tile::P5), Tile::new(Tile::P6)],
+            tiles: vec![
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+            ],
             category: MeldType::Chi,
             from: MeldFrom::Previous,
             called_tile: None,
         });
         player.hand.add_meld(Meld {
-            tiles: vec![Tile::new(Tile::M2), Tile::new(Tile::M3), Tile::new(Tile::M4)],
+            tiles: vec![
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M4),
+            ],
             category: MeldType::Chi,
             from: MeldFrom::Previous,
             called_tile: None,
@@ -543,6 +625,43 @@ mod tests {
         assert!(result.is_win, "open tanyao tsumo should be a win");
         let score = result.score_result.unwrap();
         assert!(score.han >= 1, "expected at least tanyao");
+    }
+
+    #[test]
+    fn test_check_win_respects_open_tanyao_disabled() {
+        let hand = Hand::from("56677m66s 5m");
+        let tiles: Vec<Tile> = hand.tiles().to_vec();
+        let drawn = hand.drawn();
+        let mut player = Player::new(Wind::South, tiles, 25000);
+        player.hand.add_meld(Meld {
+            tiles: vec![
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+            ],
+            category: MeldType::Chi,
+            from: MeldFrom::Previous,
+            called_tile: None,
+        });
+        player.hand.add_meld(Meld {
+            tiles: vec![
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M4),
+            ],
+            category: MeldType::Chi,
+            from: MeldFrom::Previous,
+            called_tile: None,
+        });
+        if let Some(d) = drawn {
+            player.draw(d);
+        }
+
+        let mut settings = Settings::new();
+        settings.opened_all_simples = false;
+
+        let result = check_win_with_settings(&player, Wind::East, true, false, false, &settings);
+        assert!(!result.is_win, "open tanyao must be rejected when disabled");
     }
 
     #[test]
@@ -573,7 +692,10 @@ mod tests {
 
         let fu_result = FuResult {
             total: 30,
-            details: vec![FuDetail { name: "副底", fu: 20 }],
+            details: vec![FuDetail {
+                name: "副底",
+                fu: 20,
+            }],
         };
         let mut score = ScoreResult {
             han: 1,
@@ -590,10 +712,18 @@ mod tests {
 
         // 手牌にM2（ドラ）・赤M5（赤ドラ）・S7（裏ドラ対象）を含む
         let tiles = vec![
-            Tile::new(Tile::M2), Tile::new(Tile::M3), Tile::new(Tile::M4),
-            Tile::new(Tile::P2), Tile::new(Tile::P3), Tile::new(Tile::P4),
-            Tile::new(Tile::S2), Tile::new(Tile::S3), Tile::new(Tile::S4),
-            Tile::new(Tile::M6), Tile::new(Tile::M7), Tile::new(Tile::M8),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::M6),
+            Tile::new(Tile::M7),
+            Tile::new(Tile::M8),
             Tile::new(Tile::S7),
         ];
         let mut player = Player::new(Wind::South, tiles, 25000);
@@ -605,7 +735,13 @@ mod tests {
         let dora_indicators = vec![Tile::new(Tile::M1)];
         let uradora_indicators = vec![Tile::new(Tile::S6)];
 
-        add_dora_to_score(&mut score, &player.hand, None, &dora_indicators, &uradora_indicators);
+        add_dora_to_score(
+            &mut score,
+            &player.hand,
+            None,
+            &dora_indicators,
+            &uradora_indicators,
+        );
 
         assert_eq!(score.yaku_list.len(), 4);
         assert_eq!(score.yaku_list[0], ("断么九", 1));
@@ -613,7 +749,84 @@ mod tests {
         assert_eq!(score.yaku_list[2], ("赤ドラ", 1));
         assert_eq!(score.yaku_list[3], ("裏ドラ", 1));
     }
+
+    #[test]
+    fn test_add_dora_counts_red_called_kan_tile() {
+        let fu_result = FuResult {
+            total: 30,
+            details: vec![FuDetail {
+                name: "副底",
+                fu: 20,
+            }],
+        };
+        let mut score = ScoreResult {
+            han: 1,
+            fu: 30,
+            rank: ScoreRank::Normal,
+            dealer_ron: 1500,
+            dealer_tsumo_all: 500,
+            non_dealer_ron: 1000,
+            non_dealer_tsumo_dealer: 500,
+            non_dealer_tsumo_non_dealer: 300,
+            yaku_list: vec![("立直", 1)],
+            fu_result,
+        };
+        let hand = Hand::new_with_melds(
+            vec![],
+            vec![Meld {
+                tiles: vec![Tile::new(Tile::M5); 3],
+                category: MeldType::Kan,
+                from: MeldFrom::Previous,
+                called_tile: Some(Tile::new_red(Tile::M5)),
+            }],
+            None,
+        );
+
+        add_dora_to_score(&mut score, &hand, None, &[], &[]);
+
+        assert_eq!(score.yaku_list.last(), Some(&("赤ドラ", 1)));
+        assert_eq!(score.han, 2);
+    }
+
+    #[test]
+    fn test_add_dora_counts_red_closed_kan_once() {
+        let fu_result = FuResult {
+            total: 30,
+            details: vec![FuDetail {
+                name: "副底",
+                fu: 20,
+            }],
+        };
+        let mut score = ScoreResult {
+            han: 1,
+            fu: 30,
+            rank: ScoreRank::Normal,
+            dealer_ron: 1500,
+            dealer_tsumo_all: 500,
+            non_dealer_ron: 1000,
+            non_dealer_tsumo_dealer: 500,
+            non_dealer_tsumo_non_dealer: 300,
+            yaku_list: vec![("立直", 1)],
+            fu_result,
+        };
+        let hand = Hand::new_with_melds(
+            vec![],
+            vec![Meld {
+                tiles: vec![
+                    Tile::new_red(Tile::M5),
+                    Tile::new(Tile::M5),
+                    Tile::new(Tile::M5),
+                ],
+                category: MeldType::Kan,
+                from: MeldFrom::Myself,
+                called_tile: None,
+            }],
+            None,
+        );
+
+        add_dora_to_score(&mut score, &hand, None, &[], &[]);
+
+        assert_eq!(score.yaku_list.last(), Some(&("赤ドラ", 1)));
+        assert_eq!(score.han, 2);
+    }
 }
-
-
-
