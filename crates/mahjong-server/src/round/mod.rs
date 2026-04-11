@@ -188,6 +188,71 @@ impl Round {
         }
     }
 
+    /// テスト用：固定シードの牌山でラウンドを生成する（再現性のあるテスト向け）
+    #[cfg(test)]
+    pub fn new_with_seed(
+        seed: u64,
+        prevailing_wind: Wind,
+        dealer: usize,
+        initial_scores: [i32; 4],
+        honba: usize,
+        riichi_sticks: usize,
+        round_number: usize,
+        settings: Settings,
+    ) -> Self {
+        let mut wall = Wall::new_with_seed(seed);
+        let dealt = wall.deal();
+
+        let winds = [
+            Wind::from_index((4 - dealer) % 4),
+            Wind::from_index((1 + 4 - dealer) % 4),
+            Wind::from_index((2 + 4 - dealer) % 4),
+            Wind::from_index((3 + 4 - dealer) % 4),
+        ];
+
+        let players = [
+            Player::new(winds[0], dealt[0].clone(), initial_scores[0]),
+            Player::new(winds[1], dealt[1].clone(), initial_scores[1]),
+            Player::new(winds[2], dealt[2].clone(), initial_scores[2]),
+            Player::new(winds[3], dealt[3].clone(), initial_scores[3]),
+        ];
+
+        let dora_indicators = wall.dora_indicators();
+
+        let mut events = Vec::new();
+        for (i, player) in players.iter().enumerate() {
+            events.push((
+                i,
+                ServerEvent::GameStarted {
+                    seat_wind: player.seat_wind,
+                    hand: player.hand.tiles().to_vec(),
+                    scores: initial_scores,
+                    prevailing_wind,
+                    dora_indicators: dora_indicators.clone(),
+                    round_number,
+                    honba,
+                    riichi_sticks,
+                },
+            ));
+        }
+
+        Round {
+            wall,
+            players,
+            prevailing_wind,
+            dealer,
+            current_player: dealer,
+            honba,
+            riichi_sticks,
+            phase: TurnPhase::Draw,
+            result: None,
+            events,
+            call_state: None,
+            last_draw_was_dead_wall: false,
+            settings,
+        }
+    }
+
     /// 各プレイヤーの点数を返す
     /// 全プレイヤーの手牌情報を構築する
     fn build_player_hands(&self) -> Vec<PlayerHandInfo> {
@@ -1828,7 +1893,9 @@ mod tests {
 
     #[test]
     fn test_round_turn_flow() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        // 固定シードで牌山を生成し、テストの再現性を確保する
+        let mut round =
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events();
 
         // 4人分のターンを回す
@@ -1841,8 +1908,16 @@ mod tests {
                 break;
             }
 
+            // 九種九牌が成立した場合は宣言せず続行する
+            if round.phase == TurnPhase::WaitForNineTerminals {
+                round.do_nine_terminals(expected_player, false);
+            }
+
             // discard
             round.do_discard(None);
+            if round.phase == TurnPhase::RoundOver {
+                break;
+            }
 
             // WaitForCalls なら全員パス
             if round.phase == TurnPhase::WaitForCalls {
@@ -1855,6 +1930,9 @@ mod tests {
                             break;
                         }
                     }
+                }
+                if round.phase == TurnPhase::RoundOver {
+                    break;
                 }
             }
         }

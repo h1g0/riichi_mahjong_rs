@@ -56,6 +56,22 @@ impl Wall {
         }
     }
 
+    /// テスト用：固定シードで牌山を生成する（再現性のある乱数）
+    #[cfg(test)]
+    pub fn new_with_seed(seed: u64) -> Self {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
+        let mut tiles = Self::create_all_tiles();
+        tiles.shuffle(&mut rng);
+        let dead_wall: Vec<Tile> = tiles.split_off(tiles.len() - 14);
+        Wall {
+            tiles,
+            dead_wall,
+            rinshan_index: 0,
+            dora_indicator_count: 1,
+        }
+    }
+
     /// テスト用：指定した牌列で牌山を生成する（シャッフルなし）
     #[cfg(test)]
     pub fn from_tiles(mut tiles: Vec<Tile>) -> Self {
