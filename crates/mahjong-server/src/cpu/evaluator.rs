@@ -95,7 +95,11 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
 ///
 /// 13枚の手牌に対して、各牌種を加えた時に向聴数が下がるものをカウント。
 /// `current_shanten` は呼び出し元で既に計算済みの向聴数。
-fn count_acceptance(hand_tiles: &[Tile], visible_counts: &[u8; 34], current_shanten: ShantenNumber) -> u32 {
+fn count_acceptance(
+    hand_tiles: &[Tile],
+    visible_counts: &[u8; 34],
+    current_shanten: ShantenNumber,
+) -> u32 {
     let mut total = 0u32;
     for tile_type in 0..34u32 {
         // 場に4枚全て見えていたら受入不可
@@ -183,7 +187,6 @@ fn get_yakuhai_types(seat_wind: Wind, prevailing_wind: Wind) -> Vec<TileType> {
 
     types
 }
-
 
 /// 打牌候補から最良の1枚を選ぶ
 pub fn select_best_discard(
@@ -287,10 +290,7 @@ mod tests {
 
     #[test]
     fn test_count_dora_in_hand_multiple_indicators() {
-        let hand = vec![
-            Tile::new(Tile::M2),
-            Tile::new(Tile::P3),
-        ];
+        let hand = vec![Tile::new(Tile::M2), Tile::new(Tile::P3)];
         // ドラ表示牌1m（ドラ2m）と2p（ドラ3p）
         let indicators = vec![Tile::new(Tile::M1), Tile::new(Tile::P2)];
         assert_eq!(count_dora_in_hand(&hand, &indicators), 2);
@@ -357,14 +357,20 @@ mod tests {
         let state = CpuGameState::new();
         // 全部中張牌でタンヤオ可能
         let hand = vec![
-            Tile::new(Tile::M2), Tile::new(Tile::M3), Tile::new(Tile::M4),
-            Tile::new(Tile::P5), Tile::new(Tile::S6),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::S6),
         ];
         let value_tanyao = estimate_hand_value(&hand, &state);
         // 端牌を混ぜた場合と比較してボーナスがある
         let hand_nontanyao = vec![
-            Tile::new(Tile::M1), Tile::new(Tile::M3), Tile::new(Tile::M4),
-            Tile::new(Tile::P5), Tile::new(Tile::S6),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::S6),
         ];
         let value_non = estimate_hand_value(&hand_nontanyao, &state);
         assert!(value_tanyao > value_non);
@@ -394,10 +400,18 @@ mod tests {
     fn test_evaluate_discards_with_drawn_tile() {
         let mut state = CpuGameState::new();
         state.my_hand = vec![
-            Tile::new(Tile::M1), Tile::new(Tile::M2), Tile::new(Tile::M3),
-            Tile::new(Tile::P1), Tile::new(Tile::P2), Tile::new(Tile::P3),
-            Tile::new(Tile::S1), Tile::new(Tile::S2), Tile::new(Tile::S3),
-            Tile::new(Tile::Z1), Tile::new(Tile::Z2), Tile::new(Tile::Z3),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P1),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::S1),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z2),
+            Tile::new(Tile::Z3),
             Tile::new(Tile::M4),
         ];
         state.my_drawn = Some(Tile::new(Tile::M5));
@@ -412,8 +426,11 @@ mod tests {
         let mut state = CpuGameState::new();
         // 同じ牌が複数あっても重複評価しない
         state.my_hand = vec![
-            Tile::new(Tile::M1), Tile::new(Tile::M1), Tile::new(Tile::M1),
-            Tile::new(Tile::M2), Tile::new(Tile::M3),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
         ];
         let result = evaluate_discards(&state, &weak_config());
         // M1 は1候補のみ、M2、M3 でmax3候補
@@ -424,7 +441,9 @@ mod tests {
     fn test_evaluate_discards_weak_skips_acceptance_and_value() {
         let mut state = CpuGameState::new();
         state.my_hand = vec![
-            Tile::new(Tile::M1), Tile::new(Tile::M2), Tile::new(Tile::M3),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
         ];
         let result = evaluate_discards(&state, &weak_config());
         // Weak: acceptance_count=0, estimated_value=0.0, safety=0.5
@@ -439,10 +458,18 @@ mod tests {
     fn test_evaluate_discards_strong_uses_all_features() {
         let mut state = CpuGameState::new();
         state.my_hand = vec![
-            Tile::new(Tile::M2), Tile::new(Tile::M3), Tile::new(Tile::M4),
-            Tile::new(Tile::P2), Tile::new(Tile::P3), Tile::new(Tile::P4),
-            Tile::new(Tile::S2), Tile::new(Tile::S3), Tile::new(Tile::S4),
-            Tile::new(Tile::M6), Tile::new(Tile::M7), Tile::new(Tile::M8),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::M6),
+            Tile::new(Tile::M7),
+            Tile::new(Tile::M8),
             Tile::new(Tile::Z1),
         ];
         state.my_drawn = Some(Tile::new(Tile::Z2));
@@ -490,10 +517,18 @@ mod tests {
         // evaluate_discards 経由で shanten 付きの候補を生成する
         let mut state = CpuGameState::new();
         state.my_hand = vec![
-            Tile::new(Tile::M1), Tile::new(Tile::M2), Tile::new(Tile::M3),
-            Tile::new(Tile::M4), Tile::new(Tile::M5), Tile::new(Tile::M6),
-            Tile::new(Tile::M7), Tile::new(Tile::M8), Tile::new(Tile::M9),
-            Tile::new(Tile::P1), Tile::new(Tile::P2), Tile::new(Tile::P3),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::M5),
+            Tile::new(Tile::M6),
+            Tile::new(Tile::M7),
+            Tile::new(Tile::M8),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::P1),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
             Tile::new(Tile::Z1),
         ];
         state.my_drawn = Some(Tile::new(Tile::Z2));
@@ -511,10 +546,18 @@ mod tests {
         // 向聴数は同じで safety だけ異なる2候補を手動構成
         let mut state = CpuGameState::new();
         state.my_hand = vec![
-            Tile::new(Tile::M1), Tile::new(Tile::M2), Tile::new(Tile::M3),
-            Tile::new(Tile::P1), Tile::new(Tile::P2), Tile::new(Tile::P3),
-            Tile::new(Tile::S1), Tile::new(Tile::S2), Tile::new(Tile::S3),
-            Tile::new(Tile::Z1), Tile::new(Tile::Z2), Tile::new(Tile::Z3),
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P1),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::S1),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z2),
+            Tile::new(Tile::Z3),
             Tile::new(Tile::M4),
         ];
         let candidates = evaluate_discards(&state, &weak_config());

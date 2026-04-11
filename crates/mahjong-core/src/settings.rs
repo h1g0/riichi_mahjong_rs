@@ -39,6 +39,12 @@ pub struct Settings {
     pub multiple_ron: bool,
 }
 
+impl Default for Settings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Settings {
     pub fn new() -> Settings {
         Settings {

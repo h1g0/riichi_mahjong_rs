@@ -230,4 +230,3 @@ pub fn check(
 /// ユニットテスト
 #[cfg(test)]
 mod tests {}
-

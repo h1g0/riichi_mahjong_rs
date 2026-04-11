@@ -169,23 +169,22 @@ pub fn check_three_closed_triplets(
         }
     }
 
-    if !status.is_self_picked {
-        if let Some(winning_tile) = hand.drawn() {
-            let winning_tile_type = winning_tile.get();
-            let completes_open_triplet = hand.melds().iter().any(|open| {
-                open.tiles[0].get() == winning_tile_type
-                    && (matches!(open.category, MeldType::Pon)
-                        || (open.category.is_kan()
-                            && open.from != MeldFrom::Myself))
-            });
-            let completes_concealed_triplet = hand_analyzer
-                .same3
-                .iter()
-                .any(|triplet| triplet.get()[0] == winning_tile_type);
+    if !status.is_self_picked
+        && let Some(winning_tile) = hand.drawn()
+    {
+        let winning_tile_type = winning_tile.get();
+        let completes_open_triplet = hand.melds().iter().any(|open| {
+            open.tiles[0].get() == winning_tile_type
+                && (matches!(open.category, MeldType::Pon)
+                    || (open.category.is_kan() && open.from != MeldFrom::Myself))
+        });
+        let completes_concealed_triplet = hand_analyzer
+            .same3
+            .iter()
+            .any(|triplet| triplet.get()[0] == winning_tile_type);
 
-            if completes_concealed_triplet && !completes_open_triplet {
-                concealed_triplet_count = concealed_triplet_count.saturating_sub(1);
-            }
+        if completes_concealed_triplet && !completes_open_triplet {
+            concealed_triplet_count = concealed_triplet_count.saturating_sub(1);
         }
     }
 
@@ -256,7 +255,7 @@ pub fn check_terminal_or_honor_in_each_set(
     }
 
     // 混老頭とは複合しないため、必ず順子が含まれる
-    if hand_analyzer.sequential3.len() == 0 {
+    if hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
 
@@ -317,7 +316,7 @@ pub fn check_all_terminals_and_honors(
     }
     // 混老頭は全ての面子・雀頭が么九牌（1,9）または字牌で構成される
     // 順子が含まれていてはいけない
-    if hand_analyzer.sequential3.len() > 0 {
+    if !hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
     // 字牌が含まれていなければ清老頭であり混老頭にはならない

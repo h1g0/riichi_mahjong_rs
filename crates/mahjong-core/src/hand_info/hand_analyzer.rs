@@ -182,15 +182,15 @@ impl HandAnalyzer {
         let (shanten_raw, _pair_count) = calc_seven_pairs_shanten(&t);
 
         let mut same2: Vec<Same2> = Vec::new();
-        for i in 0..Tile::LEN {
-            if t[i] >= 2 {
+        for (i, count) in t.iter_mut().enumerate().take(Tile::LEN) {
+            if *count >= 2 {
                 same2.push(Same2::new(i as TileType, i as TileType)?);
-                t[i] -= 2;
+                *count -= 2;
             }
         }
         let mut single: Vec<TileType> = Vec::new();
-        for i in 0..Tile::LEN {
-            for _ in 0..t[i] {
+        for (i, &count) in t.iter().enumerate().take(Tile::LEN) {
+            for _ in 0..count {
                 single.push(i as TileType);
             }
         }
@@ -278,15 +278,15 @@ pub fn calc_shanten_number(hand: &Hand) -> ShantenNumber {
 fn calc_seven_pairs_shanten(t: &TileSummarize) -> (i32, u32) {
     let mut pair: u32 = 0;
     let mut kind: u32 = 0;
-    for i in 0..Tile::LEN as usize {
-        if t[i] > 0 {
+    for &count in t.iter().take(Tile::LEN) {
+        if count > 0 {
             kind += 1;
-            if t[i] >= 2 {
+            if count >= 2 {
                 pair += 1;
             }
         }
     }
-    let shanten = (7 - pair + if kind < 7 { 7 - kind } else { 0 }) as i32 - 1;
+    let shanten = (7 - pair + 7_u32.saturating_sub(kind)) as i32 - 1;
     (shanten, pair)
 }
 
@@ -587,8 +587,8 @@ impl ShantenAccumulator for FullTracking {
         _head: usize,
     ) -> Self {
         let mut single = Vec::new();
-        for i in 0..Tile::LEN as usize {
-            for _ in 0..t[i] {
+        for (i, &count) in t.iter().enumerate().take(Tile::LEN) {
+            for _ in 0..count {
                 single.push(i as TileType);
             }
         }
@@ -619,7 +619,7 @@ fn calc_normal_shanten<A: ShantenAccumulator>(hand: &Hand) -> Result<(i32, A)> {
     let mut best_acc = A::new_tracking();
 
     // 雀頭を抜き出す
-    for i in 0..Tile::LEN as usize {
+    for i in 0..Tile::LEN {
         if t[i] >= 2 {
             t[i] -= 2;
             acc.push_same2(i);
@@ -645,7 +645,7 @@ fn find_mentsu<A: ShantenAccumulator>(
     best: &mut i32,
     best_acc: &mut A,
 ) {
-    for i in idx..Tile::LEN as usize {
+    for i in idx..Tile::LEN {
         // 刻子
         if t[i] >= 3 {
             t[i] -= 3;
@@ -671,42 +671,53 @@ fn find_mentsu<A: ShantenAccumulator>(
     // 面子を全て抽出し終えたら、塔子・対子の探索に移行する。
     // 面子抽出後の残り牌は元のインデックスより前に存在し得るため、常に先頭から探索する。
     let block3 = pre.same3_count() + pre.seq3_count() + acc.same3_count() + acc.seq3_count();
-    find_tatsu(0, block3, head, pre, acc, t, best, best_acc);
+    let mut ctx = TatsuSearch {
+        block3,
+        head,
+        pre,
+        best,
+        best_acc,
+    };
+    find_tatsu(0, &mut ctx, acc, t);
 }
 
 /// フェーズ2: 塔子（対子・両面/辺張・嵌張）を再帰的に抽出する
-fn find_tatsu<A: ShantenAccumulator>(
-    idx: usize,
+struct TatsuSearch<'a, A: ShantenAccumulator> {
     block3: usize,
     head: usize,
-    pre: &A::Preprocess,
+    pre: &'a A::Preprocess,
+    best: &'a mut i32,
+    best_acc: &'a mut A,
+}
+
+fn find_tatsu<A: ShantenAccumulator>(
+    idx: usize,
+    ctx: &mut TatsuSearch<'_, A>,
     acc: &mut A,
     t: &mut TileSummarize,
-    best: &mut i32,
-    best_acc: &mut A,
 ) {
     // 現在の分解で向聴数を計算
     let block2_raw = acc.same2_count() + acc.seq2_count();
     // 雀頭として使っている same2 は block2 に含めない
-    let block2_net = block2_raw.saturating_sub(head);
-    let block2_capped = block2_net.min(4usize.saturating_sub(block3));
-    let shanten = 8i32 - (block3 * 2 + block2_capped + head) as i32;
-    if shanten < *best {
-        *best = shanten;
-        *best_acc = acc.snapshot_best(pre, t, head);
+    let block2_net = block2_raw.saturating_sub(ctx.head);
+    let block2_capped = block2_net.min(4usize.saturating_sub(ctx.block3));
+    let shanten = 8i32 - (ctx.block3 * 2 + block2_capped + ctx.head) as i32;
+    if shanten < *ctx.best {
+        *ctx.best = shanten;
+        *ctx.best_acc = acc.snapshot_best(ctx.pre, t, ctx.head);
     }
 
     // 枝刈り: これ以上 block2 を増やしても改善しない場合
-    if block2_net >= 4usize.saturating_sub(block3) {
+    if block2_net >= 4usize.saturating_sub(ctx.block3) {
         return;
     }
 
-    for i in idx..Tile::LEN as usize {
+    for i in idx..Tile::LEN {
         // 対子
         if t[i] >= 2 {
             t[i] -= 2;
             acc.push_same2(i);
-            find_tatsu(i + 1, block3, head, pre, acc, t, best, best_acc);
+            find_tatsu(i + 1, ctx, acc, t);
             acc.pop_same2();
             t[i] += 2;
         }
@@ -715,7 +726,7 @@ fn find_tatsu<A: ShantenAccumulator>(
             t[i] -= 1;
             t[i + 1] -= 1;
             acc.push_seq2(i, i + 1);
-            find_tatsu(i, block3, head, pre, acc, t, best, best_acc);
+            find_tatsu(i, ctx, acc, t);
             acc.pop_seq2();
             t[i] += 1;
             t[i + 1] += 1;
@@ -725,7 +736,7 @@ fn find_tatsu<A: ShantenAccumulator>(
             t[i] -= 1;
             t[i + 2] -= 1;
             acc.push_seq2(i, i + 2);
-            find_tatsu(i, block3, head, pre, acc, t, best, best_acc);
+            find_tatsu(i, ctx, acc, t);
             acc.pop_seq2();
             t[i] += 1;
             t[i + 2] += 1;
@@ -754,7 +765,7 @@ fn is_isolated(t: &TileSummarize, i: usize) -> bool {
 /// 独立した刻子を抽出する（カウントのみ返す）
 fn extract_independent_same3(t: &mut TileSummarize) -> usize {
     let mut count = 0;
-    for i in 0..Tile::LEN as usize {
+    for i in 0..Tile::LEN {
         if t[i] >= 3 && is_isolated(t, i) {
             t[i] -= 3;
             count += 1;
@@ -766,7 +777,7 @@ fn extract_independent_same3(t: &mut TileSummarize) -> usize {
 /// 独立した刻子を抽出する（Vec で返す）
 fn extract_independent_same3_full(t: &mut TileSummarize) -> Result<Vec<Same3>> {
     let mut result = Vec::new();
-    for i in 0..Tile::LEN as usize {
+    for i in 0..Tile::LEN {
         if t[i] >= 3 && is_isolated(t, i) {
             t[i] -= 3;
             let tile = i as TileType;
@@ -844,7 +855,7 @@ fn extract_independent_seq3_full(t: &mut TileSummarize) -> Result<Vec<Sequential
 /// 独立した孤立牌を除去する（カウントのみ返す）
 fn remove_independent_singles(t: &mut TileSummarize) -> usize {
     let mut count = 0;
-    for i in 0..Tile::LEN as usize {
+    for i in 0..Tile::LEN {
         if t[i] == 1 && is_isolated(t, i) {
             t[i] -= 1;
             count += 1;
@@ -856,7 +867,7 @@ fn remove_independent_singles(t: &mut TileSummarize) -> usize {
 /// 独立した孤立牌を除去する（Vec で返す）
 fn extract_independent_singles_full(t: &mut TileSummarize) -> Result<Vec<TileType>> {
     let mut result = Vec::new();
-    for i in 0..Tile::LEN as usize {
+    for i in 0..Tile::LEN {
         if t[i] == 1 && is_isolated(t, i) {
             t[i] -= 1;
             result.push(i as TileType);

@@ -1,9 +1,9 @@
-pub mod wall;
-pub mod player;
-pub mod table;
-pub mod round;
-pub mod turn;
 pub mod action;
-pub mod scoring;
-pub mod protocol;
 pub mod cpu;
+pub mod player;
+pub mod protocol;
+pub mod round;
+pub mod scoring;
+pub mod table;
+pub mod turn;
+pub mod wall;

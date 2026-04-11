@@ -4,7 +4,7 @@ use crate::hand::Hand;
 use crate::hand_info::hand_analyzer::HandAnalyzer;
 use crate::hand_info::meld::{MeldFrom, MeldType};
 use crate::hand_info::status::Status;
-use crate::tile::{suit_rank, Dragon, Tile, TileType, Wind};
+use crate::tile::{Dragon, Tile, TileType, Wind, suit_rank};
 use crate::winning_hand::name::Form;
 
 /// 符計算の結果
@@ -34,11 +34,7 @@ pub struct FuDetail {
 ///
 /// # Returns
 /// 符計算の結果（切り上げ済み合計 + 内訳）
-pub fn calculate_fu(
-    analyzer: &HandAnalyzer,
-    hand: &Hand,
-    status: &Status,
-) -> Result<FuResult> {
+pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Result<FuResult> {
     // 七対子は固定25符
     if analyzer.form == Form::SevenPairs {
         return Ok(FuResult {
@@ -110,7 +106,7 @@ pub fn calculate_fu(
 
 /// 10符単位に切り上げる
 fn round_up_to_10(fu: u32) -> u32 {
-    (fu + 9) / 10 * 10
+    fu.div_ceil(10) * 10
 }
 
 /// 平和判定（簡易版：符計算用）
@@ -376,10 +372,7 @@ fn calculate_tsumo_fu(
 }
 
 /// 門前ロンの加符を計算する
-fn calculate_menzen_ron_fu(
-    status: &Status,
-    details: &mut Vec<FuDetail>,
-) -> Result<()> {
+fn calculate_menzen_ron_fu(status: &Status, details: &mut Vec<FuDetail>) -> Result<()> {
     // 門前でロン和了した場合は10符加算
     if !status.has_claimed_open && !status.is_self_picked {
         details.push(FuDetail {

@@ -263,8 +263,5 @@ pub enum ClientAction {
     Pass,
 
     /// 九種九牌を宣言する（true=流局, false=続行）
-    NineTerminals {
-        declare: bool,
-    },
+    NineTerminals { declare: bool },
 }
-

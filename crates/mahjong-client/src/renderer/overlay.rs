@@ -6,8 +6,8 @@ use macroquad::prelude::*;
 use mahjong_core::tile::Tile;
 use mahjong_server::protocol::{AvailableCall, ClientAction};
 
+use super::{AGARI_FONT, FONT_SIZE, SMALL_FONT, TileTextures, draw_jp_text, draw_tile_sprite};
 use crate::game::GameState;
-use super::{draw_jp_text, draw_tile_sprite, TileTextures, FONT_SIZE, SMALL_FONT, AGARI_FONT};
 
 // ─── チー／ポン選択UI定数 ─────────────────────────────────────────────────────
 
@@ -127,16 +127,17 @@ pub(super) fn draw_action_buttons(
         );
     }
 
-    if state.drawn.is_none() {
-        return None;
-    }
+    state.drawn?;
 
     let mut result = None;
 
     // 和了ボタン（ツモ）
     if state.can_tsumo {
         draw_agari_button(font, AGARI_BTN_X, AGARI_BTN_Y);
-        if clicked && result.is_none() && hit_rect(mx, my, AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_W, AGARI_BTN_H) {
+        if clicked
+            && result.is_none()
+            && hit_rect(mx, my, AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_W, AGARI_BTN_H)
+        {
             result = Some(OverlayClick::Action(ClientAction::Tsumo));
         }
     }
@@ -146,10 +147,33 @@ pub(super) fn draw_action_buttons(
         const RIICHI_BTN_W: f32 = 80.0;
         const RIICHI_BTN_H: f32 = 40.0;
         let riichi_bg = Color::new(0.8, 0.2, 0.2, 1.0);
-        draw_rectangle(AGARI_BTN_X, AGARI_BTN_Y, RIICHI_BTN_W, RIICHI_BTN_H, riichi_bg);
-        draw_rectangle_lines(AGARI_BTN_X, AGARI_BTN_Y, RIICHI_BTN_W, RIICHI_BTN_H, 2.0, WHITE);
-        draw_jp_text(font, "リーチ", AGARI_BTN_X + 8.0, AGARI_BTN_Y + RIICHI_BTN_H - 8.0, SMALL_FONT, WHITE);
-        if clicked && result.is_none() && hit_rect(mx, my, AGARI_BTN_X, AGARI_BTN_Y, RIICHI_BTN_W, RIICHI_BTN_H) {
+        draw_rectangle(
+            AGARI_BTN_X,
+            AGARI_BTN_Y,
+            RIICHI_BTN_W,
+            RIICHI_BTN_H,
+            riichi_bg,
+        );
+        draw_rectangle_lines(
+            AGARI_BTN_X,
+            AGARI_BTN_Y,
+            RIICHI_BTN_W,
+            RIICHI_BTN_H,
+            2.0,
+            WHITE,
+        );
+        draw_jp_text(
+            font,
+            "リーチ",
+            AGARI_BTN_X + 8.0,
+            AGARI_BTN_Y + RIICHI_BTN_H - 8.0,
+            SMALL_FONT,
+            WHITE,
+        );
+        if clicked
+            && result.is_none()
+            && hit_rect(mx, my, AGARI_BTN_X, AGARI_BTN_Y, RIICHI_BTN_W, RIICHI_BTN_H)
+        {
             result = Some(OverlayClick::ToggleRiichi);
         }
     }
@@ -162,7 +186,14 @@ pub(super) fn draw_action_buttons(
         let kan_bg = Color::new(0.1, 0.3, 0.8, 1.0);
         draw_rectangle(x, 670.0, KAN_BTN_W, KAN_BTN_H, kan_bg);
         draw_rectangle_lines(x, 670.0, KAN_BTN_W, KAN_BTN_H, 2.0, WHITE);
-        draw_jp_text(font, &format!("{}カン", tile.to_string()), x + 10.0, 697.0, SMALL_FONT, WHITE);
+        draw_jp_text(
+            font,
+            &format!("{tile}カン"),
+            x + 10.0,
+            697.0,
+            SMALL_FONT,
+            WHITE,
+        );
         if clicked && result.is_none() && hit_rect(mx, my, x, 670.0, KAN_BTN_W, KAN_BTN_H) {
             result = Some(OverlayClick::Action(ClientAction::Kan {
                 tile_index: tile.get() as usize,
@@ -214,8 +245,14 @@ fn draw_call_overlay(
     mx: f32,
     my: f32,
 ) -> Option<OverlayClick> {
-    let has_ron = state.available_calls.iter().any(|c| matches!(c, AvailableCall::Ron));
-    let has_non_ron = state.available_calls.iter().any(|c| !matches!(c, AvailableCall::Ron));
+    let has_ron = state
+        .available_calls
+        .iter()
+        .any(|c| matches!(c, AvailableCall::Ron));
+    let has_non_ron = state
+        .available_calls
+        .iter()
+        .any(|c| !matches!(c, AvailableCall::Ron));
 
     if !has_non_ron {
         // ロンのみ：和了ボタンを右下に単独表示
@@ -264,8 +301,21 @@ fn draw_call_overlay(
     }
 
     // パネル背景
-    draw_rectangle(panel_x, panel_y, panel_w, panel_h, Color::new(0.0, 0.0, 0.0, 0.88));
-    draw_rectangle_lines(panel_x, panel_y, panel_w, panel_h, 2.0, Color::new(1.0, 0.85, 0.3, 1.0));
+    draw_rectangle(
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        Color::new(0.0, 0.0, 0.0, 0.88),
+    );
+    draw_rectangle_lines(
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        2.0,
+        Color::new(1.0, 0.85, 0.3, 1.0),
+    );
 
     draw_jp_text(
         font,
@@ -307,9 +357,13 @@ fn draw_call_overlay(
                 draw_jp_text(font, "ポン", x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
                 if clicked && result.is_none() && hit_rect(mx, my, x, base_y, btn_w, btn_h) {
                     result = if options.len() == 1 {
-                        Some(OverlayClick::Action(ClientAction::Pon { tiles: options[0] }))
+                        Some(OverlayClick::Action(ClientAction::Pon {
+                            tiles: options[0],
+                        }))
                     } else if !options.is_empty() {
-                        Some(OverlayClick::ShowPonSelection { options: options.clone() })
+                        Some(OverlayClick::ShowPonSelection {
+                            options: options.clone(),
+                        })
                     } else {
                         None
                     };
@@ -319,12 +373,14 @@ fn draw_call_overlay(
                 draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
                 draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
                 draw_jp_text(font, "カン", x + 18.0, base_y + 27.0, SMALL_FONT, WHITE);
-                if clicked && result.is_none() && hit_rect(mx, my, x, base_y, btn_w, btn_h) {
-                    if let Some(tile) = state.call_target_tile {
-                        result = Some(OverlayClick::Action(ClientAction::Kan {
-                            tile_index: tile.get() as usize,
-                        }));
-                    }
+                if clicked
+                    && result.is_none()
+                    && hit_rect(mx, my, x, base_y, btn_w, btn_h)
+                    && let Some(tile) = state.call_target_tile
+                {
+                    result = Some(OverlayClick::Action(ClientAction::Kan {
+                        tile_index: tile.get() as usize,
+                    }));
                 }
             }
             AvailableCall::Chi { options } => {
@@ -333,9 +389,13 @@ fn draw_call_overlay(
                 draw_jp_text(font, "チー", x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
                 if clicked && result.is_none() && hit_rect(mx, my, x, base_y, btn_w, btn_h) {
                     result = if options.len() == 1 {
-                        Some(OverlayClick::Action(ClientAction::Chi { tiles: options[0] }))
+                        Some(OverlayClick::Action(ClientAction::Chi {
+                            tiles: options[0],
+                        }))
                     } else if !options.is_empty() {
-                        Some(OverlayClick::ShowChiSelection { options: options.clone() })
+                        Some(OverlayClick::ShowChiSelection {
+                            options: options.clone(),
+                        })
                     } else {
                         None
                     };
@@ -369,14 +429,14 @@ fn draw_chi_selection_overlay(
 ) -> Option<OverlayClick> {
     let called_tile = state.call_target_tile?;
     draw_meld_selection_overlay(
-        font,
-        tile_textures,
-        "チーの組み合わせを選択",
-        called_tile,
-        &state.chi_pending_options,
-        clicked,
-        mx,
-        my,
+        MeldSelectionOverlay {
+            font,
+            tile_textures,
+            title: "チーの組み合わせを選択",
+            called_tile,
+            options: &state.chi_pending_options,
+            click: ClickState { clicked, mx, my },
+        },
         |opt| ClientAction::Chi { tiles: opt },
     )
 }
@@ -391,30 +451,48 @@ fn draw_pon_selection_overlay(
 ) -> Option<OverlayClick> {
     let called_tile = state.call_target_tile?;
     draw_meld_selection_overlay(
-        font,
-        tile_textures,
-        "ポンの組み合わせを選択",
-        called_tile,
-        &state.pon_pending_options,
-        clicked,
-        mx,
-        my,
+        MeldSelectionOverlay {
+            font,
+            tile_textures,
+            title: "ポンの組み合わせを選択",
+            called_tile,
+            options: &state.pon_pending_options,
+            click: ClickState { clicked, mx, my },
+        },
         |opt| ClientAction::Pon { tiles: opt },
     )
 }
 
 /// チー／ポン選択オーバーレイの共通描画処理。描画しながらクリックを判定する。
-fn draw_meld_selection_overlay(
-    font: Option<&Font>,
-    tile_textures: &TileTextures,
-    title: &str,
-    called_tile: Tile,
-    options: &[[Tile; 2]],
+struct ClickState {
     clicked: bool,
     mx: f32,
     my: f32,
+}
+
+struct MeldSelectionOverlay<'a> {
+    font: Option<&'a Font>,
+    tile_textures: &'a TileTextures,
+    title: &'a str,
+    called_tile: Tile,
+    options: &'a [[Tile; 2]],
+    click: ClickState,
+}
+
+fn draw_meld_selection_overlay(
+    overlay: MeldSelectionOverlay<'_>,
     make_action: impl Fn([Tile; 2]) -> ClientAction,
 ) -> Option<OverlayClick> {
+    let MeldSelectionOverlay {
+        font,
+        tile_textures,
+        title,
+        called_tile,
+        options,
+        click,
+    } = overlay;
+    let ClickState { clicked, mx, my } = click;
+
     let tile_w = CHI_SEL_TILE_W;
     let tile_h = CHI_SEL_TILE_H;
     let tile_gap = CHI_SEL_TILE_GAP;
@@ -427,8 +505,21 @@ fn draw_meld_selection_overlay(
     let panel_x = CALL_PANEL_RIGHT_X_NO_RON - panel_w;
     let panel_y = CALL_PANEL_BOTTOM_Y_NO_RON - panel_h;
 
-    draw_rectangle(panel_x, panel_y, panel_w, panel_h, Color::new(0.0, 0.0, 0.0, 0.88));
-    draw_rectangle_lines(panel_x, panel_y, panel_w, panel_h, 2.0, Color::new(1.0, 0.85, 0.3, 1.0));
+    draw_rectangle(
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        Color::new(0.0, 0.0, 0.0, 0.88),
+    );
+    draw_rectangle_lines(
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        2.0,
+        Color::new(1.0, 0.85, 0.3, 1.0),
+    );
 
     draw_jp_text(
         font,
@@ -449,8 +540,21 @@ fn draw_meld_selection_overlay(
         let hovered = hit_rect(mx, my, ox, opts_y, opt_w, tile_h);
 
         if hovered {
-            draw_rectangle(ox - 4.0, opts_y - 4.0, opt_w + 8.0, tile_h + 8.0, Color::new(1.0, 1.0, 0.4, 0.22));
-            draw_rectangle_lines(ox - 4.0, opts_y - 4.0, opt_w + 8.0, tile_h + 8.0, 2.0, Color::new(1.0, 1.0, 0.4, 0.9));
+            draw_rectangle(
+                ox - 4.0,
+                opts_y - 4.0,
+                opt_w + 8.0,
+                tile_h + 8.0,
+                Color::new(1.0, 1.0, 0.4, 0.22),
+            );
+            draw_rectangle_lines(
+                ox - 4.0,
+                opts_y - 4.0,
+                opt_w + 8.0,
+                tile_h + 8.0,
+                2.0,
+                Color::new(1.0, 1.0, 0.4, 0.9),
+            );
         }
 
         let mut display_tiles = [opt[0], opt[1], called_tile];
@@ -458,8 +562,19 @@ fn draw_meld_selection_overlay(
 
         for (ti, tile) in display_tiles.iter().enumerate() {
             let tx = ox + ti as f32 * (tile_w + tile_gap);
-            let tint = if *tile == called_tile { Color::new(1.0, 1.0, 0.6, 1.0) } else { WHITE };
-            draw_tile_sprite(tile_textures.for_tile(tile), tx, opts_y, tile_w - 1.0, tile_h - 1.0, tint);
+            let tint = if *tile == called_tile {
+                Color::new(1.0, 1.0, 0.6, 1.0)
+            } else {
+                WHITE
+            };
+            draw_tile_sprite(
+                tile_textures.for_tile(tile),
+                tx,
+                opts_y,
+                tile_w - 1.0,
+                tile_h - 1.0,
+                tint,
+            );
         }
 
         if clicked && result.is_none() && hovered {
@@ -473,10 +588,21 @@ fn draw_meld_selection_overlay(
     let cancel_x = panel_x + (panel_w - cancel_w) / 2.0;
     let cancel_y = panel_y + panel_h - cancel_h - 14.0;
     let cancel_hovered = hit_rect(mx, my, cancel_x, cancel_y, cancel_w, cancel_h);
-    let cancel_bg = if cancel_hovered { Color::new(0.5, 0.5, 0.5, 1.0) } else { Color::new(0.3, 0.3, 0.3, 1.0) };
+    let cancel_bg = if cancel_hovered {
+        Color::new(0.5, 0.5, 0.5, 1.0)
+    } else {
+        Color::new(0.3, 0.3, 0.3, 1.0)
+    };
     draw_rectangle(cancel_x, cancel_y, cancel_w, cancel_h, cancel_bg);
     draw_rectangle_lines(cancel_x, cancel_y, cancel_w, cancel_h, 2.0, WHITE);
-    draw_jp_text(font, "キャンセル", cancel_x + 10.0, cancel_y + 24.0, FONT_SIZE, WHITE);
+    draw_jp_text(
+        font,
+        "キャンセル",
+        cancel_x + 10.0,
+        cancel_y + 24.0,
+        FONT_SIZE,
+        WHITE,
+    );
 
     if clicked && result.is_none() && cancel_hovered {
         result = Some(OverlayClick::CancelMeldSelection);
@@ -498,8 +624,21 @@ fn draw_nine_terminals_overlay(
     const PANEL_X: f32 = CALL_PANEL_RIGHT_X_NO_RON - PANEL_W;
     const PANEL_Y: f32 = CALL_PANEL_BOTTOM_Y_NO_RON - PANEL_H;
 
-    draw_rectangle(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, Color::new(0.0, 0.0, 0.0, 0.90));
-    draw_rectangle_lines(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, 2.0, Color::new(1.0, 0.85, 0.3, 1.0));
+    draw_rectangle(
+        PANEL_X,
+        PANEL_Y,
+        PANEL_W,
+        PANEL_H,
+        Color::new(0.0, 0.0, 0.0, 0.90),
+    );
+    draw_rectangle_lines(
+        PANEL_X,
+        PANEL_Y,
+        PANEL_W,
+        PANEL_H,
+        2.0,
+        Color::new(1.0, 0.85, 0.3, 1.0),
+    );
 
     draw_jp_text(
         font,
@@ -533,7 +672,14 @@ fn draw_nine_terminals_overlay(
     };
     draw_rectangle(declare_x, BTN_Y, BTN_W, BTN_H, declare_bg);
     draw_rectangle_lines(declare_x, BTN_Y, BTN_W, BTN_H, 2.0, WHITE);
-    draw_jp_text(font, "流局する", declare_x + 22.0, BTN_Y + 26.0, FONT_SIZE, WHITE);
+    draw_jp_text(
+        font,
+        "流局する",
+        declare_x + 22.0,
+        BTN_Y + 26.0,
+        FONT_SIZE,
+        WHITE,
+    );
 
     let pass_hovered = hit_rect(mx, my, pass_x, BTN_Y, BTN_W, BTN_H);
     let pass_bg = if pass_hovered {
@@ -543,7 +689,14 @@ fn draw_nine_terminals_overlay(
     };
     draw_rectangle(pass_x, BTN_Y, BTN_W, BTN_H, pass_bg);
     draw_rectangle_lines(pass_x, BTN_Y, BTN_W, BTN_H, 2.0, WHITE);
-    draw_jp_text(font, "続ける", pass_x + 26.0, BTN_Y + 26.0, FONT_SIZE, WHITE);
+    draw_jp_text(
+        font,
+        "続ける",
+        pass_x + 26.0,
+        BTN_Y + 26.0,
+        FONT_SIZE,
+        WHITE,
+    );
 
     if clicked {
         if declare_hovered {

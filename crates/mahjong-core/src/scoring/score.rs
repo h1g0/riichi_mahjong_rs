@@ -5,10 +5,10 @@ use anyhow::Result;
 use crate::hand::Hand;
 use crate::hand_info::hand_analyzer::HandAnalyzer;
 use crate::hand_info::status::Status;
-use crate::scoring::fu::{calculate_fu, FuResult};
+use crate::scoring::fu::{FuResult, calculate_fu};
+use crate::settings::Settings;
 use crate::winning_hand::checker;
 use crate::winning_hand::name::Kind;
-use crate::settings::Settings;
 
 /// 点数計算の結果
 #[derive(Debug, PartialEq, Eq)]
@@ -123,7 +123,7 @@ fn extract_yaku_list(
     let mut has_yakuman = false;
 
     // まず役満があるか確認
-    for (_, (_, is_valid, han)) in yaku_result {
+    for (_, is_valid, han) in yaku_result.values() {
         if *is_valid && *han >= 13 {
             has_yakuman = true;
             break;
@@ -155,11 +155,7 @@ pub fn determine_rank(han: u32, fu: u32, has_yakuman: bool) -> ScoreRank {
         ScoreRank::Baiman
     } else if han >= 6 {
         ScoreRank::Haneman
-    } else if han >= 5 {
-        ScoreRank::Mangan
-    } else if han == 4 && fu >= 30 {
-        ScoreRank::Mangan
-    } else if han == 3 && fu >= 60 {
+    } else if han >= 5 || (han == 4 && fu >= 30) || (han == 3 && fu >= 60) {
         ScoreRank::Mangan
     } else {
         ScoreRank::Normal
@@ -185,7 +181,7 @@ pub fn calculate_base_points(han: u32, fu: u32, rank: ScoreRank) -> u32 {
 
 /// 100点単位に切り上げる
 pub fn round_up_to_100(points: u32) -> u32 {
-    (points + 99) / 100 * 100
+    points.div_ceil(100) * 100
 }
 
 #[cfg(test)]
@@ -359,8 +355,8 @@ mod tests {
     #[test]
     fn test_mangan_non_dealer_tsumo() {
         let base = calculate_base_points(5, 30, ScoreRank::Mangan);
-        let dealer_pay = round_up_to_100(base * 2);  // 4000
-        let non_dealer_pay = round_up_to_100(base);   // 2000
+        let dealer_pay = round_up_to_100(base * 2); // 4000
+        let non_dealer_pay = round_up_to_100(base); // 2000
         assert_eq!(dealer_pay, 4000);
         assert_eq!(non_dealer_pay, 2000);
     }
@@ -369,7 +365,7 @@ mod tests {
     #[test]
     fn test_mangan_dealer_tsumo() {
         let base = calculate_base_points(5, 30, ScoreRank::Mangan);
-        let each_pay = round_up_to_100(base * 2);  // 4000
+        let each_pay = round_up_to_100(base * 2); // 4000
         assert_eq!(each_pay, 4000);
     }
 

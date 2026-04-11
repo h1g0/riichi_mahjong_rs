@@ -224,7 +224,7 @@ impl Table {
             }
             Some(RoundResult::Ron { winners, .. }) => {
                 // 和了者の中に親がいれば連荘（1人ロンでも複数ロンでも共通）
-                if winners.iter().any(|&w| w == self.dealer) {
+                if winners.contains(&self.dealer) {
                     self.honba += 1;
                 } else {
                     self.honba = 0;
@@ -331,12 +331,12 @@ mod tests {
             let round = table.current_round_mut().unwrap();
             if round.phase == TurnPhase::WaitForCalls {
                 for i in 0..4 {
-                    if let Some(ref cs) = round.call_state {
-                        if !cs.responded[i] {
-                            round.respond_to_call(i, CallResponse::Pass);
-                            if round.call_state.is_none() {
-                                break;
-                            }
+                    if let Some(ref cs) = round.call_state
+                        && !cs.responded[i]
+                    {
+                        round.respond_to_call(i, CallResponse::Pass);
+                        if round.call_state.is_none() {
+                            break;
                         }
                     }
                 }

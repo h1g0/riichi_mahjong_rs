@@ -36,9 +36,9 @@ impl LocalAdapter {
         // 人間以外のプレイヤーにCPUクライアントを割り当て
         let mut cpu_clients: [Option<CpuClient>; 4] = [None, None, None, None];
         let mut config_idx = 0;
-        for i in 0..4 {
+        for (i, cpu_client) in cpu_clients.iter_mut().enumerate() {
             if i != human_player {
-                cpu_clients[i] = Some(CpuClient::new(cpu_configs[config_idx].clone()));
+                *cpu_client = Some(CpuClient::new(cpu_configs[config_idx].clone()));
                 config_idx += 1;
             }
         }
@@ -159,10 +159,10 @@ impl LocalAdapter {
                 continue;
             }
 
-            if let Some(cpu) = &mut self.cpu_clients[*player_idx] {
-                if let Some(action) = cpu.handle_event(event) {
-                    actions.push((*player_idx, action));
-                }
+            if let Some(cpu) = &mut self.cpu_clients[*player_idx]
+                && let Some(action) = cpu.handle_event(event)
+            {
+                actions.push((*player_idx, action));
             }
         }
 
@@ -198,8 +198,7 @@ impl LocalAdapter {
     pub fn is_human_turn(&self) -> bool {
         match self.table.current_round() {
             Some(r) => {
-                r.current_player == self.human_player
-                    && r.phase == TurnPhase::WaitForDiscard
+                r.current_player == self.human_player && r.phase == TurnPhase::WaitForDiscard
             }
             None => false,
         }
@@ -230,8 +229,8 @@ mod tests {
     use mahjong_core::hand::Hand;
     use mahjong_core::tile::Tile;
     use mahjong_server::player::Player;
-    use mahjong_server::round::TurnPhase;
     use mahjong_server::protocol::ServerEvent;
+    use mahjong_server::round::TurnPhase;
 
     /// カン後にゲームが進行できることを確認するテスト
     #[test]
@@ -259,7 +258,12 @@ mod tests {
         let _ = adapter.poll_events(0);
 
         // player 0 が暗カンを実行
-        let kan_result = adapter.table.handle_action(0, ClientAction::Kan { tile_index: Tile::M1 as usize });
+        let kan_result = adapter.table.handle_action(
+            0,
+            ClientAction::Kan {
+                tile_index: Tile::M1 as usize,
+            },
+        );
         assert!(kan_result, "カンが失敗した");
 
         adapter.process_all_events();
@@ -267,18 +271,36 @@ mod tests {
         // カン後の状態確認
         {
             let round = adapter.table.current_round().unwrap();
-            assert_eq!(round.phase, TurnPhase::WaitForDiscard, "カン後のフェーズがWaitForDiscardでない");
+            assert_eq!(
+                round.phase,
+                TurnPhase::WaitForDiscard,
+                "カン後のフェーズがWaitForDiscardでない"
+            );
             assert_eq!(round.current_player, 0, "カン後の現在プレイヤーが0でない");
-            assert!(round.players[0].hand.drawn().is_some(), "カン後に嶺上牌が設定されていない");
+            assert!(
+                round.players[0].hand.drawn().is_some(),
+                "カン後に嶺上牌が設定されていない"
+            );
         }
 
         // イベントを取得
         let events = adapter.poll_events(0);
-        let has_tile_drawn = events.iter().any(|e| matches!(e, ServerEvent::TileDrawn { .. }));
-        assert!(has_tile_drawn, "カン後にTileDrawnイベントが来なかった: {:?}", events.iter().map(|e| std::mem::discriminant(e)).collect::<Vec<_>>());
+        let has_tile_drawn = events
+            .iter()
+            .any(|e| matches!(e, ServerEvent::TileDrawn { .. }));
+        assert!(
+            has_tile_drawn,
+            "カン後にTileDrawnイベントが来なかった: {:?}",
+            events
+                .iter()
+                .map(std::mem::discriminant)
+                .collect::<Vec<_>>()
+        );
 
         // 打牌して進行できることを確認
-        let discard_result = adapter.table.handle_action(0, ClientAction::Discard { tile: None });
+        let discard_result = adapter
+            .table
+            .handle_action(0, ClientAction::Discard { tile: None });
         assert!(discard_result, "カン後の打牌が失敗した");
     }
 
@@ -310,8 +332,11 @@ mod tests {
             round.phase.clone()
         };
         assert!(
-            phase == TurnPhase::WaitForDiscard || phase == TurnPhase::Draw || phase == TurnPhase::WaitForCalls,
-            "CPUカン後にゲームが詰まった: フェーズ = {:?}", phase
+            phase == TurnPhase::WaitForDiscard
+                || phase == TurnPhase::Draw
+                || phase == TurnPhase::WaitForCalls,
+            "CPUカン後にゲームが詰まった: フェーズ = {:?}",
+            phase
         );
 
         // さらに10ターン分ゲームを進める（フリーズしないことを確認）
@@ -331,7 +356,9 @@ mod tests {
                     (round.phase.clone(), round.current_player)
                 };
                 if phase == TurnPhase::WaitForDiscard && current_player == 0 {
-                    adapter.table.handle_action(0, ClientAction::Discard { tile: None });
+                    adapter
+                        .table
+                        .handle_action(0, ClientAction::Discard { tile: None });
                     adapter.process_all_events();
                 }
             }
@@ -339,7 +366,11 @@ mod tests {
             {
                 let (phase, human_responded) = {
                     let round = adapter.table.current_round().unwrap();
-                    let responded = round.call_state.as_ref().map(|cs| cs.responded[0]).unwrap_or(true);
+                    let responded = round
+                        .call_state
+                        .as_ref()
+                        .map(|cs| cs.responded[0])
+                        .unwrap_or(true);
                     (round.phase.clone(), responded)
                 };
                 if phase == TurnPhase::WaitForCalls && !human_responded {

@@ -1,6 +1,7 @@
 use crate::hand_info::meld::*;
 use crate::tile::*;
 use std::collections::VecDeque;
+use std::fmt;
 
 /// 手牌
 #[derive(Debug, Clone)]
@@ -34,7 +35,7 @@ impl Hand {
     }
 
     /// 指定インデックスの牌を手牌から除去する
-    pub fn remove_tiles_by_indices(&mut self, indices: &mut Vec<usize>) {
+    pub fn remove_tiles_by_indices(&mut self, indices: &mut [usize]) {
         indices.sort_unstable_by(|a, b| b.cmp(a));
         for &idx in indices.iter() {
             if idx < self.tiles.len() {
@@ -44,7 +45,7 @@ impl Hand {
     }
 
     pub fn new(tiles: Vec<Tile>, drawn: Option<Tile>) -> Hand {
-        return Hand::new_with_melds(tiles, Vec::new(), drawn);
+        Hand::new_with_melds(tiles, Vec::new(), drawn)
     }
     pub fn new_with_melds(tiles: Vec<Tile>, melds: Vec<Meld>, drawn: Option<Tile>) -> Hand {
         Hand {
@@ -75,7 +76,7 @@ impl Hand {
     }
     /// 種類別に各牌の数をカウントする
     pub fn summarize_tiles(&self) -> TileSummarize {
-        let mut result: TileSummarize = [0; Tile::LEN as usize];
+        let mut result: TileSummarize = [0; Tile::LEN];
 
         // 通常の手牌をカウント
         for i in 0..self.tiles.len() {
@@ -97,7 +98,7 @@ impl Hand {
             result[t.get() as usize] += 1;
         }
 
-        return result;
+        result
     }
 
     /// 絵文字として出力する
@@ -123,40 +124,12 @@ impl Hand {
         if let Some(tsumo) = self.drawn {
             result.push_str(&format!(" {}", tsumo.to_char()));
         }
-        return result;
-    }
-
-    /// 文字列として出力する
-    ///
-    /// `to_short_string`と違い、こちらは牌の種類を省略せずに`1m2m3m1p2p3p...`と必ず2文字単位で出力する。
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
-        for i in 0..self.tiles.len() {
-            result.push_str(&self.tiles[i].to_string());
-        }
-
-        for i in 0..self.melds.len() {
-            result.push_str(&format!(
-                " {}{}{}",
-                self.melds[i].tiles[0].to_string(),
-                self.melds[i].tiles[1].to_string(),
-                self.melds[i].tiles[2].to_string()
-            ));
-            // カンなら4枚目を追加する
-            if self.melds[i].category.is_kan() {
-                result.push_str(&format!("{}", self.melds[i].tiles[0].to_string(),));
-            }
-        }
-
-        if let Some(tsumo) = self.drawn {
-            result.push_str(&format!(" {}", tsumo.to_string()));
-        }
-        return result;
+        result
     }
 
     /// `Vec<Tile>`から連続した牌の種類を圧縮した文字列を返す
     fn make_short_str(mut tiles: Vec<Tile>) -> String {
-        if tiles.len() == 0 {
+        if tiles.is_empty() {
             return String::from("");
         } else if tiles.len() == 1 {
             return tiles[0].to_string();
@@ -179,7 +152,7 @@ impl Hand {
             }
             prev_suit = now_suit;
         }
-        return result;
+        result
     }
 
     /// 文字列として出力する
@@ -198,31 +171,30 @@ impl Hand {
         }
 
         if let Some(tsumo) = self.drawn {
-            result.push_str(&format!(" {}", tsumo.to_string()));
+            result.push_str(&format!(" {tsumo}"));
         }
-        return result;
+        result
     }
 
     /// 文字列から`Vec<Tile>`を返す
     fn str_to_tiles(hand_str: &str) -> Vec<Tile> {
         let mut result: Vec<Tile> = Vec::new();
         let mut stack: VecDeque<char> = VecDeque::new();
-        let mut itr = hand_str.chars();
-        while let Some(c) = itr.next() {
+        for c in hand_str.chars() {
             if matches!(c, '1'..='9') {
                 stack.push_back(c);
             } else if matches!(c, 'm' | 'p' | 's' | 'z') {
                 while let Some(t) = stack.pop_front() {
                     // 字牌の場合は`8z`と`9z`は存在しない
-                    if matches!(c, 'm' | 'p' | 's') || (c == 'z' && matches!(t, '1'..='7')) {
-                        if let Some(t) = Tile::from(&format!("{}{}", t, c)) {
-                            result.push(t);
-                        }
+                    if (matches!(c, 'm' | 'p' | 's') || (c == 'z' && matches!(t, '1'..='7')))
+                        && let Some(t) = Tile::from(&format!("{}{}", t, c))
+                    {
+                        result.push(t);
                     }
                 }
             }
         }
-        return result;
+        result
     }
 
     pub fn from(hand_str: &str) -> Hand {
@@ -231,11 +203,11 @@ impl Hand {
         let mut melds: Vec<Meld> = Vec::new();
         let mut drawn: Option<Tile> = None;
 
-        while let Some(tile_str) = itr.next() {
+        for tile_str in itr {
             let tile_vec = Hand::str_to_tiles(tile_str);
             match tile_vec.len() {
                 1 => {
-                    let t = *tile_vec.get(0).unwrap();
+                    let t = *tile_vec.first().unwrap();
                     drawn = Some(t);
                 }
                 3 => {
@@ -261,18 +233,48 @@ impl Hand {
                 _ => {}
             }
         }
-        return Hand::new_with_melds(hand, melds, drawn);
+        Hand::new_with_melds(hand, melds, drawn)
     }
 
     pub fn from_summarized(sum: &TileSummarize) -> Hand {
         let mut result: Vec<Tile> = Vec::new();
 
-        for i in Tile::M1 as usize..Tile::LEN {
-            for _ in 0..sum[i] {
+        for (i, &count) in sum
+            .iter()
+            .enumerate()
+            .take(Tile::LEN)
+            .skip(Tile::M1 as usize)
+        {
+            for _ in 0..count {
                 result.push(Tile::new(i as TileType));
             }
         }
-        return Hand::new(result, None);
+        Hand::new(result, None)
+    }
+}
+
+/// 文字列として出力する
+///
+/// `to_short_string`と違い、こちらは牌の種類を省略せずに`1m2m3m1p2p3p...`と必ず2文字単位で出力する。
+impl fmt::Display for Hand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for tile in &self.tiles {
+            write!(f, "{tile}")?;
+        }
+
+        for meld in &self.melds {
+            write!(f, " {}{}{}", meld.tiles[0], meld.tiles[1], meld.tiles[2])?;
+            // カンなら4枚目を追加する
+            if meld.category.is_kan() {
+                write!(f, "{}", meld.tiles[0])?;
+            }
+        }
+
+        if let Some(tsumo) = self.drawn {
+            write!(f, " {tsumo}")?;
+        }
+
+        Ok(())
     }
 }
 #[cfg(test)]

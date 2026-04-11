@@ -9,10 +9,10 @@ use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
 use mahjong_core::hand_info::meld::Meld;
 use mahjong_core::hand_info::status::Status;
 use mahjong_core::scoring::score::{
-    calculate_base_points, calculate_score, determine_rank, round_up_to_100, ScoreRank, ScoreResult,
+    ScoreRank, ScoreResult, calculate_base_points, calculate_score, determine_rank, round_up_to_100,
 };
 use mahjong_core::settings::Settings;
-use mahjong_core::tile::{dora_indicator_to_dora, Tile, TileType, Wind};
+use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
 
 use crate::player::Player;
 
@@ -261,11 +261,11 @@ pub fn calculate_tsumo_score_deltas(
     if winner_is_dealer {
         // 親ツモ: 各子が dealer_tsumo_all + 本場ボーナス を支払う
         let each_pay = score_result.dealer_tsumo_all as i32 + honba_bonus;
-        for i in 0..4 {
+        for (i, delta) in deltas.iter_mut().enumerate() {
             if i == winner {
-                deltas[i] = each_pay * 3;
+                *delta = each_pay * 3;
             } else {
-                deltas[i] = -each_pay;
+                *delta = -each_pay;
             }
         }
     } else {
@@ -273,15 +273,15 @@ pub fn calculate_tsumo_score_deltas(
         let dealer_pay = score_result.non_dealer_tsumo_dealer as i32 + honba_bonus;
         let non_dealer_pay = score_result.non_dealer_tsumo_non_dealer as i32 + honba_bonus;
         let mut total_gain = 0i32;
-        for i in 0..4 {
+        for (i, delta) in deltas.iter_mut().enumerate() {
             if i == winner {
                 continue;
             }
             if i == dealer_idx {
-                deltas[i] = -dealer_pay;
+                *delta = -dealer_pay;
                 total_gain += dealer_pay;
             } else {
-                deltas[i] = -non_dealer_pay;
+                *delta = -non_dealer_pay;
                 total_gain += non_dealer_pay;
             }
         }

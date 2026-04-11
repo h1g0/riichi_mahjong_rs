@@ -153,11 +153,9 @@ impl CpuClient {
         }
 
         // リーチ可能か検討
-        if self.state.can_riichi {
-            if self.should_riichi() {
-                let tile = self.select_riichi_tile();
-                return ClientAction::Riichi { tile };
-            }
+        if self.state.can_riichi && self.should_riichi() {
+            let tile = self.select_riichi_tile();
+            return ClientAction::Riichi { tile };
         }
 
         // 暗カン検討
@@ -240,10 +238,10 @@ impl CpuClient {
 
         // チー判断
         for call in calls {
-            if let AvailableCall::Chi { options } = call {
-                if let Some(tiles) = self.select_chi_option(options) {
-                    return ClientAction::Chi { tiles };
-                }
+            if let AvailableCall::Chi { options } = call
+                && let Some(tiles) = self.select_chi_option(options)
+            {
+                return ClientAction::Chi { tiles };
             }
         }
 
@@ -481,8 +479,6 @@ impl CpuClient {
         None
     }
 
-
-
     /// 既存の副露を取得する
     fn build_existing_melds(&self) -> Vec<Meld> {
         let my_idx = super::state::CpuGameState::wind_to_index(self.state.my_seat_wind);
@@ -602,7 +598,7 @@ fn is_tanyao_tile(tile_type: u32) -> bool {
         return false;
     }
     let num = tile_type % 9;
-    num >= 1 && num <= 7
+    (1..=7).contains(&num)
 }
 
 #[cfg(test)]

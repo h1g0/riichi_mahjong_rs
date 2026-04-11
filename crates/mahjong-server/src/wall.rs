@@ -27,9 +27,7 @@ impl Wall {
             for copy in 0..4u8 {
                 // 赤ドラ: 5m, 5p, 5s の各1枚目を赤にする
                 let is_red = copy == 0
-                    && (tile_type == Tile::M5
-                        || tile_type == Tile::P5
-                        || tile_type == Tile::S5);
+                    && (tile_type == Tile::M5 || tile_type == Tile::P5 || tile_type == Tile::S5);
 
                 if is_red {
                     tiles.push(Tile::new_red(tile_type));
@@ -144,23 +142,29 @@ impl Wall {
 
         // 4枚ずつ3回配る
         for _ in 0..3 {
-            for player in 0..4 {
+            for hand in &mut hands {
                 for _ in 0..4 {
                     if let Some(tile) = self.draw() {
-                        hands[player].push(tile);
+                        hand.push(tile);
                     }
                 }
             }
         }
 
         // 1枚ずつ配る
-        for player in 0..4 {
+        for hand in &mut hands {
             if let Some(tile) = self.draw() {
-                hands[player].push(tile);
+                hand.push(tile);
             }
         }
 
         hands
+    }
+}
+
+impl Default for Wall {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -219,8 +223,8 @@ mod tests {
         let hands = wall.deal();
 
         // 各プレイヤー13枚
-        for i in 0..4 {
-            assert_eq!(hands[i].len(), 13, "Player {} should have 13 tiles", i);
+        for (i, hand) in hands.iter().enumerate() {
+            assert_eq!(hand.len(), 13, "Player {} should have 13 tiles", i);
         }
 
         // 配牌後の山の残り枚数: 122 - 52 = 70

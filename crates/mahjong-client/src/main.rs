@@ -47,7 +47,8 @@ async fn main() {
         match game_state.phase {
             GamePhase::Setup => {
                 // 設定画面の入力処理
-                if let Some(configs) = renderer::handle_setup_input(&mut game_state, font.as_ref()) {
+                if let Some(configs) = renderer::handle_setup_input(&mut game_state, font.as_ref())
+                {
                     // 対局開始
                     let mut new_adapter = LocalAdapter::with_cpu_configs(configs);
                     new_adapter.start_game();
@@ -78,16 +79,16 @@ async fn main() {
             GamePhase::RoundResult => {
                 if is_mouse_button_pressed(MouseButton::Left) {
                     // まだ表示していない和了者がいれば次のページへ、なければ次の局へ
-                    if !game_state.advance_win_result() {
-                        if let Some(ref mut adp) = adapter {
-                            if adp.is_game_over() {
-                                game_state.phase = GamePhase::GameOver;
-                            } else {
-                                adp.next_round();
-                                let events = adp.poll_events(0);
-                                for event in events {
-                                    game_state.handle_event(event);
-                                }
+                    if !game_state.advance_win_result()
+                        && let Some(ref mut adp) = adapter
+                    {
+                        if adp.is_game_over() {
+                            game_state.phase = GamePhase::GameOver;
+                        } else {
+                            adp.next_round();
+                            let events = adp.poll_events(0);
+                            for event in events {
+                                game_state.handle_event(event);
                             }
                         }
                     }

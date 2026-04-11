@@ -251,7 +251,7 @@ impl Player {
         }
 
         // パターン2: [tt-1, tt+1] + tt （例: 鳴く牌が5m, 手牌に4m6mがある）
-        if tt >= suit_start + 1 && tt + 1 < suit_end {
+        if tt > suit_start && tt + 1 < suit_end {
             add_pattern(tt - 1, tt + 1);
         }
 
@@ -276,7 +276,7 @@ impl Player {
 
     /// 暗カン可能な牌種一覧を返す
     pub fn ankan_options(&self) -> Vec<TileType> {
-        let mut counts = [0u8; Tile::LEN as usize];
+        let mut counts = [0u8; Tile::LEN];
         for tile in self.hand.tiles() {
             counts[tile.get() as usize] += 1;
         }
@@ -293,7 +293,7 @@ impl Player {
 
     /// 加カン可能な牌種一覧を返す
     pub fn kakan_options(&self) -> Vec<TileType> {
-        let mut counts = [0u8; Tile::LEN as usize];
+        let mut counts = [0u8; Tile::LEN];
         for tile in self.hand.tiles() {
             counts[tile.get() as usize] += 1;
         }
@@ -314,10 +314,10 @@ impl Player {
 
     /// 加カンで追加する実際の牌を返す（赤ドラも区別する）
     pub fn kakan_added_tile(&self, tile_type: TileType) -> Option<Tile> {
-        if let Some(drawn) = self.hand.drawn() {
-            if drawn.get() == tile_type {
-                return Some(drawn);
-            }
+        if let Some(drawn) = self.hand.drawn()
+            && drawn.get() == tile_type
+        {
+            return Some(drawn);
         }
 
         self.hand
@@ -696,12 +696,16 @@ mod tests {
         // 4mでチー: [2m,3m] or [3m,5m]
         let options = player.chi_options(Tile::new(Tile::M4));
         assert_eq!(options.len(), 2);
-        assert!(options
-            .iter()
-            .any(|o| o[0].get() == Tile::M2 && o[1].get() == Tile::M3));
-        assert!(options
-            .iter()
-            .any(|o| o[0].get() == Tile::M3 && o[1].get() == Tile::M5));
+        assert!(
+            options
+                .iter()
+                .any(|o| o[0].get() == Tile::M2 && o[1].get() == Tile::M3)
+        );
+        assert!(
+            options
+                .iter()
+                .any(|o| o[0].get() == Tile::M3 && o[1].get() == Tile::M5)
+        );
 
         // 字牌はチー不可
         let options = player.chi_options(Tile::new(Tile::Z1));
