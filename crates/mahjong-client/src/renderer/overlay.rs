@@ -146,17 +146,17 @@ pub(super) fn draw_action_buttons(
     if state.can_riichi {
         const RIICHI_BTN_W: f32 = 80.0;
         const RIICHI_BTN_H: f32 = 40.0;
+        // ツモボタンと重ならないよう、ツモボタンがある場合は上にずらす
+        let riichi_y = if state.can_tsumo {
+            AGARI_BTN_Y - RIICHI_BTN_H - AGARI_BTN_GAP
+        } else {
+            AGARI_BTN_Y
+        };
         let riichi_bg = Color::new(0.8, 0.2, 0.2, 1.0);
-        draw_rectangle(
-            AGARI_BTN_X,
-            AGARI_BTN_Y,
-            RIICHI_BTN_W,
-            RIICHI_BTN_H,
-            riichi_bg,
-        );
+        draw_rectangle(AGARI_BTN_X, riichi_y, RIICHI_BTN_W, RIICHI_BTN_H, riichi_bg);
         draw_rectangle_lines(
             AGARI_BTN_X,
-            AGARI_BTN_Y,
+            riichi_y,
             RIICHI_BTN_W,
             RIICHI_BTN_H,
             2.0,
@@ -166,13 +166,13 @@ pub(super) fn draw_action_buttons(
             font,
             "リーチ",
             AGARI_BTN_X + 8.0,
-            AGARI_BTN_Y + RIICHI_BTN_H - 8.0,
+            riichi_y + RIICHI_BTN_H - 8.0,
             SMALL_FONT,
             WHITE,
         );
         if clicked
             && result.is_none()
-            && hit_rect(mx, my, AGARI_BTN_X, AGARI_BTN_Y, RIICHI_BTN_W, RIICHI_BTN_H)
+            && hit_rect(mx, my, AGARI_BTN_X, riichi_y, RIICHI_BTN_W, RIICHI_BTN_H)
         {
             result = Some(OverlayClick::ToggleRiichi);
         }
