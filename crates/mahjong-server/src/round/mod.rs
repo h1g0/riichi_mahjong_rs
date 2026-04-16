@@ -20,6 +20,11 @@ use crate::protocol::{
 use crate::scoring;
 use crate::wall::Wall;
 
+/// リーチ棒1本の点数
+const RIICHI_STICK_VALUE: i32 = 1000;
+/// リーチ宣言に必要な最低持ち点
+const RIICHI_MIN_SCORE: i32 = 1000;
+
 /// ターンのフェーズ
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnPhase {
@@ -190,6 +195,7 @@ impl Round {
 
     /// テスト用：固定シードの牌山でラウンドを生成する（再現性のあるテスト向け）
     #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_seed(
         seed: u64,
         prevailing_wind: Wind,
@@ -795,7 +801,7 @@ impl Round {
 
             // 供託棒は打順最優先の和了者（winner_data の先頭）のみ取得
             let riichi_bonus = if winner_data.is_empty() {
-                (riichi_sticks as i32) * 1000
+                (riichi_sticks as i32) * RIICHI_STICK_VALUE
             } else {
                 0
             };
@@ -825,12 +831,13 @@ impl Round {
         }
         // 供託棒は打順最優先の和了者に付与
         if riichi_sticks > 0 {
-            self.players[winner_data[0].winner].score += (riichi_sticks as i32) * 1000;
+            self.players[winner_data[0].winner].score +=
+                (riichi_sticks as i32) * RIICHI_STICK_VALUE;
             self.riichi_sticks = 0;
         }
 
-        if !is_robbing_a_quad && let Some(last_discard) = self.players[loser].discards.last_mut() {
-            last_discard.is_called = true;
+        if !is_robbing_a_quad {
+            self.mark_last_discard_as_called(loser);
         }
 
         let scores = self.get_scores();
@@ -889,15 +896,10 @@ impl Round {
         self.players[caller].do_pon(called_tile, hand_tile_types, from);
 
         // 捨て牌を「鳴かれた」としてマーク
-        if let Some(last_discard) = self.players[discarder].discards.last_mut() {
-            last_discard.is_called = true;
-        }
+        self.mark_last_discard_as_called(discarder);
 
         // 鳴きにより全プレイヤーの一発フラグを無効化
-        for i in 0..4 {
-            self.players[i].is_ippatsu = false;
-            self.players[i].first_turn_interrupted = true;
-        }
+        self.invalidate_first_turn_flags();
 
         // 全プレイヤーにポン通知
         let caller_wind = self.players[caller].seat_wind;
@@ -939,14 +941,8 @@ impl Round {
         let from = Player::meld_from_relative(caller, discarder);
         self.players[caller].do_daiminkan(called_tile, from);
 
-        if let Some(last_discard) = self.players[discarder].discards.last_mut() {
-            last_discard.is_called = true;
-        }
-
-        for i in 0..4 {
-            self.players[i].is_ippatsu = false;
-            self.players[i].first_turn_interrupted = true;
-        }
+        self.mark_last_discard_as_called(discarder);
+        self.invalidate_first_turn_flags();
 
         let caller_wind = self.players[caller].seat_wind;
         let open = self.players[caller].hand.melds().last().unwrap();
@@ -987,15 +983,10 @@ impl Round {
         self.players[caller].do_chi(called_tile, hand_tile_types);
 
         // 捨て牌を「鳴かれた」としてマーク
-        if let Some(last_discard) = self.players[discarder].discards.last_mut() {
-            last_discard.is_called = true;
-        }
+        self.mark_last_discard_as_called(discarder);
 
         // 鳴きにより全プレイヤーの一発フラグを無効化
-        for i in 0..4 {
-            self.players[i].is_ippatsu = false;
-            self.players[i].first_turn_interrupted = true;
-        }
+        self.invalidate_first_turn_flags();
 
         // 全プレイヤーにチー通知
         let caller_wind = self.players[caller].seat_wind;
@@ -1034,10 +1025,7 @@ impl Round {
 
     fn execute_kakan(&mut self, caller: usize, tile_type: TileType) {
         self.players[caller].do_kakan(tile_type);
-        for i in 0..4 {
-            self.players[i].is_ippatsu = false;
-            self.players[i].first_turn_interrupted = true;
-        }
+        self.invalidate_first_turn_flags();
 
         let caller_wind = self.players[caller].seat_wind;
         let open = self.players[caller]
@@ -1170,10 +1158,8 @@ impl Round {
         } else {
             return false;
         }
-        for i in 0..4 {
-            self.players[i].is_ippatsu = false;
-            self.players[i].first_turn_interrupted = true;
-        }
+        // ankan 確定時のみこの行以降が実行される（kakan/不可の場合は early return 済み）
+        self.invalidate_first_turn_flags();
 
         let caller_wind = self.players[player_idx].seat_wind;
         let open = self.players[player_idx].hand.melds().last().unwrap();
@@ -1202,6 +1188,22 @@ impl Round {
         self.reveal_new_dora_indicator();
         self.draw_after_kan(player_idx);
         true
+    }
+
+    /// 指定プレイヤーの最後の捨て牌を「鳴かれた」としてマークする
+    fn mark_last_discard_as_called(&mut self, discarder: usize) {
+        if let Some(last_discard) = self.players[discarder].discards.last_mut() {
+            last_discard.is_called = true;
+        }
+    }
+
+    /// 鳴き・カンなどにより全プレイヤーの一発フラグと
+    /// 第1巡フラグ（四風連打の判定用）を無効化する
+    fn invalidate_first_turn_flags(&mut self) {
+        for player in &mut self.players {
+            player.is_ippatsu = false;
+            player.first_turn_interrupted = true;
+        }
     }
 
     fn reveal_new_dora_indicator(&mut self) {
@@ -1309,44 +1311,37 @@ impl Round {
     fn can_player_riichi(&self, player_idx: usize) -> bool {
         let player = &self.players[player_idx];
 
-        if player.is_riichi {
+        // 人間プレイヤー(idx=0)の場合のみ却下理由を診断ログに残す
+        let log_reject = |detail: std::fmt::Arguments| {
             if player_idx == 0 {
-                eprintln!(
-                    "[riichi-reject] reason=already_riichi player={}",
-                    player_idx
-                );
+                eprintln!("[riichi-reject] {detail}");
             }
+        };
+
+        if player.is_riichi {
+            log_reject(format_args!("reason=already_riichi player={player_idx}"));
             return false;
         }
         if !player.is_menzen() {
-            if player_idx == 0 {
-                eprintln!("[riichi-reject] reason=not_menzen player={}", player_idx);
-            }
+            log_reject(format_args!("reason=not_menzen player={player_idx}"));
             return false;
         }
-        if player.score < 1000 {
-            if player_idx == 0 {
-                eprintln!(
-                    "[riichi-reject] reason=score_too_low player={} score={}",
-                    player_idx, player.score
-                );
-            }
+        if player.score < RIICHI_MIN_SCORE {
+            log_reject(format_args!(
+                "reason=score_too_low player={player_idx} score={}",
+                player.score
+            ));
             return false;
         }
         if self.wall.remaining() < 1 {
-            if player_idx == 0 {
-                eprintln!(
-                    "[riichi-reject] reason=wall_empty player={} remaining={}",
-                    player_idx,
-                    self.wall.remaining()
-                );
-            }
+            log_reject(format_args!(
+                "reason=wall_empty player={player_idx} remaining={}",
+                self.wall.remaining()
+            ));
             return false;
         }
         if player.hand.drawn().is_none() {
-            if player_idx == 0 {
-                eprintln!("[riichi-reject] reason=no_drawn player={}", player_idx);
-            }
+            log_reject(format_args!("reason=no_drawn player={player_idx}"));
             return false;
         }
 
@@ -1544,7 +1539,7 @@ impl Round {
             player.score += delta;
         }
         if riichi_sticks > 0 {
-            self.players[winner].score += (riichi_sticks as i32) * 1000;
+            self.players[winner].score += (riichi_sticks as i32) * RIICHI_STICK_VALUE;
             self.riichi_sticks = 0;
         }
 
@@ -1572,7 +1567,7 @@ impl Round {
                     yaku_list: yaku_list.clone(),
                     han: score_result.han,
                     fu: score_result.fu,
-                    score_points: deltas[winner] + (riichi_sticks as i32) * 1000,
+                    score_points: deltas[winner] + (riichi_sticks as i32) * RIICHI_STICK_VALUE,
                     rank_name: rank_name.clone(),
                     uradora_indicators: uradora_indicators.clone(),
                     riichi_sticks,
