@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(round_up_to_100(base * 4), 2000);
     }
 
-    /// 3翻30符の子ロン: 4000点
+    /// 3翻30符の子ロン: 3900点
     #[test]
     fn test_3han_30fu_non_dealer_ron() {
         let rank = determine_rank(3, 30, false);
