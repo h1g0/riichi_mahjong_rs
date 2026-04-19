@@ -606,6 +606,19 @@ mod tests {
     use super::*;
     use mahjong_core::tile::Wind;
 
+    fn game_started_event(seat_wind: Wind, hand: Vec<Tile>) -> ServerEvent {
+        ServerEvent::GameStarted {
+            seat_wind,
+            hand,
+            scores: [25000; 4],
+            prevailing_wind: Wind::East,
+            dora_indicators: vec![],
+            round_number: 0,
+            honba: 0,
+            riichi_sticks: 0,
+        }
+    }
+
     #[test]
     fn test_cpu_config_creation() {
         let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
@@ -637,14 +650,45 @@ mod tests {
     }
 
     #[test]
+    fn test_is_yakuhai_seat_and_prevailing_wind() {
+        // 自風が南のとき、Z2（南）は役牌
+        assert!(is_yakuhai(Tile::Z2, Wind::South, Wind::East));
+        // 場風が南のとき、Z2（南）は役牌
+        assert!(is_yakuhai(Tile::Z2, Wind::East, Wind::South));
+        // どちらでもないとき、Z2 は役牌でない
+        assert!(!is_yakuhai(Tile::Z2, Wind::East, Wind::East));
+        // 三元牌は常に役牌
+        assert!(is_yakuhai(Tile::Z5, Wind::North, Wind::West));
+        assert!(is_yakuhai(Tile::Z6, Wind::North, Wind::West));
+        assert!(is_yakuhai(Tile::Z7, Wind::North, Wind::West));
+    }
+
+    #[test]
+    fn test_is_tanyao_tile() {
+        // 端牌・字牌は非タンヤオ
+        assert!(!is_tanyao_tile(Tile::M1));
+        assert!(!is_tanyao_tile(Tile::M9));
+        assert!(!is_tanyao_tile(Tile::P1));
+        assert!(!is_tanyao_tile(Tile::P9));
+        assert!(!is_tanyao_tile(Tile::S1));
+        assert!(!is_tanyao_tile(Tile::S9));
+        assert!(!is_tanyao_tile(Tile::Z1));
+        assert!(!is_tanyao_tile(Tile::Z7));
+        // 中張牌はタンヤオ
+        assert!(is_tanyao_tile(Tile::M2));
+        assert!(is_tanyao_tile(Tile::M8));
+        assert!(is_tanyao_tile(Tile::P5));
+        assert!(is_tanyao_tile(Tile::S7));
+    }
+
+    #[test]
     fn test_tsumo_action() {
         let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
         let mut client = CpuClient::new(config);
 
-        // ゲーム開始
-        client.handle_event(&ServerEvent::GameStarted {
-            seat_wind: Wind::East,
-            hand: vec![
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
                 Tile::new(Tile::M1),
                 Tile::new(Tile::M2),
                 Tile::new(Tile::M3),
@@ -659,15 +703,8 @@ mod tests {
                 Tile::new(Tile::Z1),
                 Tile::new(Tile::Z2),
             ],
-            scores: [25000; 4],
-            prevailing_wind: Wind::East,
-            dora_indicators: vec![],
-            round_number: 0,
-            honba: 0,
-            riichi_sticks: 0,
-        });
+        ));
 
-        // ツモ和了可能なイベント
         let action = client.handle_event(&ServerEvent::TileDrawn {
             tile: Tile::new(Tile::Z2),
             remaining_tiles: 50,
@@ -684,16 +721,7 @@ mod tests {
         let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
         let mut client = CpuClient::new(config);
 
-        client.handle_event(&ServerEvent::GameStarted {
-            seat_wind: Wind::South,
-            hand: vec![],
-            scores: [25000; 4],
-            prevailing_wind: Wind::East,
-            dora_indicators: vec![],
-            round_number: 0,
-            honba: 0,
-            riichi_sticks: 0,
-        });
+        client.handle_event(&game_started_event(Wind::South, vec![]));
 
         let action = client.handle_event(&ServerEvent::CallAvailable {
             tile: Tile::new(Tile::M1),
@@ -702,5 +730,317 @@ mod tests {
         });
 
         assert!(matches!(action, Some(ClientAction::Ron)));
+    }
+
+    #[test]
+    fn test_discard_when_in_riichi_state() {
+        // リーチ中はcan_tsumo=falseのときツモ切りを返す
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::S7),
+                Tile::new(Tile::S8),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z2),
+            ],
+        ));
+        client.handle_event(&ServerEvent::PlayerRiichi {
+            player: Wind::East,
+            scores: [24000, 25000, 25000, 25000],
+            riichi_sticks: 1,
+        });
+
+        let action = client.handle_event(&ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::M5),
+            remaining_tiles: 30,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        });
+
+        assert!(matches!(action, Some(ClientAction::Discard { tile: None })));
+    }
+
+    #[test]
+    fn test_riichi_action_when_can_riichi() {
+        // can_riichi=true かつリーチ積極度が十分なら Riichi を返す
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        // テンパイ1枚前の手牌（Z2待ち）
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::S7),
+                Tile::new(Tile::S8),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z2),
+            ],
+        ));
+
+        // Z3をツモ → Z2Z3の順子形成でもテンパイにならないが、
+        // can_riichi フラグをサーバが立てている想定
+        let action = client.handle_event(&ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::Z3),
+            remaining_tiles: 30,
+            can_tsumo: false,
+            can_riichi: true,
+            is_furiten: false,
+        });
+
+        assert!(matches!(action, Some(ClientAction::Riichi { .. })));
+    }
+
+    #[test]
+    fn test_discard_action_when_no_special_state() {
+        // ツモ和了不可・リーチ不可のとき Discard を返す
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::S7),
+                Tile::new(Tile::S8),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::Z2),
+                Tile::new(Tile::Z3),
+                Tile::new(Tile::Z4),
+                Tile::new(Tile::Z5),
+            ],
+        ));
+
+        let action = client.handle_event(&ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::Z6),
+            remaining_tiles: 30,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        });
+
+        assert!(matches!(action, Some(ClientAction::Discard { .. })));
+    }
+
+    #[test]
+    fn test_nine_terminals_high_value_continues() {
+        // HighValue は国士狙いで続行（declare=false）
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue);
+        let mut client = CpuClient::new(config);
+
+        let action = client.handle_event(&ServerEvent::NineTerminalsAvailable);
+
+        assert!(matches!(
+            action,
+            Some(ClientAction::NineTerminals { declare: false })
+        ));
+    }
+
+    #[test]
+    fn test_nine_terminals_non_high_value_declares() {
+        // HighValue 以外は流局宣言（declare=true）
+        for personality in [
+            CpuPersonality::Balanced,
+            CpuPersonality::Speedy,
+            CpuPersonality::Defensive,
+        ] {
+            let config = CpuConfig::new(CpuLevel::Normal, personality);
+            let mut client = CpuClient::new(config);
+
+            let action = client.handle_event(&ServerEvent::NineTerminalsAvailable);
+
+            assert!(
+                matches!(action, Some(ClientAction::NineTerminals { declare: true })),
+                "personality {personality:?} should declare nine terminals"
+            );
+        }
+    }
+
+    #[test]
+    fn test_handle_event_returns_none_for_non_actionable() {
+        // 打牌・他プレイヤーツモ等はアクション不要なので None
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        let events = [
+            ServerEvent::TileDiscarded {
+                player: Wind::South,
+                tile: Tile::new(Tile::M1),
+                is_tsumogiri: false,
+            },
+            ServerEvent::OtherPlayerDrew {
+                player: Wind::South,
+                remaining_tiles: 50,
+            },
+            ServerEvent::PlayerRiichi {
+                player: Wind::South,
+                scores: [25000; 4],
+                riichi_sticks: 1,
+            },
+        ];
+
+        for event in &events {
+            assert!(
+                client.handle_event(event).is_none(),
+                "expected None for {event:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_pass_when_chi_only_and_high_value() {
+        // HighValue はチーしない → Pass を返す
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::HighValue);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(
+            Wind::South,
+            vec![
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::S7),
+                Tile::new(Tile::S8),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z2),
+                Tile::new(Tile::Z2),
+            ],
+        ));
+
+        let action = client.handle_event(&ServerEvent::CallAvailable {
+            tile: Tile::new(Tile::M1),
+            discarder: Wind::East,
+            calls: vec![AvailableCall::Chi {
+                options: vec![[Tile::new(Tile::M2), Tile::new(Tile::M3)]],
+            }],
+        });
+
+        assert!(matches!(action, Some(ClientAction::Pass)));
+    }
+
+    #[test]
+    fn test_pon_yakuhai_normal_level() {
+        // 役牌ポンは向聴数が下がれば Normal レベルでも鳴く
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        // Z5（白）×2 を持つ一向聴の手牌: M123+P456+S789完成+Z5Z5雀頭+Z2Z3孤立
+        // → Z5 ポンで向聴数 1→0 に下がる
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::Z5),
+                Tile::new(Tile::Z5),
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::S7),
+                Tile::new(Tile::S8),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::Z2),
+                Tile::new(Tile::Z3),
+            ],
+        ));
+
+        let action = client.handle_event(&ServerEvent::CallAvailable {
+            tile: Tile::new(Tile::Z5),
+            discarder: Wind::South,
+            calls: vec![AvailableCall::Pon {
+                options: vec![[Tile::new(Tile::Z5), Tile::new(Tile::Z5)]],
+            }],
+        });
+
+        assert!(matches!(action, Some(ClientAction::Pon { .. })));
+    }
+
+    #[test]
+    fn test_pon_not_called_when_shanten_does_not_decrease() {
+        // ポンで向聴数が下がらない場合は Pass
+        // 国士無双テンパイ（13孤立牌+対子）では向聴数=0だが、
+        // Z5 をポンすると closed=false になり nm 向聴数が大幅に上がる
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        // 12種の孤立牌 + Z5×2: 国士无双テンパイ(向聴数=0)
+        // Z5 ポン後は closed 制約外れて向聴数が大幅に上昇する
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M9),
+                Tile::new(Tile::P1),
+                Tile::new(Tile::P9),
+                Tile::new(Tile::S1),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z2),
+                Tile::new(Tile::Z3),
+                Tile::new(Tile::Z4),
+                Tile::new(Tile::Z5),
+                Tile::new(Tile::Z5),
+                Tile::new(Tile::Z7),
+            ],
+        ));
+
+        let action = client.handle_event(&ServerEvent::CallAvailable {
+            tile: Tile::new(Tile::Z5),
+            discarder: Wind::South,
+            calls: vec![AvailableCall::Pon {
+                options: vec![[Tile::new(Tile::Z5), Tile::new(Tile::Z5)]],
+            }],
+        });
+
+        assert!(matches!(action, Some(ClientAction::Pass)));
+    }
+
+    #[test]
+    fn test_pass_when_daiminkan_only_non_strong_high_value() {
+        // 大明カンの場合、Strong+HighValue 以外はパス
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(Wind::South, vec![]));
+
+        let action = client.handle_event(&ServerEvent::CallAvailable {
+            tile: Tile::new(Tile::M1),
+            discarder: Wind::East,
+            calls: vec![AvailableCall::Daiminkan],
+        });
+
+        assert!(matches!(action, Some(ClientAction::Pass)));
     }
 }
