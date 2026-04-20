@@ -13,7 +13,7 @@ Implementation for Japanese Riichi Mahjong in Rust.
 - Fu calculation and score calculation are implemented.
 - A playable client that runs in both native and WASM builds is included.
   - The current client is a temporary simplified version.
-  - CPU opponent algorithms are planned for future implementation. At present, seats other than the player only draw and discard the drawn tile.
+  - A CPU opponent is implemented. The current CPU is a provisional implementation.
   - The design also takes future networked multiplayer implementation into consideration.
 - Vercel deployment using the included scripts is supported.
 
