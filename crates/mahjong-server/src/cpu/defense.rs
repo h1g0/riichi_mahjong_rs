@@ -240,7 +240,7 @@ fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mahjong_core::tile::Tile;
+    use mahjong_core::tile::{Tile, Wind};
 
     #[test]
     fn test_genbutsu() {
@@ -274,5 +274,327 @@ mod tests {
         // 字牌で見えていない → 低い安全度
         let safety = evaluate_safety_against_player(Tile::new(Tile::Z1), &discards, &state);
         assert!(safety < 0.5);
+    }
+
+    // --- evaluate_safety (public) ---
+
+    #[test]
+    fn test_evaluate_safety_no_riichi_returns_1() {
+        // リーチ者がいなければ常に安全度 1.0
+        let state = CpuGameState::new();
+        let safety = evaluate_safety(Tile::new(Tile::M5), &state);
+        assert_eq!(safety, 1.0);
+    }
+
+    #[test]
+    fn test_evaluate_safety_skips_self() {
+        // 自分自身のリーチはスキップされる
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.player_riichi[0] = true; // 東（自分）がリーチ
+        let safety = evaluate_safety(Tile::new(Tile::M5), &state);
+        assert_eq!(safety, 1.0);
+    }
+
+    #[test]
+    fn test_evaluate_safety_genbutsu_riichi_opponent() {
+        // リーチ者の現物は安全度 1.0
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.player_riichi[1] = true; // 南がリーチ
+        state.all_discards[1] = vec![Tile::new(Tile::M5)];
+        let safety = evaluate_safety(Tile::new(Tile::M5), &state);
+        assert_eq!(safety, 1.0);
+    }
+
+    #[test]
+    fn test_evaluate_safety_multiple_riichi_takes_min() {
+        // 複数リーチ者がいる場合、最小の安全度を返す
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.player_riichi[1] = true; // 南がリーチ: M5は現物 → 1.0
+        state.player_riichi[2] = true; // 西がリーチ: M5は非現物 → 低い安全度
+        state.all_discards[1] = vec![Tile::new(Tile::M5)];
+        let safety = evaluate_safety(Tile::new(Tile::M5), &state);
+        assert!(safety < 1.0);
+    }
+
+    // --- is_suji: 未カバーの num パターン ---
+
+    #[test]
+    fn test_suji_3m_when_6m_discarded() {
+        // 6m捨て → 3m, 9m は筋
+        let discards = vec![Tile::new(Tile::M6)];
+        assert!(is_suji(Tile::M3, &discards));
+        assert!(is_suji(Tile::M9, &discards));
+    }
+
+    #[test]
+    fn test_suji_4m_when_1m_or_7m_discarded() {
+        // 1m または 7m が捨てられている → 4m は筋
+        assert!(is_suji(Tile::M4, &[Tile::new(Tile::M1)]));
+        assert!(is_suji(Tile::M4, &[Tile::new(Tile::M7)]));
+        assert!(!is_suji(Tile::M4, &[Tile::new(Tile::M2)]));
+    }
+
+    #[test]
+    fn test_suji_5m_when_2m_or_8m_discarded() {
+        // 2m または 8m が捨てられている → 5m は筋
+        assert!(is_suji(Tile::M5, &[Tile::new(Tile::M2)]));
+        assert!(is_suji(Tile::M5, &[Tile::new(Tile::M8)]));
+        assert!(!is_suji(Tile::M5, &[Tile::new(Tile::M1)]));
+    }
+
+    #[test]
+    fn test_suji_6m_when_3m_or_9m_discarded() {
+        // 3m または 9m が捨てられている → 6m は筋
+        assert!(is_suji(Tile::M6, &[Tile::new(Tile::M3)]));
+        assert!(is_suji(Tile::M6, &[Tile::new(Tile::M9)]));
+        assert!(!is_suji(Tile::M6, &[Tile::new(Tile::M2)]));
+    }
+
+    #[test]
+    fn test_suji_pin_suit() {
+        // 筋は別の色でも成立し、異なる色の捨て牌は無効
+        let discards = vec![Tile::new(Tile::P4)];
+        assert!(is_suji(Tile::P1, &discards));
+        assert!(is_suji(Tile::P7, &discards));
+        assert!(!is_suji(Tile::M1, &discards)); // 万子には無関係
+    }
+
+    #[test]
+    fn test_suji_sou_suit() {
+        // 索子でも同様
+        let discards = vec![Tile::new(Tile::S5)];
+        assert!(is_suji(Tile::S2, &discards));
+        assert!(is_suji(Tile::S8, &discards));
+    }
+
+    #[test]
+    fn test_suji_honor_tile_returns_false() {
+        // 字牌に筋はない
+        let discards = vec![Tile::new(Tile::M4)];
+        assert!(!is_suji(Tile::Z1, &discards));
+        assert!(!is_suji(Tile::Z7, &discards));
+    }
+
+    #[test]
+    fn test_suji_no_partner_in_discards() {
+        // 筋パートナーが捨てられていなければ false
+        let discards = vec![Tile::new(Tile::M3)];
+        assert!(!is_suji(Tile::M1, &discards)); // M1 のパートナーは M4
+    }
+
+    // --- evaluate_safety_against_player: 各安全度の返り値 ---
+
+    #[test]
+    fn test_suji_safety_value() {
+        // 筋牌の安全度は 0.75
+        let discards = vec![Tile::new(Tile::M4)];
+        let state = CpuGameState::new();
+        let safety = evaluate_safety_against_player(Tile::new(Tile::M1), &discards, &state);
+        assert_eq!(safety, 0.75);
+    }
+
+    #[test]
+    fn test_kabe_safety_value() {
+        // 壁牌の安全度は 0.70
+        // 2m が4枚見えている → 1m を含む唯一の順子(123m)がブロック
+        let mut state = CpuGameState::new();
+        state.all_discards[0] = vec![Tile::new(Tile::M2); 4];
+        let discards: Vec<Tile> = vec![];
+        let safety = evaluate_safety_against_player(Tile::new(Tile::M1), &discards, &state);
+        assert_eq!(safety, 0.7);
+    }
+
+    #[test]
+    fn test_end_tile_safety() {
+        // 1m / 9m → 0.4
+        let state = CpuGameState::new();
+        let discards: Vec<Tile> = vec![];
+        assert_eq!(
+            evaluate_safety_against_player(Tile::new(Tile::M1), &discards, &state),
+            0.4
+        );
+        assert_eq!(
+            evaluate_safety_against_player(Tile::new(Tile::M9), &discards, &state),
+            0.4
+        );
+    }
+
+    #[test]
+    fn test_near_end_tile_safety() {
+        // 2m / 8m → 0.3
+        let state = CpuGameState::new();
+        let discards: Vec<Tile> = vec![];
+        assert_eq!(
+            evaluate_safety_against_player(Tile::new(Tile::M2), &discards, &state),
+            0.3
+        );
+        assert_eq!(
+            evaluate_safety_against_player(Tile::new(Tile::M8), &discards, &state),
+            0.3
+        );
+    }
+
+    #[test]
+    fn test_3_7_tile_safety() {
+        // 3m / 7m → 0.2
+        let state = CpuGameState::new();
+        let discards: Vec<Tile> = vec![];
+        assert_eq!(
+            evaluate_safety_against_player(Tile::new(Tile::M3), &discards, &state),
+            0.2
+        );
+        assert_eq!(
+            evaluate_safety_against_player(Tile::new(Tile::M7), &discards, &state),
+            0.2
+        );
+    }
+
+    #[test]
+    fn test_middle_tile_safety() {
+        // 4m / 5m / 6m → 0.15
+        let state = CpuGameState::new();
+        let discards: Vec<Tile> = vec![];
+        assert_eq!(
+            evaluate_safety_against_player(Tile::new(Tile::M4), &discards, &state),
+            0.15
+        );
+        assert_eq!(
+            evaluate_safety_against_player(Tile::new(Tile::M5), &discards, &state),
+            0.15
+        );
+        assert_eq!(
+            evaluate_safety_against_player(Tile::new(Tile::M6), &discards, &state),
+            0.15
+        );
+    }
+
+    #[test]
+    fn test_honor_tile_visible_counts() {
+        // 字牌の見え枚数に応じた安全度
+        let discards: Vec<Tile> = vec![];
+        {
+            let state = CpuGameState::new();
+            assert_eq!(
+                evaluate_safety_against_player(Tile::new(Tile::Z1), &discards, &state),
+                0.3
+            );
+        }
+        {
+            let mut state = CpuGameState::new();
+            state.my_hand = vec![Tile::new(Tile::Z1)];
+            assert_eq!(
+                evaluate_safety_against_player(Tile::new(Tile::Z1), &discards, &state),
+                0.4
+            );
+        }
+        {
+            let mut state = CpuGameState::new();
+            state.my_hand = vec![Tile::new(Tile::Z1); 2];
+            assert_eq!(
+                evaluate_safety_against_player(Tile::new(Tile::Z1), &discards, &state),
+                0.6
+            );
+        }
+        {
+            let mut state = CpuGameState::new();
+            state.my_hand = vec![Tile::new(Tile::Z1); 3];
+            assert_eq!(
+                evaluate_safety_against_player(Tile::new(Tile::Z1), &discards, &state),
+                0.95
+            );
+        }
+        {
+            let mut state = CpuGameState::new();
+            state.my_hand = vec![Tile::new(Tile::Z1); 4];
+            assert_eq!(
+                evaluate_safety_against_player(Tile::new(Tile::Z1), &discards, &state),
+                1.0
+            );
+        }
+    }
+
+    // --- is_kabe ---
+
+    #[test]
+    fn test_kabe_1m_when_2m_exhausted() {
+        // 2m が4枚見えている → 1m の唯一の順子(123m)がブロック → 壁
+        let mut counts = [0u8; 34];
+        counts[Tile::M2 as usize] = 4;
+        assert!(is_kabe(Tile::M1, &counts));
+    }
+
+    #[test]
+    fn test_kabe_1m_not_blocked() {
+        // 壁牌がなければ false
+        let counts = [0u8; 34];
+        assert!(!is_kabe(Tile::M1, &counts));
+    }
+
+    #[test]
+    fn test_kabe_9m_when_8m_exhausted() {
+        // 8m が4枚見えている → 9m の唯一の順子(789m)がブロック → 壁
+        let mut counts = [0u8; 34];
+        counts[Tile::M8 as usize] = 4;
+        assert!(is_kabe(Tile::M9, &counts));
+    }
+
+    #[test]
+    fn test_kabe_2m_fully_blocked() {
+        // 3m が4枚見えている → 123m と 234m の両方がブロック → 壁
+        let mut counts = [0u8; 34];
+        counts[Tile::M3 as usize] = 4;
+        assert!(is_kabe(Tile::M2, &counts));
+    }
+
+    #[test]
+    fn test_kabe_2m_partially_blocked() {
+        // 1m のみ4枚 → 123m はブロックされるが 234m はブロックされない → false
+        let mut counts = [0u8; 34];
+        counts[Tile::M1 as usize] = 4;
+        assert!(!is_kabe(Tile::M2, &counts));
+    }
+
+    #[test]
+    fn test_kabe_8m_fully_blocked() {
+        // 7m が4枚見えている → 789m と 678m の両方がブロック → 壁
+        let mut counts = [0u8; 34];
+        counts[Tile::M7 as usize] = 4;
+        assert!(is_kabe(Tile::M8, &counts));
+    }
+
+    #[test]
+    fn test_kabe_middle_5m_fully_blocked() {
+        // 4m + 6m が4枚見えている → 345m / 456m / 567m 全てブロック → 壁
+        let mut counts = [0u8; 34];
+        counts[Tile::M4 as usize] = 4;
+        counts[Tile::M6 as usize] = 4;
+        assert!(is_kabe(Tile::M5, &counts));
+    }
+
+    #[test]
+    fn test_kabe_middle_5m_partially_blocked() {
+        // 4m のみ4枚 → 345m と 456m はブロックされるが 567m はブロックされない → false
+        let mut counts = [0u8; 34];
+        counts[Tile::M4 as usize] = 4;
+        assert!(!is_kabe(Tile::M5, &counts));
+    }
+
+    #[test]
+    fn test_kabe_pin_suit() {
+        // 別のスートでも壁判定が成立する
+        let mut counts = [0u8; 34];
+        counts[Tile::P2 as usize] = 4;
+        assert!(is_kabe(Tile::P1, &counts));
+    }
+
+    #[test]
+    fn test_kabe_honor_tile_returns_false() {
+        // 字牌に壁はない
+        let mut counts = [0u8; 34];
+        counts[Tile::Z1 as usize] = 4;
+        assert!(!is_kabe(Tile::Z1, &counts));
     }
 }
