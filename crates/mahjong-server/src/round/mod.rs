@@ -2932,4 +2932,68 @@ mod tests {
         );
         assert_eq!(round.riichi_sticks, 0, "供託棒はすべて消費されること");
     }
+
+    // ─── auto_pass_cpu テスト ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_auto_pass_cpu_no_op_when_wrong_phase() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        assert_eq!(round.phase, TurnPhase::Draw);
+        round.auto_pass_cpu(0);
+        assert_eq!(round.phase, TurnPhase::Draw);
+    }
+
+    #[test]
+    fn test_auto_pass_cpu_passes_cpu_players_and_resolves() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+
+        // プレイヤー1に5zポン可能な手牌をセット
+        let seat1 = round.players[1].seat_wind;
+        let hand1 = mahjong_core::hand::Hand::from("234678m56p567s55z");
+        round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
+
+        let call_state = round.check_available_calls(Tile::new(Tile::Z5), 0);
+        assert!(!call_state.responded[1], "player 1 should have pending pon");
+
+        round.phase = TurnPhase::WaitForCalls;
+        round.call_state = Some(call_state);
+
+        // human = 0 (捨て牌側), CPU のプレイヤー1 が自動パスされて鳴き解決される
+        round.auto_pass_cpu(0);
+
+        assert!(
+            round.call_state.is_none(),
+            "all CPUs passed → call should resolve"
+        );
+        assert_eq!(round.phase, TurnPhase::Draw);
+    }
+
+    #[test]
+    fn test_auto_pass_cpu_skips_human_player() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+
+        // プレイヤー1に5zポン可能な手牌をセット
+        let seat1 = round.players[1].seat_wind;
+        let hand1 = mahjong_core::hand::Hand::from("234678m56p567s55z");
+        round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
+
+        let call_state = round.check_available_calls(Tile::new(Tile::Z5), 0);
+        assert!(!call_state.responded[1], "player 1 should have pending pon");
+
+        round.phase = TurnPhase::WaitForCalls;
+        round.call_state = Some(call_state);
+
+        // human = 1 → プレイヤー1はスキップされるので応答が残る
+        round.auto_pass_cpu(1);
+
+        assert!(
+            round.call_state.is_some(),
+            "call should still be pending for human player"
+        );
+        assert!(
+            !round.call_state.as_ref().unwrap().responded[1],
+            "human player should not have been auto-passed"
+        );
+        assert_eq!(round.phase, TurnPhase::WaitForCalls);
+    }
 }
