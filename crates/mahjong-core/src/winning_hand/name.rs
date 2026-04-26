@@ -247,6 +247,294 @@ fn get_en(hand_kind: Kind, has_openned: bool) -> &'static str {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- get() dispatch ---
+
+    #[test]
+    fn get_dispatches_to_en() {
+        assert_eq!(get(Kind::ReadyHand, false, Lang::En), "Ready Hand");
+    }
+
+    #[test]
+    fn get_dispatches_to_ja() {
+        assert_eq!(get(Kind::ReadyHand, false, Lang::Ja), "立直");
+    }
+
+    // --- English names (closed) ---
+
+    #[test]
+    fn en_closed_all_variants() {
+        let cases: Vec<(Kind, &str)> = vec![
+            (Kind::ReadyHand, "Ready Hand"),
+            (Kind::DoubleReady, "Double Ready"),
+            (Kind::OneShot, "One Shot"),
+            (Kind::SelfPick, "Self Pick"),
+            (Kind::SevenPairs, "Seven Pairs"),
+            (Kind::NagashiMangan, "Nagashi Mangan"),
+            (Kind::LastTileFromTheWall, "Last Tile From The Wall"),
+            (Kind::LastDiscard, "Last Discard"),
+            (Kind::DeadWallDraw, "Dead Wall Draw"),
+            (Kind::RobbingAQuad, "Robbing A Quad"),
+            (Kind::NoPointsHand, "No Points Hand"),
+            (
+                Kind::OneSetOfIdenticalSequences,
+                "One Set Of Identical Sequences",
+            ),
+            (Kind::ThreeColorStraight, "Three Color Straight"),
+            (Kind::Straight, "Straight"),
+            (
+                Kind::TwoSetsOfIdenticalSequences,
+                "Two Sets Of Identical Sequences",
+            ),
+            (Kind::AllTripletHand, "All Triplet Hand"),
+            (Kind::ThreeClosedTriplets, "Three Closed Triplets"),
+            (Kind::ThreeColorTriplets, "Three Color Triplets"),
+            (Kind::AllSimples, "All Simples"),
+            (Kind::HonorTilesPlayersWind, "Honor Tiles (Players Wind)"),
+            (
+                Kind::HonorTilesPrevailingWind,
+                "Honor Tiles (Prevailing Wind)",
+            ),
+            (Kind::HonorTilesWhiteDragon, "Honor Tiles (White Dragon)"),
+            (Kind::HonorTilesGreenDragon, "Honor Tiles (Green Dragon)"),
+            (Kind::HonorTilesRedDragon, "Honor Tiles (Red Dragon)"),
+            (
+                Kind::TerminalOrHonorInEachSet,
+                "Terminal Or Honor In Each Set",
+            ),
+            (Kind::TerminalInEachSet, "Terminal In Each Set"),
+            (Kind::AllTerminalsAndHonors, "All Terminals And Honors"),
+            (Kind::LittleThreeDragons, "Little Three Dragons"),
+            (Kind::HalfFlush, "Half Flush"),
+            (Kind::Flush, "Flush"),
+            (Kind::ThirteenOrphans, "Thirteen Orphans"),
+            (Kind::FourConcealedTriplets, "Four Concealed Triplets"),
+            (
+                Kind::FourConcealedTripletsSingleWait,
+                "Four Concealed Triplets Single Wait",
+            ),
+            (Kind::BigThreeDragons, "Big Three Dragons"),
+            (Kind::LittleFourWinds, "Little Four Winds"),
+            (Kind::BigFourWinds, "Big Four Winds"),
+            (Kind::AllHonors, "All Honors"),
+            (Kind::AllTerminals, "All Terminals"),
+            (Kind::AllGreen, "All Green"),
+            (Kind::NineGates, "Nine Gates"),
+            (Kind::FourKans, "Four Kans"),
+            (Kind::HeavenlyHand, "Heavenly Hand"),
+            (Kind::HandOfEarth, "Hand Of Earth"),
+        ];
+        for (kind, expected) in cases {
+            let label = format!("{kind:?}");
+            assert_eq!(get(kind, false, Lang::En), expected, "kind: {label}");
+        }
+    }
+
+    // --- English names (open) — only openable yaku change ---
+
+    #[test]
+    fn en_open_openable_yaku() {
+        let cases: Vec<(Kind, &str)> = vec![
+            (Kind::ThreeColorStraight, "Three Color Straight (Open)"),
+            (Kind::Straight, "Straight (Open)"),
+            (
+                Kind::TerminalOrHonorInEachSet,
+                "Terminal Or Honor In Each Set (Open)",
+            ),
+            (Kind::TerminalInEachSet, "Terminal In Each Set (Open)"),
+            (Kind::HalfFlush, "Half Flush (Open)"),
+            (Kind::Flush, "Flush (Open)"),
+        ];
+        for (kind, expected) in cases {
+            let label = format!("{kind:?}");
+            assert_eq!(get(kind, true, Lang::En), expected, "kind: {label}");
+        }
+    }
+
+    #[test]
+    fn en_open_non_openable_yaku_unchanged() {
+        // Yaku whose name does not change when has_opened=true
+        let cases: Vec<(Kind, &str)> = vec![
+            (Kind::ReadyHand, "Ready Hand"),
+            (Kind::DoubleReady, "Double Ready"),
+            (Kind::OneShot, "One Shot"),
+            (Kind::SelfPick, "Self Pick"),
+            (Kind::SevenPairs, "Seven Pairs"),
+            (Kind::NagashiMangan, "Nagashi Mangan"),
+            (Kind::LastTileFromTheWall, "Last Tile From The Wall"),
+            (Kind::LastDiscard, "Last Discard"),
+            (Kind::DeadWallDraw, "Dead Wall Draw"),
+            (Kind::RobbingAQuad, "Robbing A Quad"),
+            (Kind::NoPointsHand, "No Points Hand"),
+            (
+                Kind::OneSetOfIdenticalSequences,
+                "One Set Of Identical Sequences",
+            ),
+            (
+                Kind::TwoSetsOfIdenticalSequences,
+                "Two Sets Of Identical Sequences",
+            ),
+            (Kind::AllTripletHand, "All Triplet Hand"),
+            (Kind::ThreeClosedTriplets, "Three Closed Triplets"),
+            (Kind::ThreeColorTriplets, "Three Color Triplets"),
+            (Kind::AllSimples, "All Simples"),
+            (Kind::HonorTilesPlayersWind, "Honor Tiles (Players Wind)"),
+            (
+                Kind::HonorTilesPrevailingWind,
+                "Honor Tiles (Prevailing Wind)",
+            ),
+            (Kind::HonorTilesWhiteDragon, "Honor Tiles (White Dragon)"),
+            (Kind::HonorTilesGreenDragon, "Honor Tiles (Green Dragon)"),
+            (Kind::HonorTilesRedDragon, "Honor Tiles (Red Dragon)"),
+            (Kind::AllTerminalsAndHonors, "All Terminals And Honors"),
+            (Kind::LittleThreeDragons, "Little Three Dragons"),
+            (Kind::ThirteenOrphans, "Thirteen Orphans"),
+            (Kind::FourConcealedTriplets, "Four Concealed Triplets"),
+            (
+                Kind::FourConcealedTripletsSingleWait,
+                "Four Concealed Triplets Single Wait",
+            ),
+            (Kind::BigThreeDragons, "Big Three Dragons"),
+            (Kind::LittleFourWinds, "Little Four Winds"),
+            (Kind::BigFourWinds, "Big Four Winds"),
+            (Kind::AllHonors, "All Honors"),
+            (Kind::AllTerminals, "All Terminals"),
+            (Kind::AllGreen, "All Green"),
+            (Kind::NineGates, "Nine Gates"),
+            (Kind::FourKans, "Four Kans"),
+            (Kind::HeavenlyHand, "Heavenly Hand"),
+            (Kind::HandOfEarth, "Hand Of Earth"),
+        ];
+        for (kind, expected) in cases {
+            let label = format!("{kind:?}");
+            assert_eq!(get(kind, true, Lang::En), expected, "kind: {label}");
+        }
+    }
+
+    // --- Japanese names (closed) ---
+
+    #[test]
+    fn ja_closed_all_variants() {
+        let cases: Vec<(Kind, &str)> = vec![
+            (Kind::ReadyHand, "立直"),
+            (Kind::DoubleReady, "ダブル立直"),
+            (Kind::OneShot, "一発"),
+            (Kind::SelfPick, "門前清自摸和"),
+            (Kind::SevenPairs, "七対子"),
+            (Kind::NagashiMangan, "流し満貫"),
+            (Kind::LastTileFromTheWall, "海底撈月"),
+            (Kind::LastDiscard, "河底撈魚"),
+            (Kind::DeadWallDraw, "嶺上開花"),
+            (Kind::RobbingAQuad, "搶槓"),
+            (Kind::NoPointsHand, "平和"),
+            (Kind::OneSetOfIdenticalSequences, "一盃口"),
+            (Kind::ThreeColorStraight, "三色同順"),
+            (Kind::Straight, "一気通貫"),
+            (Kind::TwoSetsOfIdenticalSequences, "二盃口"),
+            (Kind::AllTripletHand, "対々和"),
+            (Kind::ThreeClosedTriplets, "三暗刻"),
+            (Kind::ThreeColorTriplets, "三色同刻"),
+            (Kind::AllSimples, "断么九"),
+            (Kind::HonorTilesPlayersWind, "役牌（自風牌）"),
+            (Kind::HonorTilesPrevailingWind, "役牌（場風牌）"),
+            (Kind::HonorTilesWhiteDragon, "役牌（白）"),
+            (Kind::HonorTilesGreenDragon, "役牌（發）"),
+            (Kind::HonorTilesRedDragon, "役牌（中）"),
+            (Kind::TerminalOrHonorInEachSet, "混全帯么九"),
+            (Kind::TerminalInEachSet, "純全帯么九"),
+            (Kind::AllTerminalsAndHonors, "混老頭"),
+            (Kind::LittleThreeDragons, "小三元"),
+            (Kind::HalfFlush, "混一色"),
+            (Kind::Flush, "清一色"),
+            (Kind::ThirteenOrphans, "国士無双"),
+            (Kind::FourConcealedTriplets, "四暗刻"),
+            (Kind::FourConcealedTripletsSingleWait, "四暗刻単騎待ち"),
+            (Kind::BigThreeDragons, "大三元"),
+            (Kind::LittleFourWinds, "小四喜"),
+            (Kind::BigFourWinds, "大四喜"),
+            (Kind::AllHonors, "字一色"),
+            (Kind::AllTerminals, "清老頭"),
+            (Kind::AllGreen, "緑一色"),
+            (Kind::NineGates, "九蓮宝燈"),
+            (Kind::FourKans, "四槓子"),
+            (Kind::HeavenlyHand, "天和"),
+            (Kind::HandOfEarth, "地和"),
+        ];
+        for (kind, expected) in cases {
+            let label = format!("{kind:?}");
+            assert_eq!(get(kind, false, Lang::Ja), expected, "kind: {label}");
+        }
+    }
+
+    // --- Japanese names (open) ---
+
+    #[test]
+    fn ja_open_openable_yaku() {
+        let cases: Vec<(Kind, &str)> = vec![
+            (Kind::ThreeColorStraight, "三色同順（鳴）"),
+            (Kind::Straight, "一気通貫（鳴）"),
+            (Kind::TerminalOrHonorInEachSet, "混全帯么九（鳴）"),
+            (Kind::TerminalInEachSet, "純全帯么九（鳴）"),
+            (Kind::HalfFlush, "混一色（鳴）"),
+            (Kind::Flush, "清一色（鳴）"),
+        ];
+        for (kind, expected) in cases {
+            let label = format!("{kind:?}");
+            assert_eq!(get(kind, true, Lang::Ja), expected, "kind: {label}");
+        }
+    }
+
+    #[test]
+    fn ja_open_non_openable_yaku_unchanged() {
+        let cases: Vec<(Kind, &str)> = vec![
+            (Kind::ReadyHand, "立直"),
+            (Kind::DoubleReady, "ダブル立直"),
+            (Kind::OneShot, "一発"),
+            (Kind::SelfPick, "門前清自摸和"),
+            (Kind::SevenPairs, "七対子"),
+            (Kind::NagashiMangan, "流し満貫"),
+            (Kind::LastTileFromTheWall, "海底撈月"),
+            (Kind::LastDiscard, "河底撈魚"),
+            (Kind::DeadWallDraw, "嶺上開花"),
+            (Kind::RobbingAQuad, "搶槓"),
+            (Kind::NoPointsHand, "平和"),
+            (Kind::OneSetOfIdenticalSequences, "一盃口"),
+            (Kind::TwoSetsOfIdenticalSequences, "二盃口"),
+            (Kind::AllTripletHand, "対々和"),
+            (Kind::ThreeClosedTriplets, "三暗刻"),
+            (Kind::ThreeColorTriplets, "三色同刻"),
+            (Kind::AllSimples, "断么九"),
+            (Kind::HonorTilesPlayersWind, "役牌（自風牌）"),
+            (Kind::HonorTilesPrevailingWind, "役牌（場風牌）"),
+            (Kind::HonorTilesWhiteDragon, "役牌（白）"),
+            (Kind::HonorTilesGreenDragon, "役牌（發）"),
+            (Kind::HonorTilesRedDragon, "役牌（中）"),
+            (Kind::AllTerminalsAndHonors, "混老頭"),
+            (Kind::LittleThreeDragons, "小三元"),
+            (Kind::ThirteenOrphans, "国士無双"),
+            (Kind::FourConcealedTriplets, "四暗刻"),
+            (Kind::FourConcealedTripletsSingleWait, "四暗刻単騎待ち"),
+            (Kind::BigThreeDragons, "大三元"),
+            (Kind::LittleFourWinds, "小四喜"),
+            (Kind::BigFourWinds, "大四喜"),
+            (Kind::AllHonors, "字一色"),
+            (Kind::AllTerminals, "清老頭"),
+            (Kind::AllGreen, "緑一色"),
+            (Kind::NineGates, "九蓮宝燈"),
+            (Kind::FourKans, "四槓子"),
+            (Kind::HeavenlyHand, "天和"),
+            (Kind::HandOfEarth, "地和"),
+        ];
+        for (kind, expected) in cases {
+            let label = format!("{kind:?}");
+            assert_eq!(get(kind, true, Lang::Ja), expected, "kind: {label}");
+        }
+    }
+}
+
 fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
     match hand_kind {
         // 立直
