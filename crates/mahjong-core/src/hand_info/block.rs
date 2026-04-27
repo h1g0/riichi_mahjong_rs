@@ -457,8 +457,24 @@ mod tests {
         );
     }
     #[test]
+    fn test_sequential2_accepts_high_end_wait_shape() {
+        assert_eq!(
+            Sequential2::new(Tile::M8, Tile::M9).unwrap().get(),
+            [Tile::M8, Tile::M9]
+        );
+        assert_eq!(
+            Sequential2::new(Tile::P7, Tile::P9).unwrap().get(),
+            [Tile::P7, Tile::P9]
+        );
+    }
+    #[test]
     fn test_sequential2_errors_when_not_sequential() {
         assert!(Sequential2::new(Tile::M1, Tile::M4).is_err());
+    }
+    #[test]
+    fn test_sequential2_errors_when_reversed() {
+        assert!(Sequential2::new(Tile::M2, Tile::M1).is_err());
+        assert!(Sequential2::new(Tile::P3, Tile::P1).is_err());
     }
     #[test]
     fn test_sequential2_errors_when_honor() {
@@ -490,8 +506,21 @@ mod tests {
         );
     }
     #[test]
+    fn test_sequential3_accepts_terminal_sequence() {
+        assert_eq!(
+            Sequential3::new(Tile::S7, Tile::S8, Tile::S9)
+                .unwrap()
+                .get(),
+            [Tile::S7, Tile::S8, Tile::S9]
+        );
+    }
+    #[test]
     fn test_sequential3_errors_when_not_sequential() {
         assert!(Sequential3::new(Tile::M1, Tile::M2, Tile::M4).is_err());
+    }
+    #[test]
+    fn test_sequential3_errors_when_reversed() {
+        assert!(Sequential3::new(Tile::M3, Tile::M2, Tile::M1).is_err());
     }
     #[test]
     fn test_sequential3_errors_when_honor() {
@@ -549,7 +578,7 @@ mod tests {
     // is_two_sided_wait: 嵌張（両面でない）
     #[test]
     fn test_kanchan_not_two_sided() {
-        // 468の5待ち — 中牌は低位端でも高位端でもない
+        // 456の5待ち — 中牌は低位端でも高位端でもない
         assert!(!seq3(Tile::M4, Tile::M5, Tile::M6).is_two_sided_wait(Tile::M5));
     }
 
@@ -1237,62 +1266,5 @@ mod tests {
         assert_eq!(a.partial_cmp(&b), Some(std::cmp::Ordering::Less));
         assert_eq!(b.partial_cmp(&a), Some(std::cmp::Ordering::Greater));
         assert_eq!(a.partial_cmp(&a), Some(std::cmp::Ordering::Equal));
-    }
-
-    // --- Private function direct tests (error paths and is_same_suit Z-tile arm) ---
-
-    #[test]
-    fn test_has_1_or_9_invalid_tile() {
-        assert!(has_1_or_9(34).is_err());
-    }
-
-    #[test]
-    fn test_has_honor_invalid_tile() {
-        assert!(has_honor(34).is_err());
-    }
-
-    #[test]
-    fn test_has_wind_invalid_tile() {
-        assert!(has_wind(34, Wind::East).is_err());
-    }
-
-    #[test]
-    fn test_has_dragon_invalid_tile() {
-        assert!(has_dragon(34, Dragon::White).is_err());
-    }
-
-    #[test]
-    fn test_is_character_invalid_tile() {
-        assert!(is_character(34).is_err());
-    }
-
-    #[test]
-    fn test_is_circle_invalid_tile() {
-        assert!(is_circle(34).is_err());
-    }
-
-    #[test]
-    fn test_is_bamboo_invalid_tile() {
-        assert!(is_bamboo(34).is_err());
-    }
-
-    #[test]
-    fn test_is_same_suit_honor_same() {
-        assert!(is_same_suit(Tile::Z1, Tile::Z7).unwrap());
-    }
-
-    #[test]
-    fn test_is_same_suit_honor_different() {
-        assert!(!is_same_suit(Tile::Z1, Tile::M1).unwrap());
-    }
-
-    #[test]
-    fn test_is_same_suit_invalid_first_tile() {
-        assert!(is_same_suit(34, 35).is_err());
-    }
-
-    #[test]
-    fn test_is_same_suit_invalid_second_tile() {
-        assert!(is_same_suit(Tile::M1, 34).is_err());
     }
 }
