@@ -225,7 +225,7 @@ impl Ord for Same3 {
     }
 }
 
-/// 塔子（連続した牌が2枚）もしくは嵌張（順子の真ん中が抜けている2枚）
+/// 塔子（連続した牌2枚）または嵌張（1枚飛ばしの牌2枚）
 #[derive(Debug, Eq, Clone, Copy)]
 pub struct Sequential2 {
     tiles: [TileType; 2],
