@@ -45,8 +45,8 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
     let mut seen = std::collections::HashSet::new();
 
     for (i, &tile) in all_tiles.iter().enumerate() {
-        // 同じ牌種は重複評価しない
-        if !seen.insert(tile.get()) {
+        // 同じ牌は重複評価しない。赤5と通常5は打牌価値が異なるので別候補にする。
+        if !seen.insert((tile.get(), tile.is_red_dora())) {
             continue;
         }
 
@@ -435,6 +435,24 @@ mod tests {
         let result = evaluate_discards(&state, &weak_config());
         // M1 は1候補のみ、M2、M3 でmax3候補
         assert!(result.iter().filter(|c| c.tile.get() == Tile::M1).count() <= 1);
+    }
+
+    #[test]
+    fn test_evaluate_discards_keeps_red_and_normal_five_candidates() {
+        let mut state = CpuGameState::new();
+        state.my_hand = vec![
+            Tile::new_red(Tile::M5),
+            Tile::new(Tile::M5),
+            Tile::new(Tile::M1),
+        ];
+
+        let result = evaluate_discards(&state, &weak_config());
+        let five_candidates: Vec<&DiscardCandidate> =
+            result.iter().filter(|c| c.tile.get() == Tile::M5).collect();
+
+        assert_eq!(five_candidates.len(), 2);
+        assert!(five_candidates.iter().any(|c| c.tile.is_red_dora()));
+        assert!(five_candidates.iter().any(|c| !c.tile.is_red_dora()));
     }
 
     #[test]

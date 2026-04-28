@@ -347,7 +347,10 @@ impl Round {
             return true;
         }
 
-        let tile = self.wall.draw().unwrap();
+        let Some(tile) = self.wall.draw() else {
+            self.do_exhaustive_draw();
+            return true;
+        };
         let remaining = self.wall.remaining();
         self.players[self.current_player].draw(tile);
         self.last_draw_was_dead_wall = false;
@@ -411,7 +414,9 @@ impl Round {
             return false;
         }
 
-        let discarded = self.players[self.current_player].discard(tile);
+        let Some(discarded) = self.players[self.current_player].try_discard(tile) else {
+            return false;
+        };
         let is_tsumogiri = tile.is_none();
         let current_wind = self.players[self.current_player].seat_wind;
         let discarder = self.current_player;
@@ -774,7 +779,9 @@ impl Round {
                 continue;
             }
 
-            let mut score_result = win_result.score_result.unwrap();
+            let Some(mut score_result) = win_result.score_result else {
+                continue;
+            };
 
             let uradora_indicators = if self.players[winner].is_riichi {
                 self.wall.uradora_indicators()
@@ -1385,6 +1392,27 @@ impl Round {
         self.players[player_idx].declare_riichi(is_double);
         self.riichi_sticks += 1;
 
+        // リーチ宣言牌を打牌
+        // （declare_riichi内でippatsu=trueが設定されるが、
+        //   直後のdiscardでippatsu=falseにされてしまう。
+        //   これを防ぐため、一時的にippatsuを保護する）
+        let is_tsumogiri = tile.is_none();
+        let Some(discarded) = self.players[player_idx].try_discard(tile) else {
+            self.players[player_idx].is_riichi = false;
+            self.players[player_idx].is_double_riichi = false;
+            self.players[player_idx].is_ippatsu = false;
+            self.players[player_idx].score += RIICHI_STICK_VALUE;
+            self.riichi_sticks = self.riichi_sticks.saturating_sub(1);
+            return false;
+        };
+        // リーチ宣言直後の打牌なのでippatsuを復元
+        self.players[player_idx].is_ippatsu = true;
+
+        // 打牌をリーチ宣言牌としてマーク
+        if let Some(last_discard) = self.players[player_idx].discards.last_mut() {
+            last_discard.is_riichi_declaration = true;
+        }
+
         // 全プレイヤーにリーチ通知
         let player_wind = self.players[player_idx].seat_wind;
         let scores = self.get_scores();
@@ -1397,20 +1425,6 @@ impl Round {
                     riichi_sticks: self.riichi_sticks,
                 },
             ));
-        }
-
-        // リーチ宣言牌を打牌
-        // （declare_riichi内でippatsu=trueが設定されるが、
-        //   直後のdiscardでippatsu=falseにされてしまう。
-        //   これを防ぐため、一時的にippatsuを保護する）
-        let is_tsumogiri = tile.is_none();
-        let discarded = self.players[player_idx].discard(tile);
-        // リーチ宣言直後の打牌なのでippatsuを復元
-        self.players[player_idx].is_ippatsu = true;
-
-        // 打牌をリーチ宣言牌としてマーク
-        if let Some(last_discard) = self.players[player_idx].discards.last_mut() {
-            last_discard.is_riichi_declaration = true;
         }
 
         let current_wind = self.players[player_idx].seat_wind;
@@ -1501,12 +1515,13 @@ impl Round {
             return false;
         }
 
-        let mut score_result = win_result.score_result.unwrap();
+        let Some(mut score_result) = win_result.score_result else {
+            return false;
+        };
         let winner = self.current_player;
-        let winning_tile = self.players[winner]
-            .hand
-            .drawn()
-            .expect("ツモ和了時にはdrawnが必要");
+        let Some(winning_tile) = self.players[winner].hand.drawn() else {
+            return false;
+        };
         let winner_is_dealer = self.players[winner].is_dealer();
 
         // ドラ・赤ドラ・裏ドラを加算
@@ -1884,6 +1899,21 @@ mod tests {
 
         assert_eq!(round.phase, TurnPhase::Draw);
         assert_eq!(round.current_player, 1); // 次のプレイヤーへ
+    }
+
+    #[test]
+    fn test_round_discard_rejects_tile_not_in_hand() {
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        round.drain_events();
+        round.do_draw();
+        round.drain_events();
+
+        round.players[0].hand = mahjong_core::hand::Hand::from("123m123p123s1234z 5z");
+
+        assert!(!round.do_discard(Some(Tile::new(Tile::Z7))));
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+        assert_eq!(round.players[0].discards.len(), 0);
+        assert_eq!(round.players[0].hand.drawn(), Some(Tile::new(Tile::Z5)));
     }
 
     #[test]

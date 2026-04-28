@@ -179,17 +179,20 @@ impl Table {
     /// 局が終了した場合に後処理を行う
     /// 点数更新、親交代、局の進行を処理する
     pub fn finish_round(&mut self) {
-        let result = {
+        let (result, scores, riichi_sticks) = {
             let round = match self.round.as_ref() {
                 Some(r) if r.is_over() => r,
                 _ => return,
             };
-            round.result.clone()
+            (
+                round.result.clone(),
+                round.get_scores(),
+                round.riichi_sticks,
+            )
         };
 
-        let round = self.round.as_ref().unwrap();
-        self.scores = round.get_scores();
-        self.riichi_sticks = round.riichi_sticks;
+        self.scores = scores;
+        self.riichi_sticks = riichi_sticks;
 
         // 誰かが箱割れしていたらその時点でゲーム終了（0点は許容）
         if self.scores.iter().any(|&score| score < 0) {
