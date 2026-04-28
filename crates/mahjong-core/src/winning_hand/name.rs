@@ -247,6 +247,109 @@ fn get_en(hand_kind: Kind, has_openned: bool) -> &'static str {
     }
 }
 
+fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
+    match hand_kind {
+        // 立直
+        Kind::ReadyHand => "立直",
+        // 七対子
+        Kind::SevenPairs => "七対子",
+        // 流し満貫
+        Kind::NagashiMangan => "流し満貫",
+        // 門前清自摸和
+        Kind::SelfPick => "門前清自摸和",
+        // 一発
+        Kind::OneShot => "一発",
+        // 海底撈月
+        Kind::LastTileFromTheWall => "海底撈月",
+        // 河底撈魚
+        Kind::LastDiscard => "河底撈魚",
+        // 嶺上開花
+        Kind::DeadWallDraw => "嶺上開花",
+        // 搶槓
+        Kind::RobbingAQuad => "搶槓",
+        // ダブル立直
+        Kind::DoubleReady => "ダブル立直",
+        // 平和
+        Kind::NoPointsHand => "平和",
+        // 一盃口
+        Kind::OneSetOfIdenticalSequences => "一盃口",
+        // 三色同順
+        Kind::ThreeColorStraight => {
+            openned_name!("三色同順", has_openned, Lang::Ja)
+        }
+        // 一気通貫
+        Kind::Straight => {
+            openned_name!("一気通貫", has_openned, Lang::Ja)
+        }
+        // 二盃口
+        Kind::TwoSetsOfIdenticalSequences => "二盃口",
+        // 対々和
+        Kind::AllTripletHand => "対々和",
+        // 三暗刻
+        Kind::ThreeClosedTriplets => "三暗刻",
+        // 三色同刻
+        Kind::ThreeColorTriplets => "三色同刻",
+        // 断么九
+        Kind::AllSimples => "断么九",
+        // 役牌（自風牌）
+        Kind::HonorTilesPlayersWind => "役牌（自風牌）",
+        // 役牌（場風牌）
+        Kind::HonorTilesPrevailingWind => "役牌（場風牌）",
+        // 役牌（白）
+        Kind::HonorTilesWhiteDragon => "役牌（白）",
+        // 役牌（發）
+        Kind::HonorTilesGreenDragon => "役牌（發）",
+        // 役牌（中）
+        Kind::HonorTilesRedDragon => "役牌（中）",
+        // 混全帯么九
+        Kind::TerminalOrHonorInEachSet => {
+            openned_name!("混全帯么九", has_openned, Lang::Ja)
+        }
+        // 純全帯么九
+        Kind::TerminalInEachSet => {
+            openned_name!("純全帯么九", has_openned, Lang::Ja)
+        }
+        // 混老頭
+        Kind::AllTerminalsAndHonors => "混老頭",
+        // 小三元
+        Kind::LittleThreeDragons => "小三元",
+        // 混一色
+        Kind::HalfFlush => {
+            openned_name!("混一色", has_openned, Lang::Ja)
+        }
+        // 清一色
+        Kind::Flush => {
+            openned_name!("清一色", has_openned, Lang::Ja)
+        }
+        // 国士無双
+        Kind::ThirteenOrphans => "国士無双",
+        // 四暗刻
+        Kind::FourConcealedTriplets => "四暗刻",
+        // 四暗刻単騎待ち
+        Kind::FourConcealedTripletsSingleWait => "四暗刻単騎待ち",
+        // 大三元
+        Kind::BigThreeDragons => "大三元",
+        // 小四喜
+        Kind::LittleFourWinds => "小四喜",
+        // 大四喜
+        Kind::BigFourWinds => "大四喜",
+        // 字一色
+        Kind::AllHonors => "字一色",
+        // 清老頭
+        Kind::AllTerminals => "清老頭",
+        // 緑一色
+        Kind::AllGreen => "緑一色",
+        // 九蓮宝燈
+        Kind::NineGates => "九蓮宝燈",
+        // 四槓子
+        Kind::FourKans => "四槓子",
+        // 天和
+        Kind::HeavenlyHand => "天和",
+        // 地和
+        Kind::HandOfEarth => "地和",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,108 +635,5 @@ mod tests {
             let label = format!("{kind:?}");
             assert_eq!(get(kind, true, Lang::Ja), expected, "kind: {label}");
         }
-    }
-}
-
-fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
-    match hand_kind {
-        // 立直
-        Kind::ReadyHand => "立直",
-        // 七対子
-        Kind::SevenPairs => "七対子",
-        // 流し満貫
-        Kind::NagashiMangan => "流し満貫",
-        // 門前清自摸和
-        Kind::SelfPick => "門前清自摸和",
-        // 一発
-        Kind::OneShot => "一発",
-        // 海底撈月
-        Kind::LastTileFromTheWall => "海底撈月",
-        // 河底撈魚
-        Kind::LastDiscard => "河底撈魚",
-        // 嶺上開花
-        Kind::DeadWallDraw => "嶺上開花",
-        // 搶槓
-        Kind::RobbingAQuad => "搶槓",
-        // ダブル立直
-        Kind::DoubleReady => "ダブル立直",
-        // 平和
-        Kind::NoPointsHand => "平和",
-        // 一盃口
-        Kind::OneSetOfIdenticalSequences => "一盃口",
-        // 三色同順
-        Kind::ThreeColorStraight => {
-            openned_name!("三色同順", has_openned, Lang::Ja)
-        }
-        // 一気通貫
-        Kind::Straight => {
-            openned_name!("一気通貫", has_openned, Lang::Ja)
-        }
-        // 二盃口
-        Kind::TwoSetsOfIdenticalSequences => "二盃口",
-        // 対々和
-        Kind::AllTripletHand => "対々和",
-        // 三暗刻
-        Kind::ThreeClosedTriplets => "三暗刻",
-        // 三色同刻
-        Kind::ThreeColorTriplets => "三色同刻",
-        // 断么九
-        Kind::AllSimples => "断么九",
-        // 役牌（自風牌）
-        Kind::HonorTilesPlayersWind => "役牌（自風牌）",
-        // 役牌（場風牌）
-        Kind::HonorTilesPrevailingWind => "役牌（場風牌）",
-        // 役牌（白）
-        Kind::HonorTilesWhiteDragon => "役牌（白）",
-        // 役牌（發）
-        Kind::HonorTilesGreenDragon => "役牌（發）",
-        // 役牌（中）
-        Kind::HonorTilesRedDragon => "役牌（中）",
-        // 混全帯么九
-        Kind::TerminalOrHonorInEachSet => {
-            openned_name!("混全帯么九", has_openned, Lang::Ja)
-        }
-        // 純全帯么九
-        Kind::TerminalInEachSet => {
-            openned_name!("純全帯么九", has_openned, Lang::Ja)
-        }
-        // 混老頭
-        Kind::AllTerminalsAndHonors => "混老頭",
-        // 小三元
-        Kind::LittleThreeDragons => "小三元",
-        // 混一色
-        Kind::HalfFlush => {
-            openned_name!("混一色", has_openned, Lang::Ja)
-        }
-        // 清一色
-        Kind::Flush => {
-            openned_name!("清一色", has_openned, Lang::Ja)
-        }
-        // 国士無双
-        Kind::ThirteenOrphans => "国士無双",
-        // 四暗刻
-        Kind::FourConcealedTriplets => "四暗刻",
-        // 四暗刻単騎待ち
-        Kind::FourConcealedTripletsSingleWait => "四暗刻単騎待ち",
-        // 大三元
-        Kind::BigThreeDragons => "大三元",
-        // 小四喜
-        Kind::LittleFourWinds => "小四喜",
-        // 大四喜
-        Kind::BigFourWinds => "大四喜",
-        // 字一色
-        Kind::AllHonors => "字一色",
-        // 清老頭
-        Kind::AllTerminals => "清老頭",
-        // 緑一色
-        Kind::AllGreen => "緑一色",
-        // 九蓮宝燈
-        Kind::NineGates => "九蓮宝燈",
-        // 四槓子
-        Kind::FourKans => "四槓子",
-        // 天和
-        Kind::HeavenlyHand => "天和",
-        // 地和
-        Kind::HandOfEarth => "地和",
     }
 }

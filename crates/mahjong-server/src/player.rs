@@ -75,17 +75,14 @@ impl Player {
     /// 手牌から指定牌を捨てる
     /// tile が Some(牌) なら手牌からその牌を探して捨てる（手出し）
     /// tile が None ならツモ切り
-    pub fn discard(&mut self, tile: Option<Tile>) -> Tile {
+    pub fn try_discard(&mut self, tile: Option<Tile>) -> Option<Tile> {
         let drawn = self.hand.drawn();
 
-        match tile {
+        let (discarded, is_tsumogiri) = match tile {
             // 手牌からの手出し: 牌の種類で検索して除去
             Some(target) => {
                 let tiles = self.hand.tiles_mut();
-                let idx = tiles
-                    .iter()
-                    .position(|t| *t == target)
-                    .expect("指定された牌が手牌にありません");
+                let idx = tiles.iter().position(|t| *t == target)?;
                 let discarded = tiles.remove(idx);
 
                 // ツモ牌を手牌に加える
@@ -95,36 +92,38 @@ impl Player {
                 }
                 self.hand.set_drawn(None);
 
-                self.discards.push(Discard {
-                    tile: discarded,
-                    is_tsumogiri: false,
-                    is_riichi_declaration: false,
-                    is_called: false,
-                });
-
-                // 一発を無効にする（自分が打牌したので）
-                self.is_ippatsu = false;
-                self.is_first_turn = false;
-
-                discarded
+                (discarded, false)
             }
             // ツモ切り（ツモった牌をそのまま捨てる）
             None => {
-                let discarded = drawn.expect("ツモ牌がない状態でツモ切りはできません");
+                let discarded = drawn?;
                 self.hand.set_drawn(None);
 
-                self.discards.push(Discard {
-                    tile: discarded,
-                    is_tsumogiri: true,
-                    is_riichi_declaration: false,
-                    is_called: false,
-                });
-
-                self.is_ippatsu = false;
-                self.is_first_turn = false;
-
-                discarded
+                (discarded, true)
             }
+        };
+
+        self.discards.push(Discard {
+            tile: discarded,
+            is_tsumogiri,
+            is_riichi_declaration: false,
+            is_called: false,
+        });
+
+        self.is_ippatsu = false;
+        self.is_first_turn = false;
+
+        Some(discarded)
+    }
+
+    /// 手牌から指定牌を捨てる。
+    ///
+    /// 内部処理用の簡易 API。入力検証済みでないクライアントアクションでは
+    /// `try_discard` を使うこと。
+    pub fn discard(&mut self, tile: Option<Tile>) -> Tile {
+        match self.try_discard(tile) {
+            Some(discarded) => discarded,
+            None => panic!("捨てる牌が手牌またはツモ牌にありません"),
         }
     }
 

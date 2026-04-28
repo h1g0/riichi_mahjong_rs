@@ -294,13 +294,17 @@ impl CpuClient {
             if shanten.is_ready() {
                 // 安全度で比較
                 let safety = super::defense::evaluate_safety(tile, &self.state);
-                if best.is_none() || safety > best.unwrap().1 {
+                let is_better = match best {
+                    Some((_, best_safety)) => safety > best_safety,
+                    None => true,
+                };
+                if is_better {
                     best = Some((tile, safety));
                 }
             }
         }
 
-        best.map(|(tile, _)| {
+        best.and_then(|(tile, _)| {
             // ツモ牌ならNone（ツモ切りリーチ）
             if self.state.my_drawn == Some(tile) {
                 None
@@ -308,7 +312,6 @@ impl CpuClient {
                 Some(tile)
             }
         })
-        .unwrap_or(None)
         // Note: この返り値はOption<Tile>で、Noneの場合ツモ切りリーチ
     }
 

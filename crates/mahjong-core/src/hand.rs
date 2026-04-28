@@ -1,7 +1,7 @@
 use crate::hand_info::meld::*;
 use crate::tile::*;
 use std::collections::VecDeque;
-use std::fmt;
+use std::fmt::{self, Write};
 
 /// 手牌
 #[derive(Debug, Clone)]
@@ -104,25 +104,26 @@ impl Hand {
     /// 絵文字として出力する
     pub fn to_emoji(&self) -> String {
         let mut result = String::new();
-        for i in 0..self.tiles.len() {
-            result.push(self.tiles[i].to_char());
+        for tile in &self.tiles {
+            result.push(tile.to_char());
         }
 
-        for i in 0..self.melds.len() {
-            result.push_str(&format!(
+        for meld in &self.melds {
+            let _ = write!(
+                result,
                 " {}{}{}",
-                self.melds[i].tiles[0].to_char(),
-                self.melds[i].tiles[1].to_char(),
-                self.melds[i].tiles[2].to_char()
-            ));
+                meld.tiles[0].to_char(),
+                meld.tiles[1].to_char(),
+                meld.tiles[2].to_char()
+            );
             // カンなら4枚目を追加する
-            if self.melds[i].category.is_kan() {
-                result.push(self.melds[i].tiles[0].to_char());
+            if meld.category.is_kan() {
+                result.push(meld.tiles[0].to_char());
             }
         }
 
         if let Some(tsumo) = self.drawn {
-            result.push_str(&format!(" {}", tsumo.to_char()));
+            let _ = write!(result, " {}", tsumo.to_char());
         }
         result
     }
@@ -130,29 +131,41 @@ impl Hand {
     /// `Vec<Tile>`から連続した牌の種類を圧縮した文字列を返す
     fn make_short_str(mut tiles: Vec<Tile>) -> String {
         if tiles.is_empty() {
-            return String::from("");
+            return String::new();
         } else if tiles.len() == 1 {
             return tiles[0].to_string();
         }
         tiles.sort();
         let mut result = String::new();
-        let mut prev_suit = 'x';
-        for i in 0..tiles.len() {
-            let now_suit = tiles[i].to_string().chars().nth(1).unwrap();
-            if i > 0 {
-                result.push(tiles[i - 1].to_string().chars().nth(0).unwrap());
-                if now_suit != prev_suit {
-                    result.push(prev_suit);
-                }
+        let mut current_suit = None;
+        for tile in tiles {
+            let (rank, suit) = Self::short_tile_parts(tile);
+            if let Some(prev_suit) = current_suit
+                && suit != prev_suit
+            {
+                result.push(prev_suit);
             }
-            if i == tiles.len() - 1 {
-                result.push(tiles[i].to_string().chars().nth(0).unwrap());
-                result.push(now_suit);
-                break;
-            }
-            prev_suit = now_suit;
+            result.push(rank);
+            current_suit = Some(suit);
+        }
+        if let Some(suit) = current_suit {
+            result.push(suit);
         }
         result
+    }
+
+    fn short_tile_parts(tile: Tile) -> (char, char) {
+        match tile.get() {
+            Tile::M1..=Tile::M9 => (Self::rank_char(tile.get() - Tile::M1), 'm'),
+            Tile::P1..=Tile::P9 => (Self::rank_char(tile.get() - Tile::P1), 'p'),
+            Tile::S1..=Tile::S9 => (Self::rank_char(tile.get() - Tile::S1), 's'),
+            Tile::Z1..=Tile::Z7 => (Self::rank_char(tile.get() - Tile::Z1), 'z'),
+            _ => ('?', '?'),
+        }
+    }
+
+    fn rank_char(zero_based_rank: TileType) -> char {
+        char::from(b'1' + zero_based_rank as u8)
     }
 
     /// 文字列として出力する
@@ -162,16 +175,16 @@ impl Hand {
         let tiles = self.tiles.clone();
         let mut result = Hand::make_short_str(tiles);
 
-        for i in 0..self.melds.len() {
-            let mut op_tiles = self.melds[i].tiles.clone();
-            if self.melds[i].category.is_kan() && op_tiles.len() == 3 {
-                op_tiles.push(self.melds[i].tiles[0]);
+        for meld in &self.melds {
+            let mut op_tiles = meld.tiles.clone();
+            if meld.category.is_kan() && op_tiles.len() == 3 {
+                op_tiles.push(meld.tiles[0]);
             }
-            result.push_str(&format!(" {}", Hand::make_short_str(op_tiles)));
+            let _ = write!(result, " {}", Hand::make_short_str(op_tiles));
         }
 
         if let Some(tsumo) = self.drawn {
-            result.push_str(&format!(" {tsumo}"));
+            let _ = write!(result, " {tsumo}");
         }
         result
     }
@@ -187,7 +200,7 @@ impl Hand {
                 while let Some(t) = stack.pop_front() {
                     // 字牌の場合は`8z`と`9z`は存在しない
                     if (matches!(c, 'm' | 'p' | 's') || (c == 'z' && matches!(t, '1'..='7')))
-                        && let Some(t) = Tile::from(&format!("{}{}", t, c))
+                        && let Some(t) = Tile::from(&format!("{t}{c}"))
                     {
                         result.push(t);
                     }
@@ -207,8 +220,7 @@ impl Hand {
             let tile_vec = Hand::str_to_tiles(tile_str);
             match tile_vec.len() {
                 1 => {
-                    let t = *tile_vec.first().unwrap();
-                    drawn = Some(t);
+                    drawn = Some(tile_vec[0]);
                 }
                 3 => {
                     melds.push(Meld {
