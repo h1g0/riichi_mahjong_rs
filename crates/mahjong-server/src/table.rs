@@ -405,4 +405,267 @@ mod tests {
         assert!(table.round.is_none());
         assert_eq!(table.scores[0], -100);
     }
+
+    #[test]
+    fn test_table_methods_without_round_are_noops() {
+        let mut table = Table::new(GameSettings::default());
+
+        assert!(table.current_round().is_none());
+        assert!(table.current_round_mut().is_none());
+        assert!(table.drain_events().is_empty());
+        assert!(!table.advance_auto_player());
+        assert!(!table.handle_action(0, ClientAction::Tsumo));
+
+        table.finish_round();
+        assert!(!table.is_game_over);
+        assert_eq!(table.round_number, 0);
+        assert_eq!(table.honba, 0);
+    }
+
+    #[test]
+    fn test_table_drain_events_delegates_to_round() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+
+        let events = table.drain_events();
+        assert!(!events.is_empty());
+        assert!(table.drain_events().is_empty());
+    }
+
+    #[test]
+    fn test_table_finish_round_ignores_active_round() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+
+        table.finish_round();
+
+        assert!(table.round.is_some());
+        assert_eq!(table.round_number, 0);
+        assert_eq!(table.honba, 0);
+    }
+
+    #[test]
+    fn test_table_finish_round_ignores_round_over_without_result() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+        table.current_round_mut().unwrap().phase = TurnPhase::RoundOver;
+
+        table.finish_round();
+
+        assert!(table.round.is_none());
+        assert_eq!(table.round_number, 0);
+        assert_eq!(table.honba, 0);
+        assert!(!table.is_game_over);
+    }
+
+    #[test]
+    fn test_table_finish_round_dealer_tenpai_draw_keeps_dealer() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::ExhaustiveDraw {
+            dealer_tenpai: true,
+        });
+
+        table.finish_round();
+
+        assert_eq!(table.honba, 1);
+        assert_eq!(table.dealer, 0);
+        assert_eq!(table.round_number, 0);
+        assert!(!table.is_game_over);
+    }
+
+    #[test]
+    fn test_table_finish_round_special_draw_keeps_round_number() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::SpecialDraw);
+
+        table.finish_round();
+
+        assert_eq!(table.honba, 1);
+        assert_eq!(table.dealer, 0);
+        assert_eq!(table.round_number, 0);
+        assert!(!table.is_game_over);
+    }
+
+    #[test]
+    fn test_table_finish_round_dealer_tsumo_continues() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::Tsumo {
+            winner: 0,
+            winning_tile: Tile::new(Tile::M1),
+        });
+
+        table.finish_round();
+
+        assert_eq!(table.honba, 1);
+        assert_eq!(table.dealer, 0);
+        assert_eq!(table.round_number, 0);
+    }
+
+    #[test]
+    fn test_table_finish_round_child_tsumo_advances_dealer() {
+        let mut table = Table::new(GameSettings::default());
+        table.honba = 2;
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::Tsumo {
+            winner: 1,
+            winning_tile: Tile::new(Tile::M1),
+        });
+
+        table.finish_round();
+
+        assert_eq!(table.honba, 0);
+        assert_eq!(table.dealer, 1);
+        assert_eq!(table.round_number, 1);
+    }
+
+    #[test]
+    fn test_table_finish_round_ron_with_dealer_winner_continues() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::Ron {
+            winners: vec![2, 0],
+            loser: 1,
+            winning_tile: Tile::new(Tile::M1),
+        });
+
+        table.finish_round();
+
+        assert_eq!(table.honba, 1);
+        assert_eq!(table.dealer, 0);
+        assert_eq!(table.round_number, 0);
+    }
+
+    #[test]
+    fn test_table_finish_round_ron_without_dealer_winner_advances() {
+        let mut table = Table::new(GameSettings::default());
+        table.honba = 2;
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::Ron {
+            winners: vec![1, 2],
+            loser: 3,
+            winning_tile: Tile::new(Tile::M1),
+        });
+
+        table.finish_round();
+
+        assert_eq!(table.honba, 0);
+        assert_eq!(table.dealer, 1);
+        assert_eq!(table.round_number, 1);
+    }
+
+    #[test]
+    fn test_table_advance_round_updates_prevailing_wind_in_south_game() {
+        let mut table = Table::new(GameSettings {
+            initial_score: 25000,
+            round_count: 2,
+            ..Default::default()
+        });
+
+        for _ in 0..4 {
+            table.start_round();
+            let round = table.current_round_mut().unwrap();
+            round.phase = TurnPhase::RoundOver;
+            round.result = Some(RoundResult::ExhaustiveDraw {
+                dealer_tenpai: false,
+            });
+            table.finish_round();
+        }
+
+        assert!(!table.is_game_over);
+        assert_eq!(table.round_number, 4);
+        assert_eq!(table.prevailing_wind, Wind::South);
+        assert_eq!(table.dealer, 0);
+    }
+
+    #[test]
+    fn test_table_handle_actions_reject_wrong_phase_or_player() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+
+        assert!(!table.handle_action(0, ClientAction::Discard { tile: None }));
+        assert!(!table.handle_action(0, ClientAction::Tsumo));
+        assert!(!table.handle_action(0, ClientAction::Riichi { tile: None }));
+        assert!(!table.handle_action(0, ClientAction::Ron));
+        assert!(!table.handle_action(
+            0,
+            ClientAction::Pon {
+                tiles: [Tile::new(Tile::M1), Tile::new(Tile::M1)],
+            },
+        ));
+        assert!(!table.handle_action(
+            0,
+            ClientAction::Chi {
+                tiles: [Tile::new(Tile::M1), Tile::new(Tile::M2)],
+            },
+        ));
+        assert!(!table.handle_action(0, ClientAction::Pass));
+        assert!(!table.handle_action(
+            0,
+            ClientAction::Kan {
+                tile_index: Tile::M1 as usize,
+            },
+        ));
+        assert!(!table.handle_action(0, ClientAction::NineTerminals { declare: true }));
+
+        let round = table.current_round_mut().unwrap();
+        round.do_draw();
+
+        assert!(!table.handle_action(1, ClientAction::Tsumo));
+        assert!(!table.handle_action(1, ClientAction::Riichi { tile: None }));
+        assert!(!table.handle_action(
+            1,
+            ClientAction::Kan {
+                tile_index: Tile::M1 as usize,
+            },
+        ));
+        assert!(!table.handle_action(
+            0,
+            ClientAction::Kan {
+                tile_index: Tile::LEN,
+            },
+        ));
+    }
+
+    #[test]
+    fn test_table_handle_nine_terminals_continue_and_declare() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+        table.current_round_mut().unwrap().phase = TurnPhase::WaitForNineTerminals;
+
+        assert!(!table.handle_action(1, ClientAction::NineTerminals { declare: false }));
+        assert!(table.handle_action(0, ClientAction::NineTerminals { declare: false }));
+        assert_eq!(
+            table.current_round().unwrap().phase,
+            TurnPhase::WaitForDiscard
+        );
+
+        table.current_round_mut().unwrap().phase = TurnPhase::WaitForNineTerminals;
+        assert!(table.handle_action(0, ClientAction::NineTerminals { declare: true }));
+        assert_eq!(table.current_round().unwrap().phase, TurnPhase::RoundOver);
+        assert!(matches!(
+            table.current_round().unwrap().result,
+            Some(RoundResult::SpecialDraw)
+        ));
+    }
 }
