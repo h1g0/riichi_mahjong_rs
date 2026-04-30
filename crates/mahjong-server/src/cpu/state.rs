@@ -348,9 +348,23 @@ impl Default for CpuGameState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ServerEvent;
+    use crate::protocol::{DrawReason, ServerEvent};
     use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
     use mahjong_core::tile::{Tile, Wind};
+
+    #[test]
+    fn test_default_state_and_wind_to_index() {
+        let state = CpuGameState::default();
+
+        assert!(state.my_hand.is_empty());
+        assert_eq!(state.my_drawn, None);
+        assert_eq!(state.my_seat_wind, Wind::East);
+        assert_eq!(state.scores, [0; 4]);
+        assert_eq!(CpuGameState::wind_to_index(Wind::East), 0);
+        assert_eq!(CpuGameState::wind_to_index(Wind::South), 1);
+        assert_eq!(CpuGameState::wind_to_index(Wind::West), 2);
+        assert_eq!(CpuGameState::wind_to_index(Wind::North), 3);
+    }
 
     #[test]
     fn test_game_started_initializes_state() {
@@ -380,6 +394,71 @@ mod tests {
     }
 
     #[test]
+    fn test_game_started_resets_existing_round_state() {
+        let mut state = CpuGameState::new();
+        state.my_hand = vec![Tile::new(Tile::M1)];
+        state.my_drawn = Some(Tile::new(Tile::P1));
+        state.my_seat_wind = Wind::West;
+        state.is_riichi = true;
+        state.can_tsumo = true;
+        state.can_riichi = true;
+        state.is_furiten = true;
+        state.scores = [1000, 2000, 3000, 4000];
+        state.all_discards[0].push(Tile::new(Tile::M9));
+        state.called_discards.push(Tile::new(Tile::M9));
+        state.player_riichi = [true; 4];
+        state.player_melds[0].push(Meld {
+            tiles: vec![Tile::new(Tile::S1); 3],
+            category: MeldType::Pon,
+            from: MeldFrom::Unknown,
+            called_tile: Some(Tile::new(Tile::S1)),
+        });
+        state.dora_indicators = vec![Tile::new(Tile::P9)];
+        state.prevailing_wind = Wind::South;
+        state.remaining_tiles = 12;
+        state.honba = 3;
+        state.riichi_sticks = 2;
+        state.pending_calls = vec![AvailableCall::Ron];
+        state.pending_call_tile = Some(Tile::new(Tile::M2));
+        state.need_discard_after_call = true;
+        state.pending_kan_draw = true;
+
+        let hand = vec![Tile::new(Tile::S2), Tile::new(Tile::S3)];
+        state.update(&ServerEvent::GameStarted {
+            seat_wind: Wind::North,
+            hand: hand.clone(),
+            scores: [25000; 4],
+            prevailing_wind: Wind::East,
+            dora_indicators: vec![Tile::new(Tile::Z1)],
+            round_number: 4,
+            honba: 1,
+            riichi_sticks: 1,
+        });
+
+        assert_eq!(state.my_hand, hand);
+        assert_eq!(state.my_drawn, None);
+        assert_eq!(state.my_seat_wind, Wind::North);
+        assert!(!state.is_riichi);
+        assert!(!state.can_tsumo);
+        assert!(!state.can_riichi);
+        assert!(!state.is_furiten);
+        assert_eq!(state.scores, [25000; 4]);
+        assert!(state.all_discards.iter().all(Vec::is_empty));
+        assert!(state.called_discards.is_empty());
+        assert_eq!(state.player_riichi, [false; 4]);
+        assert!(state.player_melds.iter().all(Vec::is_empty));
+        assert_eq!(state.dora_indicators, vec![Tile::new(Tile::Z1)]);
+        assert_eq!(state.prevailing_wind, Wind::East);
+        assert_eq!(state.remaining_tiles, 70);
+        assert_eq!(state.honba, 1);
+        assert_eq!(state.riichi_sticks, 1);
+        assert!(state.pending_calls.is_empty());
+        assert_eq!(state.pending_call_tile, None);
+        assert!(!state.need_discard_after_call);
+        assert!(!state.pending_kan_draw);
+    }
+
+    #[test]
     fn test_tile_drawn_updates_state() {
         let mut state = CpuGameState::new();
         state.update(&ServerEvent::TileDrawn {
@@ -397,6 +476,39 @@ mod tests {
     }
 
     #[test]
+    fn test_tile_drawn_clears_post_call_discard_flag() {
+        let mut state = CpuGameState::new();
+        state.need_discard_after_call = true;
+
+        state.update(&ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::S5),
+            remaining_tiles: 12,
+            can_tsumo: true,
+            can_riichi: false,
+            is_furiten: true,
+        });
+
+        assert_eq!(state.my_drawn, Some(Tile::new(Tile::S5)));
+        assert_eq!(state.remaining_tiles, 12);
+        assert!(state.can_tsumo);
+        assert!(!state.can_riichi);
+        assert!(state.is_furiten);
+        assert!(!state.need_discard_after_call);
+    }
+
+    #[test]
+    fn test_other_player_drew_updates_remaining_tiles() {
+        let mut state = CpuGameState::new();
+
+        state.update(&ServerEvent::OtherPlayerDrew {
+            player: Wind::West,
+            remaining_tiles: 33,
+        });
+
+        assert_eq!(state.remaining_tiles, 33);
+    }
+
+    #[test]
     fn test_tile_discarded_updates_discards() {
         let mut state = CpuGameState::new();
         state.my_seat_wind = Wind::East;
@@ -409,6 +521,122 @@ mod tests {
 
         assert_eq!(state.all_discards[1].len(), 1);
         assert_eq!(state.all_discards[1][0], Tile::new(Tile::Z1));
+    }
+
+    #[test]
+    fn test_self_discard_without_drawn_tile_removes_from_hand_only() {
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.my_hand = vec![
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+        ];
+
+        state.update(&ServerEvent::TileDiscarded {
+            player: Wind::East,
+            tile: Tile::new(Tile::M2),
+            is_tsumogiri: false,
+        });
+
+        assert_eq!(state.my_drawn, None);
+        assert_eq!(
+            state.my_hand,
+            vec![Tile::new(Tile::M1), Tile::new(Tile::M3)]
+        );
+        assert_eq!(state.all_discards[0], vec![Tile::new(Tile::M2)]);
+    }
+
+    #[test]
+    fn test_call_available_records_pending_calls() {
+        let mut state = CpuGameState::new();
+        let option = [Tile::new(Tile::M1), Tile::new(Tile::M1)];
+
+        state.update(&ServerEvent::CallAvailable {
+            tile: Tile::new(Tile::M1),
+            discarder: Wind::North,
+            calls: vec![
+                AvailableCall::Ron,
+                AvailableCall::Pon {
+                    options: vec![option],
+                },
+            ],
+        });
+
+        assert_eq!(state.pending_call_tile, Some(Tile::new(Tile::M1)));
+        assert_eq!(state.pending_calls.len(), 2);
+        assert!(matches!(state.pending_calls[0], AvailableCall::Ron));
+        match &state.pending_calls[1] {
+            AvailableCall::Pon { options } => assert_eq!(options, &vec![option]),
+            call => panic!("expected pon call, got {call:?}"),
+        }
+    }
+
+    #[test]
+    fn test_player_called_variants_update_melds_and_kan_state() {
+        let mut state = CpuGameState::new();
+        state.pending_calls = vec![AvailableCall::Ron];
+        state.pending_call_tile = Some(Tile::new(Tile::M2));
+
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::South,
+            call_type: CallType::Chi,
+            called_tile: Tile::new(Tile::M2),
+            tiles: vec![
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+            ],
+        });
+
+        let chi = &state.player_melds[1][0];
+        assert_eq!(chi.category, MeldType::Chi);
+        assert_eq!(chi.from, MeldFrom::Unknown);
+        assert_eq!(state.called_discards, vec![Tile::new(Tile::M2)]);
+        assert!(state.pending_calls.is_empty());
+        assert_eq!(state.pending_call_tile, None);
+        assert!(!state.pending_kan_draw);
+
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::West,
+            call_type: CallType::Daiminkan,
+            called_tile: Tile::new(Tile::P4),
+            tiles: vec![Tile::new(Tile::P4); 4],
+        });
+
+        let daiminkan = &state.player_melds[2][0];
+        assert_eq!(daiminkan.category, MeldType::Kan);
+        assert_eq!(daiminkan.from, MeldFrom::Unknown);
+        assert_eq!(
+            state.called_discards,
+            vec![Tile::new(Tile::M2), Tile::new(Tile::P4)]
+        );
+        assert!(state.pending_kan_draw);
+
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::North,
+            call_type: CallType::Ankan,
+            called_tile: Tile::new(Tile::S7),
+            tiles: vec![Tile::new(Tile::S7); 4],
+        });
+
+        let ankan = &state.player_melds[3][0];
+        assert_eq!(ankan.category, MeldType::Kan);
+        assert_eq!(ankan.from, MeldFrom::Myself);
+        assert_eq!(state.called_discards.len(), 2);
+        assert!(state.pending_kan_draw);
+
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::East,
+            call_type: CallType::Ron,
+            called_tile: Tile::new(Tile::Z1),
+            tiles: vec![Tile::new(Tile::Z1); 3],
+        });
+
+        let ron_fallback = &state.player_melds[0][0];
+        assert_eq!(ron_fallback.category, MeldType::Pon);
+        assert_eq!(state.called_discards.len(), 2);
+        assert!(!state.pending_kan_draw);
     }
 
     #[test]
@@ -429,6 +657,120 @@ mod tests {
     }
 
     #[test]
+    fn test_other_player_riichi_does_not_mark_self_riichi() {
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::North;
+
+        state.update(&ServerEvent::PlayerRiichi {
+            player: Wind::South,
+            scores: [25000, 24000, 25000, 25000],
+            riichi_sticks: 1,
+        });
+
+        assert!(!state.is_riichi);
+        assert!(state.player_riichi[1]);
+        assert_eq!(state.scores, [25000, 24000, 25000, 25000]);
+        assert_eq!(state.riichi_sticks, 1);
+    }
+
+    #[test]
+    fn test_dora_indicators_updated_replaces_indicators() {
+        let mut state = CpuGameState::new();
+        state.dora_indicators = vec![Tile::new(Tile::M1)];
+
+        state.update(&ServerEvent::DoraIndicatorsUpdated {
+            dora_indicators: vec![Tile::new(Tile::P9), Tile::new(Tile::Z5)],
+        });
+
+        assert_eq!(
+            state.dora_indicators,
+            vec![Tile::new(Tile::P9), Tile::new(Tile::Z5)]
+        );
+    }
+
+    #[test]
+    fn test_hand_updated_after_open_call_requires_discard() {
+        let mut state = CpuGameState::new();
+        state.my_drawn = Some(Tile::new(Tile::S9));
+
+        state.update(&ServerEvent::HandUpdated {
+            hand: vec![Tile::new(Tile::M1), Tile::new(Tile::M2)],
+        });
+
+        assert_eq!(
+            state.my_hand,
+            vec![Tile::new(Tile::M1), Tile::new(Tile::M2)]
+        );
+        assert_eq!(state.my_drawn, None);
+        assert!(state.need_discard_after_call);
+        assert!(!state.pending_kan_draw);
+    }
+
+    #[test]
+    fn test_hand_updated_after_kan_waits_for_rinshan_draw() {
+        let mut state = CpuGameState::new();
+        state.my_drawn = Some(Tile::new(Tile::S9));
+        state.pending_kan_draw = true;
+
+        state.update(&ServerEvent::HandUpdated {
+            hand: vec![Tile::new(Tile::P1), Tile::new(Tile::P2)],
+        });
+
+        assert_eq!(
+            state.my_hand,
+            vec![Tile::new(Tile::P1), Tile::new(Tile::P2)]
+        );
+        assert_eq!(state.my_drawn, None);
+        assert!(!state.need_discard_after_call);
+        assert!(!state.pending_kan_draw);
+    }
+
+    #[test]
+    fn test_round_end_events_update_scores() {
+        let mut state = CpuGameState::new();
+
+        state.update(&ServerEvent::RoundWon {
+            winner: Wind::East,
+            loser: Some(Wind::South),
+            winning_tile: Tile::new(Tile::M1),
+            scores: [35000, 15000, 25000, 25000],
+            yaku_list: Vec::new(),
+            han: 1,
+            fu: 30,
+            score_points: 1000,
+            rank_name: String::new(),
+            uradora_indicators: Vec::new(),
+            riichi_sticks: 0,
+            player_hands: Vec::new(),
+        });
+        assert_eq!(state.scores, [35000, 15000, 25000, 25000]);
+
+        state.update(&ServerEvent::RoundDraw {
+            scores: [26000, 26000, 24000, 24000],
+            reason: DrawReason::Exhaustive,
+            tenpai: vec![Wind::East, Wind::South],
+            riichi_sticks: 1,
+            player_hands: Vec::new(),
+            declarer: None,
+        });
+        assert_eq!(state.scores, [26000, 26000, 24000, 24000]);
+    }
+
+    #[test]
+    fn test_nine_terminals_available_preserves_state() {
+        let mut state = CpuGameState::new();
+        state.scores = [25000, 26000, 24000, 25000];
+        state.pending_calls = vec![AvailableCall::Ron];
+        state.pending_call_tile = Some(Tile::new(Tile::Z1));
+
+        state.update(&ServerEvent::NineTerminalsAvailable);
+
+        assert_eq!(state.scores, [25000, 26000, 24000, 25000]);
+        assert_eq!(state.pending_calls.len(), 1);
+        assert_eq!(state.pending_call_tile, Some(Tile::new(Tile::Z1)));
+    }
+
+    #[test]
     fn test_visible_tile_counts() {
         let mut state = CpuGameState::new();
         state.my_hand = vec![Tile::new(Tile::M1), Tile::new(Tile::M1)];
@@ -436,6 +778,26 @@ mod tests {
 
         let counts = state.visible_tile_counts();
         assert_eq!(counts[Tile::M1 as usize], 3);
+    }
+
+    #[test]
+    fn test_visible_tile_counts_includes_drawn_dora_melds_and_saturates_called_discards() {
+        let mut state = CpuGameState::new();
+        state.my_drawn = Some(Tile::new(Tile::M2));
+        state.dora_indicators = vec![Tile::new(Tile::M3)];
+        state.player_melds[2].push(Meld {
+            tiles: vec![Tile::new(Tile::M4); 3],
+            category: MeldType::Pon,
+            from: MeldFrom::Unknown,
+            called_tile: Some(Tile::new(Tile::M4)),
+        });
+        state.called_discards.push(Tile::new(Tile::Z7));
+
+        let counts = state.visible_tile_counts();
+        assert_eq!(counts[Tile::M2 as usize], 1);
+        assert_eq!(counts[Tile::M3 as usize], 1);
+        assert_eq!(counts[Tile::M4 as usize], 3);
+        assert_eq!(counts[Tile::Z7 as usize], 0);
     }
 
     #[test]
@@ -483,6 +845,34 @@ mod tests {
         assert_eq!(state.player_melds[0][0].category, MeldType::Kakan);
         assert_eq!(state.player_melds[0][0].tiles.len(), 4);
         assert_eq!(state.visible_tile_counts()[Tile::M1 as usize], 4);
+    }
+
+    #[test]
+    fn test_kakan_without_matching_pon_adds_new_meld() {
+        let mut state = CpuGameState::new();
+        state.player_melds[0].push(Meld {
+            tiles: vec![Tile::new(Tile::M2); 3],
+            category: MeldType::Pon,
+            from: MeldFrom::Unknown,
+            called_tile: Some(Tile::new(Tile::M2)),
+        });
+
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::East,
+            call_type: CallType::Kakan,
+            called_tile: Tile::new(Tile::M1),
+            tiles: vec![Tile::new(Tile::M1); 4],
+        });
+
+        assert_eq!(state.player_melds[0].len(), 2);
+        assert_eq!(state.player_melds[0][1].category, MeldType::Kakan);
+        assert_eq!(state.player_melds[0][1].tiles, vec![Tile::new(Tile::M1); 4]);
+        assert_eq!(
+            state.player_melds[0][1].called_tile,
+            Some(Tile::new(Tile::M1))
+        );
+        assert!(state.pending_kan_draw);
+        assert!(state.called_discards.is_empty());
     }
 
     #[test]
