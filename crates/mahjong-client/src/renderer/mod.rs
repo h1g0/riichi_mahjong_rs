@@ -990,7 +990,7 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         .enumerate()
         .map(|(i, &s)| (i, s))
         .collect();
-    rankings.sort_by(|a, b| b.1.cmp(&a.1));
+    rankings.sort_by_key(|&(_, score)| std::cmp::Reverse(score));
 
     for (rank, (player_idx, score)) in rankings.iter().enumerate() {
         let color = if *player_idx == 0 {

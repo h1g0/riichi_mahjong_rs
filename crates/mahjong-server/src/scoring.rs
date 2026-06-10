@@ -144,25 +144,6 @@ pub fn check_ron_with_settings(
     )
 }
 
-/// ロン和了が可能か判定する（搶槓などの状態フラグ付き）
-pub fn check_ron_with_flags(
-    player: &Player,
-    discarded_tile: Tile,
-    prevailing_wind: Wind,
-    is_last_tile: bool,
-    is_robbing_a_quad: bool,
-) -> WinCheckResult {
-    let settings = Settings::new();
-    check_ron_with_flags_and_settings(
-        player,
-        discarded_tile,
-        prevailing_wind,
-        is_last_tile,
-        is_robbing_a_quad,
-        &settings,
-    )
-}
-
 /// ロン和了が可能か指定ルールと状態フラグで判定する
 pub fn check_ron_with_flags_and_settings(
     player: &Player,

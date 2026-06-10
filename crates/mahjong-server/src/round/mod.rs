@@ -138,7 +138,55 @@ impl Round {
         round_number: usize,
         settings: Settings,
     ) -> Self {
-        let mut wall = Wall::new();
+        Self::with_wall(
+            Wall::new(),
+            prevailing_wind,
+            dealer,
+            initial_scores,
+            honba,
+            riichi_sticks,
+            round_number,
+            settings,
+        )
+    }
+
+    /// テスト用：固定シードの牌山でラウンドを生成する（再現性のあるテスト向け）
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_seed(
+        seed: u64,
+        prevailing_wind: Wind,
+        dealer: usize,
+        initial_scores: [i32; 4],
+        honba: usize,
+        riichi_sticks: usize,
+        round_number: usize,
+        settings: Settings,
+    ) -> Self {
+        Self::with_wall(
+            Wall::new_with_seed(seed),
+            prevailing_wind,
+            dealer,
+            initial_scores,
+            honba,
+            riichi_sticks,
+            round_number,
+            settings,
+        )
+    }
+
+    /// 指定した牌山から局を開始する共通処理
+    #[allow(clippy::too_many_arguments)]
+    fn with_wall(
+        mut wall: Wall,
+        prevailing_wind: Wind,
+        dealer: usize,
+        initial_scores: [i32; 4],
+        honba: usize,
+        riichi_sticks: usize,
+        round_number: usize,
+        settings: Settings,
+    ) -> Self {
         let dealt = wall.deal();
 
         // 座席の風を割り当て: dealer=東, 反時計回りに南西北
@@ -159,72 +207,6 @@ impl Round {
         let dora_indicators = wall.dora_indicators();
 
         // 各プレイヤーにゲーム開始イベントを送信
-        let mut events = Vec::new();
-        for (i, player) in players.iter().enumerate() {
-            events.push((
-                i,
-                ServerEvent::GameStarted {
-                    seat_wind: player.seat_wind,
-                    hand: player.hand.tiles().to_vec(),
-                    scores: initial_scores,
-                    prevailing_wind,
-                    dora_indicators: dora_indicators.clone(),
-                    round_number,
-                    honba,
-                    riichi_sticks,
-                },
-            ));
-        }
-
-        Round {
-            wall,
-            players,
-            prevailing_wind,
-            dealer,
-            current_player: dealer,
-            honba,
-            riichi_sticks,
-            phase: TurnPhase::Draw,
-            result: None,
-            events,
-            call_state: None,
-            last_draw_was_dead_wall: false,
-            settings,
-        }
-    }
-
-    /// テスト用：固定シードの牌山でラウンドを生成する（再現性のあるテスト向け）
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_seed(
-        seed: u64,
-        prevailing_wind: Wind,
-        dealer: usize,
-        initial_scores: [i32; 4],
-        honba: usize,
-        riichi_sticks: usize,
-        round_number: usize,
-        settings: Settings,
-    ) -> Self {
-        let mut wall = Wall::new_with_seed(seed);
-        let dealt = wall.deal();
-
-        let winds = [
-            Wind::from_index((4 - dealer) % 4),
-            Wind::from_index((1 + 4 - dealer) % 4),
-            Wind::from_index((2 + 4 - dealer) % 4),
-            Wind::from_index((3 + 4 - dealer) % 4),
-        ];
-
-        let players = [
-            Player::new(winds[0], dealt[0].clone(), initial_scores[0]),
-            Player::new(winds[1], dealt[1].clone(), initial_scores[1]),
-            Player::new(winds[2], dealt[2].clone(), initial_scores[2]),
-            Player::new(winds[3], dealt[3].clone(), initial_scores[3]),
-        ];
-
-        let dora_indicators = wall.dora_indicators();
-
         let mut events = Vec::new();
         for (i, player) in players.iter().enumerate() {
             events.push((
@@ -433,16 +415,8 @@ impl Round {
             ));
         }
 
-        // 打牌したプレイヤーの一発フラグを無効にする
-        // （リーチ宣言直後の打牌ではippatsuは維持される。
-        //  ippatsuは宣言後の次の打牌で無効になる。
-        //  ただし宣言打牌自体でippatsuがセットされるので、
-        //  実質的にはここでは常にfalseに設定する。
-        //  宣言打牌時はdeclare_riichi()でippatsu=trueがセットされた直後なので、
-        //  ここでfalseにしてしまうのを防ぐため、is_riichi宣言直後のフラグで制御）
-        // ※ 一発フラグはリーチ宣言後1巡以内（自分の次のdrawまで）有効
-        //   → 自分のdiscard時に解除するのではなく、自分の次のdraw後のdiscardで解除
-        //   → ここでは何もしない（player.discard() 内で既に解除済み）
+        // 一発フラグは try_discard() 内で解除済み。
+        // リーチ宣言牌の打牌は do_riichi() が別途処理し、そこでフラグを復元する。
 
         // 鳴き候補をチェック
         let call_state = self.check_available_calls(discarded, discarder);
@@ -1318,9 +1292,9 @@ impl Round {
     fn can_player_riichi(&self, player_idx: usize) -> bool {
         let player = &self.players[player_idx];
 
-        // 人間プレイヤー(idx=0)の場合のみ却下理由を診断ログに残す
+        // デバッグビルドでは人間プレイヤー(idx=0)の却下理由を診断ログに残す
         let log_reject = |detail: std::fmt::Arguments| {
-            if player_idx == 0 {
+            if cfg!(debug_assertions) && player_idx == 0 {
                 eprintln!("[riichi-reject] {detail}");
             }
         };
