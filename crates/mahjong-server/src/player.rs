@@ -461,19 +461,22 @@ impl Player {
         );
 
         let mut kan_tiles: Vec<Tile> = indices.iter().map(|&idx| self.hand.tiles()[idx]).collect();
+
+        // カン牌を先に除去する。ツモ牌を手牌に戻してソートすると
+        // indices が指す位置がずれて誤った牌を削除してしまうため。
+        self.hand.remove_tiles_by_indices(&mut indices);
+
         if drawn_matches {
             kan_tiles.push(drawn.unwrap());
-            self.hand.set_drawn(None);
         } else if let Some(d) = drawn {
             // ツモ牌がカン牌でない場合、手牌に戻す（嶺上ツモで上書きされないよう）
             self.hand.tiles_mut().push(d);
             self.hand.sort();
-            self.hand.set_drawn(None);
         }
+        self.hand.set_drawn(None);
 
         let stored_tiles = Self::stored_kan_tiles(kan_tiles);
 
-        self.hand.remove_tiles_by_indices(&mut indices);
         self.hand.add_meld(Meld {
             tiles: stored_tiles,
             category: MeldType::Kan,
@@ -870,6 +873,40 @@ mod tests {
                 .iter()
                 .any(|tile| tile.is_red_dora()),
             "暗カンの赤ドラ牌が副露情報に残ること"
+        );
+    }
+
+    /// 回帰テスト: カン牌より小さいツモ牌を手牌に戻す暗カンで、
+    /// ソートによるインデックスずれで誤った牌が削除されないこと
+    #[test]
+    fn test_do_ankan_with_smaller_unrelated_drawn_tile() {
+        let hand = Hand::from("234m567m234p9999s 1m");
+        let mut player = Player::new(Wind::South, hand.tiles().to_vec(), 25000);
+        player.draw(hand.drawn().unwrap());
+
+        player.do_ankan(Tile::S9);
+
+        assert_eq!(player.hand.tiles().len(), 10);
+        assert!(player.hand.drawn().is_none());
+        assert!(
+            !player.hand.tiles().iter().any(|t| t.get() == Tile::S9),
+            "9sは全てカンされて手牌に残らないこと"
+        );
+        assert!(
+            player.hand.tiles().contains(&Tile::new(Tile::M1)),
+            "ツモ牌の1mが手牌に戻ること"
+        );
+        assert!(
+            player.hand.tiles().contains(&Tile::new(Tile::P4)),
+            "カンと無関係な牌が誤って削除されないこと"
+        );
+        assert_eq!(player.hand.melds().len(), 1);
+        assert_eq!(player.hand.melds()[0].category, MeldType::Kan);
+        assert!(
+            player.hand.melds()[0]
+                .tiles
+                .iter()
+                .all(|t| t.get() == Tile::S9)
         );
     }
 
