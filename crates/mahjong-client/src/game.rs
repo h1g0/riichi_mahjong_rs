@@ -331,7 +331,6 @@ impl GameState {
                 self.pon_pending_options.clear();
                 self.nine_terminals_pending = false;
                 self.call_target_tile = None;
-                self.refresh_self_kan_options();
                 self.call_discarder = None;
                 self.can_tsumo = false;
                 self.can_riichi = false;
