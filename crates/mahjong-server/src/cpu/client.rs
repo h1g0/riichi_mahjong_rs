@@ -86,6 +86,11 @@ pub struct CpuConfig {
     pub personality: CpuPersonality,
     /// 性格パラメータ
     pub params: PersonalityParams,
+    /// 定石（heuristics）を適用するか
+    ///
+    /// 通常は true。false にすると定石導入前の挙動になるため、
+    /// シミュレーションでの新旧比較（A/B テスト）に使用する。
+    pub heuristics_enabled: bool,
 }
 
 impl CpuConfig {
@@ -96,7 +101,14 @@ impl CpuConfig {
             level,
             personality,
             params,
+            heuristics_enabled: true,
         }
+    }
+
+    /// 定石を無効化した設定を返す（シミュレーションでの新旧比較用）
+    pub fn without_heuristics(mut self) -> Self {
+        self.heuristics_enabled = false;
+        self
     }
 }
 

@@ -4,6 +4,7 @@ pub mod player;
 pub mod protocol;
 pub mod round;
 pub mod scoring;
+pub mod simulation;
 pub mod table;
 pub mod turn;
 pub mod wall;

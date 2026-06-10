@@ -56,8 +56,9 @@ impl Wall {
         }
     }
 
-    /// テスト用：固定シードで牌山を生成する（再現性のある乱数）
-    #[cfg(test)]
+    /// 固定シードで牌山を生成する（再現性のある乱数）
+    ///
+    /// シミュレーション・再現性のあるテストに使用する。
     pub fn new_with_seed(seed: u64) -> Self {
         use rand::SeedableRng;
         let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
