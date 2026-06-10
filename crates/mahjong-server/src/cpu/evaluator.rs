@@ -9,6 +9,7 @@ use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
 
 use super::client::CpuConfig;
 use super::defense;
+use super::heuristics::{self, DiscardContext};
 use super::state::CpuGameState;
 
 /// 牌1枚を捨てた場合の評価
@@ -193,10 +194,17 @@ pub fn select_best_discard(
     candidates: &[DiscardCandidate],
     config: &CpuConfig,
     attacking: bool,
+    state: &CpuGameState,
 ) -> Option<Tile> {
     if candidates.is_empty() {
         return None;
     }
+
+    let ctx = DiscardContext {
+        state,
+        config,
+        attacking,
+    };
 
     let params = &config.params;
     let mut scored: Vec<(usize, f64)> = candidates
@@ -218,6 +226,9 @@ pub fn select_best_discard(
             if !attacking {
                 score += c.safety * params.retreat_threshold * 50.0;
             }
+
+            // 定石による補正（レベルに応じて有効な定石のみ適用される）
+            score += heuristics::discard_adjustment(&ctx, c);
 
             (i, score)
         })
@@ -500,7 +511,8 @@ mod tests {
 
     #[test]
     fn test_select_best_discard_empty() {
-        assert!(select_best_discard(&[], &normal_config(), true).is_none());
+        let state = CpuGameState::new();
+        assert!(select_best_discard(&[], &normal_config(), true, &state).is_none());
     }
 
     fn make_candidate(tile_type: u32, shanten_val: i32, safety: f64) -> DiscardCandidate {
@@ -523,8 +535,9 @@ mod tests {
 
     #[test]
     fn test_select_best_discard_single_candidate() {
+        let state = CpuGameState::new();
         let c = make_candidate(Tile::Z1, 1, 0.5);
-        let result = select_best_discard(&[c], &normal_config(), true);
+        let result = select_best_discard(&[c], &normal_config(), true, &state);
         assert!(result.is_some());
         assert_eq!(result.unwrap().get(), Tile::Z1);
     }
@@ -552,7 +565,7 @@ mod tests {
         state.my_drawn = Some(Tile::new(Tile::Z2));
         let candidates = evaluate_discards(&state, &weak_config());
         // Z1 か Z2 を捨てたときがテンパイ（shanten=0）になるはず
-        let result = select_best_discard(&candidates, &normal_config(), true);
+        let result = select_best_discard(&candidates, &normal_config(), true, &state);
         assert!(result.is_some());
         let best = result.unwrap();
         // Z1 か Z2 を選ぶ（字牌を捨ててテンパイ）
@@ -597,7 +610,7 @@ mod tests {
             safety: 1.0,
         };
         // 守備モードでは安全な牌を選ぶ
-        let result = select_best_discard(&[dangerous, safe], &normal_config(), false);
+        let result = select_best_discard(&[dangerous, safe], &normal_config(), false, &state);
         assert_eq!(result.unwrap().get(), Tile::Z3);
     }
 }

@@ -272,6 +272,39 @@ pub fn calc_shanten_number(hand: &Hand) -> ShantenNumber {
     ShantenNumber(min(min(sp, to), nm))
 }
 
+/// 和了形を指定して向聴数のみを高速に計算する
+///
+/// `HandAnalyzer::new_by_form(hand, form)` の `shanten` と同じ結果を返すが、
+/// ブロック分解やVecへの格納を行わないため高速。
+/// CPU の路線判断（一般形・七対子・国士無双の比較）など、
+/// 形ごとの向聴数を大量に計算する箇所で使用する。
+///
+/// 副露がある場合、七対子・国士無双は該当なし（`i32::MAX` 相当）を返す。
+pub fn calc_shanten_number_by_form(hand: &Hand, form: Form) -> ShantenNumber {
+    let is_closed = hand.melds().is_empty();
+    match form {
+        Form::SevenPairs => {
+            if is_closed {
+                let t = hand.summarize_tiles();
+                ShantenNumber(calc_seven_pairs_shanten(&t).0)
+            } else {
+                ShantenNumber::UNAVAILABLE
+            }
+        }
+        Form::ThirteenOrphans => {
+            if is_closed {
+                let t = hand.summarize_tiles();
+                ShantenNumber(calc_thirteen_orphans_shanten(&t))
+            } else {
+                ShantenNumber::UNAVAILABLE
+            }
+        }
+        Form::Normal => calc_normal_shanten::<CountOnly>(hand)
+            .map(|(s, _)| ShantenNumber(s))
+            .unwrap_or(ShantenNumber::UNAVAILABLE),
+    }
+}
+
 /// 七対子のシャンテン数を計算する共通ロジック
 ///
 /// 戻り値: `(shanten, pair_count)`
@@ -916,6 +949,65 @@ mod tests {
                 .shanten
                 .is_ready()
         );
+    }
+
+    #[test]
+    /// calc_shanten_number_by_form は HandAnalyzer::new_by_form と同じ向聴数を返す
+    fn calc_shanten_number_by_form_matches_analyzer() {
+        let test_strs = [
+            "226699m99p228s66z 1z", // 七対子聴牌
+            "19m19p11s1234567z 5m", // 国士無双聴牌
+            "123456789m123p11z 2p", // 通常形聴牌
+            "1122m3344p5555s1z 1z", // 4枚使い七対子
+            "139m258p47s12345z 6z", // バラバラ
+            "111222333m44455p 5p",  // 和了形
+        ];
+        for test_str in test_strs {
+            let hand = Hand::from(test_str);
+            for form in [Form::Normal, Form::SevenPairs, Form::ThirteenOrphans] {
+                assert_eq!(
+                    calc_shanten_number_by_form(&hand, form),
+                    HandAnalyzer::new_by_form(&hand, form).unwrap().shanten,
+                    "form {form:?} mismatch for {test_str}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    /// 副露がある場合、七対子・国士無双は該当なしを返す
+    fn calc_shanten_number_by_form_melded_hand() {
+        use crate::hand_info::meld::{Meld, MeldFrom, MeldType};
+        let tiles = vec![
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S7),
+            Tile::new(Tile::S8),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z1),
+        ];
+        let melds = vec![Meld {
+            tiles: vec![Tile::new(Tile::Z5); 3],
+            category: MeldType::Pon,
+            from: MeldFrom::Unknown,
+            called_tile: Some(Tile::new(Tile::Z5)),
+        }];
+        let hand = Hand::new_with_melds(tiles, melds, None);
+
+        assert_eq!(
+            calc_shanten_number_by_form(&hand, Form::SevenPairs),
+            ShantenNumber::UNAVAILABLE
+        );
+        assert_eq!(
+            calc_shanten_number_by_form(&hand, Form::ThirteenOrphans),
+            ShantenNumber::UNAVAILABLE
+        );
+        // 通常形は計算できる（S9 か S6 待ちの聴牌）
+        assert!(calc_shanten_number_by_form(&hand, Form::Normal).is_ready());
     }
 
     #[test]

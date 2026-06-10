@@ -3,7 +3,7 @@ use strum_macros::{EnumCount as EnumCountMacro, EnumIter};
 use crate::settings::Lang;
 
 /// 和了時の手牌の形態
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Form {
     /// 七対子
     SevenPairs,
