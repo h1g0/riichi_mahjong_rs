@@ -83,6 +83,23 @@ impl Table {
         self.round = Some(round);
     }
 
+    /// シード値を指定して新しい局を開始する
+    ///
+    /// 牌山が決定的になるため、シミュレーション・テストでの再現に使用する。
+    pub fn start_round_with_seed(&mut self, seed: u64) {
+        let round = Round::new_with_seed(
+            seed,
+            self.prevailing_wind,
+            self.dealer,
+            self.scores,
+            self.honba,
+            self.riichi_sticks,
+            self.round_number,
+            self.settings.rules.clone(),
+        );
+        self.round = Some(round);
+    }
+
     /// 現在の局への参照を取得する
     pub fn current_round(&self) -> Option<&Round> {
         self.round.as_ref()

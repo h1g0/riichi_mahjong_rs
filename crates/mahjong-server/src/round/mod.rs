@@ -150,8 +150,9 @@ impl Round {
         )
     }
 
-    /// テスト用：固定シードの牌山でラウンドを生成する（再現性のあるテスト向け）
-    #[cfg(test)]
+    /// 固定シードの牌山でラウンドを生成する
+    ///
+    /// 牌山が決定的になるため、シミュレーション・再現性のあるテストに使用する。
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_seed(
         seed: u64,

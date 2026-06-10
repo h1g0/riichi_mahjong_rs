@@ -49,11 +49,15 @@ pub fn discard_adjustment(ctx: &DiscardContext, candidate: &DiscardCandidate) ->
 /// レジストリを指定して補正値を合算する
 ///
 /// レベルが `min_level` 未満の定石は適用しない。
+/// `heuristics_enabled` が false の場合は全定石を無効化する（新旧比較用）。
 fn discard_adjustment_with(
     heuristics: &[DiscardHeuristic],
     ctx: &DiscardContext,
     candidate: &DiscardCandidate,
 ) -> f64 {
+    if !ctx.config.heuristics_enabled {
+        return 0.0;
+    }
     heuristics
         .iter()
         .filter(|h| ctx.config.level >= h.min_level)
@@ -145,6 +149,26 @@ mod tests {
             discard_adjustment_with(&heuristics, &ctx, &candidate),
             111.0
         );
+    }
+
+    #[test]
+    fn test_heuristics_disabled_config_returns_zero() {
+        // heuristics_enabled=false なら全定石が無効（新旧比較用のベースライン）
+        let heuristics = [fixed_bonus_heuristic(
+            "weak-rule",
+            CpuLevel::Weak,
+            |_, _| 1.0,
+        )];
+        let state = CpuGameState::new();
+        let config =
+            CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced).without_heuristics();
+        let ctx = DiscardContext {
+            state: &state,
+            config: &config,
+            attacking: true,
+        };
+        let candidate = make_candidate(Tile::M1);
+        assert_eq!(discard_adjustment_with(&heuristics, &ctx, &candidate), 0.0);
     }
 
     #[test]

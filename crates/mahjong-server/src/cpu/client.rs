@@ -86,6 +86,11 @@ pub struct CpuConfig {
     pub personality: CpuPersonality,
     /// 性格パラメータ
     pub params: PersonalityParams,
+    /// 定石（heuristics）を適用するか
+    ///
+    /// 通常は true。false にすると定石導入前の挙動になるため、
+    /// シミュレーションでの新旧比較（A/B テスト）に使用する。
+    pub heuristics_enabled: bool,
 }
 
 impl CpuConfig {
@@ -96,7 +101,14 @@ impl CpuConfig {
             level,
             personality,
             params,
+            heuristics_enabled: true,
         }
+    }
+
+    /// 定石を無効化した設定を返す（シミュレーションでの新旧比較用）
+    pub fn without_heuristics(mut self) -> Self {
+        self.heuristics_enabled = false;
+        self
     }
 }
 
@@ -156,8 +168,12 @@ impl CpuClient {
         }
 
         // リーチ可能か検討
-        if self.state.can_riichi && self.should_riichi() {
-            let tile = self.select_riichi_tile();
+        // 聴牌を維持できる打牌が見つからない場合はリーチせず通常打牌に進む
+        // （不正なリーチ宣言はサーバに拒否され、局が進行不能になる）
+        if self.state.can_riichi
+            && self.should_riichi()
+            && let Some(tile) = self.select_riichi_tile()
+        {
             return ClientAction::Riichi { tile };
         }
 
@@ -281,13 +297,20 @@ impl CpuClient {
     }
 
     /// リーチ宣言牌を選ぶ
-    fn select_riichi_tile(&self) -> Option<Tile> {
+    ///
+    /// 戻り値:
+    /// - `Some(Some(tile))`: tile を手出ししてリーチ
+    /// - `Some(None)`: ツモ切りリーチ
+    /// - `None`: 聴牌を維持できる打牌がない（リーチ不可）
+    fn select_riichi_tile(&self) -> Option<Option<Tile>> {
         // テンパイを維持する牌を選ぶ
         let mut all_tiles = self.state.my_hand.clone();
         if let Some(drawn) = self.state.my_drawn {
             all_tiles.push(drawn);
         }
 
+        // 暗カンがある場合も正しく判定できるよう、副露を含めて向聴数を計算する
+        let melds = self.build_existing_melds();
         let mut best: Option<(Tile, f64)> = None;
 
         for (i, &tile) in all_tiles.iter().enumerate() {
@@ -295,7 +318,7 @@ impl CpuClient {
             remaining.remove(i);
 
             // 捨てた後にテンパイを維持するか
-            let hand = Hand::new(remaining, None);
+            let hand = Hand::new_with_melds(remaining, melds.clone(), None);
             let shanten = calc_shanten_number(&hand);
 
             if shanten.is_ready() {
@@ -311,7 +334,7 @@ impl CpuClient {
             }
         }
 
-        best.and_then(|(tile, _)| {
+        best.map(|(tile, _)| {
             // ツモ牌ならNone（ツモ切りリーチ）
             if self.state.my_drawn == Some(tile) {
                 None
@@ -319,7 +342,6 @@ impl CpuClient {
                 Some(tile)
             }
         })
-        // Note: この返り値はOption<Tile>で、Noneの場合ツモ切りリーチ
     }
 
     /// 暗カンを検討する
@@ -827,6 +849,101 @@ mod tests {
         });
 
         assert!(matches!(action, Some(ClientAction::Riichi { .. })));
+    }
+
+    #[test]
+    fn test_riichi_with_ankan_melds_selects_tenpai_keeping_tile() {
+        // 暗カンを含む手牌でもリーチ宣言牌を正しく選べる（回帰テスト）。
+        // 以前は副露を無視して向聴数を計算していたため「聴牌維持牌なし」と
+        // 誤判定し、不正なツモ切りリーチを送信して局が進行不能になっていた。
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::S1),
+                Tile::new(Tile::S2),
+                Tile::new(Tile::S3),
+                Tile::new(Tile::S6),
+            ],
+        ));
+        // 暗カン2つ（M1, Z5）を副露情報としてセット
+        client.state.player_melds[0] = vec![
+            Meld {
+                tiles: vec![Tile::new(Tile::M1); 4],
+                category: MeldType::Kan,
+                from: MeldFrom::Myself,
+                called_tile: None,
+            },
+            Meld {
+                tiles: vec![Tile::new(Tile::Z5); 4],
+                category: MeldType::Kan,
+                from: MeldFrom::Myself,
+                called_tile: None,
+            },
+        ];
+
+        let action = client.handle_event(&ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::S5),
+            remaining_tiles: 30,
+            can_tsumo: false,
+            can_riichi: true,
+            is_furiten: false,
+        });
+
+        // P6切りリーチ（S5S6の両面を残す）が唯一の聴牌維持打牌
+        assert!(
+            matches!(
+                action,
+                Some(ClientAction::Riichi { tile: Some(t) }) if t.get() == Tile::P6
+            ),
+            "expected riichi discarding P6, got {action:?}"
+        );
+    }
+
+    #[test]
+    fn test_riichi_falls_back_to_discard_when_no_tenpai_keeping_tile() {
+        // can_riichi が立っていても聴牌維持牌が見つからなければ
+        // リーチせず通常打牌に進む（不正なリーチはサーバに拒否され停滞する）
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        // 大きく聴牌から遠いバラバラの手牌
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M4),
+                Tile::new(Tile::M7),
+                Tile::new(Tile::P2),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P8),
+                Tile::new(Tile::S3),
+                Tile::new(Tile::S6),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::Z1),
+                Tile::new(Tile::Z2),
+                Tile::new(Tile::Z3),
+                Tile::new(Tile::Z4),
+            ],
+        ));
+
+        let action = client.handle_event(&ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::Z5),
+            remaining_tiles: 30,
+            can_tsumo: false,
+            can_riichi: true,
+            is_furiten: false,
+        });
+
+        assert!(
+            matches!(action, Some(ClientAction::Discard { .. })),
+            "expected fallback discard, got {action:?}"
+        );
     }
 
     #[test]
