@@ -46,6 +46,8 @@ pub struct CpuGameState {
     pub prevailing_wind: Wind,
     /// 山の残り枚数
     pub remaining_tiles: usize,
+    /// 局番号（東1局=0, 東2局=1, ...）
+    pub round_number: usize,
     /// 本場数
     pub honba: usize,
     /// 供託リーチ棒
@@ -83,6 +85,7 @@ impl CpuGameState {
             dora_indicators: Vec::new(),
             prevailing_wind: Wind::East,
             remaining_tiles: 0,
+            round_number: 0,
             honba: 0,
             riichi_sticks: 0,
             pending_calls: Vec::new(),
@@ -111,6 +114,7 @@ impl CpuGameState {
                 scores,
                 prevailing_wind,
                 dora_indicators,
+                round_number,
                 honba,
                 riichi_sticks,
                 ..
@@ -131,6 +135,7 @@ impl CpuGameState {
                 self.dora_indicators = dora_indicators.clone();
                 self.prevailing_wind = *prevailing_wind;
                 self.remaining_tiles = 70; // 136 - 14(王牌) - 13*4(配牌) = 70
+                self.round_number = *round_number;
                 self.honba = *honba;
                 self.riichi_sticks = *riichi_sticks;
                 self.pending_calls.clear();
@@ -296,6 +301,18 @@ impl CpuGameState {
         }
     }
 
+    /// 自分の捨て牌を返す
+    pub fn my_discards(&self) -> &[Tile] {
+        &self.all_discards[Self::wind_to_index(self.my_seat_wind)]
+    }
+
+    /// 現在の巡目（1始まり）を返す
+    ///
+    /// 自分の捨て牌の数から導出する。打牌前に呼べば「これから何巡目の打牌か」になる。
+    pub fn turn(&self) -> usize {
+        self.my_discards().len() + 1
+    }
+
     /// 場に見えている牌の枚数を種類ごとにカウントする
     /// （自分の手牌 + 全員の捨て牌 + 全員の副露）
     pub fn visible_tile_counts(&self) -> [u8; 34] {
@@ -391,6 +408,7 @@ mod tests {
         assert_eq!(state.scores, [25000; 4]);
         assert_eq!(state.prevailing_wind, Wind::East);
         assert_eq!(state.dora_indicators.len(), 1);
+        assert_eq!(state.round_number, 0);
     }
 
     #[test]
@@ -416,6 +434,7 @@ mod tests {
         state.dora_indicators = vec![Tile::new(Tile::P9)];
         state.prevailing_wind = Wind::South;
         state.remaining_tiles = 12;
+        state.round_number = 9;
         state.honba = 3;
         state.riichi_sticks = 2;
         state.pending_calls = vec![AvailableCall::Ron];
@@ -450,6 +469,7 @@ mod tests {
         assert_eq!(state.dora_indicators, vec![Tile::new(Tile::Z1)]);
         assert_eq!(state.prevailing_wind, Wind::East);
         assert_eq!(state.remaining_tiles, 70);
+        assert_eq!(state.round_number, 4);
         assert_eq!(state.honba, 1);
         assert_eq!(state.riichi_sticks, 1);
         assert!(state.pending_calls.is_empty());
@@ -768,6 +788,33 @@ mod tests {
         assert_eq!(state.scores, [25000, 26000, 24000, 25000]);
         assert_eq!(state.pending_calls.len(), 1);
         assert_eq!(state.pending_call_tile, Some(Tile::new(Tile::Z1)));
+    }
+
+    #[test]
+    fn test_turn_and_my_discards() {
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+
+        // 配牌直後は1巡目
+        assert_eq!(state.turn(), 1);
+        assert!(state.my_discards().is_empty());
+
+        // 他家の捨て牌は巡目に影響しない
+        state.update(&ServerEvent::TileDiscarded {
+            player: Wind::East,
+            tile: Tile::new(Tile::M1),
+            is_tsumogiri: false,
+        });
+        assert_eq!(state.turn(), 1);
+
+        // 自分が捨てると巡目が進む
+        state.update(&ServerEvent::TileDiscarded {
+            player: Wind::South,
+            tile: Tile::new(Tile::P5),
+            is_tsumogiri: true,
+        });
+        assert_eq!(state.turn(), 2);
+        assert_eq!(state.my_discards(), &[Tile::new(Tile::P5)]);
     }
 
     #[test]

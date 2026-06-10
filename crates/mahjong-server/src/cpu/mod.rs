@@ -6,5 +6,6 @@
 pub mod client;
 pub mod defense;
 pub mod evaluator;
+pub mod heuristics;
 pub mod personalities;
 pub mod state;

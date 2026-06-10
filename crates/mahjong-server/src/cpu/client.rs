@@ -14,7 +14,10 @@ use super::evaluator;
 use super::state::CpuGameState;
 
 /// CPUの強さレベル
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Weak < Normal < Strong` の順序を持つ。
+/// 定石（heuristics）の「弱以上」「中以上」などの有効化判定に使用する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CpuLevel {
     /// 初心者: 向聴数のみ考慮、防御なし、ミスあり
     Weak,
@@ -172,7 +175,9 @@ impl CpuClient {
         let candidates = evaluator::evaluate_discards(&self.state, &self.config);
 
         let attacking = self.should_attack();
-        if let Some(tile) = evaluator::select_best_discard(&candidates, &self.config, attacking) {
+        if let Some(tile) =
+            evaluator::select_best_discard(&candidates, &self.config, attacking, &self.state)
+        {
             // ツモ牌と同じならツモ切り
             if self.state.my_drawn == Some(tile) {
                 ClientAction::Discard { tile: None }
@@ -191,7 +196,9 @@ impl CpuClient {
         let candidates = evaluator::evaluate_discards(&self.state, &self.config);
         let attacking = self.should_attack();
 
-        if let Some(tile) = evaluator::select_best_discard(&candidates, &self.config, attacking) {
+        if let Some(tile) =
+            evaluator::select_best_discard(&candidates, &self.config, attacking, &self.state)
+        {
             ClientAction::Discard { tile: Some(tile) }
         } else if let Some(&tile) = self.state.my_hand.last() {
             ClientAction::Discard { tile: Some(tile) }
@@ -641,6 +648,13 @@ mod tests {
 
         assert!(CpuLevel::Weak.should_make_mistake());
         assert!(!CpuLevel::Normal.should_make_mistake());
+    }
+
+    #[test]
+    fn test_level_ordering() {
+        // 定石の「弱以上」「中以上」判定はこの順序に依存する
+        assert!(CpuLevel::Weak < CpuLevel::Normal);
+        assert!(CpuLevel::Normal < CpuLevel::Strong);
     }
 
     #[test]
