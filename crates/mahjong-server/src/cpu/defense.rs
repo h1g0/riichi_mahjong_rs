@@ -8,6 +8,23 @@ use mahjong_core::tile::{Tile, TileType, dora_indicator_to_dora};
 use super::client::{CpuConfig, CpuLevel, is_yakuhai};
 use super::state::CpuGameState;
 
+/// 国士無双の構成牌（么九牌・字牌の全13種）
+const ORPHAN_TYPES: [TileType; 13] = [
+    Tile::M1,
+    Tile::M9,
+    Tile::P1,
+    Tile::P9,
+    Tile::S1,
+    Tile::S9,
+    Tile::Z1,
+    Tile::Z2,
+    Tile::Z3,
+    Tile::Z4,
+    Tile::Z5,
+    Tile::Z6,
+    Tile::Z7,
+];
+
 /// 他家1人分の脅威情報
 #[derive(Debug, Clone, Default)]
 pub struct Threat {
@@ -112,17 +129,19 @@ pub(crate) fn assess_threat(
 
     // #182拡張: 国士無双気配（中以上）
     // 国士無双は門前限定で、不要な中張牌を切り続ける河になる。
-    // 么九牌・字牌は対子の余剰分（2枚目以降の重なり）が切られうるので、
-    // 「序盤6巡で么九牌1枚以下 + 河全体で2枚以下」を気配とする。
-    // 3枚以上切り出したら見切ったとみなして解除する。
+    // 么九牌・字牌の対子余剰（2枚目以降の重なり）は切られうるため、
+    // 河の么九牌枚数では見切りを判定せず、「いずれかの么九牌が場に
+    // 4枚見えている（＝相手が持ち得ず国士が成立しない）」場合のみ
+    // 警戒を解除する。
     // 同じ河はチャンタ・混老頭系でもありえるが、いずれにせよ
     // 么九牌・字牌が危険という結論は変わらない。
     if config.level >= CpuLevel::Normal && melds.is_empty() {
         let discards = &state.all_discards[idx];
         if discards.len() >= 5 {
             let early_orphans = discards.iter().take(6).filter(|t| t.is_1_9_honor()).count();
-            let total_orphans = discards.iter().filter(|t| t.is_1_9_honor()).count();
-            if early_orphans <= 1 && total_orphans <= 2 {
+            let visible = state.visible_tile_counts();
+            let some_orphan_dead = ORPHAN_TYPES.iter().any(|&t| visible[t as usize] >= 4);
+            if early_orphans <= 1 && !some_orphan_dead {
                 threat.kokushi_alert = true;
                 threat.weight = threat.weight.max(0.5);
             }
@@ -609,12 +628,17 @@ mod tests {
         let threat = assess_threat(&state, 1, &test_config()).expect("kokushi signs");
         assert!(threat.kokushi_alert);
 
-        // 么九牌の重なり（余剰）が1〜2枚混ざっていても気配は維持
+        // 么九牌の重なり（余剰）が中盤以降に何枚混ざっていても気配は維持
+        // （4枚切れの么九牌が出ない限り国士は成立しうる）
         let mut state = CpuGameState::new();
         let mut discards = middle_discards(5);
         discards.push(Tile::new(Tile::M1)); // 6枚目に余剰の么九牌
         discards.extend(middle_discards(3));
-        discards.push(Tile::new(Tile::Z2)); // 河全体で么九牌2枚
+        discards.extend([
+            Tile::new(Tile::Z2),
+            Tile::new(Tile::P9),
+            Tile::new(Tile::Z3),
+        ]); // 余剰の么九牌が複数（いずれも4枚切れではない）
         state.all_discards[1] = discards;
         let threat = assess_threat(&state, 1, &test_config()).expect("kokushi signs");
         assert!(threat.kokushi_alert);
@@ -626,15 +650,17 @@ mod tests {
         state.all_discards[1] = discards;
         assert!(assess_threat(&state, 1, &test_config()).is_none());
 
-        // 河全体で么九牌3枚以上 → 見切ったとみなして解除
+        // いずれかの么九牌が場に4枚見えている → 国士不成立 → 警戒解除
         let mut state = CpuGameState::new();
-        let mut discards = middle_discards(6);
-        discards.extend([
-            Tile::new(Tile::M1),
-            Tile::new(Tile::P9),
-            Tile::new(Tile::Z1),
-        ]);
-        state.all_discards[1] = discards;
+        state.all_discards[1] = middle_discards(6);
+        state.all_discards[2] = vec![Tile::new(Tile::M1); 4]; // M1が4枚切れ
+        assert!(assess_threat(&state, 1, &test_config()).is_none());
+
+        // 自分の手牌の枚数も「相手が持ち得ない」判定に含める
+        let mut state = CpuGameState::new();
+        state.all_discards[1] = middle_discards(6);
+        state.all_discards[2] = vec![Tile::new(Tile::Z7); 2];
+        state.my_hand = vec![Tile::new(Tile::Z7); 2]; // 合計4枚で中が枯れ
         assert!(assess_threat(&state, 1, &test_config()).is_none());
 
         // 捨て牌4枚以下では判定しない
