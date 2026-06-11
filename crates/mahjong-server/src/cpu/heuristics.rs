@@ -20,7 +20,7 @@ use mahjong_core::winning_hand::name::Form;
 
 use super::client::{CpuConfig, CpuLevel, is_yakuhai};
 use super::defense::ORPHAN_TYPES;
-use super::evaluator::{DiscardCandidate, get_yakuhai_types};
+use super::evaluator::{DiscardCandidate, estimate_hand_value, get_yakuhai_types};
 use super::state::CpuGameState;
 
 /// 打牌補正を計算する際の局面コンテキスト
@@ -242,11 +242,31 @@ fn dora_protection_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
 /// 安全度に大きな重みを掛けることで、現物 > スジ・字牌 > 無筋么九牌 >
 /// 無筋中張牌（456が最も危険）の順で打牌が選ばれる。
 /// 重み300は向聴数3段階分に相当し、聴牌を崩してでも現物を切る。
+///
+/// #179（強以上）: 聴牌・1向聴で降りる場合は重みを150に下げる。
+/// スジ程度の安全度差（0.25 → 37.5点）では向聴数1段階（100点）を
+/// 覆せなくなるため、現物で形を崩す代わりにスジ・字牌などの
+/// 安全寄りの牌で聴牌復帰を狙う「まわし打ち」になる。
+/// 無筋中張牌との差（0.85 → 127.5点）は依然として向聴数を上回るので、
+/// 危険牌を押してまで形は守らない。
 fn defense_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     if ctx.attacking {
         return 0.0;
     }
-    c.safety * 300.0
+
+    let mut weight = 300.0;
+    if ctx.config.level >= CpuLevel::Strong {
+        let mut all_tiles = ctx.state.my_hand.clone();
+        if let Some(drawn) = ctx.state.my_drawn {
+            all_tiles.push(drawn);
+        }
+        let hand = Hand::new_with_melds(all_tiles, ctx.state.my_melds_for_analysis(), None);
+        if calc_shanten_number(&hand).as_i32() <= 1 {
+            weight = 150.0;
+        }
+    }
+
+    c.safety * weight
 }
 
 /// 手牌全体（ツモ込み・副露込み）のブロック数を数える
@@ -900,6 +920,94 @@ pub fn judge_ankan(ctx: &CallContext, tile_type: TileType) -> CallJudgement {
     }
 
     CallJudgement::Neutral
+}
+
+// ============================================================================
+// 押し引きの定石（#178）
+// ============================================================================
+
+/// 押し引きに対する定石の判定結果
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushJudgement {
+    /// 押すべき（攻撃続行）
+    Push,
+    /// 降りるべき
+    Fold,
+    /// 定石では決まらない（従来の判断に委ねる）
+    Neutral,
+}
+
+/// 脅威がいる局面で押すか降りるかの定石判定（#178, 中以上）
+///
+/// - 聴牌: 良形で「高打点・親・脅威1人」のいずれかなら押す。
+///   愚形かつ安手なら降りる（従来は聴牌なら無条件に押していた）。
+/// - 2向聴: 高打点（ドラ多数など）で脅威が1人なら押し続ける。
+/// - それ以外は従来の判断（性格・撤退閾値）に委ねる。
+pub fn judge_push(ctx: &CallContext, threat_count: usize) -> PushJudgement {
+    if !ctx.config.heuristics_enabled || ctx.config.level < CpuLevel::Normal || threat_count == 0 {
+        return PushJudgement::Neutral;
+    }
+
+    let mut all_tiles = ctx.state.my_hand.clone();
+    if let Some(drawn) = ctx.state.my_drawn {
+        all_tiles.push(drawn);
+    }
+    let melds = ctx.state.my_melds_for_analysis();
+    let hand = Hand::new_with_melds(all_tiles.clone(), melds.clone(), None);
+    let shanten = calc_shanten_number(&hand);
+
+    if shanten.is_ready_or_won() {
+        // 聴牌: 最も広い聴牌を取る打牌を選んだときの待ちの形と打点で判断する
+        let visible = ctx.state.visible_tile_counts();
+        let mut best_waits = 0u32;
+        let mut best_han = 0u32;
+        for i in 0..all_tiles.len() {
+            let mut remaining = all_tiles.clone();
+            remaining.remove(i);
+            let h = Hand::new_with_melds(remaining.clone(), melds.clone(), None);
+            if !calc_shanten_number(&h).is_ready() {
+                continue;
+            }
+            let waits = waiting_tiles(&remaining, &melds);
+            let count: u32 = waits
+                .iter()
+                .map(|&t| 4u32.saturating_sub(visible[t as usize] as u32))
+                .sum();
+            let han = waits
+                .iter()
+                .filter_map(|&w| estimate_ron_han(ctx.state, &remaining, &melds, w))
+                .max()
+                .unwrap_or(0);
+            if count > best_waits {
+                best_waits = count;
+                best_han = han;
+            }
+        }
+
+        let good_shape = best_waits >= 6;
+        // 門前ならリーチ・裏ドラなどの上積みを見込む
+        let value_han = best_han + u32::from(ctx.state.my_melds().is_empty());
+        let high_value = value_han >= 4;
+        let dealer = ctx.state.my_seat_wind == Wind::East;
+
+        if good_shape && (high_value || dealer || threat_count == 1) {
+            return PushJudgement::Push;
+        }
+        if !good_shape && !high_value {
+            return PushJudgement::Fold;
+        }
+        return PushJudgement::Neutral;
+    }
+
+    // 2向聴: 高打点（推定値が満貫級）で脅威が1人なら押し続ける
+    if shanten.as_i32() == 2
+        && threat_count == 1
+        && estimate_hand_value(&all_tiles, ctx.state) >= 6.0
+    {
+        return PushJudgement::Push;
+    }
+
+    PushJudgement::Neutral
 }
 
 // ============================================================================
@@ -2313,6 +2421,177 @@ mod tests {
         // 大差のラス目なら狙う
         state.scores = [5000, 45000, 25000, 25000];
         assert_eq!(preferred_form(&state), Form::ThirteenOrphans);
+    }
+
+    // --- 押し引き（#178）・まわし打ち（#179）---
+
+    #[test]
+    fn test_judge_push_folds_cheap_bad_shape_tenpai() {
+        // #178: 愚形安手の聴牌は脅威がいれば降りる
+        let mut state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
+        state.my_seat_wind = Wind::South; // 親の例外を避ける
+        state.player_riichi[2] = true;
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Fold);
+
+        // 弱レベルは対象外
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Neutral);
+    }
+
+    #[test]
+    fn test_judge_push_pushes_good_shape_tenpai() {
+        // #178: 良形聴牌は安手でも1人リーチには押す
+        let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        state.my_seat_wind = Wind::South;
+        state.player_riichi[2] = true;
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Push);
+    }
+
+    #[test]
+    fn test_judge_push_pushes_high_value_against_multiple_threats() {
+        // #178: 満貫級の良形聴牌は2人リーチでも押す
+        let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        state.my_seat_wind = Wind::South;
+        state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)]; // ドラ3
+        state.player_riichi[2] = true;
+        state.player_riichi[3] = true;
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 2), PushJudgement::Push);
+    }
+
+    #[test]
+    fn test_judge_push_dealer_pushes_good_shape() {
+        // #178: 親は良形聴牌なら2人リーチでも押す（連荘価値）
+        let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        state.my_seat_wind = Wind::East;
+        state.player_riichi[2] = true;
+        state.player_riichi[3] = true;
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 2), PushJudgement::Push);
+    }
+
+    #[test]
+    fn test_judge_push_two_shanten_with_value() {
+        // #178: 2向聴でも満貫級（ドラ3相当）なら単独の脅威には押す
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+        state.my_hand = tiles(&[
+            Tile::M3,
+            Tile::M4,
+            Tile::M5,
+            Tile::M5,
+            Tile::P4,
+            Tile::P5,
+            Tile::P6,
+            Tile::S6,
+            Tile::S7,
+            Tile::S2,
+            Tile::S2,
+            Tile::Z3,
+            Tile::Z4,
+        ]);
+        state.dora_indicators = vec![Tile::new(Tile::M4), Tile::new(Tile::M4)]; // ドラ M5×2重
+        state.player_riichi[2] = true;
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Push);
+
+        // ドラなしの安手2向聴は対象外（従来の撤退判断に委ねる）
+        state.dora_indicators = vec![];
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Neutral);
+    }
+
+    #[test]
+    fn test_judge_push_neutral_without_threats() {
+        let state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 0), PushJudgement::Neutral);
+    }
+
+    #[test]
+    fn test_mawashi_reduces_safety_weight_when_close() {
+        // #179: 強レベルは聴牌・1向聴で降りるとき安全度の重みを下げる
+        let mut candidate = make_candidate(Tile::M5);
+        candidate.safety = 1.0;
+
+        // 聴牌形の手牌
+        let state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+
+        // 強レベル + 聴牌 → 重み150（まわし打ち）
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
+        let defending = DiscardContext {
+            state: &state,
+            config: &config,
+            attacking: false,
+        };
+        assert_eq!(defense_safety_bonus(&defending, &candidate), 150.0);
+
+        // 中レベルは常にベタオリ（重み300）
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let defending = DiscardContext {
+            state: &state,
+            config: &config,
+            attacking: false,
+        };
+        assert_eq!(defense_safety_bonus(&defending, &candidate), 300.0);
+
+        // 強レベルでも手が遠ければベタオリ（重み300）
+        let mut far_state = CpuGameState::new();
+        far_state.my_hand = tiles(&[
+            Tile::M1,
+            Tile::M4,
+            Tile::M7,
+            Tile::P2,
+            Tile::P5,
+            Tile::P8,
+            Tile::S3,
+            Tile::S6,
+            Tile::S9,
+            Tile::Z1,
+            Tile::Z2,
+            Tile::Z3,
+            Tile::Z4,
+        ]);
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
+        let defending = DiscardContext {
+            state: &far_state,
+            config: &config,
+            attacking: false,
+        };
+        assert_eq!(defense_safety_bonus(&defending, &candidate), 300.0);
     }
 
     // --- リーチ・ダマ判断（#168〜#172）---
