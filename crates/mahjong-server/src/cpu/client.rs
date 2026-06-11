@@ -172,10 +172,25 @@ impl CpuClient {
         // 聴牌を維持できる打牌が見つからない場合はリーチせず通常打牌に進む
         // （不正なリーチ宣言はサーバに拒否され、局が進行不能になる）
         if self.state.can_riichi
-            && self.should_riichi()
             && let Some(tile) = self.select_riichi_tile()
         {
-            return ClientAction::Riichi { tile };
+            // 定石判定（#168〜#172）。Neutral の場合は従来の積極度判断に委ねる
+            let declare = if self.config.heuristics_enabled {
+                let ctx = heuristics::CallContext {
+                    state: &self.state,
+                    config: &self.config,
+                };
+                match heuristics::judge_riichi(&ctx, tile) {
+                    heuristics::RiichiJudgement::Declare => true,
+                    heuristics::RiichiJudgement::Damaten => false,
+                    heuristics::RiichiJudgement::Neutral => self.should_riichi(),
+                }
+            } else {
+                self.should_riichi()
+            };
+            if declare {
+                return ClientAction::Riichi { tile };
+            }
         }
 
         // 暗カン検討
@@ -299,6 +314,9 @@ impl CpuClient {
 
     /// リーチ宣言牌を選ぶ
     ///
+    /// 定石有効時は待ち枚数が最大になる宣言牌を選び、同数なら安全度で比較する。
+    /// 定石無効時は従来どおり安全度のみで選ぶ。
+    ///
     /// 戻り値:
     /// - `Some(Some(tile))`: tile を手出ししてリーチ
     /// - `Some(None)`: ツモ切りリーチ
@@ -312,30 +330,39 @@ impl CpuClient {
 
         // 暗カンがある場合も正しく判定できるよう、副露を含めて向聴数を計算する
         let melds = self.state.my_melds_for_analysis();
-        let mut best: Option<(Tile, f64)> = None;
+        let visible = self.state.visible_tile_counts();
+        let mut best: Option<(Tile, u32, f64)> = None;
 
         for (i, &tile) in all_tiles.iter().enumerate() {
             let mut remaining: Vec<Tile> = all_tiles.clone();
             remaining.remove(i);
 
             // 捨てた後にテンパイを維持するか
-            let hand = Hand::new_with_melds(remaining, melds.clone(), None);
+            let hand = Hand::new_with_melds(remaining.clone(), melds.clone(), None);
             let shanten = calc_shanten_number(&hand);
 
             if shanten.is_ready() {
+                // 待ち枚数（定石有効時のみ考慮）
+                let waits = if self.config.heuristics_enabled {
+                    heuristics::remaining_wait_count(&remaining, &melds, &visible)
+                } else {
+                    0
+                };
                 // 安全度で比較
                 let safety = super::defense::evaluate_safety(tile, &self.state);
                 let is_better = match best {
-                    Some((_, best_safety)) => safety > best_safety,
+                    Some((_, best_waits, best_safety)) => {
+                        waits > best_waits || (waits == best_waits && safety > best_safety)
+                    }
                     None => true,
                 };
                 if is_better {
-                    best = Some((tile, safety));
+                    best = Some((tile, waits, safety));
                 }
             }
         }
 
-        best.map(|(tile, _)| {
+        best.map(|(tile, _, _)| {
             // ツモ牌ならNone（ツモ切りリーチ）
             if self.state.my_drawn == Some(tile) {
                 None
@@ -1225,6 +1252,116 @@ mod tests {
 
         let tile = discarded_tile(&action).expect("expected a hand discard");
         assert_eq!(tile.get(), Tile::M7, "筋牌(M7)を選ぶべき, got {tile:?}");
+    }
+
+    #[test]
+    fn test_riichi_declared_with_no_yaku_tenpai() {
+        // #168: 役なし聴牌は（従来なら宣言を控える局面でも）リーチする。
+        // Speedy（リーチ積極度0.4）は2人リーチに対して従来は宣言しないが、
+        // 役なしダマは和了できないため定石が宣言を強制する。
+        let hand = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::M7),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::Z3),
+            Tile::new(Tile::Z3),
+        ];
+        let riichi = |player| ServerEvent::PlayerRiichi {
+            player,
+            scores: [25000; 4],
+            riichi_sticks: 1,
+        };
+        let draw = ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::Z4),
+            remaining_tiles: 40,
+            can_tsumo: false,
+            can_riichi: true,
+            is_furiten: false,
+        };
+
+        // 定石有効: リーチ宣言
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Speedy);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand.clone()));
+        client.handle_event(&riichi(Wind::South));
+        client.handle_event(&riichi(Wind::West));
+        let action = client.handle_event(&draw);
+        assert!(
+            matches!(action, Some(ClientAction::Riichi { .. })),
+            "役なし聴牌はリーチすべき, got {action:?}"
+        );
+
+        // 定石無効: 従来どおり2人リーチには宣言しない
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Speedy).without_heuristics();
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand));
+        client.handle_event(&riichi(Wind::South));
+        client.handle_event(&riichi(Wind::West));
+        let action = client.handle_event(&draw);
+        assert!(matches!(action, Some(ClientAction::Discard { .. })));
+    }
+
+    #[test]
+    fn test_damaten_with_confirmed_mangan() {
+        // #170: ダマでも満貫（タンヤオ+ピンフ+ドラ3）ならリーチしない
+        let hand = vec![
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::P7),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S8),
+            Tile::new(Tile::S8),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::M5),
+        ];
+        let start = |hand: Vec<Tile>| ServerEvent::GameStarted {
+            seat_wind: Wind::South,
+            hand,
+            scores: [25000; 4],
+            prevailing_wind: Wind::East,
+            dora_indicators: vec![Tile::new(Tile::S7), Tile::new(Tile::M3)], // ドラ S8×2 + M4
+            round_number: 0,
+            honba: 0,
+            riichi_sticks: 0,
+        };
+        let draw = ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::Z3),
+            remaining_tiles: 40,
+            can_tsumo: false,
+            can_riichi: true,
+            is_furiten: false,
+        };
+
+        // 定石有効: ダマ（通常打牌）
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&start(hand.clone()));
+        let action = client.handle_event(&draw);
+        assert!(
+            matches!(action, Some(ClientAction::Discard { .. })),
+            "満貫確定はダマにすべき, got {action:?}"
+        );
+
+        // 定石無効: 従来の積極度判断でリーチする
+        let config =
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
+        let mut client = CpuClient::new(config);
+        client.handle_event(&start(hand));
+        let action = client.handle_event(&draw);
+        assert!(matches!(action, Some(ClientAction::Riichi { .. })));
     }
 
     #[test]
