@@ -1554,6 +1554,102 @@ mod tests {
         assert!(matches!(action, Some(ClientAction::Pass)));
     }
 
+    fn chi_call_event(tile_type: u32, hand_tiles: [u32; 2]) -> ServerEvent {
+        ServerEvent::CallAvailable {
+            tile: Tile::new(tile_type),
+            discarder: Wind::East,
+            calls: vec![AvailableCall::Chi {
+                options: vec![[Tile::new(hand_tiles[0]), Tile::new(hand_tiles[1])]],
+            }],
+        }
+    }
+
+    #[test]
+    fn test_kuitan_chi_requires_simple_centered_hand() {
+        // #164: 么九牌が3枚残る手から喰いタン目当てのチーをしない（中以上）
+        let hand = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::P9),
+            Tile::new(Tile::S9),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::S7),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::M6),
+            Tile::new(Tile::P7),
+        ];
+
+        // Normal: 厳しい条件で見込みなし → パス
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::South, hand.clone()));
+        let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
+        assert!(matches!(action, Some(ClientAction::Pass)));
+
+        // Weak: 緩い条件（么九牌3枚以下）なら鳴く
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::South, hand));
+        let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
+        assert!(matches!(action, Some(ClientAction::Chi { .. })));
+    }
+
+    #[test]
+    fn test_cheap_distant_chi_suppressed() {
+        // #165: 子の、打点要素のない2向聴超の仕掛けは控える
+        let hand = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::P7),
+            Tile::new(Tile::P8),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::M7),
+            Tile::new(Tile::M8),
+            Tile::new(Tile::S8),
+        ];
+
+        // ドラなし: 安くて遠い → パス
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&ServerEvent::GameStarted {
+            seat_wind: Wind::South,
+            hand: hand.clone(),
+            scores: [25000; 4],
+            prevailing_wind: Wind::East,
+            dora_indicators: vec![Tile::new(Tile::Z5)], // ドラ(發)は手牌にない
+            round_number: 0,
+            honba: 0,
+            riichi_sticks: 0,
+        });
+        let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
+        assert!(matches!(action, Some(ClientAction::Pass)));
+
+        // ドラ2枚あり: 打点見込みがあるので鳴く
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&ServerEvent::GameStarted {
+            seat_wind: Wind::South,
+            hand,
+            scores: [25000; 4],
+            prevailing_wind: Wind::East,
+            dora_indicators: vec![Tile::new(Tile::P6)], // ドラは P7（手牌に2枚...P7,P8のP7）
+            round_number: 0,
+            honba: 0,
+            riichi_sticks: 0,
+        });
+        let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
+        assert!(matches!(action, Some(ClientAction::Chi { .. })));
+    }
+
     #[test]
     fn test_toitoi_pon_requires_four_blocks() {
         // #157: 対々和狙いのポンは「副露+対子・刻子が4ブロック以上」のときだけ
