@@ -74,7 +74,8 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
         };
 
         // 安全度
-        let safety = if config.level.uses_defense() {
+        // 定石有効時は弱レベルでも安全度を計算する（#173/#174: ベタオリは弱以上）
+        let safety = if config.level.uses_defense() || config.heuristics_enabled {
             defense::evaluate_safety(tile, state)
         } else {
             0.5 // 防御を考慮しない場合は中立値
@@ -475,10 +476,27 @@ mod tests {
             Tile::new(Tile::M3),
         ];
         let result = evaluate_discards(&state, &weak_config());
-        // Weak: acceptance_count=0, estimated_value=0.0, safety=0.5
+        // Weak: acceptance_count=0, estimated_value=0.0
+        // 安全度は定石有効時には弱レベルでも計算される（リーチ者不在 → 1.0）
         for c in &result {
             assert_eq!(c.acceptance_count, 0);
             assert_eq!(c.estimated_value, 0.0);
+            assert_eq!(c.safety, 1.0);
+        }
+    }
+
+    #[test]
+    fn test_evaluate_discards_weak_without_heuristics_uses_neutral_safety() {
+        // 定石無効の弱レベルは従来どおり安全度を計算しない（中立値 0.5）
+        let mut state = CpuGameState::new();
+        state.my_hand = vec![
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+        ];
+        let config = weak_config().without_heuristics();
+        let result = evaluate_discards(&state, &config);
+        for c in &result {
             assert_eq!(c.safety, 0.5);
         }
     }

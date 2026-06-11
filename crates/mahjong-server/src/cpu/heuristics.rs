@@ -10,7 +10,7 @@
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::calc_shanten_number;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
-use mahjong_core::tile::{Tile, TileType, Wind};
+use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
 
 use super::client::{CpuConfig, CpuLevel, is_yakuhai};
 use super::evaluator::{DiscardCandidate, get_yakuhai_types};
@@ -44,7 +44,173 @@ pub struct DiscardHeuristic {
 ///
 /// issue #142 の定石を後続の変更でここに追加していく。
 /// 補正は合算されるため、登録順は結果に影響しない。
-pub const DISCARD_HEURISTICS: &[DiscardHeuristic] = &[];
+pub const DISCARD_HEURISTICS: &[DiscardHeuristic] = &[
+    // #147: 孤立字牌・孤立么九牌から優先して切る（弱以上）
+    DiscardHeuristic {
+        name: "isolated-honor-terminal-first",
+        min_level: CpuLevel::Weak,
+        apply: isolated_tile_bonus,
+    },
+    // #148: 両面ターツを辺張・嵌張より優先する（弱以上）
+    DiscardHeuristic {
+        name: "protect-ryanmen-shapes",
+        min_level: CpuLevel::Weak,
+        apply: shape_protection_bonus,
+    },
+    // #152: ドラを雑に切らない（弱以上）
+    DiscardHeuristic {
+        name: "protect-dora",
+        min_level: CpuLevel::Weak,
+        apply: dora_protection_bonus,
+    },
+    // #173/#174/#176: 守備時は現物を最優先で切る（弱以上）
+    DiscardHeuristic {
+        name: "genbutsu-first-when-defending",
+        min_level: CpuLevel::Weak,
+        apply: defense_safety_bonus,
+    },
+];
+
+// ============================================================================
+// 打牌定石の実装
+// ============================================================================
+
+/// 打牌候補を除いた残り手牌の牌種カウントを返す
+///
+/// 「この牌を切ったときに残る形」を評価するため、候補牌1枚を差し引く。
+fn remaining_counts(state: &CpuGameState, discard: Tile) -> [u8; 34] {
+    let mut counts = [0u8; 34];
+    for t in &state.my_hand {
+        counts[t.get() as usize] += 1;
+    }
+    if let Some(d) = state.my_drawn {
+        counts[d.get() as usize] += 1;
+    }
+    let idx = discard.get() as usize;
+    counts[idx] = counts[idx].saturating_sub(1);
+    counts
+}
+
+/// #147: 孤立した字牌・么九牌は切りやすくする
+///
+/// 序盤のバラバラな手では、孤立した客風牌 > 1・9牌 > 役牌 > 2・8牌
+/// の順で打牌候補としての価値を上げる（=手牌としての価値を下げる）。
+/// 役牌は対子になれば役が付くため 1・9 牌より残す。
+/// 中張牌の孤立牌には補正を与えず、相対的に残りやすくする。
+fn isolated_tile_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    let counts = remaining_counts(ctx.state, c.tile);
+    let tt = c.tile.get();
+
+    // 対子・刻子の一部なら孤立牌ではない
+    if counts[tt as usize] >= 1 {
+        return 0.0;
+    }
+
+    if tt >= 27 {
+        // 字牌: 役牌は対子になれば役があるため、1・9牌よりさらに残す
+        if is_yakuhai(tt, ctx.state.my_seat_wind, ctx.state.prevailing_wind) {
+            8.0
+        } else {
+            16.0
+        }
+    } else {
+        // 数牌: 前後2つ以内に牌があればターツ候補なので孤立ではない
+        let pos = (tt % 9) as i32;
+        let suit_start = tt - tt % 9;
+        let near = |offset: i32| -> bool {
+            let q = pos + offset;
+            (0..9).contains(&q) && counts[(suit_start + q as TileType) as usize] > 0
+        };
+        if near(-2) || near(-1) || near(1) || near(2) {
+            return 0.0;
+        }
+        match pos {
+            0 | 8 => 10.0, // 1, 9
+            1 | 7 => 5.0,  // 2, 8
+            _ => 0.0,      // 中張牌は雑に切らない
+        }
+    }
+}
+
+/// #148: 両面ターツの牌は残し、辺張・嵌張の牌は整理しやすくする
+fn shape_protection_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    // 守備時は安全度を優先する
+    if !ctx.attacking {
+        return 0.0;
+    }
+
+    let tt = c.tile.get();
+    if tt >= 27 {
+        return 0.0; // 字牌にターツはない
+    }
+
+    let counts = remaining_counts(ctx.state, c.tile);
+    if counts[tt as usize] >= 1 {
+        return 0.0; // 対子・刻子側の判断はしない
+    }
+
+    let pos = (tt % 9) as i32;
+    let suit_start = tt - tt % 9;
+    let has = |offset: i32| -> bool {
+        let q = pos + offset;
+        (0..9).contains(&q) && counts[(suit_start + q as TileType) as usize] > 0
+    };
+
+    let lower = has(-1);
+    let upper = has(1);
+
+    if lower && upper {
+        return 0.0; // 順子の真ん中（切れば向聴数で評価される）
+    }
+
+    if lower || upper {
+        // 隣の牌と2枚ターツを構成している
+        // ターツの下端位置で両面か辺張かを判定（0-indexed: 1..=6 始まりが両面）
+        let pair_low = if lower { pos - 1 } else { pos };
+        let two_sided = (1..=6).contains(&pair_low);
+        return if two_sided {
+            -6.0 // 両面ターツの牌は守る
+        } else {
+            3.0 // 辺張（12/89）は整理しやすく
+        };
+    }
+
+    if has(-2) || has(2) {
+        return 3.0; // 嵌張も愚形として整理しやすく
+    }
+
+    0.0
+}
+
+/// #152: ドラ・赤ドラを雑に切らない
+///
+/// 攻撃中はドラ1枚につきペナルティを与えて手に残しやすくする。
+/// 守備時は補正しない（安全度を優先する）。
+fn dora_protection_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    if !ctx.attacking {
+        return 0.0;
+    }
+
+    let mut dora_count = u32::from(c.tile.is_red_dora());
+    for indicator in &ctx.state.dora_indicators {
+        if dora_indicator_to_dora(indicator.get()) == c.tile.get() {
+            dora_count += 1;
+        }
+    }
+    -(dora_count as f64) * 12.0
+}
+
+/// #173/#174/#176: 守備時は安全度を最優先する（ベタオリ）
+///
+/// 安全度に大きな重みを掛けることで、現物 > スジ・字牌 > 無筋么九牌 >
+/// 無筋中張牌（456が最も危険）の順で打牌が選ばれる。
+/// 重み300は向聴数3段階分に相当し、聴牌を崩してでも現物を切る。
+fn defense_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    if ctx.attacking {
+        return 0.0;
+    }
+    c.safety * 300.0
+}
 
 /// 打牌候補1つに対して、有効な全定石の補正値を合算する
 pub fn discard_adjustment(ctx: &DiscardContext, candidate: &DiscardCandidate) -> f64 {
@@ -390,16 +556,20 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_registry_returns_zero() {
-        let state = CpuGameState::new();
-        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
+    fn test_registry_returns_zero_when_disabled() {
+        // 定石無効なら実レジストリでも補正は常に0（A/Bベースライン）
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[Tile::M1, Tile::Z3, Tile::M5, Tile::M6]);
+        let config =
+            CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced).without_heuristics();
         let ctx = DiscardContext {
             state: &state,
             config: &config,
             attacking: true,
         };
-        let candidate = make_candidate(Tile::M1);
-        assert_eq!(discard_adjustment(&ctx, &candidate), 0.0);
+        for t in [Tile::M1, Tile::Z3, Tile::M5] {
+            assert_eq!(discard_adjustment(&ctx, &make_candidate(t)), 0.0);
+        }
     }
 
     #[test]
@@ -461,6 +631,158 @@ mod tests {
         };
         let candidate = make_candidate(Tile::M1);
         assert_eq!(discard_adjustment_with(&heuristics, &ctx, &candidate), 0.0);
+    }
+
+    // --- 打牌定石 ---
+
+    fn attack_ctx<'a>(state: &'a CpuGameState, config: &'a CpuConfig) -> DiscardContext<'a> {
+        DiscardContext {
+            state,
+            config,
+            attacking: true,
+        }
+    }
+
+    #[test]
+    fn test_isolated_tile_bonus_ordering() {
+        // 孤立牌の切りやすさ: 客風 > 1/9 > 役牌 > 2/8 > 中張牌
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.prevailing_wind = Wind::East;
+        // Z3=客風(西), Z5=白(役牌), M1=孤立1, S8=孤立8, M5=孤立中張, P7P7=対子
+        state.my_hand = tiles(&[
+            Tile::Z3,
+            Tile::Z5,
+            Tile::M1,
+            Tile::S8,
+            Tile::M5,
+            Tile::P7,
+            Tile::P7,
+        ]);
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+
+        let bonus = |t: u32| isolated_tile_bonus(&ctx, &make_candidate(t));
+
+        assert!(bonus(Tile::Z3) > bonus(Tile::M1), "客風 > 1/9");
+        assert!(bonus(Tile::M1) > bonus(Tile::Z5), "1/9 > 役牌");
+        assert!(bonus(Tile::Z5) > bonus(Tile::S8), "役牌 > 2/8");
+        assert!(bonus(Tile::S8) > bonus(Tile::M5), "2/8 > 中張");
+        assert_eq!(bonus(Tile::M5), 0.0, "孤立中張牌は雑に切らない");
+        assert_eq!(bonus(Tile::P7), 0.0, "対子は孤立牌ではない");
+    }
+
+    #[test]
+    fn test_isolated_tile_bonus_requires_isolation() {
+        // 前後2つ以内に牌があれば孤立ではない
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[Tile::M1, Tile::M3, Tile::M9, Tile::S9]);
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+
+        // M1 は M3 と嵌張候補 → 孤立ではない
+        assert_eq!(isolated_tile_bonus(&ctx, &make_candidate(Tile::M1)), 0.0);
+        // M9 / S9 は孤立
+        assert!(isolated_tile_bonus(&ctx, &make_candidate(Tile::M9)) > 0.0);
+        assert!(isolated_tile_bonus(&ctx, &make_candidate(Tile::S9)) > 0.0);
+    }
+
+    #[test]
+    fn test_shape_protection_bonus() {
+        // 両面はマイナス（守る）、辺張・嵌張はプラス（整理しやすい）
+        let mut state = CpuGameState::new();
+        // M2M3=両面, P1P2=辺張, S3S5=嵌張, S8S8=対子
+        state.my_hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::P1,
+            Tile::P2,
+            Tile::S3,
+            Tile::S5,
+            Tile::S8,
+            Tile::S8,
+        ]);
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+
+        let bonus = |t: u32| shape_protection_bonus(&ctx, &make_candidate(t));
+
+        assert!(bonus(Tile::M2) < 0.0, "両面の牌は守る");
+        assert!(bonus(Tile::M3) < 0.0, "両面の牌は守る");
+        assert!(bonus(Tile::P1) > 0.0, "辺張は整理しやすい");
+        assert!(bonus(Tile::S3) > 0.0, "嵌張は整理しやすい");
+        assert!(bonus(Tile::S5) > 0.0, "嵌張は整理しやすい");
+        assert_eq!(bonus(Tile::S8), 0.0, "対子は対象外");
+    }
+
+    #[test]
+    fn test_shape_protection_inactive_when_defending() {
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[Tile::M2, Tile::M3]);
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let ctx = DiscardContext {
+            state: &state,
+            config: &config,
+            attacking: false,
+        };
+        assert_eq!(shape_protection_bonus(&ctx, &make_candidate(Tile::M2)), 0.0);
+    }
+
+    #[test]
+    fn test_dora_protection_bonus() {
+        let mut state = CpuGameState::new();
+        state.dora_indicators = vec![Tile::new(Tile::P8)]; // ドラは P9
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+
+        // ドラはペナルティ
+        assert!(dora_protection_bonus(&ctx, &make_candidate(Tile::P9)) < 0.0);
+        // 非ドラは補正なし
+        assert_eq!(dora_protection_bonus(&ctx, &make_candidate(Tile::S9)), 0.0);
+
+        // 赤ドラもペナルティ
+        let red_five = DiscardCandidate {
+            tile: Tile::new_red(Tile::M5),
+            ..make_candidate(Tile::M5)
+        };
+        assert!(dora_protection_bonus(&ctx, &red_five) < 0.0);
+
+        // 守備時は補正なし（安全度を優先）
+        let defending = DiscardContext {
+            state: &state,
+            config: &config,
+            attacking: false,
+        };
+        assert_eq!(
+            dora_protection_bonus(&defending, &make_candidate(Tile::P9)),
+            0.0
+        );
+    }
+
+    #[test]
+    fn test_defense_safety_bonus() {
+        let state = CpuGameState::new();
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+
+        let mut candidate = make_candidate(Tile::M5);
+        candidate.safety = 1.0;
+
+        // 攻撃中は補正なし
+        let attacking = attack_ctx(&state, &config);
+        assert_eq!(defense_safety_bonus(&attacking, &candidate), 0.0);
+
+        // 守備時は安全度に大きな重み（向聴数3段階分 = 300）
+        let defending = DiscardContext {
+            state: &state,
+            config: &config,
+            attacking: false,
+        };
+        assert_eq!(defense_safety_bonus(&defending, &candidate), 300.0);
+
+        // 現物(1.0)と無筋中張牌(0.15)の差は向聴数2段階を超える
+        candidate.safety = 0.15;
+        let dangerous = defense_safety_bonus(&defending, &candidate);
+        assert!(300.0 - dangerous > 200.0);
     }
 
     // --- has_yaku_prospect ---
