@@ -1555,6 +1555,61 @@ mod tests {
     }
 
     #[test]
+    fn test_toitoi_pon_requires_four_blocks() {
+        // #157: 対々和狙いのポンは「副露+対子・刻子が4ブロック以上」のときだけ
+        let s9_pon = Meld {
+            tiles: vec![Tile::new(Tile::S9); 3],
+            category: MeldType::Pon,
+            from: MeldFrom::Unknown,
+            called_tile: Some(Tile::new(Tile::S9)),
+        };
+
+        // 3ブロック相当（副露1 + M9M9 + P1P1）から M9 ポン → 役の見込みなし → パス
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::M9),
+                Tile::new(Tile::M9),
+                Tile::new(Tile::P1),
+                Tile::new(Tile::P1),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::S3),
+                Tile::new(Tile::M6),
+                Tile::new(Tile::P7),
+                Tile::new(Tile::S5),
+            ],
+        ));
+        client.state.player_melds[0] = vec![s9_pon.clone()];
+        let action = client.handle_event(&pon_call_event(Tile::M9));
+        assert!(matches!(action, Some(ClientAction::Pass)));
+
+        // 5ブロック相当（副露1 + 対子4）から M9 ポン → 対々和の見込みあり → 鳴く
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::M9),
+                Tile::new(Tile::M9),
+                Tile::new(Tile::P1),
+                Tile::new(Tile::P1),
+                Tile::new(Tile::S3),
+                Tile::new(Tile::S3),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::S5),
+            ],
+        ));
+        client.state.player_melds[0] = vec![s9_pon];
+        let action = client.handle_event(&pon_call_event(Tile::M9));
+        assert!(matches!(action, Some(ClientAction::Pon { .. })));
+    }
+
+    #[test]
     fn test_pass_on_pon_leading_to_naked_tanki() {
         // #166: 4副露目（裸単騎）になるポンはしない
         let hand = vec![
