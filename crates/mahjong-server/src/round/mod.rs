@@ -1747,6 +1747,26 @@ impl Round {
             self.declare_special_draw(DrawReason::NineTerminals, Some(declarer_wind));
         } else {
             self.phase = TurnPhase::WaitForDiscard;
+
+            // 続行を選んだプレイヤーに TileDrawn を再送して打牌を促す。
+            // 最初の TileDrawn への応答（打牌）は WaitForNineTerminals
+            // フェーズで拒否されているため、再送しないとクライアントが
+            // 打牌の機会を得られず局が進行しなくなる。
+            if let Some(drawn) = self.players[player_idx].hand.drawn() {
+                let can_tsumo = self.can_tsumo();
+                let can_riichi = self.can_player_riichi(player_idx);
+                let is_furiten = self.players[player_idx].is_furiten();
+                self.events.push((
+                    player_idx,
+                    ServerEvent::TileDrawn {
+                        tile: drawn,
+                        remaining_tiles: self.wall.remaining(),
+                        can_tsumo,
+                        can_riichi,
+                        is_furiten,
+                    },
+                ));
+            }
         }
         true
     }
@@ -2598,6 +2618,43 @@ mod tests {
             has_available,
             "NineTerminalsAvailableイベントが生成されていない"
         );
+    }
+
+    #[test]
+    fn test_nine_terminals_continue_resends_tile_drawn() {
+        // 続行を選んだプレイヤーには TileDrawn を再送して打牌を促す。
+        // （最初の TileDrawn への打牌は WaitForNineTerminals フェーズで
+        // 拒否されているため、再送がないと局が進行不能になる）
+        let mut wall_tiles: Vec<Tile> = vec![Tile::new(Tile::Z7)];
+        for _ in 0..(70 + 14) {
+            wall_tiles.push(Tile::new(Tile::M5));
+        }
+        let wall = Wall::from_tiles(wall_tiles);
+
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        round.wall = wall;
+        let seat = round.players[0].seat_wind;
+        let mut player = Player::new(seat, vec![], 25000);
+        player.hand = mahjong_core::hand::Hand::from("1m9m1p9p1s9s1z2z3z4z5z6z5m");
+        round.players[0] = player;
+        round.current_player = 0;
+        round.phase = TurnPhase::Draw;
+        round.drain_events();
+
+        round.do_draw();
+        round.drain_events();
+
+        assert!(round.do_nine_terminals(0, false));
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+
+        let events = round.drain_events();
+        let resent = events
+            .iter()
+            .any(|(idx, e)| *idx == 0 && matches!(e, ServerEvent::TileDrawn { .. }));
+        assert!(resent, "続行時に TileDrawn が再送されるべき");
+
+        // 再送されたツモ牌で打牌できる（局が進行する）
+        assert!(round.do_discard(None));
     }
 
     #[test]
