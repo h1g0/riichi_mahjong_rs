@@ -306,6 +306,28 @@ impl CpuGameState {
         &self.all_discards[Self::wind_to_index(self.my_seat_wind)]
     }
 
+    /// 自分の副露を返す
+    pub fn my_melds(&self) -> &[Meld] {
+        &self.player_melds[Self::wind_to_index(self.my_seat_wind)]
+    }
+
+    /// 自分の副露を手牌分析用に取得する（カンは3枚に切り詰める）
+    ///
+    /// `HandAnalyzer` は副露を3枚の面子として扱うため、
+    /// 向聴数計算に渡す際はこちらを使用する。
+    pub fn my_melds_for_analysis(&self) -> Vec<Meld> {
+        self.my_melds()
+            .iter()
+            .map(|open| {
+                let mut o = open.clone();
+                if o.tiles.len() > 3 {
+                    o.tiles.truncate(3);
+                }
+                o
+            })
+            .collect()
+    }
+
     /// 現在の巡目（1始まり）を返す
     ///
     /// 自分の捨て牌の数から導出する。打牌前に呼べば「これから何巡目の打牌か」になる。

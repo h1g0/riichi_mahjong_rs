@@ -162,7 +162,7 @@ fn count_dora_in_hand(hand_tiles: &[Tile], dora_indicators: &[Tile]) -> u32 {
 }
 
 /// 役牌となる牌種のリストを返す
-fn get_yakuhai_types(seat_wind: Wind, prevailing_wind: Wind) -> Vec<TileType> {
+pub(crate) fn get_yakuhai_types(seat_wind: Wind, prevailing_wind: Wind) -> Vec<TileType> {
     use mahjong_core::tile::Tile as T;
     let mut types = vec![T::Z5, T::Z6, T::Z7]; // 白發中
 
