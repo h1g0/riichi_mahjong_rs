@@ -19,6 +19,8 @@ pub struct Threat {
     pub dragon_alert: bool,
     /// 四喜和気配（風牌を2種類以上鳴いている）
     pub wind_alert: bool,
+    /// 国士無双気配（門前のまま序盤から中張牌中心に切っている）
+    pub kokushi_alert: bool,
 }
 
 /// 牌の安全度を評価する（0.0=最危険, 1.0=最安全)
@@ -55,6 +57,8 @@ pub fn evaluate_safety(tile: Tile, state: &CpuGameState, config: &CpuConfig) -> 
 /// - #180（弱以上）: 3副露以上は聴牌濃厚として警戒する
 /// - #181（中以上）: 2副露以上が1色+字牌に染まっていれば染め手気配
 /// - #182（弱以上）: 三元牌2種以上 / 風牌2種以上の副露は役満気配
+/// - #182（中以上）: 門前のまま序盤から中張牌中心に切っている相手は
+///   国士無双（またはチャンタ系）気配
 pub(crate) fn assess_threat(
     state: &CpuGameState,
     idx: usize,
@@ -104,6 +108,25 @@ pub(crate) fn assess_threat(
     if wind_kinds >= 2 {
         threat.wind_alert = true;
         threat.weight = threat.weight.max(0.6);
+    }
+
+    // #182拡張: 国士無双気配（中以上）
+    // 国士無双は門前限定で、不要な中張牌を切り続ける河になる。
+    // 么九牌・字牌は対子の余剰分（2枚目以降の重なり）が切られうるので、
+    // 「序盤6巡で么九牌1枚以下 + 河全体で2枚以下」を気配とする。
+    // 3枚以上切り出したら見切ったとみなして解除する。
+    // 同じ河はチャンタ・混老頭系でもありえるが、いずれにせよ
+    // 么九牌・字牌が危険という結論は変わらない。
+    if config.level >= CpuLevel::Normal && melds.is_empty() {
+        let discards = &state.all_discards[idx];
+        if discards.len() >= 5 {
+            let early_orphans = discards.iter().take(6).filter(|t| t.is_1_9_honor()).count();
+            let total_orphans = discards.iter().filter(|t| t.is_1_9_honor()).count();
+            if early_orphans <= 1 && total_orphans <= 2 {
+                threat.kokushi_alert = true;
+                threat.weight = threat.weight.max(0.5);
+            }
+        }
     }
 
     // #181: 染め手気配（中以上）: 2副露以上が全て1色+字牌
@@ -191,6 +214,16 @@ fn evaluate_safety_against_threat(
         if threat.wind_alert && (Tile::Z1..=Tile::Z4).contains(&tt) {
             return 0.05;
         }
+    }
+
+    // 国士無双気配（#182拡張）: 么九牌・字牌は重みによらず危険として扱う
+    // （国士は么九牌13種のどれでも待ちになりうる。生牌は特に危険）
+    if threat.kokushi_alert && tile.is_1_9_honor() {
+        return if publicly_visible(state, tt) == 0 {
+            0.08
+        } else {
+            0.2
+        };
     }
 
     let visible_counts = state.visible_tile_counts();
@@ -557,6 +590,100 @@ mod tests {
         state.player_melds[2] = vec![pon_meld(Tile::Z1), pon_meld(Tile::Z2)];
         let threat = assess_threat(&state, 2, &config).expect("wind signs");
         assert!(threat.wind_alert);
+    }
+
+    #[test]
+    fn test_assess_threat_kokushi_signs() {
+        // #182拡張: 門前で序盤から中張牌中心の河は国士無双気配（中以上）
+        let middle_discards = |n: usize| -> Vec<Tile> {
+            [Tile::M5, Tile::P4, Tile::S6, Tile::M3, Tile::P7, Tile::S5]
+                .iter()
+                .take(n)
+                .map(|&t| Tile::new(t))
+                .collect()
+        };
+
+        // 中張牌6枚の河 → 気配あり
+        let mut state = CpuGameState::new();
+        state.all_discards[1] = middle_discards(6);
+        let threat = assess_threat(&state, 1, &test_config()).expect("kokushi signs");
+        assert!(threat.kokushi_alert);
+
+        // 么九牌の重なり（余剰）が1〜2枚混ざっていても気配は維持
+        let mut state = CpuGameState::new();
+        let mut discards = middle_discards(5);
+        discards.push(Tile::new(Tile::M1)); // 6枚目に余剰の么九牌
+        discards.extend(middle_discards(3));
+        discards.push(Tile::new(Tile::Z2)); // 河全体で么九牌2枚
+        state.all_discards[1] = discards;
+        let threat = assess_threat(&state, 1, &test_config()).expect("kokushi signs");
+        assert!(threat.kokushi_alert);
+
+        // 序盤に么九牌を2枚以上切っている → 通常の手（気配なし）
+        let mut state = CpuGameState::new();
+        let mut discards = vec![Tile::new(Tile::Z3), Tile::new(Tile::M9)];
+        discards.extend(middle_discards(4));
+        state.all_discards[1] = discards;
+        assert!(assess_threat(&state, 1, &test_config()).is_none());
+
+        // 河全体で么九牌3枚以上 → 見切ったとみなして解除
+        let mut state = CpuGameState::new();
+        let mut discards = middle_discards(6);
+        discards.extend([
+            Tile::new(Tile::M1),
+            Tile::new(Tile::P9),
+            Tile::new(Tile::Z1),
+        ]);
+        state.all_discards[1] = discards;
+        assert!(assess_threat(&state, 1, &test_config()).is_none());
+
+        // 捨て牌4枚以下では判定しない
+        let mut state = CpuGameState::new();
+        state.all_discards[1] = middle_discards(4);
+        assert!(assess_threat(&state, 1, &test_config()).is_none());
+
+        // 副露があれば国士無双ではない
+        let mut state = CpuGameState::new();
+        state.all_discards[1] = middle_discards(6);
+        state.player_melds[1] = vec![pon_meld(Tile::P5)];
+        let threat = assess_threat(&state, 1, &test_config());
+        assert!(threat.is_none_or(|t| !t.kokushi_alert));
+
+        // 弱レベルは対象外
+        let mut state = CpuGameState::new();
+        state.all_discards[1] = middle_discards(6);
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        assert!(assess_threat(&state, 1, &config).is_none());
+    }
+
+    #[test]
+    fn test_orphans_dangerous_against_kokushi_suspect() {
+        // 国士無双気配の相手に么九牌・字牌は危険、中張牌は比較的安全
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.all_discards[1] = vec![
+            Tile::new(Tile::M5),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P7),
+        ];
+        let config = test_config();
+
+        let terminal = evaluate_safety(Tile::new(Tile::M1), &state, &config);
+        let honor = evaluate_safety(Tile::new(Tile::Z1), &state, &config);
+        let middle = evaluate_safety(Tile::new(Tile::S2), &state, &config);
+
+        assert!(terminal <= 0.1, "生牌の么九牌は最危険: {terminal}");
+        assert!(honor <= 0.1, "生牌の字牌は最危険: {honor}");
+        assert!(
+            middle > terminal && middle > honor,
+            "中張牌は么九牌より安全: {middle}"
+        );
+
+        // 相手の現物（中張牌）は安全
+        let genbutsu = evaluate_safety(Tile::new(Tile::M5), &state, &config);
+        assert_eq!(genbutsu, 1.0);
     }
 
     #[test]
