@@ -415,7 +415,8 @@ impl CpuClient {
         let riichi_count = self.state.player_riichi.iter().filter(|&&r| r).count();
 
         // 防御を使わないレベルなら常に攻撃
-        if !self.config.level.uses_defense() {
+        // ただし定石有効時は弱レベルでも撤退判断を行う（#173: ベタオリは弱以上）
+        if !self.config.level.uses_defense() && !self.config.heuristics_enabled {
             return true;
         }
 
@@ -999,6 +1000,231 @@ mod tests {
         });
 
         assert!(matches!(action, Some(ClientAction::Discard { .. })));
+    }
+
+    fn draw_event(tile_type: u32) -> ServerEvent {
+        ServerEvent::TileDrawn {
+            tile: Tile::new(tile_type),
+            remaining_tiles: 40,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        }
+    }
+
+    fn discarded_tile(action: &Option<ClientAction>) -> Option<Tile> {
+        match action {
+            Some(ClientAction::Discard { tile }) => *tile,
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn test_discards_isolated_guest_wind_before_terminal() {
+        // #147: 孤立牌の中でも客風牌を1・9牌より先に切る
+        // 3面子 + 雀頭 + 浮き牌3枚（Z3=客風, P9, ツモS9）
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(
+            Wind::South,
+            vec![
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M4),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::S4),
+                Tile::new(Tile::S5),
+                Tile::new(Tile::S6),
+                Tile::new(Tile::M9),
+                Tile::new(Tile::M9),
+                Tile::new(Tile::P9),
+                Tile::new(Tile::Z3),
+            ],
+        ));
+        let action = client.handle_event(&draw_event(Tile::S9));
+
+        let tile = discarded_tile(&action).expect("expected a hand discard");
+        assert_eq!(tile.get(), Tile::Z3, "客風牌を最初に切るべき");
+    }
+
+    #[test]
+    fn test_discard_prefers_breaking_penchan_over_ryanmen() {
+        // #148: 6ブロックの手では両面より辺張を整理する
+        // ブロック: M234 P456 M9M9 S6S7(両面) P1P2(辺張) Z5Z5(ツモで対子)
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(
+            Wind::South,
+            vec![
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M4),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::M9),
+                Tile::new(Tile::M9),
+                Tile::new(Tile::S6),
+                Tile::new(Tile::S7),
+                Tile::new(Tile::P1),
+                Tile::new(Tile::P2),
+                Tile::new(Tile::Z5),
+            ],
+        ));
+        let action = client.handle_event(&draw_event(Tile::Z5));
+
+        let tile = discarded_tile(&action).expect("expected a hand discard");
+        assert!(
+            tile.get() == Tile::P1 || tile.get() == Tile::P2,
+            "両面(S6S7)ではなく辺張(P1P2)を整理すべき, got {tile:?}"
+        );
+    }
+
+    #[test]
+    fn test_dora_float_kept_over_plain_float() {
+        // #152: 同価値の浮き牌（孤立1・9牌）ならドラでない方を切る
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        let hand = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::P9),
+        ];
+        client.handle_event(&ServerEvent::GameStarted {
+            seat_wind: Wind::South,
+            hand: hand.clone(),
+            scores: [25000; 4],
+            prevailing_wind: Wind::East,
+            dora_indicators: vec![Tile::new(Tile::P8)], // ドラは P9
+            round_number: 0,
+            honba: 0,
+            riichi_sticks: 0,
+        });
+        // 4面子完成 + P9(ドラ) + ツモ S9 の単騎選択。
+        // ドラの P9 を残して S9 をツモ切りすべき
+        let action = client.handle_event(&draw_event(Tile::S9));
+        assert!(
+            matches!(action, Some(ClientAction::Discard { tile: None })),
+            "ドラ(P9)を残して S9 をツモ切りすべき, got {action:?}"
+        );
+
+        // 対照: 定石無効なら P9 を切る（ドラ保護なし、同値で先頭の候補が選ばれる）
+        let config =
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
+        let mut client = CpuClient::new(config);
+        client.handle_event(&ServerEvent::GameStarted {
+            seat_wind: Wind::South,
+            hand,
+            scores: [25000; 4],
+            prevailing_wind: Wind::East,
+            dora_indicators: vec![Tile::new(Tile::P8)],
+            round_number: 0,
+            honba: 0,
+            riichi_sticks: 0,
+        });
+        let action = client.handle_event(&draw_event(Tile::S9));
+        assert!(
+            matches!(action, Some(ClientAction::Discard { tile: Some(t) }) if t.get() == Tile::P9),
+            "定石無効時はドラ保護が効かない, got {action:?}"
+        );
+    }
+
+    #[test]
+    fn test_weak_folds_with_genbutsu_against_riichi() {
+        // #173/#174: 弱レベルでも他家リーチに対して現物からベタオリする
+        // （現物が対子の一部でも、聴牌への近さより安全を優先する）
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::S1),
+                Tile::new(Tile::S2),
+                Tile::new(Tile::S3),
+                Tile::new(Tile::Z3),
+                Tile::new(Tile::Z3),
+                Tile::new(Tile::P2),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P9),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::M9),
+            ],
+        ));
+        // 南家が Z3 を切ってからリーチ
+        client.handle_event(&ServerEvent::TileDiscarded {
+            player: Wind::South,
+            tile: Tile::new(Tile::Z3),
+            is_tsumogiri: false,
+        });
+        client.handle_event(&ServerEvent::PlayerRiichi {
+            player: Wind::South,
+            scores: [25000, 24000, 25000, 25000],
+            riichi_sticks: 1,
+        });
+        let action = client.handle_event(&draw_event(Tile::M5));
+
+        let tile = discarded_tile(&action).expect("expected a hand discard");
+        assert_eq!(tile.get(), Tile::Z3, "現物(Z3)を最優先で切るべき");
+    }
+
+    #[test]
+    fn test_defense_prefers_suji_over_dangerous_tiles() {
+        // #176: 現物がない場合、無筋の中張牌より筋・字牌寄りの牌を選ぶ
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(
+            Wind::East,
+            vec![
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::S1),
+                Tile::new(Tile::S2),
+                Tile::new(Tile::S3),
+                Tile::new(Tile::Z3),
+                Tile::new(Tile::Z3),
+                Tile::new(Tile::M7),
+                Tile::new(Tile::P9),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::S6),
+                Tile::new(Tile::P2),
+            ],
+        ));
+        // 南家が M4 を切ってからリーチ → M7 は筋
+        client.handle_event(&ServerEvent::TileDiscarded {
+            player: Wind::South,
+            tile: Tile::new(Tile::M4),
+            is_tsumogiri: false,
+        });
+        client.handle_event(&ServerEvent::PlayerRiichi {
+            player: Wind::South,
+            scores: [25000, 24000, 25000, 25000],
+            riichi_sticks: 1,
+        });
+        let action = client.handle_event(&draw_event(Tile::P5));
+
+        let tile = discarded_tile(&action).expect("expected a hand discard");
+        assert_eq!(tile.get(), Tile::M7, "筋牌(M7)を選ぶべき, got {tile:?}");
     }
 
     #[test]
