@@ -449,6 +449,12 @@ impl CpuClient {
             riichi_count
         };
 
+        // 終盤の遠い手は降りる（#183, 弱以上）:
+        // 残りツモが少ない2向聴以下の手は、脅威の有無や打点によらず押さない
+        if self.config.heuristics_enabled && self.state.remaining_tiles <= 12 && shanten >= 2 {
+            return false;
+        }
+
         // 押し引きの定石判定（#178, 中以上）:
         // 良形・高打点・親の聴牌は押し、愚形安手の聴牌は降りる
         let ctx = heuristics::CallContext {
@@ -745,6 +751,7 @@ mod tests {
             prevailing_wind: Wind::East,
             dora_indicators: vec![],
             round_number: 0,
+            total_rounds: 4,
             honba: 0,
             riichi_sticks: 0,
         }
@@ -1191,6 +1198,7 @@ mod tests {
             prevailing_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::P8)], // ドラは P9
             round_number: 0,
+            total_rounds: 4,
             honba: 0,
             riichi_sticks: 0,
         });
@@ -1213,6 +1221,7 @@ mod tests {
             prevailing_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::P8)],
             round_number: 0,
+            total_rounds: 4,
             honba: 0,
             riichi_sticks: 0,
         });
@@ -1386,6 +1395,7 @@ mod tests {
             prevailing_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::S7), Tile::new(Tile::M3)], // ドラ S8×2 + M4
             round_number: 0,
+            total_rounds: 4,
             honba: 0,
             riichi_sticks: 0,
         };
@@ -1633,6 +1643,7 @@ mod tests {
             prevailing_wind: Wind::East,
             dora_indicators: vec![],
             round_number: 0,
+            total_rounds: 4,
             honba: 0,
             riichi_sticks: 0,
         });
@@ -2047,6 +2058,7 @@ mod tests {
             prevailing_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::Z5)], // ドラ(發)は手牌にない
             round_number: 0,
+            total_rounds: 4,
             honba: 0,
             riichi_sticks: 0,
         });
@@ -2063,6 +2075,7 @@ mod tests {
             prevailing_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::P6)], // ドラは P7（手牌に2枚...P7,P8のP7）
             round_number: 0,
+            total_rounds: 4,
             honba: 0,
             riichi_sticks: 0,
         });

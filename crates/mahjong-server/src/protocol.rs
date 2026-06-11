@@ -90,6 +90,8 @@ pub enum ServerEvent {
         dora_indicators: Vec<Tile>,
         /// 局番号（0-based: 東1局=0, 東2局=1, ...）
         round_number: usize,
+        /// ゲーム全体の局数（東風戦=4, 東南戦=8。オーラス判定に使用）
+        total_rounds: usize,
         /// 本場数
         honba: usize,
         /// 供託リーチ棒の本数

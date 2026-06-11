@@ -129,6 +129,7 @@ impl Round {
     /// - `prevailing_wind`: 場風（東場なら East）
     /// - `dealer`: 親のプレイヤーインデックス（0-3）
     /// - `initial_scores`: 各プレイヤーの初期点数
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         prevailing_wind: Wind,
         dealer: usize,
@@ -136,6 +137,7 @@ impl Round {
         honba: usize,
         riichi_sticks: usize,
         round_number: usize,
+        total_rounds: usize,
         settings: Settings,
     ) -> Self {
         Self::with_wall(
@@ -146,6 +148,7 @@ impl Round {
             honba,
             riichi_sticks,
             round_number,
+            total_rounds,
             settings,
         )
     }
@@ -162,6 +165,7 @@ impl Round {
         honba: usize,
         riichi_sticks: usize,
         round_number: usize,
+        total_rounds: usize,
         settings: Settings,
     ) -> Self {
         Self::with_wall(
@@ -172,6 +176,7 @@ impl Round {
             honba,
             riichi_sticks,
             round_number,
+            total_rounds,
             settings,
         )
     }
@@ -186,6 +191,7 @@ impl Round {
         honba: usize,
         riichi_sticks: usize,
         round_number: usize,
+        total_rounds: usize,
         settings: Settings,
     ) -> Self {
         let dealt = wall.deal();
@@ -219,6 +225,7 @@ impl Round {
                     prevailing_wind,
                     dora_indicators: dora_indicators.clone(),
                     round_number,
+                    total_rounds,
                     honba,
                     riichi_sticks,
                 },
@@ -1832,7 +1839,7 @@ mod tests {
 
     #[test]
     fn test_round_new() {
-        let round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         assert_eq!(round.prevailing_wind, Wind::East);
         assert_eq!(round.current_player, 0);
         assert_eq!(round.phase, TurnPhase::Draw);
@@ -1851,7 +1858,7 @@ mod tests {
     fn test_round_draw() {
         // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
         let mut round =
-            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.drain_events(); // 初期イベントをクリア
 
         assert!(round.do_draw());
@@ -1867,7 +1874,7 @@ mod tests {
     fn test_round_discard() {
         // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
         let mut round =
-            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.drain_events();
         round.do_draw();
         round.drain_events();
@@ -1904,7 +1911,7 @@ mod tests {
     fn test_round_discard_rejects_tile_not_in_hand() {
         // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
         let mut round =
-            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.drain_events();
         round.do_draw();
         round.drain_events();
@@ -1921,7 +1928,7 @@ mod tests {
     fn test_round_turn_flow() {
         // 固定シードで牌山を生成し、テストの再現性を確保する
         let mut round =
-            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.drain_events();
 
         // 4人分のターンを回す
@@ -1971,7 +1978,7 @@ mod tests {
 
     #[test]
     fn test_round_play_to_end() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.play_to_end();
 
         assert!(round.is_over());
@@ -1987,6 +1994,7 @@ mod tests {
             0,
             0,
             0,
+            4,
             Settings::new(),
         );
         let scores = round.get_scores();
@@ -1995,7 +2003,7 @@ mod tests {
 
     #[test]
     fn test_round_events_on_start() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         let events = round.drain_events();
 
         // 4人分のGameStartedイベント
@@ -2025,7 +2033,7 @@ mod tests {
         // 打牌後に WaitForCalls になった場合、全員パスで Draw に進む
         // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
         let mut round =
-            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.drain_events();
         round.do_draw();
         round.drain_events();
@@ -2049,7 +2057,7 @@ mod tests {
 
     #[test]
     fn test_check_available_calls_offers_pon_but_not_ron_for_5z() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         let seat_wind = round.players[1].seat_wind;
         let hand = mahjong_core::hand::Hand::from("234678m56p567s55z");
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -2102,7 +2110,7 @@ mod tests {
     fn test_open_tanyao_disabled_blocks_tsumo() {
         let mut settings = Settings::new();
         settings.opened_all_simples = false;
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
 
         let seat_wind = round.players[0].seat_wind;
         round.players[0] = open_tanyao_player(seat_wind, true);
@@ -2118,7 +2126,7 @@ mod tests {
     fn test_open_tanyao_disabled_does_not_offer_ron() {
         let mut settings = Settings::new();
         settings.opened_all_simples = false;
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
 
         let seat_wind = round.players[1].seat_wind;
         round.players[1] = open_tanyao_player(seat_wind, false);
@@ -2134,7 +2142,7 @@ mod tests {
 
     #[test]
     fn test_do_riichi_requires_tenpai_after_discard() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("123m123p123s45z67m 8m");
         round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -2153,7 +2161,7 @@ mod tests {
 
     #[test]
     fn test_do_riichi_deducts_score_and_adds_stick() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("123m123p123s45z67m 8m");
         round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -2169,7 +2177,7 @@ mod tests {
 
     #[test]
     fn test_check_available_calls_offers_daiminkan() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         let seat_wind = round.players[1].seat_wind;
         let hand = mahjong_core::hand::Hand::from("111m234p567s789m");
         round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -2184,7 +2192,7 @@ mod tests {
 
     #[test]
     fn test_do_ankan_draws_rinshan_and_reveals_dora() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("111m234p567s789m 1m");
         round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
@@ -2202,7 +2210,7 @@ mod tests {
 
     #[test]
     fn test_do_kakan_draws_rinshan_and_reveals_dora() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let mut player = Player::new(seat_wind, vec![], 25000);
         player.hand = mahjong_core::hand::Hand::from("234p567s789m1z 111m 1m");
@@ -2223,7 +2231,7 @@ mod tests {
 
     #[test]
     fn test_do_kakan_keeps_unrelated_drawn_tile_in_hand() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         let seat_wind = round.players[0].seat_wind;
         let mut player = Player::new(seat_wind, vec![], 25000);
         player.hand = mahjong_core::hand::Hand::from("127m234p567s1z 111m 9s");
@@ -2247,7 +2255,7 @@ mod tests {
     #[test]
     fn test_temporary_furiten_set_on_ron_pass() {
         // プレイヤー1がロン可能な状態で、パスすると同巡フリテンが設定される
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
         // プレイヤー1にテンパイ手を設定: 123m456p789s11z 待ち1z（場風東）
         let seat1 = round.players[1].seat_wind;
@@ -2286,7 +2294,7 @@ mod tests {
 
     #[test]
     fn test_temporary_furiten_cleared_on_draw() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.drain_events();
 
         // プレイヤー1に同巡フリテンを設定
@@ -2304,7 +2312,7 @@ mod tests {
     #[test]
     fn test_riichi_furiten_set_on_ron_pass() {
         // リーチ中のプレイヤーがロンを見逃すとリーチ後フリテンが設定される
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
         let seat1 = round.players[1].seat_wind;
         let hand1 = mahjong_core::hand::Hand::from("123m456p789s1122z");
@@ -2339,7 +2347,7 @@ mod tests {
 
     #[test]
     fn test_riichi_furiten_persists_after_draw() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.drain_events();
 
         // リーチ後フリテンを設定
@@ -2358,7 +2366,7 @@ mod tests {
     #[test]
     fn test_temporary_furiten_blocks_ron() {
         // 同巡フリテンのプレイヤーにはロンが提供されない
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
         let seat1 = round.players[1].seat_wind;
         let hand1 = mahjong_core::hand::Hand::from("123m456p789s1122z");
@@ -2379,7 +2387,7 @@ mod tests {
     #[test]
     fn test_kakan_ron_pass_sets_furiten() {
         // 加カンで搶槓可能だがパスした場合、フリテンが設定される
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
         let seat0 = round.players[0].seat_wind;
         let mut player0 = Player::new(seat0, vec![], 25000);
@@ -2413,7 +2421,7 @@ mod tests {
         // 再現テスト: 6m7m1p2p3p3p4p5p5p6p7s8s9s ツモ8m
         // shanten=0 で riichi_discards がある（3p,3p,5p,5p,6p）
         // → can_riichi = true であるべき
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
         let seat0 = round.players[0].seat_wind;
         let hand = mahjong_core::hand::Hand::from("67m12334556p789s");
@@ -2439,7 +2447,7 @@ mod tests {
 
     #[test]
     fn test_kakan_offers_rob_ron() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
         let seat0 = round.players[0].seat_wind;
         let mut player0 = Player::new(seat0, vec![], 25000);
@@ -2496,7 +2504,7 @@ mod tests {
 
     #[test]
     fn test_check_nine_terminals_qualifies() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         setup_nine_terminals_hand(&mut round, 0);
         // 初回ツモ（捨て牌0枚）かつヤオ九牌9種以上
         assert!(round.check_nine_terminals());
@@ -2504,7 +2512,7 @@ mod tests {
 
     #[test]
     fn test_check_nine_terminals_insufficient_types() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         let seat = round.players[0].seat_wind;
         let mut player = Player::new(seat, vec![], 25000);
         // ヤオ九牌が8種類のみ（6z・7zがなく中張牌が多い）
@@ -2518,7 +2526,7 @@ mod tests {
 
     #[test]
     fn test_check_nine_terminals_after_discard() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         setup_nine_terminals_hand(&mut round, 0);
         // 捨て牌を1枚追加（既に1巡した状態を再現）
         round.players[0].discards.push(crate::player::Discard {
@@ -2533,7 +2541,7 @@ mod tests {
 
     #[test]
     fn test_do_nine_terminals_declare() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         setup_nine_terminals_hand(&mut round, 0);
         round.phase = TurnPhase::WaitForNineTerminals;
         round.drain_events();
@@ -2557,7 +2565,7 @@ mod tests {
 
     #[test]
     fn test_do_nine_terminals_continue() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         setup_nine_terminals_hand(&mut round, 0);
         round.phase = TurnPhase::WaitForNineTerminals;
         round.drain_events();
@@ -2570,7 +2578,7 @@ mod tests {
 
     #[test]
     fn test_do_nine_terminals_wrong_player() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         setup_nine_terminals_hand(&mut round, 0);
         round.phase = TurnPhase::WaitForNineTerminals;
 
@@ -2590,7 +2598,7 @@ mod tests {
         }
         let wall = Wall::from_tiles(wall_tiles);
 
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.wall = wall;
 
         // 手牌をヤオ九牌12種に設定（ツモで7zが来て13種になる）
@@ -2631,7 +2639,7 @@ mod tests {
         }
         let wall = Wall::from_tiles(wall_tiles);
 
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         round.wall = wall;
         let seat = round.players[0].seat_wind;
         let mut player = Player::new(seat, vec![], 25000);
@@ -2667,7 +2675,7 @@ mod tests {
 
         let mut settings = Settings::new();
         settings.nine_terminals_draw = false;
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
         round.wall = wall;
 
         let seat = round.players[0].seat_wind;
@@ -2717,7 +2725,7 @@ mod tests {
     fn test_triple_ron_draw_enabled() {
         let mut settings = Settings::new();
         settings.triple_ron_draw = true;
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -2754,7 +2762,7 @@ mod tests {
         let mut settings = Settings::new();
         settings.triple_ron_draw = true;
         settings.multiple_ron = true;
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -2784,7 +2792,7 @@ mod tests {
         let mut settings = Settings::new();
         settings.triple_ron_draw = false;
         settings.multiple_ron = false;
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -2812,7 +2820,7 @@ mod tests {
         let mut settings = Settings::new();
         settings.triple_ron_draw = true;
         // multiple_ron=true（デフォルト）なので両方和了
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -2839,7 +2847,7 @@ mod tests {
         // multiple_ron=false の場合は上家取り（頭ハネ）の1人ロン
         let mut settings = Settings::new();
         settings.multiple_ron = false;
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -2864,7 +2872,7 @@ mod tests {
     #[test]
     fn test_double_ron_both_win() {
         // multiple_ron=true（デフォルト）: 2人ロンで両方和了
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -2890,7 +2898,7 @@ mod tests {
         let mut settings = Settings::new();
         settings.multiple_ron = true;
         settings.triple_ron_draw = false;
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, settings);
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -2914,7 +2922,7 @@ mod tests {
     fn test_double_ron_scores() {
         // ダブロン時のスコア: 各和了者が放銃者から独立して点数を受け取る
         // 本場ボーナスは上家取りで最初の和了者（プレイヤー1）のみ
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 1, 0, 0, Settings::new()); // honba=1
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 1, 0, 0, 4, Settings::new()); // honba=1
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -2955,7 +2963,7 @@ mod tests {
     #[test]
     fn test_double_ron_events_generated() {
         // ダブロン時に各和了者分のRoundWonイベントが生成されること
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -2980,7 +2988,7 @@ mod tests {
     fn test_multi_ron_riichi_sticks_first_winner_only() {
         // 供託棒は最初の和了者（プレイヤー1）のみ取得
         let settings = Settings::new();
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 2, 0, settings); // riichi_sticks=2
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 2, 0, 4, settings); // riichi_sticks=2
         setup_triple_ron(&mut round);
         round.drain_events();
 
@@ -3007,7 +3015,7 @@ mod tests {
 
     #[test]
     fn test_auto_pass_cpu_no_op_when_wrong_phase() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
         assert_eq!(round.phase, TurnPhase::Draw);
         round.auto_pass_cpu(0);
         assert_eq!(round.phase, TurnPhase::Draw);
@@ -3015,7 +3023,7 @@ mod tests {
 
     #[test]
     fn test_auto_pass_cpu_passes_cpu_players_and_resolves() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
         // プレイヤー1に5zポン可能な手牌をセット
         let seat1 = round.players[1].seat_wind;
@@ -3040,7 +3048,7 @@ mod tests {
 
     #[test]
     fn test_auto_pass_cpu_skips_human_player() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
         // プレイヤー1に5zポン可能な手牌をセット
         let seat1 = round.players[1].seat_wind;

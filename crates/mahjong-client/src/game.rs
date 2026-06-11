@@ -307,6 +307,7 @@ impl GameState {
                 prevailing_wind,
                 dora_indicators,
                 round_number,
+                total_rounds: _,
                 honba,
                 riichi_sticks,
             } => {
