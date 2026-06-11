@@ -8,8 +8,13 @@
 //! レベルごとの有効/無効切り替えと定石単位のテストを可能にする。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::hand_analyzer::{calc_shanten_number, calc_shanten_number_by_form};
+use mahjong_core::hand_info::hand_analyzer::{
+    HandAnalyzer, calc_shanten_number, calc_shanten_number_by_form,
+};
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+use mahjong_core::hand_info::status::Status;
+use mahjong_core::scoring::score::calculate_score;
+use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
 use mahjong_core::winning_hand::name::Form;
 
@@ -808,6 +813,234 @@ pub fn judge_ankan(ctx: &CallContext, tile_type: TileType) -> CallJudgement {
     }
 
     CallJudgement::Neutral
+}
+
+// ============================================================================
+// リーチ・ダマ判断の定石（#168〜#172）
+// ============================================================================
+
+/// リーチ宣言に対する定石の判定結果
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiichiJudgement {
+    /// リーチすべき
+    Declare,
+    /// ダマ（宣言しない）にすべき
+    Damaten,
+    /// 定石では決まらない（従来の積極度判断に委ねる）
+    Neutral,
+}
+
+/// リーチすべきかの定石判定
+///
+/// `riichi_discard` はリーチ宣言牌（`None` はツモ切り）。
+///
+/// 適用される定石:
+/// - #168（弱以上）: 役なし門前聴牌は基本的にリーチする
+///   （リーチしないと和了できないため）
+/// - #170（中以上）: 全ての待ちでダマでも満貫以上あるならダマにする
+/// - #169（弱以上）: 先制の良形聴牌（残り待ち6枚以上）はリーチする
+/// - #172（強以上）: 序盤の愚形聴牌で良形変化が多ければ一巡待つ
+/// - #171（中以上）: 愚形の安手リーチは早巡の先制なら打ち、中終盤は控える
+pub fn judge_riichi(ctx: &CallContext, riichi_discard: Option<Tile>) -> RiichiJudgement {
+    if !ctx.config.heuristics_enabled {
+        return RiichiJudgement::Neutral;
+    }
+
+    // リーチ後の13枚を構築
+    let mut remaining = ctx.state.my_hand.clone();
+    if let Some(drawn) = ctx.state.my_drawn {
+        remaining.push(drawn);
+    }
+    let Some(target) = riichi_discard.or(ctx.state.my_drawn) else {
+        return RiichiJudgement::Neutral;
+    };
+    let Some(pos) = remaining.iter().position(|t| *t == target) else {
+        return RiichiJudgement::Neutral;
+    };
+    remaining.remove(pos);
+
+    let melds = ctx.state.my_melds_for_analysis();
+    let waits = waiting_tiles(&remaining, &melds);
+    if waits.is_empty() {
+        return RiichiJudgement::Neutral; // 聴牌していない（想定外）
+    }
+
+    let visible = ctx.state.visible_tile_counts();
+    let wait_count: u32 = waits
+        .iter()
+        .map(|&t| 4u32.saturating_sub(visible[t as usize] as u32))
+        .sum();
+
+    // 各待ちでの「リーチなし・ロン和了」の翻数（役なしなら None）
+    let values: Vec<Option<u32>> = waits
+        .iter()
+        .map(|&w| estimate_ron_han(ctx.state, &remaining, &melds, w))
+        .collect();
+
+    // #168（弱以上）: どの待ちでも役がない → リーチしないと和了できない
+    if values.iter().all(Option::is_none) {
+        return RiichiJudgement::Declare;
+    }
+
+    // #170（中以上）: 全ての待ちでダマでも満貫以上 → リーチ棒・放銃リスクを
+    // 取らず出和了しやすさを優先する
+    if ctx.config.level >= CpuLevel::Normal
+        && values.iter().all(|v| matches!(v, Some(han) if *han >= 5))
+    {
+        return RiichiJudgement::Damaten;
+    }
+
+    let my_idx = CpuGameState::wind_to_index(ctx.state.my_seat_wind);
+    let opponent_riichi = ctx
+        .state
+        .player_riichi
+        .iter()
+        .enumerate()
+        .any(|(i, &r)| i != my_idx && r);
+
+    // #169（弱以上）: 先制の良形聴牌はリーチで打点を作る
+    if wait_count >= 6 && !opponent_riichi {
+        return RiichiJudgement::Declare;
+    }
+
+    // 愚形（残り待ち4枚以下）の判断
+    if wait_count <= 4 {
+        let turn = ctx.state.turn();
+
+        // #172（強以上）: 序盤の愚形は良形変化が多ければ一巡待つ
+        if ctx.config.level >= CpuLevel::Strong
+            && turn <= 6
+            && good_shape_upgrade_draws(&remaining, &visible) >= 12
+        {
+            return RiichiJudgement::Damaten;
+        }
+
+        if ctx.config.level >= CpuLevel::Normal {
+            let max_han = values.iter().flatten().max().copied().unwrap_or(0);
+            // 安手（ダマ2翻以下）の愚形は中終盤では控える
+            if max_han <= 2 && turn >= 10 {
+                return RiichiJudgement::Damaten;
+            }
+            // 早巡の先制なら愚形でもリーチ（#171）
+            if !opponent_riichi && turn <= 8 {
+                return RiichiJudgement::Declare;
+            }
+        }
+    }
+
+    RiichiJudgement::Neutral
+}
+
+/// 13枚の手牌の待ち牌の残り枚数合計を数える
+///
+/// リーチ宣言牌の選択（待ちの広い聴牌を選ぶ）に使用する。
+pub(crate) fn remaining_wait_count(remaining: &[Tile], melds: &[Meld], visible: &[u8; 34]) -> u32 {
+    waiting_tiles(remaining, melds)
+        .iter()
+        .map(|&t| 4u32.saturating_sub(visible[t as usize] as u32))
+        .sum()
+}
+
+/// 13枚の手牌（副露込み）の待ち牌を列挙する
+fn waiting_tiles(remaining: &[Tile], melds: &[Meld]) -> Vec<TileType> {
+    (0..Tile::LEN as TileType)
+        .filter(|&t| {
+            let hand = Hand::new_with_melds(remaining.to_vec(), melds.to_vec(), Some(Tile::new(t)));
+            calc_shanten_number(&hand).has_won()
+        })
+        .collect()
+}
+
+/// 「リーチなし・ロン和了」を仮定した翻数（ドラ込み）を計算する
+///
+/// 役がない（ロン和了できない）場合は `None`。
+/// 裏ドラ・一発は不確定なので含めない。
+fn estimate_ron_han(
+    state: &CpuGameState,
+    remaining: &[Tile],
+    melds: &[Meld],
+    wait: TileType,
+) -> Option<u32> {
+    let win_tile = Tile::new(wait);
+    let hand = Hand::new_with_melds(remaining.to_vec(), melds.to_vec(), Some(win_tile));
+    let analyzer = HandAnalyzer::new(&hand).ok()?;
+    if !analyzer.shanten.has_won() {
+        return None;
+    }
+
+    let mut status = Status::new();
+    status.is_self_picked = false;
+    status.player_wind = state.my_seat_wind;
+    status.prevailing_wind = state.prevailing_wind;
+    status.has_claimed_open = melds.iter().any(|m| m.from != MeldFrom::Myself);
+    status.is_dealer = state.my_seat_wind == Wind::East;
+    status.kan_count = melds
+        .iter()
+        .filter(|m| matches!(m.category, MeldType::Kan | MeldType::Kakan))
+        .count() as u32;
+
+    let result = calculate_score(&analyzer, &hand, &status, &Settings::new())
+        .ok()
+        .flatten()?;
+
+    // ドラ・赤ドラを加算（裏ドラは不明なので含めない）
+    let mut dora = 0u32;
+    for t in remaining
+        .iter()
+        .chain(melds.iter().flat_map(|m| m.tiles.iter()))
+        .chain(std::iter::once(&win_tile))
+    {
+        if t.is_red_dora() {
+            dora += 1;
+        }
+        for indicator in &state.dora_indicators {
+            if dora_indicator_to_dora(indicator.get()) == t.get() {
+                dora += 1;
+            }
+        }
+    }
+
+    Some(result.han + dora)
+}
+
+/// 良形変化につながるツモの残り枚数を概算する（#172用の近似）
+///
+/// 手牌の数牌に隣接して新たな両面ターツを作る牌の残り枚数を数える。
+/// 完成面子の隣も数えるため過大評価気味だが、「変化の多い手」の
+/// 判定には十分な精度とする。
+fn good_shape_upgrade_draws(remaining: &[Tile], visible: &[u8; 34]) -> u32 {
+    let mut counts = [0u8; 34];
+    for t in remaining {
+        counts[t.get() as usize] += 1;
+    }
+
+    let mut counted = [false; 34];
+    let mut total = 0u32;
+    for tile_type in 0..27usize {
+        if counts[tile_type] == 0 {
+            continue;
+        }
+        let pos = (tile_type % 9) as i32;
+        let suit_start = tile_type - tile_type % 9;
+        for offset in [-1i32, 1] {
+            let q = pos + offset;
+            if !(0..9).contains(&q) {
+                continue;
+            }
+            let neighbor = suit_start + q as usize;
+            if counts[neighbor] > 0 || counted[neighbor] {
+                continue;
+            }
+            // 新たにできるターツが両面か（下端が2〜7の位置）
+            let pair_low = pos.min(q);
+            if !(1..=6).contains(&pair_low) {
+                continue;
+            }
+            counted[neighbor] = true;
+            total += 4u32.saturating_sub(visible[neighbor] as u32);
+        }
+    }
+    total
 }
 
 /// #165: 安くて遠い仕掛けか（中以上）
@@ -1868,6 +2101,188 @@ mod tests {
             Tile::M7,
         ]);
         assert!(!is_cheap_distant_call(&state, &hand, &melds));
+    }
+
+    // --- リーチ・ダマ判断（#168〜#172）---
+
+    /// 聴牌済みの13枚 + ツモ切り対象の浮き牌で判定用の状態を作る
+    fn riichi_state(hand: &[u32], drawn: u32) -> CpuGameState {
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(hand);
+        state.my_drawn = Some(Tile::new(drawn));
+        state
+    }
+
+    /// 役なし聴牌（M8カンチャン待ち、ピンフ・タンヤオなし）
+    const NO_YAKU_TENPAI: [u32; 13] = [
+        Tile::M2,
+        Tile::M3,
+        Tile::M4,
+        Tile::P4,
+        Tile::P5,
+        Tile::P6,
+        Tile::S4,
+        Tile::S5,
+        Tile::S6,
+        Tile::M7,
+        Tile::M9,
+        Tile::Z3,
+        Tile::Z3,
+    ];
+
+    /// タンヤオ・ピンフ確定の両面聴牌（M3/M6待ち）
+    const GOOD_SHAPE_TENPAI: [u32; 13] = [
+        Tile::P2,
+        Tile::P3,
+        Tile::P4,
+        Tile::P5,
+        Tile::P6,
+        Tile::P7,
+        Tile::S3,
+        Tile::S4,
+        Tile::S5,
+        Tile::S8,
+        Tile::S8,
+        Tile::M4,
+        Tile::M5,
+    ];
+
+    /// タンヤオのみのカンチャン聴牌（M7待ち）
+    const CHEAP_KANCHAN_TENPAI: [u32; 13] = [
+        Tile::M2,
+        Tile::M3,
+        Tile::M4,
+        Tile::P4,
+        Tile::P5,
+        Tile::P6,
+        Tile::S4,
+        Tile::S5,
+        Tile::S6,
+        Tile::M6,
+        Tile::M8,
+        Tile::S2,
+        Tile::S2,
+    ];
+
+    #[test]
+    fn test_judge_riichi_declares_with_no_yaku() {
+        // #168: 役なし聴牌はリーチしないと和了できない → 宣言
+        let state = riichi_state(&NO_YAKU_TENPAI, Tile::Z4);
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Declare);
+    }
+
+    #[test]
+    fn test_judge_riichi_damaten_with_mangan() {
+        // #170: 全ての待ちでダマ満貫（タンヤオ+ピンフ+ドラ3）→ ダマ
+        let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        // ドラ: S8×2（表示牌S7）+ M4×1（表示牌M3）= 3枚
+        state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)];
+
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Damaten);
+
+        // 弱レベルは #170 対象外 → 良形先制として宣言（#169）
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Declare);
+    }
+
+    #[test]
+    fn test_judge_riichi_declares_good_shape() {
+        // #169: 安手でも先制の良形聴牌はリーチ
+        let state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Declare);
+    }
+
+    #[test]
+    fn test_judge_riichi_cheap_kanchan_depends_on_turn() {
+        // #171: 愚形安手は早巡の先制なら宣言、中終盤はダマ
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+
+        // 早巡（1巡目）→ 宣言
+        let state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Declare);
+
+        // 中終盤（11巡目）→ ダマ
+        let mut state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
+        state.all_discards[0] = vec![Tile::new(Tile::Z4); 10];
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Damaten);
+    }
+
+    #[test]
+    fn test_judge_riichi_strong_defers_with_many_upgrades() {
+        // #172: 強レベルは序盤の愚形を、良形変化が多ければ一巡待つ
+        let state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
+
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Damaten);
+
+        // 中レベルは #172 対象外 → 早巡先制の宣言（#171）
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Declare);
+    }
+
+    #[test]
+    fn test_judge_riichi_neutral_when_disabled() {
+        let state = riichi_state(&NO_YAKU_TENPAI, Tile::Z4);
+        let config =
+            CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced).without_heuristics();
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Neutral);
+    }
+
+    #[test]
+    fn test_estimate_ron_han() {
+        // タンヤオ+ピンフ+ドラ3 = 5翻
+        let state = {
+            let mut s = CpuGameState::new();
+            s.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)];
+            s
+        };
+        let remaining = tiles(&GOOD_SHAPE_TENPAI);
+        let han = estimate_ron_han(&state, &remaining, &[], Tile::M3);
+        assert_eq!(han, Some(5));
+
+        // 役なし → None
+        let state = CpuGameState::new();
+        let remaining = tiles(&NO_YAKU_TENPAI);
+        assert_eq!(estimate_ron_han(&state, &remaining, &[], Tile::M8), None);
     }
 
     // --- has_yaku_prospect ---
