@@ -123,7 +123,7 @@ fn count_acceptance(
 }
 
 /// 手牌の推定打点を簡易計算する
-fn estimate_hand_value(hand_tiles: &[Tile], state: &CpuGameState) -> f64 {
+pub(crate) fn estimate_hand_value(hand_tiles: &[Tile], state: &CpuGameState) -> f64 {
     let mut value = 0.0;
 
     // ドラ枚数

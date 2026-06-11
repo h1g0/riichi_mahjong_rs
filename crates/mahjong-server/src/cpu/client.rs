@@ -433,11 +433,6 @@ impl CpuClient {
         let hand = Hand::new(all_tiles, None);
         let shanten = calc_shanten_number(&hand);
 
-        // テンパイなら基本的に攻撃
-        if shanten.is_ready_or_won() {
-            return true;
-        }
-
         // 脅威の数: リーチ者 + 定石有効時は3副露以上の他家（#180: 聴牌濃厚）
         let riichi_count = self.state.player_riichi.iter().filter(|&&r| r).count();
         let threat_count = if self.config.heuristics_enabled {
@@ -453,6 +448,23 @@ impl CpuClient {
         } else {
             riichi_count
         };
+
+        // 押し引きの定石判定（#178, 中以上）:
+        // 良形・高打点・親の聴牌は押し、愚形安手の聴牌は降りる
+        let ctx = heuristics::CallContext {
+            state: &self.state,
+            config: &self.config,
+        };
+        match heuristics::judge_push(&ctx, threat_count) {
+            heuristics::PushJudgement::Push => return true,
+            heuristics::PushJudgement::Fold => return false,
+            heuristics::PushJudgement::Neutral => {}
+        }
+
+        // テンパイなら基本的に攻撃
+        if shanten.is_ready_or_won() {
+            return true;
+        }
 
         // 防御を使わないレベルなら常に攻撃
         // ただし定石有効時は弱レベルでも撤退判断を行う（#173: ベタオリは弱以上）
@@ -1402,6 +1414,60 @@ mod tests {
         client.handle_event(&start(hand));
         let action = client.handle_event(&draw);
         assert!(matches!(action, Some(ClientAction::Riichi { .. })));
+    }
+
+    #[test]
+    fn test_cheap_bad_shape_tenpai_folds_against_riichi() {
+        // #178: 愚形安手（タンヤオのみ・カンチャン待ち）の聴牌はリーチに押さず、
+        // 現物（対子の一部でも）から降りる。従来は聴牌なら無条件に押していた。
+        let hand = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::M6),
+            Tile::new(Tile::M8),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::S2),
+        ];
+        let riichi_with_genbutsu = |client: &mut CpuClient| {
+            client.handle_event(&ServerEvent::TileDiscarded {
+                player: Wind::West,
+                tile: Tile::new(Tile::S2),
+                is_tsumogiri: false,
+            });
+            client.handle_event(&ServerEvent::PlayerRiichi {
+                player: Wind::West,
+                scores: [25000, 25000, 24000, 25000],
+                riichi_sticks: 1,
+            });
+        };
+
+        // 定石有効: 降りて現物(S2)を切る（聴牌は崩れる）
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::South, hand.clone()));
+        riichi_with_genbutsu(&mut client);
+        let action = client.handle_event(&draw_event(Tile::Z4));
+        let tile = discarded_tile(&action).expect("expected a hand discard");
+        assert_eq!(tile.get(), Tile::S2, "愚形安手聴牌は現物から降りるべき");
+
+        // 定石無効: 従来どおり聴牌を維持して押す（ツモ切り）
+        let config =
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::South, hand));
+        riichi_with_genbutsu(&mut client);
+        let action = client.handle_event(&draw_event(Tile::Z4));
+        assert!(
+            matches!(action, Some(ClientAction::Discard { tile: None })),
+            "定石無効時は聴牌維持（ツモ切り）, got {action:?}"
+        );
     }
 
     #[test]
