@@ -9,7 +9,7 @@ use super::client::{CpuConfig, CpuLevel, is_yakuhai};
 use super::state::CpuGameState;
 
 /// 国士無双の構成牌（么九牌・字牌の全13種）
-const ORPHAN_TYPES: [TileType; 13] = [
+pub(crate) const ORPHAN_TYPES: [TileType; 13] = [
     Tile::M1,
     Tile::M9,
     Tile::P1,

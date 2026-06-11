@@ -481,8 +481,35 @@ impl CpuClient {
 
     /// 九種九牌を宣言すべきか判断する
     ///
-    /// 高打点型は国士無双を狙うため続行、それ以外は流局する。
+    /// 定石有効時は国士無双の見込みで判断する（#158/#159/#160）:
+    /// - 么九牌10種以上なら国士無双を狙って続行
+    /// - 9種でも高打点型、または大きく負けている場合は続行
+    /// - それ以外は流局を宣言する
+    ///
+    /// 定石無効時は従来どおり高打点型のみ続行する。
     fn decide_nine_terminals(&self) -> ClientAction {
+        if self.config.heuristics_enabled {
+            let mut counts = [0u8; 34];
+            for t in &self.state.my_hand {
+                counts[t.get() as usize] += 1;
+            }
+            if let Some(drawn) = self.state.my_drawn {
+                counts[drawn.get() as usize] += 1;
+            }
+            let kinds = super::defense::ORPHAN_TYPES
+                .iter()
+                .filter(|&&t| counts[t as usize] > 0)
+                .count();
+
+            let continue_kokushi = kinds >= 10
+                || (kinds >= 9
+                    && (self.config.personality == CpuPersonality::HighValue
+                        || heuristics::is_far_behind(&self.state)));
+            return ClientAction::NineTerminals {
+                declare: !continue_kokushi,
+            };
+        }
+
         let declare = self.config.personality != CpuPersonality::HighValue;
         ClientAction::NineTerminals { declare }
     }
@@ -1500,14 +1527,84 @@ mod tests {
         );
     }
 
+    /// 么九牌 n 種 + 中張牌で14枚の配牌を作る
+    fn orphan_rich_hand(kinds: usize) -> Vec<Tile> {
+        let orphan_types = [
+            Tile::M1,
+            Tile::M9,
+            Tile::P1,
+            Tile::P9,
+            Tile::S1,
+            Tile::S9,
+            Tile::Z1,
+            Tile::Z2,
+            Tile::Z3,
+            Tile::Z4,
+            Tile::Z5,
+            Tile::Z6,
+            Tile::Z7,
+        ];
+        let fillers = [Tile::M4, Tile::P5, Tile::S6, Tile::M6, Tile::P3];
+        let mut hand: Vec<Tile> = orphan_types
+            .iter()
+            .take(kinds)
+            .map(|&t| Tile::new(t))
+            .collect();
+        hand.extend(fillers.iter().take(13 - kinds).map(|&t| Tile::new(t)));
+        hand
+    }
+
+    fn nine_terminals_action(
+        config: CpuConfig,
+        hand: Vec<Tile>,
+        scores: [i32; 4],
+    ) -> Option<ClientAction> {
+        let mut client = CpuClient::new(config);
+        client.handle_event(&ServerEvent::GameStarted {
+            seat_wind: Wind::East,
+            hand,
+            scores,
+            prevailing_wind: Wind::East,
+            dora_indicators: vec![],
+            round_number: 0,
+            honba: 0,
+            riichi_sticks: 0,
+        });
+        client.handle_event(&ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::S5),
+            remaining_tiles: 69,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        });
+        client.handle_event(&ServerEvent::NineTerminalsAvailable)
+    }
+
     #[test]
-    fn test_nine_terminals_high_value_continues() {
-        // HighValue は国士狙いで続行（declare=false）
-        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue);
+    fn test_kokushi_hand_keeps_orphans() {
+        // #160: 么九牌10種の手では么九牌を守り、中張牌から切る。
+        // ルートロックがないと一般形向聴数に引かれて么九牌を切ってしまう。
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
         let mut client = CpuClient::new(config);
 
-        let action = client.handle_event(&ServerEvent::NineTerminalsAvailable);
+        client.handle_event(&game_started_event(Wind::East, orphan_rich_hand(10)));
+        let action = client.handle_event(&draw_event(Tile::P6));
 
+        let tile = discarded_tile(&action);
+        // ツモ切り（P6）か手牌の中張牌切りなら正しい
+        if let Some(t) = tile {
+            assert!(
+                !t.is_1_9_honor(),
+                "国士無双ルートでは么九牌を切らない, got {t:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_nine_terminals_continues_with_ten_kinds() {
+        // #160: 么九牌10種以上は性格によらず国士無双を狙って続行
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let action = nine_terminals_action(config, orphan_rich_hand(10), [25000; 4]);
         assert!(matches!(
             action,
             Some(ClientAction::NineTerminals { declare: false })
@@ -1515,23 +1612,51 @@ mod tests {
     }
 
     #[test]
-    fn test_nine_terminals_non_high_value_declares() {
-        // HighValue 以外は流局宣言（declare=true）
-        for personality in [
-            CpuPersonality::Balanced,
-            CpuPersonality::Speedy,
-            CpuPersonality::Defensive,
-        ] {
-            let config = CpuConfig::new(CpuLevel::Normal, personality);
-            let mut client = CpuClient::new(config);
+    fn test_nine_terminals_nine_kinds_depends_on_situation() {
+        // 9種: 平場のバランス型は流局を選ぶ
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let action = nine_terminals_action(config, orphan_rich_hand(9), [25000; 4]);
+        assert!(matches!(
+            action,
+            Some(ClientAction::NineTerminals { declare: true })
+        ));
 
-            let action = client.handle_event(&ServerEvent::NineTerminalsAvailable);
+        // 9種: 高打点型は国士狙いで続行
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue);
+        let action = nine_terminals_action(config, orphan_rich_hand(9), [25000; 4]);
+        assert!(matches!(
+            action,
+            Some(ClientAction::NineTerminals { declare: false })
+        ));
 
-            assert!(
-                matches!(action, Some(ClientAction::NineTerminals { declare: true })),
-                "personality {personality:?} should declare nine terminals"
-            );
-        }
+        // 9種: 大きく負けていれば（#159）バランス型でも続行
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let action =
+            nine_terminals_action(config, orphan_rich_hand(9), [8000, 42000, 25000, 25000]);
+        assert!(matches!(
+            action,
+            Some(ClientAction::NineTerminals { declare: false })
+        ));
+    }
+
+    #[test]
+    fn test_nine_terminals_without_heuristics_uses_personality() {
+        // 定石無効時は従来どおり: HighValue のみ続行
+        let config =
+            CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue).without_heuristics();
+        let action = nine_terminals_action(config, orphan_rich_hand(9), [25000; 4]);
+        assert!(matches!(
+            action,
+            Some(ClientAction::NineTerminals { declare: false })
+        ));
+
+        let config =
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
+        let action = nine_terminals_action(config, orphan_rich_hand(10), [25000; 4]);
+        assert!(matches!(
+            action,
+            Some(ClientAction::NineTerminals { declare: true })
+        ));
     }
 
     #[test]

@@ -19,6 +19,7 @@ use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
 use mahjong_core::winning_hand::name::Form;
 
 use super::client::{CpuConfig, CpuLevel, is_yakuhai};
+use super::defense::ORPHAN_TYPES;
 use super::evaluator::{DiscardCandidate, get_yakuhai_types};
 use super::state::CpuGameState;
 
@@ -540,10 +541,12 @@ fn discard_adjustment_with(
         .sum()
 }
 
-/// 七対子と一般形のどちらを本線にするかを判定する（#154/#155/#156）
+/// 七対子・国士無双・一般形のどれを本線にするかを判定する
+/// （#154/#155/#156, #158/#159/#160/#161）
 ///
-/// - 副露がある、または対子が4つ未満なら一般形（#154: 4トイツ未満で
-///   七対子を本線にしない）
+/// - 副露があれば一般形（七対子・国士無双は門前限定）
+/// - 么九牌の種類数と点棒状況に応じて国士無双ルートを選ぶ（#158〜#161）
+/// - 対子が4つ未満なら一般形（#154: 4トイツ未満で七対子を本線にしない）
 /// - 対子が4つ以上でも、一般形の方が近い場合や、連続対子などの
 ///   複合形が多い場合は一般形を優先する（#155）
 /// - 字牌・么九牌・孤立した数牌対子（横に伸びにくい対子）が過半数なら
@@ -553,15 +556,21 @@ pub(crate) fn preferred_form(state: &CpuGameState) -> Form {
         return Form::Normal;
     }
 
+    let mut all_tiles = state.my_hand.clone();
+    if let Some(drawn) = state.my_drawn {
+        all_tiles.push(drawn);
+    }
+
+    // 国士無双ルート（#158〜#161）
+    if kokushi_route_viable(state, &all_tiles) {
+        return Form::ThirteenOrphans;
+    }
+
     let pairs = pair_types(state);
     if pairs.len() < 4 {
         return Form::Normal;
     }
 
-    let mut all_tiles = state.my_hand.clone();
-    if let Some(drawn) = state.my_drawn {
-        all_tiles.push(drawn);
-    }
     let hand = Hand::new(all_tiles.clone(), None);
     let seven_pairs = calc_shanten_number_by_form(&hand, Form::SevenPairs);
     let normal = calc_shanten_number_by_form(&hand, Form::Normal);
@@ -583,6 +592,84 @@ pub(crate) fn preferred_form(state: &CpuGameState) -> Form {
     } else {
         Form::Normal
     }
+}
+
+/// 国士無双を本線にすべきか（#158/#159/#160/#161）
+///
+/// - #160: 么九牌10種以上なら本線にする
+/// - #158: 8〜9種は他形と同等以上に近ければ採用、
+///   7種は通常手に見込みがない（5向聴以上）ときのみ候補に留める
+/// - #159: 大きく負けている場合は7種から、多少遠くても狙う
+///   （役満で逆転する価値がある）
+/// - #161: 未所持の必要牌が枯れている（4枚見え）なら成立不可能なので狙わない。
+///   中盤以降、未所持の必要牌が残り1枚以下の種類が2つ以上あれば見切る。
+///   この判定は自分の意思決定なので、自分の手牌を含む全ての見え情報を使う。
+fn kokushi_route_viable(state: &CpuGameState, all_tiles: &[Tile]) -> bool {
+    let mut counts = [0u8; 34];
+    for t in all_tiles {
+        counts[t.get() as usize] += 1;
+    }
+    let kinds = ORPHAN_TYPES
+        .iter()
+        .filter(|&&t| counts[t as usize] > 0)
+        .count();
+    if kinds < 7 {
+        return false;
+    }
+
+    // #161: 未所持の必要牌の枯れチェック
+    let visible = state.visible_tile_counts();
+    let missing_dead = ORPHAN_TYPES
+        .iter()
+        .any(|&t| counts[t as usize] == 0 && visible[t as usize] >= 4);
+    if missing_dead {
+        return false;
+    }
+    let thin_missing = ORPHAN_TYPES
+        .iter()
+        .filter(|&&t| counts[t as usize] == 0 && visible[t as usize] >= 3)
+        .count();
+    if state.turn() >= 7 && thin_missing >= 2 {
+        return false;
+    }
+
+    // #160: 10種以上は本線
+    if kinds >= 10 {
+        return true;
+    }
+
+    let hand = Hand::new(all_tiles.to_vec(), None);
+    let orphans = calc_shanten_number_by_form(&hand, Form::ThirteenOrphans);
+    let best_other = calc_shanten_number_by_form(&hand, Form::Normal)
+        .min(calc_shanten_number_by_form(&hand, Form::SevenPairs));
+
+    // #158: 8〜9種は他形と同等以上に近ければ採用（高く評価）
+    if kinds >= 8 && orphans <= best_other {
+        return true;
+    }
+
+    // #159: 大きく負けているなら7種から、多少遠くても役満を狙う
+    if is_far_behind(state) && orphans.as_i32() <= best_other.as_i32() + 1 {
+        return true;
+    }
+
+    // #158: 7種は通常手に見込みがない（5向聴以上）ときのみ候補に留める
+    orphans <= best_other && best_other.as_i32() >= 5
+}
+
+/// 大きく負けているか（#159: 役満狙いの価値が上がる点棒状況）
+///
+/// ラス目、またはトップとの点差が16000点以上ある場合。
+pub(crate) fn is_far_behind(state: &CpuGameState) -> bool {
+    let my_idx = CpuGameState::wind_to_index(state.my_seat_wind);
+    let my_score = state.scores[my_idx];
+    let top = *state.scores.iter().max().unwrap_or(&my_score);
+    let is_last = state
+        .scores
+        .iter()
+        .enumerate()
+        .all(|(i, &s)| i == my_idx || s >= my_score);
+    (top - my_score) >= 16000 || (is_last && top - my_score >= 8000)
 }
 
 /// 対子が「横に伸びにくい」か（#156）
@@ -2101,6 +2188,131 @@ mod tests {
             Tile::M7,
         ]);
         assert!(!is_cheap_distant_call(&state, &hand, &melds));
+    }
+
+    // --- 国士無双ルート（#158 #159 #160 #161）---
+
+    /// 么九牌 n 種 + 中張牌の埋め草で13枚の手牌を作る
+    fn orphan_hand(kinds: usize) -> Vec<Tile> {
+        let fillers = [Tile::M4, Tile::M5, Tile::P5, Tile::S5, Tile::S6, Tile::P3];
+        let mut hand: Vec<Tile> = ORPHAN_TYPES
+            .iter()
+            .take(kinds)
+            .map(|&t| Tile::new(t))
+            .collect();
+        hand.extend(fillers.iter().take(13 - kinds).map(|&t| Tile::new(t)));
+        hand
+    }
+
+    #[test]
+    fn test_preferred_form_kokushi_with_ten_kinds() {
+        // #160: 么九牌10種以上は国士無双を本線にする
+        let mut state = CpuGameState::new();
+        state.my_hand = orphan_hand(10);
+        assert_eq!(preferred_form(&state), Form::ThirteenOrphans);
+    }
+
+    #[test]
+    fn test_preferred_form_kokushi_nine_kinds_when_closer() {
+        // #158: 9種は他形より明確に近いとき国士無双を採用する
+        let mut state = CpuGameState::new();
+        state.my_hand = orphan_hand(9);
+        assert_eq!(preferred_form(&state), Form::ThirteenOrphans);
+    }
+
+    #[test]
+    fn test_preferred_form_normal_with_seven_kinds_and_decent_hand() {
+        // #158: 7種でも通常手に見込みがあるなら国士無双に向かわない
+        let mut state = CpuGameState::new();
+        let mut hand: Vec<Tile> = ORPHAN_TYPES.iter().take(7).map(|&t| Tile::new(t)).collect();
+        hand.extend(tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::M4,
+            Tile::P4,
+            Tile::P5,
+            Tile::P6,
+        ]));
+        state.my_hand = hand;
+        assert_eq!(preferred_form(&state), Form::Normal);
+    }
+
+    #[test]
+    fn test_kokushi_route_abandoned_when_missing_type_dead() {
+        // #161: 未所持の必要牌が4枚見えたら国士無双は成立しない
+        let mut state = CpuGameState::new();
+        state.my_hand = orphan_hand(10); // Z5/Z6/Z7 を持っていない
+        state.all_discards[1] = vec![Tile::new(Tile::Z5); 4];
+        assert_eq!(preferred_form(&state), Form::Normal);
+    }
+
+    #[test]
+    fn test_kokushi_route_abandoned_when_needed_tiles_thin_late() {
+        // #161: 中盤以降、未所持の必要牌が残り1枚以下の種類が2つ以上なら見切る
+        let mut state = CpuGameState::new();
+        state.my_hand = orphan_hand(10);
+        state.all_discards[1] = vec![
+            Tile::new(Tile::Z5),
+            Tile::new(Tile::Z5),
+            Tile::new(Tile::Z5),
+            Tile::new(Tile::Z6),
+            Tile::new(Tile::Z6),
+        ];
+        state.all_discards[2] = vec![Tile::new(Tile::Z6)];
+
+        // 序盤（1巡目）はまだ見切らない
+        assert_eq!(preferred_form(&state), Form::ThirteenOrphans);
+
+        // 7巡目以降は見切る
+        state.all_discards[0] = vec![Tile::new(Tile::P5); 6];
+        assert_eq!(preferred_form(&state), Form::Normal);
+    }
+
+    #[test]
+    fn test_is_far_behind() {
+        // トップと16000点差以上
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.scores = [8000, 42000, 25000, 25000];
+        assert!(is_far_behind(&state));
+
+        // 平場
+        state.scores = [25000; 4];
+        assert!(!is_far_behind(&state));
+
+        // ラス目でも僅差なら対象外
+        state.scores = [20000, 26000, 27000, 27000];
+        assert!(!is_far_behind(&state));
+
+        // ラス目で8000点以上離されている
+        state.scores = [17000, 27000, 28000, 28000];
+        assert!(is_far_behind(&state));
+    }
+
+    #[test]
+    fn test_preferred_form_kokushi_seven_kinds_when_far_behind() {
+        // #159: 大きく負けているなら7種から、多少遠くても国士無双を狙う。
+        // 通常形に見込みがある手で点棒状況だけを変えて比較する
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        let mut hand: Vec<Tile> = ORPHAN_TYPES.iter().take(7).map(|&t| Tile::new(t)).collect();
+        hand.extend(tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::M4,
+            Tile::P4,
+            Tile::P5,
+            Tile::S5,
+        ]));
+        state.my_hand = hand;
+
+        // 平場では狙わない（国士は通常形より遠い）
+        state.scores = [25000; 4];
+        assert_ne!(preferred_form(&state), Form::ThirteenOrphans);
+
+        // 大差のラス目なら狙う
+        state.scores = [5000, 45000, 25000, 25000];
+        assert_eq!(preferred_form(&state), Form::ThirteenOrphans);
     }
 
     // --- リーチ・ダマ判断（#168〜#172）---
