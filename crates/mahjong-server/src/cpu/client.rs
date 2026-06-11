@@ -349,7 +349,7 @@ impl CpuClient {
                     0
                 };
                 // 安全度で比較
-                let safety = super::defense::evaluate_safety(tile, &self.state);
+                let safety = super::defense::evaluate_safety(tile, &self.state, &self.config);
                 let is_better = match best {
                     Some((_, best_waits, best_safety)) => {
                         waits > best_waits || (waits == best_waits && safety > best_safety)
@@ -438,8 +438,21 @@ impl CpuClient {
             return true;
         }
 
-        // リーチ者の数
+        // 脅威の数: リーチ者 + 定石有効時は3副露以上の他家（#180: 聴牌濃厚）
         let riichi_count = self.state.player_riichi.iter().filter(|&&r| r).count();
+        let threat_count = if self.config.heuristics_enabled {
+            let my_idx = CpuGameState::wind_to_index(self.state.my_seat_wind);
+            let melded_threats = (0..4)
+                .filter(|&i| {
+                    i != my_idx
+                        && !self.state.player_riichi[i]
+                        && self.state.player_melds[i].len() >= 3
+                })
+                .count();
+            riichi_count + melded_threats
+        } else {
+            riichi_count
+        };
 
         // 防御を使わないレベルなら常に攻撃
         // ただし定石有効時は弱レベルでも撤退判断を行う（#173: ベタオリは弱以上）
@@ -448,13 +461,13 @@ impl CpuClient {
         }
 
         // 撤退判断
-        // 2人以上リーチ → 撤退寄り
-        if riichi_count >= 2 && shanten >= 2 {
+        // 脅威2人以上 → 撤退寄り
+        if threat_count >= 2 && shanten >= 2 {
             return params.retreat_threshold < 0.3;
         }
 
-        // 1人リーチ + 自分が2向聴以上 → 性格次第
-        if riichi_count >= 1 && shanten >= 2 {
+        // 脅威1人 + 自分が2向聴以上 → 性格次第
+        if threat_count >= 1 && shanten >= 2 {
             return params.retreat_threshold < 0.5;
         }
 
@@ -1362,6 +1375,85 @@ mod tests {
         client.handle_event(&start(hand));
         let action = client.handle_event(&draw);
         assert!(matches!(action, Some(ClientAction::Riichi { .. })));
+    }
+
+    #[test]
+    fn test_folds_against_three_meld_opponent() {
+        // #180: リーチがなくても3副露の他家は聴牌濃厚として扱い、
+        // 遠い手なら現物からベタオリする
+        let hand = vec![
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::S1),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::Z3),
+            Tile::new(Tile::Z3),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P9),
+            Tile::new(Tile::S9),
+            Tile::new(Tile::M9),
+        ];
+        let melds = vec![
+            Meld {
+                tiles: vec![
+                    Tile::new(Tile::M4),
+                    Tile::new(Tile::M5),
+                    Tile::new(Tile::M6),
+                ],
+                category: MeldType::Chi,
+                from: MeldFrom::Previous,
+                called_tile: Some(Tile::new(Tile::M4)),
+            },
+            Meld {
+                tiles: vec![Tile::new(Tile::P7); 3],
+                category: MeldType::Pon,
+                from: MeldFrom::Unknown,
+                called_tile: Some(Tile::new(Tile::P7)),
+            },
+            Meld {
+                tiles: vec![Tile::new(Tile::S6); 3],
+                category: MeldType::Pon,
+                from: MeldFrom::Unknown,
+                called_tile: Some(Tile::new(Tile::S6)),
+            },
+        ];
+
+        // 南家が3副露 + Z3 を捨てている
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand.clone()));
+        client.state.player_melds[1] = melds.clone();
+        client.handle_event(&ServerEvent::TileDiscarded {
+            player: Wind::South,
+            tile: Tile::new(Tile::Z3),
+            is_tsumogiri: false,
+        });
+        let action = client.handle_event(&draw_event(Tile::M5));
+        let tile = discarded_tile(&action).expect("expected a hand discard");
+        assert_eq!(
+            tile.get(),
+            Tile::Z3,
+            "3副露の他家に対して現物(Z3)からベタオリすべき"
+        );
+
+        // 定石無効: 副露者は脅威とみなさず通常打牌（現物優先にならない）
+        let config =
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand));
+        client.state.player_melds[1] = melds;
+        client.handle_event(&ServerEvent::TileDiscarded {
+            player: Wind::South,
+            tile: Tile::new(Tile::Z3),
+            is_tsumogiri: false,
+        });
+        let action = client.handle_event(&draw_event(Tile::M5));
+        if let Some(t) = discarded_tile(&action) {
+            assert_ne!(t.get(), Tile::Z3, "定石無効時は対子の現物を崩さない");
+        }
     }
 
     #[test]

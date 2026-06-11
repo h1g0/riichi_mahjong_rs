@@ -1,21 +1,33 @@
 //! 守備ロジック
 //!
-//! 牌の安全度を評価する。現物・筋・壁・字牌・端牌の判定。
+//! 牌の安全度を評価する。現物・筋・壁・字牌・端牌の判定に加え、
+//! 他家の脅威（リーチ・副露・染め手・役満気配）を統合的に扱う。
 
-use mahjong_core::tile::{Tile, TileType};
+use mahjong_core::tile::{Tile, TileType, dora_indicator_to_dora};
 
+use super::client::{CpuConfig, CpuLevel, is_yakuhai};
 use super::state::CpuGameState;
 
-/// 牌の安全度を評価する（0.0=最危険, 1.0=最安全）
+/// 他家1人分の脅威情報
+#[derive(Debug, Clone, Default)]
+pub struct Threat {
+    /// 警戒の強さ（リーチ=1.0、副露による聴牌気配はそれより弱い）
+    pub weight: f64,
+    /// 染め手気配の色（0=萬子, 1=筒子, 2=索子）。その色と字牌を危険視する
+    pub flush_suit: Option<usize>,
+    /// 大三元気配（三元牌を2種類以上鳴いている）
+    pub dragon_alert: bool,
+    /// 四喜和気配（風牌を2種類以上鳴いている）
+    pub wind_alert: bool,
+}
+
+/// 牌の安全度を評価する（0.0=最危険, 1.0=最安全)
 ///
-/// リーチ者や危険なプレイヤー全員に対する安全度を総合的に評価する。
-pub fn evaluate_safety(tile: Tile, state: &CpuGameState) -> f64 {
-    let my_idx = match state.my_seat_wind {
-        mahjong_core::tile::Wind::East => 0,
-        mahjong_core::tile::Wind::South => 1,
-        mahjong_core::tile::Wind::West => 2,
-        mahjong_core::tile::Wind::North => 3,
-    };
+/// 全ての他家の脅威に対する安全度を評価し、最小値を返す。
+/// 定石無効時はリーチ者のみを脅威として扱う（従来動作）。
+pub fn evaluate_safety(tile: Tile, state: &CpuGameState, config: &CpuConfig) -> f64 {
+    let my_idx = CpuGameState::wind_to_index(state.my_seat_wind);
+    let strict = config.heuristics_enabled && config.level >= CpuLevel::Normal;
 
     let mut min_safety = 1.0f64;
 
@@ -24,63 +36,244 @@ pub fn evaluate_safety(tile: Tile, state: &CpuGameState) -> f64 {
             continue;
         }
 
-        // リーチしているプレイヤーに対してのみ安全度を計算
-        // （リーチしていないプレイヤーに対しては安全とみなす）
-        if !state.player_riichi[i] {
+        let Some(threat) = assess_threat(state, i, config) else {
             continue;
-        }
+        };
 
-        let safety = evaluate_safety_against_player(tile, &state.all_discards[i], state);
+        let safety =
+            evaluate_safety_against_threat(tile, &state.all_discards[i], state, &threat, strict);
         min_safety = min_safety.min(safety);
     }
 
     min_safety
 }
 
-/// 特定のプレイヤーに対する牌の安全度を評価する
+/// 他家1人の脅威を判定する
+///
+/// 脅威がなければ `None`。
+/// - リーチ者は常に最大の脅威（重み1.0）
+/// - #180（弱以上）: 3副露以上は聴牌濃厚として警戒する
+/// - #181（中以上）: 2副露以上が1色+字牌に染まっていれば染め手気配
+/// - #182（弱以上）: 三元牌2種以上 / 風牌2種以上の副露は役満気配
+pub(crate) fn assess_threat(
+    state: &CpuGameState,
+    idx: usize,
+    config: &CpuConfig,
+) -> Option<Threat> {
+    if state.player_riichi[idx] {
+        return Some(Threat {
+            weight: 1.0,
+            ..Threat::default()
+        });
+    }
+
+    // 定石無効時はリーチ者のみを脅威とする（従来動作）
+    if !config.heuristics_enabled {
+        return None;
+    }
+
+    let melds = &state.player_melds[idx];
+    let mut threat = Threat::default();
+
+    // #180: 3副露以上は聴牌濃厚
+    if melds.len() >= 3 {
+        threat.weight = 0.7;
+    }
+
+    // #182: 役満気配（弱以上）
+    let dragon_kinds = melds
+        .iter()
+        .filter(|m| {
+            m.tiles
+                .first()
+                .is_some_and(|t| (Tile::Z5..=Tile::Z7).contains(&t.get()))
+        })
+        .count();
+    if dragon_kinds >= 2 {
+        threat.dragon_alert = true;
+        threat.weight = threat.weight.max(0.6);
+    }
+    let wind_kinds = melds
+        .iter()
+        .filter(|m| {
+            m.tiles
+                .first()
+                .is_some_and(|t| (Tile::Z1..=Tile::Z4).contains(&t.get()))
+        })
+        .count();
+    if wind_kinds >= 2 {
+        threat.wind_alert = true;
+        threat.weight = threat.weight.max(0.6);
+    }
+
+    // #181: 染め手気配（中以上）: 2副露以上が全て1色+字牌
+    if config.level >= CpuLevel::Normal && melds.len() >= 2 {
+        let mut suits_used = [false; 3];
+        let mut has_number_meld = false;
+        for meld in melds.iter() {
+            for t in &meld.tiles {
+                if t.get() < 27 {
+                    suits_used[(t.get() / 9) as usize] = true;
+                    has_number_meld = true;
+                }
+            }
+        }
+        let used: Vec<usize> = (0..3).filter(|&s| suits_used[s]).collect();
+        if has_number_meld && used.len() == 1 {
+            threat.flush_suit = Some(used[0]);
+            threat.weight = threat.weight.max(0.6);
+        }
+    }
+
+    if threat.weight > 0.0 {
+        Some(threat)
+    } else {
+        None
+    }
+}
+
+/// 場に公開されている枚数（自分の手牌・ツモ牌を除く）を数える
+///
+/// 「生牌」（他家から見えていない牌）の判定に使用する。
+fn publicly_visible(state: &CpuGameState, tile_type: TileType) -> u8 {
+    let total = state.visible_tile_counts()[tile_type as usize];
+    let mut own = 0u8;
+    for t in &state.my_hand {
+        if t.get() == tile_type {
+            own += 1;
+        }
+    }
+    if state.my_drawn.is_some_and(|t| t.get() == tile_type) {
+        own += 1;
+    }
+    total.saturating_sub(own)
+}
+
+/// 特定のプレイヤーに対する牌の安全度を評価する（リーチ脅威・従来動作）
+///
+/// 既存呼び出し・テストとの互換用ラッパー。
+#[cfg(test)]
 fn evaluate_safety_against_player(
     tile: Tile,
     opponent_discards: &[Tile],
     state: &CpuGameState,
 ) -> f64 {
+    let threat = Threat {
+        weight: 1.0,
+        ..Threat::default()
+    };
+    evaluate_safety_against_threat(tile, opponent_discards, state, &threat, false)
+}
+
+/// 特定の脅威に対する牌の安全度を評価する
+///
+/// `strict` は中以上の追加評価（#175 ワンチャンス, #177 生牌役牌・ドラそば）を
+/// 有効にする。
+fn evaluate_safety_against_threat(
+    tile: Tile,
+    opponent_discards: &[Tile],
+    state: &CpuGameState,
+    threat: &Threat,
+    strict: bool,
+) -> f64 {
     let tt = tile.get();
 
-    // 1. 現物: 相手の捨て牌に同じ牌がある → 完全安全
+    // 1. 現物: 相手の捨て牌に同じ牌がある → 脅威の種類によらず完全安全
     if opponent_discards.iter().any(|d| d.get() == tt) {
         return 1.0;
     }
 
-    // 2. 字牌の安全度
+    // 2. 役満気配の生牌（#182）: 重みによらず最危険として扱う
+    if tt >= 27 && publicly_visible(state, tt) == 0 {
+        if threat.dragon_alert && (Tile::Z5..=Tile::Z7).contains(&tt) {
+            return 0.05;
+        }
+        if threat.wind_alert && (Tile::Z1..=Tile::Z4).contains(&tt) {
+            return 0.05;
+        }
+    }
+
+    let visible_counts = state.visible_tile_counts();
+    let mut base: f64;
+
     if tt >= 27 {
-        let visible = state.visible_tile_counts()[tt as usize];
-        return match visible {
+        // 3. 字牌の安全度（見え枚数ベース）
+        let visible = visible_counts[tt as usize];
+        base = match visible {
             4 => 1.0,  // 全部見えている（ありえないが念のため）
             3 => 0.95, // 残り1枚 → ほぼ安全
             2 => 0.6,  // 残り2枚
             1 => 0.4,  // 残り3枚
             _ => 0.3,  // 1枚も見えていない
         };
+
+        // #177（中以上）: 生牌の役牌は危険度を上げる
+        if strict
+            && is_yakuhai(tt, state.my_seat_wind, state.prevailing_wind)
+            && publicly_visible(state, tt) == 0
+        {
+            base = base.min(0.22);
+        }
+    } else if is_suji(tt, opponent_discards) {
+        // 4. 筋（suji）判定
+        base = 0.75;
+    } else if is_kabe(tt, &visible_counts) {
+        // 5. 壁（ノーチャンス）判定
+        base = 0.7;
+    } else {
+        // 6. 端牌 vs 中張牌
+        let num = tt % 9;
+        base = match num {
+            0 | 8 => 0.4, // 1, 9
+            1 | 7 => 0.3, // 2, 8
+            2 | 6 => 0.2, // 3, 7
+            _ => 0.15,    // 4, 5, 6
+        };
+
+        // #175（中以上）: ワンチャンス（順子の材料が残り1枚以下）はやや安全寄り
+        if strict && is_one_chance(tt, &visible_counts) {
+            base = base.max(0.5);
+        }
     }
 
-    // 3. 筋（suji）判定
-    if is_suji(tt, opponent_discards) {
-        return 0.75;
+    // #177（中以上）: ドラ・ドラそばは相手の手に絡みやすく危険
+    if strict && tt < 27 && is_dora_or_neighbor(tt, state) {
+        base = (base - 0.08).max(0.05);
     }
 
-    // 4. 壁（kabe）判定
-    let visible_counts = state.visible_tile_counts();
-    if is_kabe(tt, &visible_counts) {
-        return 0.7;
+    // #181: 染め手気配の色と字牌は危険度を上げる
+    if let Some(suit) = threat.flush_suit
+        && (tt >= 27 || (tt / 9) as usize == suit)
+    {
+        base *= 0.5;
     }
 
-    // 5. 端牌 vs 中張牌
-    let num = tt % 9;
-    match num {
-        0 | 8 => 0.4, // 1, 9
-        1 | 7 => 0.3, // 2, 8
-        2 | 6 => 0.2, // 3, 7
-        _ => 0.15,    // 4, 5, 6
+    // 脅威の重みでスケール（弱い脅威ほど危険度を割り引く）
+    if threat.weight >= 1.0 {
+        base
+    } else {
+        1.0 - (1.0 - base) * threat.weight
     }
+}
+
+/// ドラまたはドラの隣（同色±1）か
+fn is_dora_or_neighbor(tile_type: TileType, state: &CpuGameState) -> bool {
+    for indicator in &state.dora_indicators {
+        let dora = dora_indicator_to_dora(indicator.get());
+        if dora >= 27 {
+            if tile_type == dora {
+                return true;
+            }
+            continue;
+        }
+        if tile_type / 9 == dora / 9 {
+            let diff = (tile_type % 9) as i32 - (dora % 9) as i32;
+            if diff.abs() <= 1 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// 筋（suji）で安全かどうか判定する
@@ -147,6 +340,20 @@ fn is_suji(tile_type: TileType, opponent_discards: &[Tile]) -> bool {
 /// ある牌種が場に全て見えている（残り0枚）場合、
 /// その牌を含む順子が成立しないため、隣接牌の危険度が下がる。
 fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
+    is_blocked(tile_type, visible_counts, 4)
+}
+
+/// ワンチャンス（順子の材料が残り1枚以下）か（#175）
+///
+/// 壁ほどではないが、両面待ちで当たる可能性が低い。
+fn is_one_chance(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
+    is_blocked(tile_type, visible_counts, 3)
+}
+
+/// 順子の材料が min_visible 枚以上見えていて成立しにくいか（壁判定の一般化）
+///
+/// min_visible=4 でノーチャンス（壁）、3 でワンチャンス相当になる。
+fn is_blocked(tile_type: TileType, visible_counts: &[u8; 34], min_visible: u8) -> bool {
     if tile_type >= 27 {
         return false; // 字牌に壁はない
     }
@@ -163,8 +370,8 @@ fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
         0 => {
             // 1: 123 のみ。2か3が壁なら安全
             total_patterns = 1;
-            if visible_counts[(suit_start + 1) as usize] >= 4
-                || visible_counts[(suit_start + 2) as usize] >= 4
+            if visible_counts[(suit_start + 1) as usize] >= min_visible
+                || visible_counts[(suit_start + 2) as usize] >= min_visible
             {
                 blocked_patterns = 1;
             }
@@ -172,13 +379,13 @@ fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
         1 => {
             // 2: 123, 234。
             total_patterns = 2;
-            if visible_counts[suit_start as usize] >= 4
-                || visible_counts[(suit_start + 2) as usize] >= 4
+            if visible_counts[suit_start as usize] >= min_visible
+                || visible_counts[(suit_start + 2) as usize] >= min_visible
             {
                 blocked_patterns += 1;
             }
-            if visible_counts[(suit_start + 2) as usize] >= 4
-                || visible_counts[(suit_start + 3) as usize] >= 4
+            if visible_counts[(suit_start + 2) as usize] >= min_visible
+                || visible_counts[(suit_start + 3) as usize] >= min_visible
             {
                 blocked_patterns += 1;
             }
@@ -186,13 +393,13 @@ fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
         7 => {
             // 8: 789, 678
             total_patterns = 2;
-            if visible_counts[(suit_start + 8) as usize] >= 4
-                || visible_counts[(suit_start + 6) as usize] >= 4
+            if visible_counts[(suit_start + 8) as usize] >= min_visible
+                || visible_counts[(suit_start + 6) as usize] >= min_visible
             {
                 blocked_patterns += 1;
             }
-            if visible_counts[(suit_start + 6) as usize] >= 4
-                || visible_counts[(suit_start + 5) as usize] >= 4
+            if visible_counts[(suit_start + 6) as usize] >= min_visible
+                || visible_counts[(suit_start + 5) as usize] >= min_visible
             {
                 blocked_patterns += 1;
             }
@@ -200,8 +407,8 @@ fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
         8 => {
             // 9: 789 のみ。7か8が壁なら安全
             total_patterns = 1;
-            if visible_counts[(suit_start + 6) as usize] >= 4
-                || visible_counts[(suit_start + 7) as usize] >= 4
+            if visible_counts[(suit_start + 6) as usize] >= min_visible
+                || visible_counts[(suit_start + 7) as usize] >= min_visible
             {
                 blocked_patterns = 1;
             }
@@ -211,22 +418,22 @@ fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
             total_patterns = 3;
             // 前方の順子
             if num >= 2
-                && (visible_counts[(suit_start + num - 2) as usize] >= 4
-                    || visible_counts[(suit_start + num - 1) as usize] >= 4)
+                && (visible_counts[(suit_start + num - 2) as usize] >= min_visible
+                    || visible_counts[(suit_start + num - 1) as usize] >= min_visible)
             {
                 blocked_patterns += 1;
             }
             // 中央の順子
             if (1..=7).contains(&num)
-                && (visible_counts[(suit_start + num - 1) as usize] >= 4
-                    || visible_counts[(suit_start + num + 1) as usize] >= 4)
+                && (visible_counts[(suit_start + num - 1) as usize] >= min_visible
+                    || visible_counts[(suit_start + num + 1) as usize] >= min_visible)
             {
                 blocked_patterns += 1;
             }
             // 後方の順子
             if num <= 6
-                && (visible_counts[(suit_start + num + 1) as usize] >= 4
-                    || visible_counts[(suit_start + num + 2) as usize] >= 4)
+                && (visible_counts[(suit_start + num + 1) as usize] >= min_visible
+                    || visible_counts[(suit_start + num + 2) as usize] >= min_visible)
             {
                 blocked_patterns += 1;
             }
@@ -240,7 +447,23 @@ fn is_kabe(tile_type: TileType, visible_counts: &[u8; 34]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
     use mahjong_core::tile::{Tile, Wind};
+
+    use crate::cpu::client::CpuPersonality;
+
+    fn test_config() -> CpuConfig {
+        CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced)
+    }
+
+    fn pon_meld(tile_type: u32) -> Meld {
+        Meld {
+            tiles: vec![Tile::new(tile_type); 3],
+            category: MeldType::Pon,
+            from: MeldFrom::Unknown,
+            called_tile: Some(Tile::new(tile_type)),
+        }
+    }
 
     #[test]
     fn test_genbutsu() {
@@ -276,13 +499,192 @@ mod tests {
         assert!(safety < 0.5);
     }
 
+    // --- 脅威モデル（#175 #177 #180 #181 #182）---
+
+    #[test]
+    fn test_assess_threat_riichi_is_full_weight() {
+        let mut state = CpuGameState::new();
+        state.player_riichi[1] = true;
+        let threat = assess_threat(&state, 1, &test_config()).expect("riichi is a threat");
+        assert_eq!(threat.weight, 1.0);
+    }
+
+    #[test]
+    fn test_assess_threat_three_melds() {
+        // #180: 3副露以上は聴牌濃厚（リーチより弱い警戒）
+        let mut state = CpuGameState::new();
+        state.player_melds[1] = vec![pon_meld(Tile::M2), pon_meld(Tile::P5), pon_meld(Tile::S7)];
+
+        let threat = assess_threat(&state, 1, &test_config()).expect("3 melds is a threat");
+        assert!(threat.weight > 0.0 && threat.weight < 1.0);
+
+        // 定石無効ならリーチ者以外は脅威としない（従来動作）
+        let config = test_config().without_heuristics();
+        assert!(assess_threat(&state, 1, &config).is_none());
+
+        // 2副露（異色）では脅威としない
+        let mut state = CpuGameState::new();
+        state.player_melds[1] = vec![pon_meld(Tile::M2), pon_meld(Tile::P5)];
+        assert!(assess_threat(&state, 1, &test_config()).is_none());
+    }
+
+    #[test]
+    fn test_assess_threat_flush_signs() {
+        // #181: 2副露が1色に染まっていれば染め手気配（中以上）
+        let mut state = CpuGameState::new();
+        state.player_melds[1] = vec![pon_meld(Tile::P2), pon_meld(Tile::P7)];
+
+        let threat = assess_threat(&state, 1, &test_config()).expect("flush signs");
+        assert_eq!(threat.flush_suit, Some(1)); // 筒子
+
+        // 弱レベルは染め手気配を見ない
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        assert!(assess_threat(&state, 1, &config).is_none());
+    }
+
+    #[test]
+    fn test_assess_threat_yakuman_signs() {
+        // #182: 三元牌2種のポンは大三元気配（弱以上）
+        let mut state = CpuGameState::new();
+        state.player_melds[1] = vec![pon_meld(Tile::Z5), pon_meld(Tile::Z6)];
+
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let threat = assess_threat(&state, 1, &config).expect("dragon signs");
+        assert!(threat.dragon_alert);
+
+        // 風牌2種のポンは四喜和気配
+        let mut state = CpuGameState::new();
+        state.player_melds[2] = vec![pon_meld(Tile::Z1), pon_meld(Tile::Z2)];
+        let threat = assess_threat(&state, 2, &config).expect("wind signs");
+        assert!(threat.wind_alert);
+    }
+
+    #[test]
+    fn test_live_dragon_is_deadly_against_dragon_alert() {
+        // #182: 大三元気配の相手に生牌の3種類目の三元牌は切らない
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.player_melds[1] = vec![pon_meld(Tile::Z5), pon_meld(Tile::Z6)];
+
+        // 生牌の中（Z7）は最危険
+        let safety = evaluate_safety(Tile::new(Tile::Z7), &state, &test_config());
+        assert!(
+            safety <= 0.05,
+            "live third dragon should be deadly: {safety}"
+        );
+
+        // 相手の現物になっている三元牌は安全
+        state.all_discards[1].push(Tile::new(Tile::Z7));
+        let safety = evaluate_safety(Tile::new(Tile::Z7), &state, &test_config());
+        assert_eq!(safety, 1.0);
+    }
+
+    #[test]
+    fn test_flush_suit_and_honors_are_dangerous() {
+        // #181: 染め手気配の色と字牌は他の色より危険
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.player_melds[1] = vec![pon_meld(Tile::P2), pon_meld(Tile::P7)];
+        let config = test_config();
+
+        let in_suit = evaluate_safety(Tile::new(Tile::P5), &state, &config);
+        let off_suit = evaluate_safety(Tile::new(Tile::S5), &state, &config);
+        let honor = evaluate_safety(Tile::new(Tile::Z3), &state, &config);
+
+        assert!(
+            in_suit < off_suit,
+            "染め色は他色より危険: {in_suit} vs {off_suit}"
+        );
+        assert!(honor < 1.0, "染め手相手の字牌も警戒する");
+    }
+
+    #[test]
+    fn test_melded_threat_weaker_than_riichi() {
+        // #180: 3副露の警戒はリーチより弱い（同じ牌でも安全度が高い）
+        let melds = vec![pon_meld(Tile::M2), pon_meld(Tile::P5), pon_meld(Tile::S7)];
+
+        let mut melded = CpuGameState::new();
+        melded.my_seat_wind = Wind::East;
+        melded.player_melds[1] = melds;
+
+        let mut riichi = CpuGameState::new();
+        riichi.my_seat_wind = Wind::East;
+        riichi.player_riichi[1] = true;
+
+        let config = test_config();
+        let vs_melded = evaluate_safety(Tile::new(Tile::S5), &melded, &config);
+        let vs_riichi = evaluate_safety(Tile::new(Tile::S5), &riichi, &config);
+        assert!(vs_melded > vs_riichi);
+        assert!(vs_melded < 1.0);
+    }
+
+    #[test]
+    fn test_live_yakuhai_more_dangerous_when_strict() {
+        // #177: 生牌の役牌（白）は中以上では客風より危険
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.prevailing_wind = Wind::East;
+        state.player_riichi[1] = true;
+
+        let config = test_config(); // Normal → strict
+        let yakuhai = evaluate_safety(Tile::new(Tile::Z5), &state, &config);
+        let guest = evaluate_safety(Tile::new(Tile::Z3), &state, &config);
+        assert!(
+            yakuhai < guest,
+            "生牌役牌({yakuhai}) < 客風({guest}) のはず"
+        );
+
+        // 弱レベルでは従来の見え枚数評価のみ
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let yakuhai = evaluate_safety(Tile::new(Tile::Z5), &state, &config);
+        let guest = evaluate_safety(Tile::new(Tile::Z3), &state, &config);
+        assert_eq!(yakuhai, guest);
+    }
+
+    #[test]
+    fn test_dora_neighbor_more_dangerous_when_strict() {
+        // #177: ドラそばは同条件の牌より危険
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.player_riichi[1] = true;
+        state.dora_indicators = vec![Tile::new(Tile::M4)]; // ドラは M5
+
+        let config = test_config();
+        let near_dora = evaluate_safety(Tile::new(Tile::M5), &state, &config);
+        let plain = evaluate_safety(Tile::new(Tile::S5), &state, &config);
+        assert!(near_dora < plain);
+    }
+
+    #[test]
+    fn test_one_chance_safer_when_strict() {
+        // #175: ワンチャンス（順子材料が残り1枚）は無筋中張牌より安全寄り
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.player_riichi[1] = true;
+        // S4 が3枚見えている → S5 の 345/456 パターンが薄い…だけでは不十分なので
+        // S4×3 + S6×3 を見せて S5 をワンチャンス級にする
+        state.all_discards[2] = vec![
+            Tile::new(Tile::S4),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::S6),
+        ];
+
+        let config = test_config();
+        let one_chance = evaluate_safety(Tile::new(Tile::S5), &state, &config);
+        let plain = evaluate_safety(Tile::new(Tile::M5), &state, &config);
+        assert!(one_chance > plain);
+    }
+
     // --- evaluate_safety (public) ---
 
     #[test]
     fn test_evaluate_safety_no_riichi_returns_1() {
         // リーチ者がいなければ常に安全度 1.0
         let state = CpuGameState::new();
-        let safety = evaluate_safety(Tile::new(Tile::M5), &state);
+        let safety = evaluate_safety(Tile::new(Tile::M5), &state, &test_config());
         assert_eq!(safety, 1.0);
     }
 
@@ -292,7 +694,7 @@ mod tests {
         let mut state = CpuGameState::new();
         state.my_seat_wind = Wind::East;
         state.player_riichi[0] = true; // 東（自分）がリーチ
-        let safety = evaluate_safety(Tile::new(Tile::M5), &state);
+        let safety = evaluate_safety(Tile::new(Tile::M5), &state, &test_config());
         assert_eq!(safety, 1.0);
     }
 
@@ -303,7 +705,7 @@ mod tests {
         state.my_seat_wind = Wind::East;
         state.player_riichi[1] = true; // 南がリーチ
         state.all_discards[1] = vec![Tile::new(Tile::M5)];
-        let safety = evaluate_safety(Tile::new(Tile::M5), &state);
+        let safety = evaluate_safety(Tile::new(Tile::M5), &state, &test_config());
         assert_eq!(safety, 1.0);
     }
 
@@ -315,7 +717,7 @@ mod tests {
         state.player_riichi[1] = true; // 南がリーチ: M5は現物 → 1.0
         state.player_riichi[2] = true; // 西がリーチ: M5は非現物 → 低い安全度
         state.all_discards[1] = vec![Tile::new(Tile::M5)];
-        let safety = evaluate_safety(Tile::new(Tile::M5), &state);
+        let safety = evaluate_safety(Tile::new(Tile::M5), &state, &test_config());
         assert!(safety < 1.0);
     }
 

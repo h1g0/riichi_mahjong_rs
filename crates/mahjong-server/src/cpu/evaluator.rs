@@ -76,7 +76,7 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
         // 安全度
         // 定石有効時は弱レベルでも安全度を計算する（#173/#174: ベタオリは弱以上）
         let safety = if config.level.uses_defense() || config.heuristics_enabled {
-            defense::evaluate_safety(tile, state)
+            defense::evaluate_safety(tile, state, config)
         } else {
             0.5 // 防御を考慮しない場合は中立値
         };
