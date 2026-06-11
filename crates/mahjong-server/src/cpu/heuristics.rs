@@ -106,6 +106,12 @@ pub const DISCARD_HEURISTICS: &[DiscardHeuristic] = &[
         min_level: CpuLevel::Normal,
         apply: route_lock_bonus,
     },
+    // #186: 河底牌（最終打牌）で危険牌を切らない（中以上）
+    DiscardHeuristic {
+        name: "safe-last-discard",
+        min_level: CpuLevel::Normal,
+        apply: last_discard_safety_bonus,
+    },
 ];
 
 // ============================================================================
@@ -255,18 +261,57 @@ fn defense_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     }
 
     let mut weight = 300.0;
-    if ctx.config.level >= CpuLevel::Strong {
-        let mut all_tiles = ctx.state.my_hand.clone();
-        if let Some(drawn) = ctx.state.my_drawn {
-            all_tiles.push(drawn);
-        }
-        let hand = Hand::new_with_melds(all_tiles, ctx.state.my_melds_for_analysis(), None);
-        if calc_shanten_number(&hand).as_i32() <= 1 {
+
+    let mut all_tiles = ctx.state.my_hand.clone();
+    if let Some(drawn) = ctx.state.my_drawn {
+        all_tiles.push(drawn);
+    }
+    let hand = Hand::new_with_melds(all_tiles, ctx.state.my_melds_for_analysis(), None);
+    let close = calc_shanten_number(&hand).as_i32() <= 1;
+
+    if close {
+        // #179（強以上）: まわし打ち
+        if ctx.config.level >= CpuLevel::Strong {
             weight = 150.0;
+        }
+        // #184（中以上）: 流局間際は安全牌を切りながら形式聴牌を狙う
+        if ctx.config.level >= CpuLevel::Normal && ctx.state.remaining_tiles <= 8 {
+            weight = 150.0;
+            // #185（強以上）: 親番・オーラスで順位が懸かる場面では
+            // 聴牌維持の価値をさらに上げる
+            if ctx.config.level >= CpuLevel::Strong
+                && (ctx.state.my_seat_wind == Wind::East
+                    || (ctx.state.is_final_round() && !ctx.state.is_top()))
+            {
+                weight = 120.0;
+            }
         }
     }
 
     c.safety * weight
+}
+
+/// #186: 河底牌（最終打牌）で危険牌を切らない
+///
+/// 山が空のときの打牌はこの局の最後の行動であり、手を進める意味がない。
+/// 攻撃中でも安全度に大きな重みを掛ける。形式聴牌の維持（約100点 =
+/// 向聴数1段階）はスジ程度の安全差なら優先されるが、無筋の危険牌を
+/// 押してまで維持はしない。
+fn last_discard_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    if ctx.state.remaining_tiles > 0 {
+        return 0.0;
+    }
+
+    // 脅威（リーチ者・3副露以上）がいなければ補正不要
+    let my_idx = CpuGameState::wind_to_index(ctx.state.my_seat_wind);
+    let any_threat = (0..4).any(|i| {
+        i != my_idx && (ctx.state.player_riichi[i] || ctx.state.player_melds[i].len() >= 3)
+    });
+    if !any_threat {
+        return 0.0;
+    }
+
+    c.safety * 200.0
 }
 
 /// 手牌全体（ツモ込み・副露込み）のブロック数を数える
@@ -804,7 +849,12 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
 
         // 安くて遠い仕掛けは控える（#165, 中以上）
         if ctx.config.level >= CpuLevel::Normal
-            && is_cheap_distant_call(ctx.state, &hand_after, &melds_after)
+            && is_cheap_distant_call(
+                ctx.state,
+                &hand_after,
+                &melds_after,
+                ctx.config.level >= CpuLevel::Strong,
+            )
         {
             return CallJudgement::Forbid;
         }
@@ -856,7 +906,12 @@ pub fn judge_chi(ctx: &CallContext, called_tile: Tile, hand_tiles: [Tile; 2]) ->
 
         // 安くて遠い仕掛けは控える（#165, 中以上）
         if ctx.config.level >= CpuLevel::Normal
-            && is_cheap_distant_call(ctx.state, &hand_after, &melds_after)
+            && is_cheap_distant_call(
+                ctx.state,
+                &hand_after,
+                &melds_after,
+                ctx.config.level >= CpuLevel::Strong,
+            )
         {
             return CallJudgement::Forbid;
         }
@@ -941,7 +996,11 @@ pub enum PushJudgement {
 ///
 /// - 聴牌: 良形で「高打点・親・脅威1人」のいずれかなら押す。
 ///   愚形かつ安手なら降りる（従来は聴牌なら無条件に押していた）。
-/// - 2向聴: 高打点（ドラ多数など）で脅威が1人なら押し続ける。
+///   親は連荘価値があるため愚形安手でも単独脅威には判断を保留する（#190）。
+///   供託・本場が多い局では安手聴牌の価値が上がる（#191, 強以上）。
+/// - 後半のトップ目は満貫級の良形聴牌以外は降りる（#188）。
+/// - 2向聴: 高打点で脅威が1人なら押し続ける。大きく負けている場合は
+///   打点の基準を下げて押す（#189: ラス目は打点寄り）。
 /// - それ以外は従来の判断（性格・撤退閾値）に委ねる。
 pub fn judge_push(ctx: &CallContext, threat_count: usize) -> PushJudgement {
     if !ctx.config.heuristics_enabled || ctx.config.level < CpuLevel::Normal || threat_count == 0 {
@@ -990,19 +1049,46 @@ pub fn judge_push(ctx: &CallContext, threat_count: usize) -> PushJudgement {
         let high_value = value_han >= 4;
         let dealer = ctx.state.my_seat_wind == Wind::East;
 
+        // #188: 後半のトップ目は放銃回避を最優先する。
+        // 満貫級の良形聴牌だけは押す
+        if ctx.state.is_top() && ctx.state.is_second_half() {
+            return if good_shape && high_value {
+                PushJudgement::Push
+            } else {
+                PushJudgement::Fold
+            };
+        }
+
         if good_shape && (high_value || dealer || threat_count == 1) {
             return PushJudgement::Push;
         }
         if !good_shape && !high_value {
+            // #190: 親は連荘価値があるため、単独脅威には判断を保留する
+            // （従来の判断 = 聴牌なら押す、に委ねる）
+            if dealer && threat_count == 1 {
+                return PushJudgement::Neutral;
+            }
+            // #191（強以上）: 供託・本場が大きければ安手聴牌でも降り推奨はしない
+            let stakes = ctx.state.riichi_sticks as i32 * 1000 + ctx.state.honba as i32 * 300;
+            if ctx.config.level >= CpuLevel::Strong && stakes >= 2000 {
+                return PushJudgement::Neutral;
+            }
             return PushJudgement::Fold;
         }
         return PushJudgement::Neutral;
     }
 
-    // 2向聴: 高打点（推定値が満貫級）で脅威が1人なら押し続ける
+    // #188: 後半のトップ目は聴牌以外では押さない
+    if ctx.state.is_top() && ctx.state.is_second_half() {
+        return PushJudgement::Fold;
+    }
+
+    // 2向聴: 高打点（推定値が満貫級）で脅威が1人なら押し続ける。
+    // 大きく負けている場合は基準を下げる（#189: 高打点ルートを取りに行く）
+    let value_threshold = if is_far_behind(ctx.state) { 4.0 } else { 6.0 };
     if shanten.as_i32() == 2
         && threat_count == 1
-        && estimate_hand_value(&all_tiles, ctx.state) >= 6.0
+        && estimate_hand_value(&all_tiles, ctx.state) >= value_threshold
     {
         return PushJudgement::Push;
     }
@@ -1078,8 +1164,11 @@ pub fn judge_riichi(ctx: &CallContext, riichi_discard: Option<Tile>) -> RiichiJu
     }
 
     // #170（中以上）: 全ての待ちでダマでも満貫以上 → リーチ棒・放銃リスクを
-    // 取らず出和了しやすさを優先する
+    // 取らず出和了しやすさを優先する。
+    // ただし大きく負けている場合は打点を伸ばす方が価値が高いので
+    // リーチに回す（#189: ラス目は打点寄り）
     if ctx.config.level >= CpuLevel::Normal
+        && !is_far_behind(ctx.state)
         && values.iter().all(|v| matches!(v, Some(han) if *han >= 5))
     {
         return RiichiJudgement::Damaten;
@@ -1243,16 +1332,40 @@ fn good_shape_upgrade_draws(remaining: &[Tile], visible: &[u8; 34]) -> u32 {
 /// 鳴いた後も2向聴以上で、打点要素（ドラ・赤ドラ・役牌・染め手）が
 /// 何もない仕掛けは、守備力低下のデメリットの方が大きいため控える。
 /// 親は連荘価値があるため例外とする。
-/// （オーラスの和了条件などの例外は点棒状況判断の導入時に拡張する）
-fn is_cheap_distant_call(state: &CpuGameState, hand_after: &[Tile], melds_after: &[Meld]) -> bool {
+///
+/// 点棒状況による例外・強化（#187/#191）:
+/// - オーラスで安手の和了でも順位が上がるなら速度優先（例外）
+/// - 供託・本場が大きい局は安手和了の価値が上がる（強以上、例外）
+/// - オーラスで満貫級が必要なら、近い仕掛けでも安手なら控える（強化）
+fn is_cheap_distant_call(
+    state: &CpuGameState,
+    hand_after: &[Tile],
+    melds_after: &[Meld],
+    consider_stakes: bool,
+) -> bool {
     // 親番は例外（連荘価値がある）
     if state.my_seat_wind == Wind::East {
         return false;
     }
 
+    // #187: オーラスで安手の和了でも順位が上がるなら速度を優先する
+    if state.is_final_round() && state.gap_to_next_rank().is_some_and(|gap| gap <= 3900) {
+        return false;
+    }
+
+    // #191（強以上）: 供託・本場が大きければ安手和了にも価値がある
+    let stakes = state.riichi_sticks as i32 * 1000 + state.honba as i32 * 300;
+    if consider_stakes && stakes >= 2000 {
+        return false;
+    }
+
+    // #187: オーラスで満貫級が必要な点差なら、安手は近い仕掛けでも控える
+    let needs_big_win =
+        state.is_final_round() && state.gap_to_next_rank().is_some_and(|gap| gap >= 8000);
+
     // 鳴いた後も2向聴以上か（遠い仕掛けか）
     let hand = Hand::new_with_melds(hand_after.to_vec(), melds_after.to_vec(), None);
-    if calc_shanten_number(&hand).as_i32() < 2 {
+    if !needs_big_win && calc_shanten_number(&hand).as_i32() < 2 {
         return false;
     }
 
@@ -2247,18 +2360,18 @@ mod tests {
             Tile::S4,
             Tile::M7,
         ]);
-        assert!(is_cheap_distant_call(&state, &hand, &melds));
+        assert!(is_cheap_distant_call(&state, &hand, &melds, false));
 
         // 親なら例外
         let mut dealer_state = CpuGameState::new();
         dealer_state.my_seat_wind = Wind::East;
-        assert!(!is_cheap_distant_call(&dealer_state, &hand, &melds));
+        assert!(!is_cheap_distant_call(&dealer_state, &hand, &melds, false));
 
         // ドラがあれば打点要素あり
         let mut dora_state = CpuGameState::new();
         dora_state.my_seat_wind = Wind::South;
         dora_state.dora_indicators = vec![Tile::new(Tile::M1)]; // ドラは M2（手牌にある）
-        assert!(!is_cheap_distant_call(&dora_state, &hand, &melds));
+        assert!(!is_cheap_distant_call(&dora_state, &hand, &melds, false));
 
         // 役牌対子があれば打点要素あり
         let hand_with_yakuhai = tiles(&[
@@ -2273,7 +2386,12 @@ mod tests {
             Tile::M6,
             Tile::P8,
         ]);
-        assert!(!is_cheap_distant_call(&state, &hand_with_yakuhai, &melds));
+        assert!(!is_cheap_distant_call(
+            &state,
+            &hand_with_yakuhai,
+            &melds,
+            false
+        ));
     }
 
     #[test]
@@ -2295,7 +2413,7 @@ mod tests {
             Tile::M6,
             Tile::M7,
         ]);
-        assert!(!is_cheap_distant_call(&state, &hand, &melds));
+        assert!(!is_cheap_distant_call(&state, &hand, &melds, false));
     }
 
     // --- 国士無双ルート（#158 #159 #160 #161）---
@@ -2547,8 +2665,9 @@ mod tests {
         let mut candidate = make_candidate(Tile::M5);
         candidate.safety = 1.0;
 
-        // 聴牌形の手牌
-        let state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        // 聴牌形の手牌（山はまだ十分残っている）
+        let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        state.remaining_tiles = 40;
 
         // 強レベル + 聴牌 → 重み150（まわし打ち）
         let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
@@ -2570,6 +2689,7 @@ mod tests {
 
         // 強レベルでも手が遠ければベタオリ（重み300）
         let mut far_state = CpuGameState::new();
+        far_state.remaining_tiles = 40;
         far_state.my_hand = tiles(&[
             Tile::M1,
             Tile::M4,
@@ -2592,6 +2712,294 @@ mod tests {
             attacking: false,
         };
         assert_eq!(defense_safety_bonus(&defending, &candidate), 300.0);
+    }
+
+    #[test]
+    fn test_keishiki_tenpai_weights_at_endgame() {
+        // #184/#185: 流局間際の聴牌・1向聴は形式聴牌を狙って重みを下げる
+        let mut candidate = make_candidate(Tile::M5);
+        candidate.safety = 1.0;
+
+        let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        state.my_seat_wind = Wind::South;
+        state.scores = [26000, 25000, 25000, 24000]; // 自分(南)は2着
+        state.remaining_tiles = 6;
+        state.round_number = 1;
+        state.total_rounds = 4;
+
+        // #184（中以上）: 流局間際 → 重み150
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let defending = DiscardContext {
+            state: &state,
+            config: &config,
+            attacking: false,
+        };
+        assert_eq!(defense_safety_bonus(&defending, &candidate), 150.0);
+
+        // #185（強以上）: オーラスでトップ目でない → さらに聴牌維持重視（重み120）
+        state.round_number = 3;
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
+        let defending = DiscardContext {
+            state: &state,
+            config: &config,
+            attacking: false,
+        };
+        assert_eq!(defense_safety_bonus(&defending, &candidate), 120.0);
+
+        // #185: 親番でも聴牌維持重視
+        let mut dealer_state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        dealer_state.my_seat_wind = Wind::East;
+        dealer_state.remaining_tiles = 6;
+        let defending = DiscardContext {
+            state: &dealer_state,
+            config: &config,
+            attacking: false,
+        };
+        assert_eq!(defense_safety_bonus(&defending, &candidate), 120.0);
+    }
+
+    // --- 終盤処理・点棒状況（#183〜#191）---
+
+    #[test]
+    fn test_last_discard_safety_bonus() {
+        // #186: 山が空の最終打牌は、脅威がいれば攻撃中でも安全度を重視する
+        let mut candidate = make_candidate(Tile::M5);
+        candidate.safety = 1.0;
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+
+        // 山が残っていれば補正なし
+        let mut state = CpuGameState::new();
+        state.remaining_tiles = 10;
+        state.player_riichi[1] = true;
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(last_discard_safety_bonus(&ctx, &candidate), 0.0);
+
+        // 山が空 + リーチ者あり → 攻撃中でも補正
+        state.remaining_tiles = 0;
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(last_discard_safety_bonus(&ctx, &candidate), 200.0);
+
+        // 脅威がいなければ補正なし
+        let mut state = CpuGameState::new();
+        state.remaining_tiles = 0;
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(last_discard_safety_bonus(&ctx, &candidate), 0.0);
+    }
+
+    #[test]
+    fn test_cheap_call_allowed_when_final_round_speed_matters() {
+        // #187: オーラスで安手和了でも順位が上がるなら速度優先（抑制解除）
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+        state.scores = [25000, 24000, 26000, 25000]; // 自分(南)は2000点差の3着
+        state.round_number = 3;
+        state.total_rounds = 4;
+        let melds = vec![chi_meld(Tile::S2)];
+        let hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::P4,
+            Tile::P5,
+            Tile::S6,
+            Tile::S7,
+            Tile::M6,
+            Tile::P8,
+            Tile::S4,
+            Tile::M7,
+        ]);
+        // 通常なら安くて遠い仕掛けだが、オーラスの僅差なので許容
+        assert!(!is_cheap_distant_call(&state, &hand, &melds, false));
+
+        // オーラスでなければ抑制される
+        state.round_number = 1;
+        assert!(is_cheap_distant_call(&state, &hand, &melds, false));
+    }
+
+    #[test]
+    fn test_cheap_call_suppressed_when_mangan_needed() {
+        // #187: オーラスで満貫級が必要なら、近い（1向聴）仕掛けでも安手は控える
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+        state.scores = [25000, 15000, 35000, 25000]; // 自分(南)はトップと2万点差
+        state.round_number = 3;
+        state.total_rounds = 4;
+        let melds = vec![chi_meld(Tile::S2)];
+        // チー後1向聴相当の手（2面子 + 対子 + ターツ）
+        let hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::M4,
+            Tile::P4,
+            Tile::P5,
+            Tile::P6,
+            Tile::S6,
+            Tile::S6,
+            Tile::M6,
+            Tile::M7,
+        ]);
+        assert!(is_cheap_distant_call(&state, &hand, &melds, false));
+
+        // 平場なら1向聴の仕掛けは抑制されない
+        state.round_number = 1;
+        assert!(!is_cheap_distant_call(&state, &hand, &melds, false));
+    }
+
+    #[test]
+    fn test_cheap_call_allowed_with_large_stakes() {
+        // #191（強以上）: 供託・本場が大きければ安手仕掛けも許容
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+        state.riichi_sticks = 2; // 供託2000点
+        let melds = vec![chi_meld(Tile::S2)];
+        let hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::P4,
+            Tile::P5,
+            Tile::S6,
+            Tile::S7,
+            Tile::M6,
+            Tile::P8,
+            Tile::S4,
+            Tile::M7,
+        ]);
+        // 強（供託考慮あり）: 許容
+        assert!(!is_cheap_distant_call(&state, &hand, &melds, true));
+        // 中（供託考慮なし）: 従来どおり抑制
+        assert!(is_cheap_distant_call(&state, &hand, &melds, false));
+    }
+
+    #[test]
+    fn test_judge_push_top_in_second_half_folds() {
+        // #188: 後半のトップ目は安手の良形聴牌でも降りる
+        let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        state.my_seat_wind = Wind::South;
+        state.scores = [25000, 40000, 20000, 15000]; // 自分(南)が大差トップ
+        state.round_number = 3;
+        state.total_rounds = 4;
+        state.player_riichi[2] = true;
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Fold);
+
+        // 満貫級の良形聴牌だけは押す
+        state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)]; // ドラ3
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Push);
+
+        // 前半なら通常の判断（良形 + 脅威1人 → 押す）
+        let mut early = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        early.my_seat_wind = Wind::South;
+        early.scores = [25000, 40000, 20000, 15000];
+        early.round_number = 0;
+        early.total_rounds = 4;
+        early.player_riichi[2] = true;
+        let ctx = CallContext {
+            state: &early,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Push);
+    }
+
+    #[test]
+    fn test_judge_push_far_behind_lowers_value_threshold() {
+        // #189: 大きく負けているときは2向聴の押し基準を下げる
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+        state.my_hand = tiles(&[
+            Tile::M3,
+            Tile::M4,
+            Tile::M5,
+            Tile::M5,
+            Tile::P4,
+            Tile::P5,
+            Tile::P6,
+            Tile::S6,
+            Tile::S7,
+            Tile::S2,
+            Tile::S2,
+            Tile::Z3,
+            Tile::Z4,
+        ]);
+        state.dora_indicators = vec![Tile::new(Tile::M4)]; // ドラ M5×2 = 推定4点相当
+        state.player_riichi[2] = true;
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+
+        // 平場: 基準（6.0）未満 → Neutral
+        state.scores = [25000; 4];
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Neutral);
+
+        // 大差のラス目: 基準が下がり押す
+        state.scores = [42000, 8000, 25000, 25000];
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Push);
+    }
+
+    #[test]
+    fn test_judge_push_dealer_keeps_pushing_cheap_tenpai() {
+        // #190: 親は愚形安手聴牌でも単独脅威には降り推奨しない（連荘価値）
+        let mut state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
+        state.my_seat_wind = Wind::East;
+        state.player_riichi[2] = true;
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        // 子なら Fold（既存テスト）、親なら Neutral（従来判断 = 押す）
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Neutral);
+    }
+
+    #[test]
+    fn test_judge_push_stakes_keep_cheap_tenpai_alive() {
+        // #191（強以上）: 供託・本場が大きければ愚形安手聴牌でも降り推奨しない
+        let mut state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
+        state.my_seat_wind = Wind::South;
+        state.riichi_sticks = 2;
+        state.player_riichi[2] = true;
+
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Neutral);
+
+        // 中レベルは供託を考慮しない → Fold
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_push(&ctx, 1), PushJudgement::Fold);
+    }
+
+    #[test]
+    fn test_judge_riichi_far_behind_declares_over_damaten() {
+        // #189: 大きく負けているときは満貫確定でもダマにせずリーチで打点を伸ばす
+        let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
+        state.my_seat_wind = Wind::South;
+        state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)]; // ドラ3
+        state.scores = [42000, 8000, 25000, 25000]; // 自分(南)は大差ラス
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = CallContext {
+            state: &state,
+            config: &config,
+        };
+        assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Declare);
     }
 
     // --- リーチ・ダマ判断（#168〜#172）---
