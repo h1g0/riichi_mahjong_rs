@@ -130,17 +130,19 @@ pub(crate) fn assess_threat(
     // #182拡張: 国士無双気配（中以上）
     // 国士無双は門前限定で、不要な中張牌を切り続ける河になる。
     // 么九牌・字牌の対子余剰（2枚目以降の重なり）は切られうるため、
-    // 河の么九牌枚数では見切りを判定せず、「いずれかの么九牌が場に
-    // 4枚見えている（＝相手が持ち得ず国士が成立しない）」場合のみ
-    // 警戒を解除する。
+    // 河の么九牌枚数では見切りを判定せず、「いずれかの么九牌が公開情報
+    // （河・副露・ドラ表示牌）で4枚切れている」場合のみ警戒を解除する。
+    // 見切りは相手の意思決定なので、相手から見えない自分の手牌は
+    // 数えない（むしろ自分が抱えている么九牌は相手の和了牌候補そのもの）。
     // 同じ河はチャンタ・混老頭系でもありえるが、いずれにせよ
     // 么九牌・字牌が危険という結論は変わらない。
     if config.level >= CpuLevel::Normal && melds.is_empty() {
         let discards = &state.all_discards[idx];
         if discards.len() >= 5 {
             let early_orphans = discards.iter().take(6).filter(|t| t.is_1_9_honor()).count();
-            let visible = state.visible_tile_counts();
-            let some_orphan_dead = ORPHAN_TYPES.iter().any(|&t| visible[t as usize] >= 4);
+            let some_orphan_dead = ORPHAN_TYPES
+                .iter()
+                .any(|&t| publicly_visible(state, t) >= 4);
             if early_orphans <= 1 && !some_orphan_dead {
                 threat.kokushi_alert = true;
                 threat.weight = threat.weight.max(0.5);
@@ -650,18 +652,20 @@ mod tests {
         state.all_discards[1] = discards;
         assert!(assess_threat(&state, 1, &test_config()).is_none());
 
-        // いずれかの么九牌が場に4枚見えている → 国士不成立 → 警戒解除
+        // いずれかの么九牌が公開情報で4枚切れ → 相手は国士を見切る → 警戒解除
         let mut state = CpuGameState::new();
         state.all_discards[1] = middle_discards(6);
         state.all_discards[2] = vec![Tile::new(Tile::M1); 4]; // M1が4枚切れ
         assert!(assess_threat(&state, 1, &test_config()).is_none());
 
-        // 自分の手牌の枚数も「相手が持ち得ない」判定に含める
+        // 自分の手牌は数えない: 相手からは見えず、相手は国士を続行する。
+        // むしろ自分が抱えている么九牌こそ相手の和了牌候補なので警戒を維持する
         let mut state = CpuGameState::new();
         state.all_discards[1] = middle_discards(6);
         state.all_discards[2] = vec![Tile::new(Tile::Z7); 2];
-        state.my_hand = vec![Tile::new(Tile::Z7); 2]; // 合計4枚で中が枯れ
-        assert!(assess_threat(&state, 1, &test_config()).is_none());
+        state.my_hand = vec![Tile::new(Tile::Z7); 2]; // 公開2枚+手牌2枚（公開では枯れていない）
+        let threat = assess_threat(&state, 1, &test_config()).expect("kokushi signs");
+        assert!(threat.kokushi_alert, "自分の手牌を見切り判定に含めない");
 
         // 捨て牌4枚以下では判定しない
         let mut state = CpuGameState::new();
