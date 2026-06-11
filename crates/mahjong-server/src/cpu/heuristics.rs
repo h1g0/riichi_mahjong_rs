@@ -94,6 +94,12 @@ pub const DISCARD_HEURISTICS: &[DiscardHeuristic] = &[
         min_level: CpuLevel::Strong,
         apply: excess_pair_bonus,
     },
+    // #154/#155/#156: 七対子と一般形の路線選択に沿って打牌する（中以上）
+    DiscardHeuristic {
+        name: "follow-hand-route",
+        min_level: CpuLevel::Normal,
+        apply: route_lock_bonus,
+    },
 ];
 
 // ============================================================================
@@ -522,6 +528,101 @@ fn discard_adjustment_with(
         .sum()
 }
 
+/// 七対子と一般形のどちらを本線にするかを判定する（#154/#155/#156）
+///
+/// - 副露がある、または対子が4つ未満なら一般形（#154: 4トイツ未満で
+///   七対子を本線にしない）
+/// - 対子が4つ以上でも、一般形の方が近い場合や、連続対子などの
+///   複合形が多い場合は一般形を優先する（#155）
+/// - 字牌・么九牌・孤立した数牌対子（横に伸びにくい対子）が過半数なら
+///   七対子に向かう（#156）
+pub(crate) fn preferred_form(state: &CpuGameState) -> Form {
+    if !state.my_melds().is_empty() {
+        return Form::Normal;
+    }
+
+    let pairs = pair_types(state);
+    if pairs.len() < 4 {
+        return Form::Normal;
+    }
+
+    let mut all_tiles = state.my_hand.clone();
+    if let Some(drawn) = state.my_drawn {
+        all_tiles.push(drawn);
+    }
+    let hand = Hand::new(all_tiles.clone(), None);
+    let seven_pairs = calc_shanten_number_by_form(&hand, Form::SevenPairs);
+    let normal = calc_shanten_number_by_form(&hand, Form::Normal);
+    if seven_pairs > normal {
+        return Form::Normal;
+    }
+
+    // 対子の質: 横に伸びにくい対子が過半数なら七対子寄り
+    let mut counts = [0u8; 34];
+    for t in &all_tiles {
+        counts[t.get() as usize] += 1;
+    }
+    let stiff = pairs
+        .iter()
+        .filter(|&&tt| is_stiff_pair(&counts, tt))
+        .count();
+    if stiff * 2 > pairs.len() {
+        Form::SevenPairs
+    } else {
+        Form::Normal
+    }
+}
+
+/// 対子が「横に伸びにくい」か（#156）
+///
+/// 字牌・么九牌、または前後2つ以内に他の牌がない孤立した数牌対子は
+/// 順子化しにくく、七対子向きの対子として扱う。
+fn is_stiff_pair(counts: &[u8; 34], tile_type: TileType) -> bool {
+    if tile_type >= 27 {
+        return true; // 字牌
+    }
+    let pos = (tile_type % 9) as i32;
+    if pos == 0 || pos == 8 {
+        return true; // 么九牌
+    }
+    let suit_start = tile_type - tile_type % 9;
+    let near = |offset: i32| -> bool {
+        let q = pos + offset;
+        (0..9).contains(&q) && q != pos && counts[(suit_start + q as TileType) as usize] > 0
+    };
+    !(near(-2) || near(-1) || near(1) || near(2))
+}
+
+/// #154/#155/#156: 選択した路線（一般形/七対子）に沿わない打牌を減点する
+///
+/// 総合向聴数（全形のmin）は対子が増えるだけで七対子に引っ張られるため、
+/// 路線の形での向聴数と総合向聴数の差分をペナルティにして、
+/// 実質的に「選択路線の向聴数」で打牌をランク付けする。
+fn route_lock_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    if !ctx.attacking {
+        return 0.0;
+    }
+
+    let route = preferred_form(ctx.state);
+
+    // 候補を除いた残り手牌で、路線の形の向聴数を計算
+    let mut remaining = ctx.state.my_hand.clone();
+    if let Some(drawn) = ctx.state.my_drawn {
+        remaining.push(drawn);
+    }
+    let Some(pos) = remaining.iter().position(|t| *t == c.tile) else {
+        return 0.0;
+    };
+    remaining.remove(pos);
+
+    let hand = Hand::new_with_melds(remaining, ctx.state.my_melds_for_analysis(), None);
+    let target = calc_shanten_number_by_form(&hand, route);
+    let overall = calc_shanten_number(&hand);
+
+    let diff = (target.as_i32() - overall.as_i32()).max(0);
+    -(diff as f64) * 100.0
+}
+
 // ============================================================================
 // 鳴き判断の定石
 //
@@ -566,13 +667,14 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
         return CallJudgement::Forbid;
     }
 
-    // 役なし鳴き禁止（弱以上）
+    // 役なし鳴き禁止（弱以上）。対々和の見込みは中以上で #157 の条件を使う
     if let Some((hand_after, melds_after)) = hand_after_pon(ctx.state, called_tile)
         && !has_yaku_prospect(
             &hand_after,
             &melds_after,
             ctx.state.my_seat_wind,
             ctx.state.prevailing_wind,
+            ctx.config.level >= CpuLevel::Normal,
         )
     {
         return CallJudgement::Forbid;
@@ -607,13 +709,14 @@ pub fn judge_chi(ctx: &CallContext, called_tile: Tile, hand_tiles: [Tile; 2]) ->
         return CallJudgement::Forbid;
     }
 
-    // 役なし鳴き禁止（弱以上）
+    // 役なし鳴き禁止（弱以上）。対々和の見込みは中以上で #157 の条件を使う
     if let Some((hand_after, melds_after)) = hand_after_chi(ctx.state, called_tile, hand_tiles)
         && !has_yaku_prospect(
             &hand_after,
             &melds_after,
             ctx.state.my_seat_wind,
             ctx.state.prevailing_wind,
+            ctx.config.level >= CpuLevel::Normal,
         )
     {
         return CallJudgement::Forbid;
@@ -739,7 +842,11 @@ fn hand_after_chi(
 /// - 役牌: 手牌+副露に役牌が2枚以上ある
 /// - 断么九: 副露が全て中張牌で、手牌の么九牌が3枚以下（切って移行できる）
 /// - 混一色/清一色: 数牌が1色に収まっている
-/// - 対々和: 副露が全て刻子系で、手牌の浮き牌が2種以下
+/// - 対々和: 副露が全て刻子系で、刻子系ブロックが十分にある
+///
+/// `toitoi_by_blocks` が true（中以上, #157）の場合、対々和の見込みは
+/// 「副露 + 手牌の対子・刻子が4ブロック以上」を条件にする。
+/// false（弱）の場合は従来どおり浮き牌2種以下で判定する。
 ///
 /// チャンタ系などの稀な役は考慮しない（見込みなしと誤判定しても
 /// 「鳴かない」側に倒れるだけで安全）。
@@ -748,6 +855,7 @@ pub fn has_yaku_prospect(
     melds: &[Meld],
     seat_wind: Wind,
     prevailing_wind: Wind,
+    toitoi_by_blocks: bool,
 ) -> bool {
     // 手牌 + 副露の牌種ごとの枚数
     let mut counts = [0u8; 34];
@@ -794,15 +902,22 @@ pub fn has_yaku_prospect(
         .iter()
         .all(|m| matches!(m.category, MeldType::Pon | MeldType::Kan | MeldType::Kakan));
     if melds_all_triplets && !melds.is_empty() {
-        let hand_singles = {
-            let mut hand_counts = [0u8; 34];
-            for t in hand_tiles {
-                hand_counts[t.get() as usize] += 1;
+        let mut hand_counts = [0u8; 34];
+        for t in hand_tiles {
+            hand_counts[t.get() as usize] += 1;
+        }
+        if toitoi_by_blocks {
+            // #157（中以上）: 副露 + 手牌の対子・刻子で4ブロック以上あるときだけ
+            // 対々和を候補にする（2〜3トイツから無理に向かわない）
+            let pair_or_triplet_types = hand_counts.iter().filter(|&&c| c >= 2).count();
+            if melds.len() + pair_or_triplet_types >= 4 {
+                return true;
             }
-            hand_counts.iter().filter(|&&c| c == 1).count()
-        };
-        if hand_singles <= 2 {
-            return true;
+        } else {
+            let hand_singles = hand_counts.iter().filter(|&&c| c == 1).count();
+            if hand_singles <= 2 {
+                return true;
+            }
         }
     }
 
@@ -1345,6 +1460,204 @@ mod tests {
         assert_eq!(excess_pair_bonus(&ctx, &make_candidate(Tile::M5)), 0.0);
     }
 
+    // --- 七対子・対々和の路線判断（#154 #155 #156 #157）---
+
+    #[test]
+    fn test_preferred_form_normal_under_four_pairs() {
+        // #154: 3対子では七対子を本線にしない
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[
+            Tile::Z1,
+            Tile::Z1,
+            Tile::Z2,
+            Tile::Z2,
+            Tile::P3,
+            Tile::P3,
+            Tile::M8,
+            Tile::M9,
+            Tile::S4,
+            Tile::S5,
+            Tile::M1,
+            Tile::P9,
+            Tile::S9,
+        ]);
+        assert_eq!(preferred_form(&state), Form::Normal);
+    }
+
+    #[test]
+    fn test_preferred_form_seven_pairs_with_stiff_pairs() {
+        // #156: 字牌・么九牌・孤立対子が4つ → 七対子寄り
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[
+            Tile::Z1,
+            Tile::Z1,
+            Tile::Z5,
+            Tile::Z5,
+            Tile::M9,
+            Tile::M9,
+            Tile::P1,
+            Tile::P1,
+            Tile::S4,
+            Tile::S5,
+            Tile::M2,
+            Tile::P5,
+            Tile::S9,
+        ]);
+        assert_eq!(preferred_form(&state), Form::SevenPairs);
+    }
+
+    #[test]
+    fn test_preferred_form_normal_with_flexible_pairs() {
+        // #155: 連続対子（M334455）は順子手としての伸びが強い → 一般形
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[
+            Tile::M3,
+            Tile::M3,
+            Tile::M4,
+            Tile::M4,
+            Tile::M5,
+            Tile::M5,
+            Tile::P6,
+            Tile::P6,
+            Tile::S2,
+            Tile::S3,
+            Tile::S7,
+            Tile::S8,
+            Tile::Z3,
+        ]);
+        assert_eq!(preferred_form(&state), Form::Normal);
+    }
+
+    #[test]
+    fn test_preferred_form_normal_with_melds() {
+        // 副露があれば七対子は不可能
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[
+            Tile::Z1,
+            Tile::Z1,
+            Tile::Z5,
+            Tile::Z5,
+            Tile::M9,
+            Tile::M9,
+            Tile::P1,
+            Tile::P1,
+            Tile::S4,
+            Tile::S5,
+        ]);
+        state.player_melds[0] = vec![pon_meld(Tile::S9)];
+        assert_eq!(preferred_form(&state), Form::Normal);
+    }
+
+    #[test]
+    fn test_is_stiff_pair() {
+        let mut counts = [0u8; 34];
+        counts[Tile::Z1 as usize] = 2; // 字牌対子
+        counts[Tile::M9 as usize] = 2; // 么九対子
+        counts[Tile::P5 as usize] = 2; // 孤立した中張対子
+        counts[Tile::S5 as usize] = 2; // 周囲に牌がある中張対子
+        counts[Tile::S6 as usize] = 1;
+
+        assert!(is_stiff_pair(&counts, Tile::Z1));
+        assert!(is_stiff_pair(&counts, Tile::M9));
+        assert!(is_stiff_pair(&counts, Tile::P5));
+        assert!(!is_stiff_pair(&counts, Tile::S5), "S6が隣にあるので伸びる");
+    }
+
+    #[test]
+    fn test_route_lock_penalizes_off_route_discards() {
+        // #154: 3対子（七対子の方が向聴数は近い）でも一般形を選び、
+        // ターツを壊す打牌（七対子追従）にペナルティを与える
+        let mut state = CpuGameState::new();
+        // 対子: Z1Z1 Z2Z2 P3P3（3つ）+ ターツ M8M9 S4S5 + 浮き牌
+        state.my_hand = tiles(&[
+            Tile::Z1,
+            Tile::Z1,
+            Tile::Z2,
+            Tile::Z2,
+            Tile::P3,
+            Tile::P3,
+            Tile::M8,
+            Tile::M9,
+            Tile::S4,
+            Tile::S5,
+            Tile::M1,
+            Tile::P9,
+            Tile::S9,
+        ]);
+        state.my_drawn = Some(Tile::new(Tile::M5));
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+
+        // ターツ(M8M9)を壊す打牌は一般形視点で損 → 大きなペナルティ
+        let break_taatsu = route_lock_bonus(&ctx, &make_candidate(Tile::M8));
+        // 浮き牌を切る打牌は両形でロスなし → ペナルティなし
+        let cut_float = route_lock_bonus(&ctx, &make_candidate(Tile::M1));
+        assert!(
+            break_taatsu < cut_float,
+            "ターツ壊し({break_taatsu}) < 浮き牌切り({cut_float}) のはず"
+        );
+        assert_eq!(cut_float, 0.0);
+    }
+
+    #[test]
+    fn test_route_lock_follows_seven_pairs_route() {
+        // 七対子路線では、一般形へドリフトする打牌（対子壊し）にペナルティを与える。
+        // 対子壊しによる向聴数自体の悪化は基礎スコアが罰するため、
+        // ここでは一般形のバックアップがある手（向聴数が変わらない打牌）で
+        // ルートロックの差分が出ることを確認する。
+        let mut state = CpuGameState::new();
+        // 硬い対子4つ + 完成面子 + ターツ → 七対子・一般形とも2向聴
+        state.my_hand = tiles(&[
+            Tile::Z1,
+            Tile::Z1,
+            Tile::Z5,
+            Tile::Z5,
+            Tile::M9,
+            Tile::M9,
+            Tile::P1,
+            Tile::P1,
+            Tile::S4,
+            Tile::S5,
+            Tile::S6,
+            Tile::S7,
+            Tile::S8,
+        ]);
+        state.my_drawn = Some(Tile::new(Tile::M2));
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(preferred_form(&state), Form::SevenPairs);
+
+        // 対子壊しは総合向聴数こそ保つ（一般形2向聴のまま）が、
+        // 七対子からは遠ざかる → ペナルティ
+        let break_pair = route_lock_bonus(&ctx, &make_candidate(Tile::Z1));
+        // 浮き牌切りは両形ともロスなし
+        let cut_float = route_lock_bonus(&ctx, &make_candidate(Tile::M2));
+        assert!(
+            break_pair < cut_float,
+            "対子壊し({break_pair}) < 浮き牌切り({cut_float}) のはず"
+        );
+        assert_eq!(cut_float, 0.0);
+    }
+
+    #[test]
+    fn test_toitoi_prospect_by_blocks() {
+        // #157: 中以上では副露+対子・刻子が4ブロック以上で対々和候補
+        let seat = Wind::East;
+        let prev = Wind::East;
+
+        // 3ブロック（副露2 + 対子1）+ 浮き牌多数 → 見込みなし
+        let hand = tiles(&[Tile::P1, Tile::P1, Tile::M2, Tile::S3, Tile::M6, Tile::P7]);
+        let melds = vec![pon_meld(Tile::M9), pon_meld(Tile::S9)];
+        assert!(!has_yaku_prospect(&hand, &melds, seat, prev, true));
+
+        // 4ブロック（副露2 + 対子2）→ 対々和の見込みあり
+        let hand = tiles(&[Tile::P1, Tile::P1, Tile::S3, Tile::S3, Tile::M2, Tile::M6]);
+        assert!(has_yaku_prospect(&hand, &melds, seat, prev, true));
+
+        // 弱（従来ルール）: 浮き牌2種以下なら見込みあり
+        assert!(has_yaku_prospect(&hand, &melds, seat, prev, false));
+    }
+
     // --- has_yaku_prospect ---
 
     fn tiles(types: &[u32]) -> Vec<Tile> {
@@ -1374,7 +1687,13 @@ mod tests {
         // 白の対子があれば役牌の見込みあり
         let hand = tiles(&[Tile::Z5, Tile::Z5, Tile::M1, Tile::M9, Tile::P1, Tile::S9]);
         let melds = vec![chi_meld(Tile::P2)];
-        assert!(has_yaku_prospect(&hand, &melds, Wind::East, Wind::East));
+        assert!(has_yaku_prospect(
+            &hand,
+            &melds,
+            Wind::East,
+            Wind::East,
+            false
+        ));
     }
 
     #[test]
@@ -1382,7 +1701,13 @@ mod tests {
         // 副露も手牌も中張牌中心なら断么九の見込みあり
         let hand = tiles(&[Tile::M2, Tile::M3, Tile::P4, Tile::P5, Tile::S6, Tile::M9]);
         let melds = vec![chi_meld(Tile::S2)];
-        assert!(has_yaku_prospect(&hand, &melds, Wind::East, Wind::East));
+        assert!(has_yaku_prospect(
+            &hand,
+            &melds,
+            Wind::East,
+            Wind::East,
+            false
+        ));
     }
 
     #[test]
@@ -1390,7 +1715,13 @@ mod tests {
         // 萬子+字牌のみなら混一色の見込みあり
         let hand = tiles(&[Tile::M1, Tile::M2, Tile::M3, Tile::M7, Tile::Z2, Tile::Z3]);
         let melds = vec![chi_meld(Tile::M4)];
-        assert!(has_yaku_prospect(&hand, &melds, Wind::East, Wind::East));
+        assert!(has_yaku_prospect(
+            &hand,
+            &melds,
+            Wind::East,
+            Wind::East,
+            false
+        ));
     }
 
     #[test]
@@ -1398,7 +1729,13 @@ mod tests {
         // 副露が全て刻子で手牌が対子中心なら対々和の見込みあり
         let hand = tiles(&[Tile::M9, Tile::M9, Tile::P1, Tile::P1, Tile::S9]);
         let melds = vec![pon_meld(Tile::M1), pon_meld(Tile::S1)];
-        assert!(has_yaku_prospect(&hand, &melds, Wind::East, Wind::East));
+        assert!(has_yaku_prospect(
+            &hand,
+            &melds,
+            Wind::East,
+            Wind::East,
+            false
+        ));
     }
 
     #[test]
@@ -1418,7 +1755,13 @@ mod tests {
             Tile::S7,
         ]);
         let melds = vec![pon_meld(Tile::M9)];
-        assert!(!has_yaku_prospect(&hand, &melds, Wind::East, Wind::East));
+        assert!(!has_yaku_prospect(
+            &hand,
+            &melds,
+            Wind::East,
+            Wind::East,
+            false
+        ));
     }
 
     // --- judge_pon ---
