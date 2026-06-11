@@ -11,6 +11,7 @@ use mahjong_core::tile::Tile;
 use crate::protocol::{AvailableCall, ClientAction, ServerEvent};
 
 use super::evaluator;
+use super::heuristics;
 use super::state::CpuGameState;
 
 /// CPUの強さレベル
@@ -310,7 +311,7 @@ impl CpuClient {
         }
 
         // 暗カンがある場合も正しく判定できるよう、副露を含めて向聴数を計算する
-        let melds = self.build_existing_melds();
+        let melds = self.state.my_melds_for_analysis();
         let mut best: Option<(Tile, f64)> = None;
 
         for (i, &tile) in all_tiles.iter().enumerate() {
@@ -357,12 +358,22 @@ impl CpuClient {
             counts[tile.get() as usize] += 1;
         }
 
+        let ctx = heuristics::CallContext {
+            state: &self.state,
+            config: &self.config,
+        };
+
         for (tile_type, &count) in counts.iter().enumerate() {
             if count == 4 {
-                // 暗カンしてもテンパイが崩れないか確認
-                // （簡易的に: Strong以外は常にカン、Strongは向聴数を確認）
-                if self.config.level == CpuLevel::Strong {
-                    // 暗カン後の手牌で向聴数を確認（簡易チェック）
+                // 定石判定（中以上）: 手を壊すカン・他家リーチ後のカンを抑制
+                if heuristics::judge_ankan(&ctx, tile_type as u32)
+                    == heuristics::CallJudgement::Forbid
+                {
+                    continue;
+                }
+
+                // 定石無効時の従来動作: Strongのみテンパイ維持を確認
+                if !self.config.heuristics_enabled && self.config.level == CpuLevel::Strong {
                     let remaining: Vec<Tile> = all_tiles
                         .iter()
                         .filter(|t| t.get() != tile_type as u32)
@@ -373,6 +384,7 @@ impl CpuClient {
                         continue; // テンパイが崩れるのでカンしない
                     }
                 }
+
                 return Some(ClientAction::Kan {
                     tile_index: tile_type,
                 });
@@ -442,18 +454,30 @@ impl CpuClient {
             None => return false,
         };
 
-        // Weakレベル: 向聴数が下がるなら常に鳴く
+        // 向聴数が下がらないポンはしない（全レベル共通）
+        if !self.call_reduces_shanten_pon(called_tile) {
+            return false;
+        }
+
+        // 定石判定: 役なし鳴き禁止・裸単騎回避・役牌早ポン
+        // （定石無効時は Neutral が返り、従来の判断に進む）
+        let ctx = heuristics::CallContext {
+            state: &self.state,
+            config: &self.config,
+        };
+        match heuristics::judge_pon(&ctx, called_tile) {
+            heuristics::CallJudgement::Forbid => return false,
+            heuristics::CallJudgement::Encourage => return true,
+            heuristics::CallJudgement::Neutral => {}
+        }
+
+        // Weakレベル: 向聴数が下がるなら鳴く
         if self.config.level == CpuLevel::Weak {
-            return self.call_reduces_shanten_pon(called_tile);
+            return true;
         }
 
         // 鳴き積極度が低ければパス
         if params.call_aggressiveness < 0.3 {
-            return false;
-        }
-
-        // 向聴数が下がるか
-        if !self.call_reduces_shanten_pon(called_tile) {
             return false;
         }
 
@@ -493,10 +517,21 @@ impl CpuClient {
         }
 
         let called_tile = self.state.pending_call_tile?;
+        let ctx = heuristics::CallContext {
+            state: &self.state,
+            config: &self.config,
+        };
 
         // 各選択肢で向聴数が下がるか確認
         for &opt in options {
             if self.call_reduces_shanten_chi(called_tile, opt) {
+                // 定石判定: 役なし鳴き禁止・裸単騎回避
+                match heuristics::judge_chi(&ctx, called_tile, opt) {
+                    heuristics::CallJudgement::Forbid => continue,
+                    heuristics::CallJudgement::Encourage => return Some(opt),
+                    heuristics::CallJudgement::Neutral => {}
+                }
+
                 // Speedy型は積極的にチー
                 if self.config.personality == CpuPersonality::Speedy {
                     return Some(opt);
@@ -509,22 +544,6 @@ impl CpuClient {
         }
 
         None
-    }
-
-    /// 既存の副露を取得する
-    fn build_existing_melds(&self) -> Vec<Meld> {
-        let my_idx = super::state::CpuGameState::wind_to_index(self.state.my_seat_wind);
-        self.state.player_melds[my_idx]
-            .iter()
-            .map(|open| {
-                // 手分析用に3枚に切り詰め
-                let mut o = open.clone();
-                if o.tiles.len() > 3 {
-                    o.tiles.truncate(3);
-                }
-                o
-            })
-            .collect()
     }
 
     /// ポンした場合に向聴数が下がるか
@@ -551,7 +570,7 @@ impl CpuClient {
         }
 
         // 既存の副露 + 今回のポンを含めた Hand を作成
-        let mut melds = self.build_existing_melds();
+        let mut melds = self.state.my_melds_for_analysis();
         melds.push(Meld {
             tiles: vec![called_tile, called_tile, called_tile],
             category: MeldType::Pon,
@@ -580,7 +599,7 @@ impl CpuClient {
         }
 
         // 既存の副露 + 今回のチーを含めた Hand を作成
-        let mut melds = self.build_existing_melds();
+        let mut melds = self.state.my_melds_for_analysis();
         melds.push(Meld {
             tiles: vec![called_tile, chi_tiles_for_meld[0], chi_tiles_for_meld[1]],
             category: MeldType::Chi,
@@ -594,7 +613,7 @@ impl CpuClient {
 }
 
 /// 役牌かどうか判定
-fn is_yakuhai(
+pub(crate) fn is_yakuhai(
     tile_type: u32,
     seat_wind: mahjong_core::tile::Wind,
     prevailing_wind: mahjong_core::tile::Wind,
@@ -1159,6 +1178,256 @@ mod tests {
         });
 
         assert!(matches!(action, Some(ClientAction::Pass)));
+    }
+
+    /// 役なしになる鳴きの機会を作る共通手牌（M9ポンで向聴数は下がるが役がない）
+    ///
+    /// 浮き牌は客風牌（南家にとって役牌でない Z3/Z4）にして、
+    /// 数牌の再分解による意図しない聴牌を防ぐ。
+    fn yakuless_pon_hand() -> Vec<Tile> {
+        vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::Z3),
+            Tile::new(Tile::Z4),
+        ]
+    }
+
+    fn pon_call_event(tile_type: u32) -> ServerEvent {
+        ServerEvent::CallAvailable {
+            tile: Tile::new(tile_type),
+            discarder: Wind::East,
+            calls: vec![AvailableCall::Pon {
+                options: vec![[Tile::new(tile_type), Tile::new(tile_type)]],
+            }],
+        }
+    }
+
+    #[test]
+    fn test_pass_on_yakuless_pon() {
+        // #162: 向聴数が下がっても役の見込みがない鳴きはしない
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(Wind::South, yakuless_pon_hand()));
+        let action = client.handle_event(&pon_call_event(Tile::M9));
+
+        assert!(matches!(action, Some(ClientAction::Pass)));
+    }
+
+    #[test]
+    fn test_yakuless_pon_called_without_heuristics() {
+        // 定石無効時は従来どおり鳴く（A/B比較のベースライン維持）
+        let config =
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(Wind::South, yakuless_pon_hand()));
+        let action = client.handle_event(&pon_call_event(Tile::M9));
+
+        assert!(matches!(action, Some(ClientAction::Pon { .. })));
+    }
+
+    #[test]
+    fn test_weak_level_also_avoids_yakuless_pon() {
+        // #162 は弱以上: Weakレベルでも役なし鳴きはしない
+        let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(Wind::South, yakuless_pon_hand()));
+        let action = client.handle_event(&pon_call_event(Tile::M9));
+
+        assert!(matches!(action, Some(ClientAction::Pass)));
+    }
+
+    #[test]
+    fn test_high_value_pons_yakuhai() {
+        // #163: 役牌対子のポンは性格（鳴き積極度）によらず行う
+        let hand = vec![
+            Tile::new(Tile::Z5),
+            Tile::new(Tile::Z5),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::P5),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::S2),
+            Tile::new(Tile::M7),
+            Tile::new(Tile::M8),
+            Tile::new(Tile::S9),
+        ];
+
+        // HighValue は鳴き積極度 0.2 で、従来は役牌すら鳴かなかった
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::HighValue);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::South, hand.clone()));
+        let action = client.handle_event(&pon_call_event(Tile::Z5));
+        assert!(matches!(action, Some(ClientAction::Pon { .. })));
+
+        // 定石無効時は従来どおりパス
+        let config =
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::HighValue).without_heuristics();
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::South, hand));
+        let action = client.handle_event(&pon_call_event(Tile::Z5));
+        assert!(matches!(action, Some(ClientAction::Pass)));
+    }
+
+    #[test]
+    fn test_pass_on_pon_leading_to_naked_tanki() {
+        // #166: 4副露目（裸単騎）になるポンはしない
+        let hand = vec![
+            Tile::new(Tile::S3),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::M5),
+            Tile::new(Tile::M9),
+        ];
+        let melds = vec![
+            Meld {
+                tiles: vec![
+                    Tile::new(Tile::M1),
+                    Tile::new(Tile::M2),
+                    Tile::new(Tile::M3),
+                ],
+                category: MeldType::Chi,
+                from: MeldFrom::Previous,
+                called_tile: Some(Tile::new(Tile::M1)),
+            },
+            Meld {
+                tiles: vec![Tile::new(Tile::P5); 3],
+                category: MeldType::Pon,
+                from: MeldFrom::Unknown,
+                called_tile: Some(Tile::new(Tile::P5)),
+            },
+            Meld {
+                tiles: vec![Tile::new(Tile::S9); 3],
+                category: MeldType::Pon,
+                from: MeldFrom::Unknown,
+                called_tile: Some(Tile::new(Tile::S9)),
+            },
+        ];
+
+        // 定石有効: パス
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand.clone()));
+        client.state.player_melds[0] = melds.clone();
+        let action = client.handle_event(&pon_call_event(Tile::S3));
+        assert!(matches!(action, Some(ClientAction::Pass)));
+
+        // 定石無効: 従来どおり鳴く
+        let config =
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand));
+        client.state.player_melds[0] = melds;
+        let action = client.handle_event(&pon_call_event(Tile::S3));
+        assert!(matches!(action, Some(ClientAction::Pon { .. })));
+    }
+
+    #[test]
+    fn test_normal_level_avoids_hand_breaking_ankan() {
+        // #167: 手を壊すカン（向聴数が悪化）は中レベル以上では行わない
+        let hand = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::S4),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z3),
+        ];
+        let draw_event = ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::S5),
+            remaining_tiles: 40,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        };
+
+        // 定石有効: S5×4 は S456+S555 に使われているのでカンせず打牌
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand.clone()));
+        let action = client.handle_event(&draw_event);
+        assert!(
+            matches!(action, Some(ClientAction::Discard { .. })),
+            "expected discard instead of hand-breaking kan, got {action:?}"
+        );
+
+        // 定石無効: 従来の Normal はカンしてしまう
+        let config =
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand));
+        let action = client.handle_event(&draw_event);
+        assert!(matches!(action, Some(ClientAction::Kan { .. })));
+    }
+
+    #[test]
+    fn test_ankan_suppressed_during_opponent_riichi() {
+        // #167: 他家リーチ中、聴牌維持にならないカンはしない
+        let hand = vec![
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M4),
+            Tile::new(Tile::M6),
+            Tile::new(Tile::M7),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z2),
+        ];
+        let draw_event = ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::M5),
+            remaining_tiles: 40,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        };
+
+        // リーチなし: 向聴数を保つカンなので実行する
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand.clone()));
+        let action = client.handle_event(&draw_event);
+        assert!(matches!(action, Some(ClientAction::Kan { .. })));
+
+        // 他家リーチあり: カン後も聴牌しないのでカンしない
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+        client.handle_event(&game_started_event(Wind::East, hand));
+        client.handle_event(&ServerEvent::PlayerRiichi {
+            player: Wind::West,
+            scores: [25000, 25000, 24000, 25000],
+            riichi_sticks: 1,
+        });
+        let action = client.handle_event(&draw_event);
+        assert!(
+            matches!(action, Some(ClientAction::Discard { .. })),
+            "expected discard instead of kan during opponent riichi, got {action:?}"
+        );
     }
 
     #[test]
