@@ -1228,6 +1228,50 @@ mod tests {
     }
 
     #[test]
+    fn test_six_block_hand_dismantles_dead_kanchan_first() {
+        // #149/#151/#153 の連動:
+        // 6ブロック（M234 S789 Z5Z5 P1P2 S2S4 P78）の手で、
+        // S3が3枚見えて死んだ嵌張(S2S4)を最優先で整理する。
+        // 両面(P78)と唯一の雀頭(Z5Z5)は守る。
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let mut client = CpuClient::new(config);
+
+        client.handle_event(&game_started_event(
+            Wind::South,
+            vec![
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M4),
+                Tile::new(Tile::S7),
+                Tile::new(Tile::S8),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::Z5),
+                Tile::new(Tile::Z5),
+                Tile::new(Tile::P1),
+                Tile::new(Tile::P2),
+                Tile::new(Tile::S2),
+                Tile::new(Tile::S4),
+                Tile::new(Tile::P7),
+            ],
+        ));
+        // S3 が3枚場に出る → S2S4 は死にターツ
+        for _ in 0..3 {
+            client.handle_event(&ServerEvent::TileDiscarded {
+                player: Wind::West,
+                tile: Tile::new(Tile::S3),
+                is_tsumogiri: true,
+            });
+        }
+        let action = client.handle_event(&draw_event(Tile::P8));
+
+        let tile = discarded_tile(&action).expect("expected a hand discard");
+        assert!(
+            tile.get() == Tile::S2 || tile.get() == Tile::S4,
+            "死に嵌張(S2S4)を整理すべき, got {tile:?}"
+        );
+    }
+
+    #[test]
     fn test_nine_terminals_high_value_continues() {
         // HighValue は国士狙いで続行（declare=false）
         let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue);

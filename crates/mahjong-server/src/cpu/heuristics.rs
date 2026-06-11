@@ -8,9 +8,10 @@
 //! レベルごとの有効/無効切り替えと定石単位のテストを可能にする。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::hand_analyzer::calc_shanten_number;
+use mahjong_core::hand_info::hand_analyzer::{calc_shanten_number, calc_shanten_number_by_form};
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
+use mahjong_core::winning_hand::name::Form;
 
 use super::client::{CpuConfig, CpuLevel, is_yakuhai};
 use super::evaluator::{DiscardCandidate, get_yakuhai_types};
@@ -68,6 +69,30 @@ pub const DISCARD_HEURISTICS: &[DiscardHeuristic] = &[
         name: "genbutsu-first-when-defending",
         min_level: CpuLevel::Weak,
         apply: defense_safety_bonus,
+    },
+    // #149: 一般形では5ブロックを意識する（中以上）
+    DiscardHeuristic {
+        name: "five-block-surplus",
+        min_level: CpuLevel::Normal,
+        apply: five_block_bonus,
+    },
+    // #151: 唯一の雀頭候補を安易に壊さない（中以上）
+    DiscardHeuristic {
+        name: "protect-sole-pair",
+        min_level: CpuLevel::Normal,
+        apply: sole_pair_protection,
+    },
+    // #153: 見えている枚数で有効牌を補正する（中以上）
+    DiscardHeuristic {
+        name: "dismantle-dead-shapes",
+        min_level: CpuLevel::Normal,
+        apply: dead_shape_bonus,
+    },
+    // #150: 3対子以上は原則としてほぐす（強以上）
+    DiscardHeuristic {
+        name: "break-excess-pairs",
+        min_level: CpuLevel::Strong,
+        apply: excess_pair_bonus,
     },
 ];
 
@@ -210,6 +235,267 @@ fn defense_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
         return 0.0;
     }
     c.safety * 300.0
+}
+
+/// 手牌全体（ツモ込み・副露込み）のブロック数を数える
+///
+/// ブロック = 面子（副露含む）+ 対子 + ターツ。
+/// 和了形は4面子1雀頭 = 5ブロックなので、6以上は持ちすぎ。
+///
+/// `HandAnalyzer` の分解は向聴数計算に必要な5ブロックまでしか記録しない
+/// （余剰ブロックは孤立牌扱いになる）ため、ここでは牌種カウントから
+/// 貪欲に数える。刻子 → 順子 → 対子 → ターツの順に取り出す。
+fn count_blocks(state: &CpuGameState) -> usize {
+    let mut counts = [0u8; 34];
+    for t in &state.my_hand {
+        counts[t.get() as usize] += 1;
+    }
+    if let Some(drawn) = state.my_drawn {
+        counts[drawn.get() as usize] += 1;
+    }
+
+    let mut blocks = state.my_melds().len();
+
+    // 刻子
+    for c in counts.iter_mut() {
+        if *c >= 3 {
+            *c -= 3;
+            blocks += 1;
+        }
+    }
+
+    // 順子（数牌のみ、昇順に貪欲）
+    for suit_start in [0usize, 9, 18] {
+        for pos in 0..7 {
+            let i = suit_start + pos;
+            while counts[i] > 0 && counts[i + 1] > 0 && counts[i + 2] > 0 {
+                counts[i] -= 1;
+                counts[i + 1] -= 1;
+                counts[i + 2] -= 1;
+                blocks += 1;
+            }
+        }
+    }
+
+    // 対子
+    for c in counts.iter_mut() {
+        if *c >= 2 {
+            *c -= 2;
+            blocks += 1;
+        }
+    }
+
+    // ターツ（隣接・嵌張。数牌のみ、昇順に貪欲）
+    for suit_start in [0usize, 9, 18] {
+        for pos in 0..8 {
+            let i = suit_start + pos;
+            if counts[i] > 0 && counts[i + 1] > 0 {
+                counts[i] -= 1;
+                counts[i + 1] -= 1;
+                blocks += 1;
+            } else if pos < 7 && counts[i] > 0 && counts[i + 2] > 0 {
+                counts[i] -= 1;
+                counts[i + 2] -= 1;
+                blocks += 1;
+            }
+        }
+    }
+
+    blocks
+}
+
+/// 手牌中で「ちょうど2枚」ある牌種（対子）のリストを返す
+///
+/// 3枚以上は刻子（またはカン材）とみなして含めない。
+fn pair_types(state: &CpuGameState) -> Vec<TileType> {
+    let mut counts = [0u8; 34];
+    for t in &state.my_hand {
+        counts[t.get() as usize] += 1;
+    }
+    if let Some(d) = state.my_drawn {
+        counts[d.get() as usize] += 1;
+    }
+    counts
+        .iter()
+        .enumerate()
+        .filter(|&(_, &c)| c == 2)
+        .map(|(i, _)| i as TileType)
+        .collect()
+}
+
+/// #149: 6ブロック以上の手では弱いブロック（愚形ターツ・余剰対子）を整理する
+fn five_block_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    if !ctx.attacking {
+        return 0.0;
+    }
+    if count_blocks(ctx.state) < 6 {
+        return 0.0;
+    }
+
+    let tt = c.tile.get();
+    let counts = remaining_counts(ctx.state, c.tile);
+
+    // 余剰対子: 対子が2つ以上あれば、1つは整理してよい
+    if counts[tt as usize] == 1 && pair_types(ctx.state).len() >= 2 {
+        return 4.0;
+    }
+
+    // 愚形ターツ（辺張・嵌張）の構成牌
+    if tt < 27 && counts[tt as usize] == 0 {
+        let pos = (tt % 9) as i32;
+        let suit_start = tt - tt % 9;
+        let has = |offset: i32| -> bool {
+            let q = pos + offset;
+            (0..9).contains(&q) && counts[(suit_start + q as TileType) as usize] > 0
+        };
+        let lower = has(-1);
+        let upper = has(1);
+        if lower != upper {
+            // 2枚ターツ: 辺張なら整理対象
+            let pair_low = if lower { pos - 1 } else { pos };
+            if !(1..=6).contains(&pair_low) {
+                return 6.0;
+            }
+        } else if !lower && !upper && (has(-2) || has(2)) {
+            // 嵌張も整理対象
+            return 6.0;
+        }
+    }
+
+    0.0
+}
+
+/// #151: 唯一の雀頭候補（対子が1つだけ）の牌は壊さない
+fn sole_pair_protection(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    if !ctx.attacking {
+        return 0.0;
+    }
+
+    let pairs = pair_types(ctx.state);
+    if pairs.len() != 1 || pairs[0] != c.tile.get() {
+        return 0.0;
+    }
+
+    // 刻子があれば雀頭候補は他にもある
+    let mut counts = [0u8; 34];
+    for t in &ctx.state.my_hand {
+        counts[t.get() as usize] += 1;
+    }
+    if let Some(d) = ctx.state.my_drawn {
+        counts[d.get() as usize] += 1;
+    }
+    if counts.iter().any(|&n| n >= 3) {
+        return 0.0;
+    }
+
+    -12.0
+}
+
+/// #153: 受け牌がほぼ枯れている形（死にターツ）は整理する
+///
+/// 嵌張・辺張は待ち1種なので、残り1枚以下なら死にターツとして扱う。
+/// 両面も両方の待ちが計2枚以下なら同様に扱う。
+fn dead_shape_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    if !ctx.attacking {
+        return 0.0;
+    }
+
+    let tt = c.tile.get();
+    if tt >= 27 {
+        return 0.0;
+    }
+
+    let counts = remaining_counts(ctx.state, c.tile);
+    if counts[tt as usize] > 0 {
+        return 0.0; // 対子・刻子側は対象外
+    }
+
+    let pos = (tt % 9) as i32;
+    let suit_start = tt - tt % 9;
+    let has = |offset: i32| -> bool {
+        let q = pos + offset;
+        (0..9).contains(&q) && counts[(suit_start + q as TileType) as usize] > 0
+    };
+
+    let visible = ctx.state.visible_tile_counts();
+    let remaining_of = |p: i32| -> u32 {
+        if (0..9).contains(&p) {
+            4u32.saturating_sub(visible[(suit_start + p as TileType) as usize] as u32)
+        } else {
+            0
+        }
+    };
+
+    let lower = has(-1);
+    let upper = has(1);
+
+    if lower && upper {
+        return 0.0; // 順子の真ん中
+    }
+
+    if lower || upper {
+        // 隣接2枚ターツ: 両面は両端、辺張は片端のみが待ち
+        let pair_low = if lower { pos - 1 } else { pos };
+        let waits = remaining_of(pair_low - 1) + remaining_of(pair_low + 2);
+        if waits <= 1 {
+            return 10.0;
+        }
+        if waits <= 2 {
+            return 4.0;
+        }
+        return 0.0;
+    }
+
+    if has(-2) || has(2) {
+        // 嵌張: 真ん中の1種のみが待ち
+        let mid = if has(-2) { pos - 1 } else { pos + 1 };
+        let waits = remaining_of(mid);
+        if waits <= 1 {
+            return 10.0;
+        }
+        if waits <= 2 {
+            return 4.0;
+        }
+    }
+
+    0.0
+}
+
+/// #150: 3対子以上は順子化しやすい対子からほぐす（強以上）
+///
+/// 一般形が七対子より明確に近い場合のみ適用する。
+/// 中張牌の対子は残った1枚が両面候補になるため、ほぐす優先度が高い。
+/// 字牌対子はポン材・雀頭として残す。
+fn excess_pair_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
+    if !ctx.attacking {
+        return 0.0;
+    }
+
+    let pairs = pair_types(ctx.state);
+    if pairs.len() < 3 || !pairs.contains(&c.tile.get()) {
+        return 0.0;
+    }
+
+    // 七対子の方が近い（または同等の）手はほぐさない
+    let mut all_tiles = ctx.state.my_hand.clone();
+    if let Some(drawn) = ctx.state.my_drawn {
+        all_tiles.push(drawn);
+    }
+    let hand = Hand::new_with_melds(all_tiles, ctx.state.my_melds_for_analysis(), None);
+    let normal = calc_shanten_number_by_form(&hand, Form::Normal);
+    let seven_pairs = calc_shanten_number_by_form(&hand, Form::SevenPairs);
+    if seven_pairs <= normal {
+        return 0.0;
+    }
+
+    let tt = c.tile.get();
+    if tt >= 27 {
+        return 0.0; // 字牌対子は残す
+    }
+    match tt % 9 {
+        0 | 8 => 3.0, // 1/9 の対子
+        _ => 5.0,     // 中張牌の対子は順子材として残った1枚が活きる
+    }
 }
 
 /// 打牌候補1つに対して、有効な全定石の補正値を合算する
@@ -783,6 +1069,280 @@ mod tests {
         candidate.safety = 0.15;
         let dangerous = defense_safety_bonus(&defending, &candidate);
         assert!(300.0 - dangerous > 200.0);
+    }
+
+    // --- ブロック理論（#149 #150 #151 #153）---
+
+    /// 6ブロックの手牌（2面子 + 嵌張 + 両面 + 両面 + 対子）
+    fn six_block_state() -> CpuGameState {
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::M4,
+            Tile::M7,
+            Tile::M8,
+            Tile::M9,
+            Tile::P1,
+            Tile::P3,
+            Tile::S6,
+            Tile::S7,
+            Tile::S2,
+            Tile::S3,
+            Tile::Z5,
+        ]);
+        state.my_drawn = Some(Tile::new(Tile::Z5));
+        state
+    }
+
+    #[test]
+    fn test_count_blocks() {
+        let state = six_block_state();
+        // M234 + M789 + P1P3 + S67 + S23 + Z5Z5 = 6ブロック
+        assert_eq!(count_blocks(&state), 6);
+
+        // 5ブロックの手牌
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::M4,
+            Tile::P4,
+            Tile::P5,
+            Tile::P6,
+            Tile::S4,
+            Tile::S5,
+            Tile::S6,
+            Tile::M9,
+            Tile::M9,
+            Tile::P9,
+            Tile::Z3,
+        ]);
+        state.my_drawn = Some(Tile::new(Tile::S9));
+        assert_eq!(count_blocks(&state), 4); // 3面子 + 対子（浮き牌は数えない）
+    }
+
+    #[test]
+    fn test_five_block_bonus_dismantles_weak_blocks() {
+        let state = six_block_state();
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+
+        let bonus = |t: u32| five_block_bonus(&ctx, &make_candidate(t));
+
+        // 嵌張の構成牌は整理対象
+        assert!(bonus(Tile::P1) > 0.0);
+        assert!(bonus(Tile::P3) > 0.0);
+        // 両面は対象外
+        assert_eq!(bonus(Tile::S6), 0.0);
+        assert_eq!(bonus(Tile::S2), 0.0);
+        // 対子は1つしかないので余剰対子扱いしない
+        assert_eq!(bonus(Tile::Z5), 0.0);
+    }
+
+    #[test]
+    fn test_five_block_bonus_inactive_under_six_blocks() {
+        // 5ブロック以下なら嵌張でも補正しない
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::M4,
+            Tile::M7,
+            Tile::M8,
+            Tile::M9,
+            Tile::P1,
+            Tile::P3,
+            Tile::S6,
+            Tile::S7,
+            Tile::Z5,
+        ]);
+        state.my_drawn = Some(Tile::new(Tile::Z5));
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(five_block_bonus(&ctx, &make_candidate(Tile::P1)), 0.0);
+    }
+
+    #[test]
+    fn test_five_block_bonus_surplus_pair() {
+        // 6ブロックで対子が2つあれば、対子の整理も許容する
+        let mut state = six_block_state();
+        // S23 を S3S3 に変えて対子2つに（M234 M789 P1P3 S67 S3S3 Z5Z5）
+        state.my_hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::M4,
+            Tile::M7,
+            Tile::M8,
+            Tile::M9,
+            Tile::P1,
+            Tile::P3,
+            Tile::S6,
+            Tile::S7,
+            Tile::S3,
+            Tile::S3,
+            Tile::Z5,
+        ]);
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+        assert!(five_block_bonus(&ctx, &make_candidate(Tile::S3)) > 0.0);
+        assert!(five_block_bonus(&ctx, &make_candidate(Tile::Z5)) > 0.0);
+    }
+
+    #[test]
+    fn test_sole_pair_protection() {
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::M4,
+            Tile::P4,
+            Tile::P5,
+            Tile::P6,
+            Tile::M9,
+            Tile::M9,
+            Tile::P9,
+            Tile::Z3,
+        ]);
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+
+        // 唯一の対子は保護
+        assert!(sole_pair_protection(&ctx, &make_candidate(Tile::M9)) < 0.0);
+        // 対子以外は対象外
+        assert_eq!(sole_pair_protection(&ctx, &make_candidate(Tile::P9)), 0.0);
+
+        // 対子が2つあれば保護しない
+        state.my_hand.push(Tile::new(Tile::P9));
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(sole_pair_protection(&ctx, &make_candidate(Tile::M9)), 0.0);
+
+        // 刻子があれば雀頭候補は他にもあるので保護しない
+        let mut state = CpuGameState::new();
+        state.my_hand = tiles(&[Tile::M9, Tile::M9, Tile::S5, Tile::S5, Tile::S5, Tile::P2]);
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(sole_pair_protection(&ctx, &make_candidate(Tile::M9)), 0.0);
+    }
+
+    #[test]
+    fn test_dead_shape_bonus_kanchan() {
+        let mut state = CpuGameState::new();
+        // S2S4 の嵌張（待ちは S3）
+        state.my_hand = tiles(&[Tile::S2, Tile::S4, Tile::M5, Tile::M5]);
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+
+        // S3 が見えていない → 生きたターツ
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(dead_shape_bonus(&ctx, &make_candidate(Tile::S2)), 0.0);
+
+        // S3 が3枚見えている → 死にターツ
+        state.all_discards[1] = tiles(&[Tile::S3, Tile::S3, Tile::S3]);
+        let ctx = attack_ctx(&state, &config);
+        assert!(dead_shape_bonus(&ctx, &make_candidate(Tile::S2)) > 0.0);
+        assert!(dead_shape_bonus(&ctx, &make_candidate(Tile::S4)) > 0.0);
+        // 対子側は対象外
+        assert_eq!(dead_shape_bonus(&ctx, &make_candidate(Tile::M5)), 0.0);
+    }
+
+    #[test]
+    fn test_dead_shape_bonus_ryanmen_both_waits_dead() {
+        let mut state = CpuGameState::new();
+        // S6S7 の両面（待ちは S5/S8）
+        state.my_hand = tiles(&[Tile::S6, Tile::S7]);
+        let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(dead_shape_bonus(&ctx, &make_candidate(Tile::S6)), 0.0);
+
+        // S5 が4枚 + S8 が3枚見えている → 残り1枚 → ほぼ死に
+        state.all_discards[1] = tiles(&[
+            Tile::S5,
+            Tile::S5,
+            Tile::S5,
+            Tile::S5,
+            Tile::S8,
+            Tile::S8,
+            Tile::S8,
+        ]);
+        let ctx = attack_ctx(&state, &config);
+        assert!(dead_shape_bonus(&ctx, &make_candidate(Tile::S6)) > 0.0);
+    }
+
+    #[test]
+    fn test_excess_pair_bonus() {
+        let mut state = CpuGameState::new();
+        // 3対子 + 2面子: 一般形1向聴、七対子2向聴 → 一般形寄り
+        state.my_hand = tiles(&[
+            Tile::M5,
+            Tile::M5,
+            Tile::M9,
+            Tile::M9,
+            Tile::Z2,
+            Tile::Z2,
+            Tile::P4,
+            Tile::P5,
+            Tile::P6,
+            Tile::S4,
+            Tile::S5,
+            Tile::S6,
+            Tile::S1,
+        ]);
+        state.my_drawn = Some(Tile::new(Tile::S9));
+
+        // 強レベル: 中張牌対子 > 1/9対子 > 字牌対子(0) の順でほぐす
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+        let m5 = excess_pair_bonus(&ctx, &make_candidate(Tile::M5));
+        let m9 = excess_pair_bonus(&ctx, &make_candidate(Tile::M9));
+        let z2 = excess_pair_bonus(&ctx, &make_candidate(Tile::Z2));
+        assert!(m5 > m9, "中張牌対子からほぐす");
+        assert!(m9 > z2, "字牌対子は残す");
+        assert_eq!(z2, 0.0);
+
+        // 対子でない牌は対象外
+        assert_eq!(excess_pair_bonus(&ctx, &make_candidate(Tile::P4)), 0.0);
+    }
+
+    #[test]
+    fn test_excess_pair_bonus_inactive_when_seven_pairs_close() {
+        let mut state = CpuGameState::new();
+        // 5対子: 七対子2向聴 <= 一般形 → ほぐさない
+        state.my_hand = tiles(&[
+            Tile::M5,
+            Tile::M5,
+            Tile::M9,
+            Tile::M9,
+            Tile::Z2,
+            Tile::Z2,
+            Tile::P2,
+            Tile::P2,
+            Tile::S8,
+            Tile::S8,
+            Tile::S1,
+            Tile::M1,
+            Tile::P9,
+        ]);
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(excess_pair_bonus(&ctx, &make_candidate(Tile::M5)), 0.0);
+    }
+
+    #[test]
+    fn test_excess_pair_bonus_requires_three_pairs() {
+        let mut state = CpuGameState::new();
+        // 2対子ではほぐさない
+        state.my_hand = tiles(&[
+            Tile::M5,
+            Tile::M5,
+            Tile::M9,
+            Tile::M9,
+            Tile::P4,
+            Tile::P5,
+            Tile::P6,
+        ]);
+        let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
+        let ctx = attack_ctx(&state, &config);
+        assert_eq!(excess_pair_bonus(&ctx, &make_candidate(Tile::M5)), 0.0);
     }
 
     // --- has_yaku_prospect ---
