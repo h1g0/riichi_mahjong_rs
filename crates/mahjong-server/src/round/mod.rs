@@ -1829,7 +1829,9 @@ mod tests {
 
     #[test]
     fn test_round_draw() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
+        let mut round =
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events(); // 初期イベントをクリア
 
         assert!(round.do_draw());
@@ -1843,7 +1845,9 @@ mod tests {
 
     #[test]
     fn test_round_discard() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
+        let mut round =
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events();
         round.do_draw();
         round.drain_events();
@@ -1878,7 +1882,9 @@ mod tests {
 
     #[test]
     fn test_round_discard_rejects_tile_not_in_hand() {
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
+        let mut round =
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events();
         round.do_draw();
         round.drain_events();
@@ -1997,7 +2003,9 @@ mod tests {
     #[test]
     fn test_wait_for_calls_and_pass() {
         // 打牌後に WaitForCalls になった場合、全員パスで Draw に進む
-        let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
+        // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
+        let mut round =
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, Settings::new());
         round.drain_events();
         round.do_draw();
         round.drain_events();
