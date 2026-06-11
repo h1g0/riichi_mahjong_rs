@@ -69,6 +69,11 @@ impl Table {
         }
     }
 
+    /// ゲーム全体の局数（東風戦=4, 東南戦=8）を返す
+    fn total_rounds(&self) -> usize {
+        self.settings.round_count as usize * 4
+    }
+
     /// 新しい局を開始する
     pub fn start_round(&mut self) {
         let round = Round::new(
@@ -78,6 +83,7 @@ impl Table {
             self.honba,
             self.riichi_sticks,
             self.round_number,
+            self.total_rounds(),
             self.settings.rules.clone(),
         );
         self.round = Some(round);
@@ -95,6 +101,7 @@ impl Table {
             self.honba,
             self.riichi_sticks,
             self.round_number,
+            self.total_rounds(),
             self.settings.rules.clone(),
         );
         self.round = Some(round);

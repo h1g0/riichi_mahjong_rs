@@ -48,6 +48,8 @@ pub struct CpuGameState {
     pub remaining_tiles: usize,
     /// 局番号（東1局=0, 東2局=1, ...）
     pub round_number: usize,
+    /// ゲーム全体の局数（東風戦=4, 東南戦=8。0なら不明）
+    pub total_rounds: usize,
     /// 本場数
     pub honba: usize,
     /// 供託リーチ棒
@@ -86,6 +88,7 @@ impl CpuGameState {
             prevailing_wind: Wind::East,
             remaining_tiles: 0,
             round_number: 0,
+            total_rounds: 0,
             honba: 0,
             riichi_sticks: 0,
             pending_calls: Vec::new(),
@@ -115,6 +118,7 @@ impl CpuGameState {
                 prevailing_wind,
                 dora_indicators,
                 round_number,
+                total_rounds,
                 honba,
                 riichi_sticks,
                 ..
@@ -136,6 +140,7 @@ impl CpuGameState {
                 self.prevailing_wind = *prevailing_wind;
                 self.remaining_tiles = 70; // 136 - 14(王牌) - 13*4(配牌) = 70
                 self.round_number = *round_number;
+                self.total_rounds = *total_rounds;
                 self.honba = *honba;
                 self.riichi_sticks = *riichi_sticks;
                 self.pending_calls.clear();
@@ -306,6 +311,37 @@ impl CpuGameState {
         &self.all_discards[Self::wind_to_index(self.my_seat_wind)]
     }
 
+    /// オーラス（最終局）か。総局数が不明（0）なら false
+    pub fn is_final_round(&self) -> bool {
+        self.total_rounds > 0 && self.round_number + 1 >= self.total_rounds
+    }
+
+    /// ゲーム後半（東南戦の南場など）か。総局数が不明なら false
+    pub fn is_second_half(&self) -> bool {
+        self.total_rounds > 0 && self.round_number >= self.total_rounds / 2
+    }
+
+    /// 自分の得点
+    pub fn my_score(&self) -> i32 {
+        self.scores[Self::wind_to_index(self.my_seat_wind)]
+    }
+
+    /// 自分がトップ目か（同点トップを含む）
+    pub fn is_top(&self) -> bool {
+        let my = self.my_score();
+        self.scores.iter().all(|&s| s <= my)
+    }
+
+    /// 順位を1つ上げるのに必要な最小点差（トップなら None）
+    pub fn gap_to_next_rank(&self) -> Option<i32> {
+        let my = self.my_score();
+        self.scores
+            .iter()
+            .filter(|&&s| s > my)
+            .map(|&s| s - my)
+            .min()
+    }
+
     /// 自分の副露を返す
     pub fn my_melds(&self) -> &[Meld] {
         &self.player_melds[Self::wind_to_index(self.my_seat_wind)]
@@ -421,6 +457,7 @@ mod tests {
             prevailing_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::M5)],
             round_number: 0,
+            total_rounds: 0,
             honba: 0,
             riichi_sticks: 0,
         });
@@ -472,6 +509,7 @@ mod tests {
             prevailing_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::Z1)],
             round_number: 4,
+            total_rounds: 4,
             honba: 1,
             riichi_sticks: 1,
         });
@@ -810,6 +848,53 @@ mod tests {
         assert_eq!(state.scores, [25000, 26000, 24000, 25000]);
         assert_eq!(state.pending_calls.len(), 1);
         assert_eq!(state.pending_call_tile, Some(Tile::new(Tile::Z1)));
+    }
+
+    #[test]
+    fn test_round_position_helpers() {
+        let mut state = CpuGameState::new();
+        state.total_rounds = 4; // 東風戦
+
+        // 東1局: 前半・オーラスでない
+        state.round_number = 0;
+        assert!(!state.is_final_round());
+        assert!(!state.is_second_half());
+
+        // 東3局: 後半
+        state.round_number = 2;
+        assert!(!state.is_final_round());
+        assert!(state.is_second_half());
+
+        // 東4局: オーラス
+        state.round_number = 3;
+        assert!(state.is_final_round());
+
+        // 総局数が不明（0）なら常に false
+        state.total_rounds = 0;
+        assert!(!state.is_final_round());
+        assert!(!state.is_second_half());
+    }
+
+    #[test]
+    fn test_score_position_helpers() {
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+        state.scores = [25000, 30000, 20000, 25000];
+
+        assert_eq!(state.my_score(), 30000);
+        assert!(state.is_top());
+        assert_eq!(state.gap_to_next_rank(), None);
+
+        // 3着のとき: 次の順位（東 25000）までの差
+        state.scores = [25000, 22000, 30000, 23000];
+        assert_eq!(state.my_score(), 22000);
+        assert!(!state.is_top());
+        assert_eq!(state.gap_to_next_rank(), Some(1000));
+
+        // 同点トップはトップ扱い
+        state.scores = [30000, 30000, 20000, 20000];
+        assert!(state.is_top());
+        assert_eq!(state.gap_to_next_rank(), None);
     }
 
     #[test]
