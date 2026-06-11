@@ -260,7 +260,14 @@ fn count_blocks(state: &CpuGameState) -> usize {
         counts[drawn.get() as usize] += 1;
     }
 
-    let mut blocks = state.my_melds().len();
+    state.my_melds().len() + greedy_block_count(counts)
+}
+
+/// 牌種カウントからブロック数（面子+対子+ターツ）を貪欲に数える
+///
+/// 刻子 → 順子 → 対子 → ターツの順に取り出す。
+fn greedy_block_count(mut counts: [u8; 34]) -> usize {
+    let mut blocks = 0;
 
     // 刻子
     for c in counts.iter_mut() {
@@ -654,6 +661,9 @@ pub enum CallJudgement {
 /// 適用される定石:
 /// - 裸単騎回避（#166, 弱以上）: 4副露目になる鳴きはしない
 /// - 役なし鳴き禁止（#162, 弱以上）: 鳴いた後に役の見込みがなければ鳴かない
+///   （対々和・喰いタンの見込み条件は中以上で #157/#164 により厳しくなる）
+/// - 安くて遠い仕掛けの抑制（#165, 中以上）: 打点要素がなく2向聴以上の
+///   仕掛けはしない（親番は例外）
 /// - 役牌対子は早めにポン（#163, 弱以上）: 役牌のポンは性格によらず推奨
 ///
 /// 呼び出し元で「向聴数が下がること」は確認済みである前提。
@@ -667,17 +677,25 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
         return CallJudgement::Forbid;
     }
 
-    // 役なし鳴き禁止（弱以上）。対々和の見込みは中以上で #157 の条件を使う
-    if let Some((hand_after, melds_after)) = hand_after_pon(ctx.state, called_tile)
-        && !has_yaku_prospect(
+    if let Some((hand_after, melds_after)) = hand_after_pon(ctx.state, called_tile) {
+        // 役なし鳴き禁止（弱以上）。
+        // 対々和・喰いタンの見込みは中以上で #157/#164 の厳しい条件を使う
+        if !has_yaku_prospect(
             &hand_after,
             &melds_after,
             ctx.state.my_seat_wind,
             ctx.state.prevailing_wind,
             ctx.config.level >= CpuLevel::Normal,
-        )
-    {
-        return CallJudgement::Forbid;
+        ) {
+            return CallJudgement::Forbid;
+        }
+
+        // 安くて遠い仕掛けは控える（#165, 中以上）
+        if ctx.config.level >= CpuLevel::Normal
+            && is_cheap_distant_call(ctx.state, &hand_after, &melds_after)
+        {
+            return CallJudgement::Forbid;
+        }
     }
 
     // 役牌対子は早めにポン（弱以上）
@@ -697,6 +715,8 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
 /// 適用される定石:
 /// - 裸単騎回避（#166, 弱以上）
 /// - 役なし鳴き禁止（#162, 弱以上）
+///   （対々和・喰いタンの見込み条件は中以上で #157/#164 により厳しくなる）
+/// - 安くて遠い仕掛けの抑制（#165, 中以上）
 ///
 /// 呼び出し元で「向聴数が下がること」は確認済みである前提。
 pub fn judge_chi(ctx: &CallContext, called_tile: Tile, hand_tiles: [Tile; 2]) -> CallJudgement {
@@ -709,17 +729,25 @@ pub fn judge_chi(ctx: &CallContext, called_tile: Tile, hand_tiles: [Tile; 2]) ->
         return CallJudgement::Forbid;
     }
 
-    // 役なし鳴き禁止（弱以上）。対々和の見込みは中以上で #157 の条件を使う
-    if let Some((hand_after, melds_after)) = hand_after_chi(ctx.state, called_tile, hand_tiles)
-        && !has_yaku_prospect(
+    if let Some((hand_after, melds_after)) = hand_after_chi(ctx.state, called_tile, hand_tiles) {
+        // 役なし鳴き禁止（弱以上）。
+        // 対々和・喰いタンの見込みは中以上で #157/#164 の厳しい条件を使う
+        if !has_yaku_prospect(
             &hand_after,
             &melds_after,
             ctx.state.my_seat_wind,
             ctx.state.prevailing_wind,
             ctx.config.level >= CpuLevel::Normal,
-        )
-    {
-        return CallJudgement::Forbid;
+        ) {
+            return CallJudgement::Forbid;
+        }
+
+        // 安くて遠い仕掛けは控える（#165, 中以上）
+        if ctx.config.level >= CpuLevel::Normal
+            && is_cheap_distant_call(ctx.state, &hand_after, &melds_after)
+        {
+            return CallJudgement::Forbid;
+        }
     }
 
     CallJudgement::Neutral
@@ -782,6 +810,62 @@ pub fn judge_ankan(ctx: &CallContext, tile_type: TileType) -> CallJudgement {
     CallJudgement::Neutral
 }
 
+/// #165: 安くて遠い仕掛けか（中以上）
+///
+/// 鳴いた後も2向聴以上で、打点要素（ドラ・赤ドラ・役牌・染め手）が
+/// 何もない仕掛けは、守備力低下のデメリットの方が大きいため控える。
+/// 親は連荘価値があるため例外とする。
+/// （オーラスの和了条件などの例外は点棒状況判断の導入時に拡張する）
+fn is_cheap_distant_call(state: &CpuGameState, hand_after: &[Tile], melds_after: &[Meld]) -> bool {
+    // 親番は例外（連荘価値がある）
+    if state.my_seat_wind == Wind::East {
+        return false;
+    }
+
+    // 鳴いた後も2向聴以上か（遠い仕掛けか）
+    let hand = Hand::new_with_melds(hand_after.to_vec(), melds_after.to_vec(), None);
+    if calc_shanten_number(&hand).as_i32() < 2 {
+        return false;
+    }
+
+    // 打点要素: ドラ・赤ドラ
+    let all_tiles = hand_after
+        .iter()
+        .chain(melds_after.iter().flat_map(|m| m.tiles.iter()));
+    let mut counts = [0u8; 34];
+    for t in all_tiles {
+        if t.is_red_dora() {
+            return false;
+        }
+        for indicator in &state.dora_indicators {
+            if dora_indicator_to_dora(indicator.get()) == t.get() {
+                return false;
+            }
+        }
+        counts[t.get() as usize] += 1;
+    }
+
+    // 打点要素: 役牌対子以上
+    for yh in get_yakuhai_types(state.my_seat_wind, state.prevailing_wind) {
+        if counts[yh as usize] >= 2 {
+            return false;
+        }
+    }
+
+    // 打点要素: 染め手（数牌が1色に収まっている）
+    let mut suits_used = [false; 3];
+    for (tile_type, &count) in counts.iter().enumerate().take(27) {
+        if count > 0 {
+            suits_used[tile_type / 9] = true;
+        }
+    }
+    if suits_used.iter().filter(|&&u| u).count() <= 1 {
+        return false;
+    }
+
+    true
+}
+
 /// ポンした後の手牌と副露を構築する
 ///
 /// 手牌に同種の牌が2枚なければ `None`。
@@ -840,13 +924,16 @@ fn hand_after_chi(
 ///
 /// 副露した手で成立しうる代表的な役の見込みを判定する（#162）:
 /// - 役牌: 手牌+副露に役牌が2枚以上ある
-/// - 断么九: 副露が全て中張牌で、手牌の么九牌が3枚以下（切って移行できる）
+/// - 断么九: 副露が全て中張牌で、手牌の么九牌が少ない
 /// - 混一色/清一色: 数牌が1色に収まっている
 /// - 対々和: 副露が全て刻子系で、刻子系ブロックが十分にある
 ///
-/// `toitoi_by_blocks` が true（中以上, #157）の場合、対々和の見込みは
-/// 「副露 + 手牌の対子・刻子が4ブロック以上」を条件にする。
-/// false（弱）の場合は従来どおり浮き牌2種以下で判定する。
+/// `strict` が true（中以上）の場合、より厳しい条件を使う:
+/// - 対々和（#157）: 副露 + 手牌の対子・刻子が4ブロック以上
+/// - 断么九（#164）: 手牌の么九牌が2枚以下、かつタンヤオ圏内に
+///   複数ブロックが収まっている
+///
+/// false（弱）の場合は従来どおりの緩い条件で判定する。
 ///
 /// チャンタ系などの稀な役は考慮しない（見込みなしと誤判定しても
 /// 「鳴かない」側に倒れるだけで安全）。
@@ -855,7 +942,7 @@ pub fn has_yaku_prospect(
     melds: &[Meld],
     seat_wind: Wind,
     prevailing_wind: Wind,
-    toitoi_by_blocks: bool,
+    strict: bool,
 ) -> bool {
     // 手牌 + 副露の牌種ごとの枚数
     let mut counts = [0u8; 34];
@@ -881,7 +968,22 @@ pub fn has_yaku_prospect(
         .all(|m| m.tiles.iter().all(|t| !t.is_1_9_honor()));
     if melds_all_simple {
         let terminal_honor_count = hand_tiles.iter().filter(|t| t.is_1_9_honor()).count();
-        if terminal_honor_count <= 3 {
+        if strict {
+            // #164（中以上）: 么九牌が多い手から無理に喰いタンへ向かわない。
+            // 么九牌2枚以下、かつタンヤオ圏内の牌で複数ブロックが
+            // 構成できる場合のみ見込みとする。
+            if terminal_honor_count <= 2 {
+                let mut simple_counts = [0u8; 34];
+                for t in hand_tiles {
+                    if !t.is_1_9_honor() {
+                        simple_counts[t.get() as usize] += 1;
+                    }
+                }
+                if greedy_block_count(simple_counts) >= 2 {
+                    return true;
+                }
+            }
+        } else if terminal_honor_count <= 3 {
             return true;
         }
     }
@@ -906,7 +1008,7 @@ pub fn has_yaku_prospect(
         for t in hand_tiles {
             hand_counts[t.get() as usize] += 1;
         }
-        if toitoi_by_blocks {
+        if strict {
             // #157（中以上）: 副露 + 手牌の対子・刻子で4ブロック以上あるときだけ
             // 対々和を候補にする（2〜3トイツから無理に向かわない）
             let pair_or_triplet_types = hand_counts.iter().filter(|&&c| c >= 2).count();
@@ -1656,6 +1758,116 @@ mod tests {
 
         // 弱（従来ルール）: 浮き牌2種以下なら見込みあり
         assert!(has_yaku_prospect(&hand, &melds, seat, prev, false));
+    }
+
+    // --- 仕掛けの高度化（#164 #165）---
+
+    #[test]
+    fn test_tanyao_prospect_strict_conditions() {
+        // #164: 中以上の喰いタン見込みは「么九牌2枚以下 + タンヤオ圏内に複数ブロック」
+        let seat = Wind::East;
+        let prev = Wind::East;
+        let melds = vec![chi_meld(Tile::S2)]; // S234（中張牌のみ）
+
+        // 么九牌3枚: 緩い条件では見込みあり、厳しい条件ではなし
+        let hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::P4,
+            Tile::P5,
+            Tile::S6,
+            Tile::M9,
+            Tile::P9,
+            Tile::S9,
+        ]);
+        assert!(has_yaku_prospect(&hand, &melds, seat, prev, false));
+        assert!(!has_yaku_prospect(&hand, &melds, seat, prev, true));
+
+        // 么九牌2枚 + タンヤオ圏内に2ブロック（M2M3, P4P5）→ 厳しい条件でも見込みあり
+        let hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::P4,
+            Tile::P5,
+            Tile::S6,
+            Tile::M9,
+            Tile::P9,
+        ]);
+        assert!(has_yaku_prospect(&hand, &melds, seat, prev, true));
+
+        // 么九牌なしでもタンヤオ圏内がバラバラ（ブロック1つ以下）なら見込みなし
+        let hand = tiles(&[Tile::M2, Tile::M5, Tile::P5, Tile::S8]);
+        assert!(!has_yaku_prospect(&hand, &melds, seat, prev, true));
+    }
+
+    #[test]
+    fn test_cheap_distant_call_detection() {
+        // #165: 2向聴以上 + 打点要素なし + 子 → 安くて遠い仕掛け
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+        let melds = vec![chi_meld(Tile::S2)];
+        // 3色バラバラの2向聴超の手（ドラ・役牌なし）
+        let hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::P4,
+            Tile::P5,
+            Tile::S6,
+            Tile::S7,
+            Tile::M6,
+            Tile::P8,
+            Tile::S4,
+            Tile::M7,
+        ]);
+        assert!(is_cheap_distant_call(&state, &hand, &melds));
+
+        // 親なら例外
+        let mut dealer_state = CpuGameState::new();
+        dealer_state.my_seat_wind = Wind::East;
+        assert!(!is_cheap_distant_call(&dealer_state, &hand, &melds));
+
+        // ドラがあれば打点要素あり
+        let mut dora_state = CpuGameState::new();
+        dora_state.my_seat_wind = Wind::South;
+        dora_state.dora_indicators = vec![Tile::new(Tile::M1)]; // ドラは M2（手牌にある）
+        assert!(!is_cheap_distant_call(&dora_state, &hand, &melds));
+
+        // 役牌対子があれば打点要素あり
+        let hand_with_yakuhai = tiles(&[
+            Tile::Z5,
+            Tile::Z5,
+            Tile::M2,
+            Tile::M3,
+            Tile::P4,
+            Tile::P5,
+            Tile::S6,
+            Tile::S7,
+            Tile::M6,
+            Tile::P8,
+        ]);
+        assert!(!is_cheap_distant_call(&state, &hand_with_yakuhai, &melds));
+    }
+
+    #[test]
+    fn test_cheap_distant_call_requires_two_shanten() {
+        // 鳴いて1向聴以内に入る仕掛けは「遠い」扱いしない
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+        let melds = vec![chi_meld(Tile::S2)];
+        // 2面子 + 対子 + ターツ: チー後1向聴相当
+        let hand = tiles(&[
+            Tile::M2,
+            Tile::M3,
+            Tile::M4,
+            Tile::P4,
+            Tile::P5,
+            Tile::P6,
+            Tile::S6,
+            Tile::S6,
+            Tile::M6,
+            Tile::M7,
+        ]);
+        assert!(!is_cheap_distant_call(&state, &hand, &melds));
     }
 
     // --- has_yaku_prospect ---
