@@ -268,8 +268,7 @@ impl Table {
     /// 局番号を進める
     fn advance_round_number(&mut self) {
         self.round_number += 1;
-        let max_rounds = self.settings.round_count as usize * 4;
-        if self.round_number >= max_rounds {
+        if self.round_number >= self.total_rounds() {
             self.is_game_over = true;
         }
 

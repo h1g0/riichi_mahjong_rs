@@ -386,22 +386,7 @@ fn calculate_menzen_ron_fu(status: &Status, details: &mut Vec<FuDetail>) -> Resu
 
 /// 么九牌（1,9）または字牌かを判定する
 fn is_terminal_or_honor(tile: TileType) -> bool {
-    matches!(
-        tile,
-        Tile::M1
-            | Tile::M9
-            | Tile::P1
-            | Tile::P9
-            | Tile::S1
-            | Tile::S9
-            | Tile::Z1
-            | Tile::Z2
-            | Tile::Z3
-            | Tile::Z4
-            | Tile::Z5
-            | Tile::Z6
-            | Tile::Z7
-    )
+    Tile::new(tile).is_1_9_honor()
 }
 
 #[cfg(test)]

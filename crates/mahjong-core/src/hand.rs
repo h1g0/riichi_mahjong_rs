@@ -109,16 +109,9 @@ impl Hand {
         }
 
         for meld in &self.melds {
-            let _ = write!(
-                result,
-                " {}{}{}",
-                meld.tiles[0].to_char(),
-                meld.tiles[1].to_char(),
-                meld.tiles[2].to_char()
-            );
-            // カンなら4枚目を追加する
-            if meld.category.is_kan() {
-                result.push(meld.tiles[0].to_char());
+            result.push(' ');
+            for tile in meld.expanded_tiles() {
+                result.push(tile.to_char());
             }
         }
 
@@ -176,11 +169,7 @@ impl Hand {
         let mut result = Hand::make_short_str(tiles);
 
         for meld in &self.melds {
-            let mut op_tiles = meld.tiles.clone();
-            if meld.category.is_kan() && op_tiles.len() == 3 {
-                op_tiles.push(meld.tiles[0]);
-            }
-            let _ = write!(result, " {}", Hand::make_short_str(op_tiles));
+            let _ = write!(result, " {}", Hand::make_short_str(meld.expanded_tiles()));
         }
 
         if let Some(tsumo) = self.drawn {
@@ -275,10 +264,9 @@ impl fmt::Display for Hand {
         }
 
         for meld in &self.melds {
-            write!(f, " {}{}{}", meld.tiles[0], meld.tiles[1], meld.tiles[2])?;
-            // カンなら4枚目を追加する
-            if meld.category.is_kan() {
-                write!(f, "{}", meld.tiles[0])?;
+            f.write_str(" ")?;
+            for tile in meld.expanded_tiles() {
+                write!(f, "{tile}")?;
             }
         }
 
