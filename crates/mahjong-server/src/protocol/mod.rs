@@ -3,6 +3,8 @@
 //! 将来的なオンライン対戦を見据えたメッセージ定義。
 //! LocalAdapter ではこれらのメッセージを直接やり取りする。
 
+pub mod net;
+
 use mahjong_core::tile::{Tile, Wind};
 use serde::{Deserialize, Serialize};
 

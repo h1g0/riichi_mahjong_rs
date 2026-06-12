@@ -8,4 +8,5 @@ edition = "2024"
 mahjong-core = { path = "../mahjong-core" }
 rand = "0.10"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 anyhow = "1.0"

@@ -1,5 +1,6 @@
 pub mod action;
 pub mod cpu;
+pub mod driver;
 pub mod player;
 pub mod protocol;
 pub mod round;
