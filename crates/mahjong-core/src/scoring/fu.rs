@@ -180,7 +180,7 @@ fn calculate_mentsu_fu(
             continue;
         }
 
-        let is_terminal_or_honor = is_terminal_or_honor(tile);
+        let is_terminal_or_honor = Tile::new(tile).is_1_9_honor();
 
         // 和了牌を含む刻子がロン和了の場合は明刻扱い
         let is_concealed = if !status.is_self_picked {
@@ -220,8 +220,7 @@ fn calculate_mentsu_fu(
     for open in hand.melds() {
         match open.category {
             MeldType::Pon => {
-                let tile = open.tiles[0].get();
-                let is_terminal_or_honor = is_terminal_or_honor(tile);
+                let is_terminal_or_honor = open.tiles[0].is_1_9_honor();
                 let fu = if is_terminal_or_honor { 4 } else { 2 };
                 let name = if is_terminal_or_honor {
                     "么九牌明刻"
@@ -231,8 +230,7 @@ fn calculate_mentsu_fu(
                 details.push(FuDetail { name, fu });
             }
             MeldType::Kan | MeldType::Kakan => {
-                let tile = open.tiles[0].get();
-                let is_terminal_or_honor = is_terminal_or_honor(tile);
+                let is_terminal_or_honor = open.tiles[0].is_1_9_honor();
                 let is_concealed = open.from == MeldFrom::Myself;
                 let fu = if is_concealed {
                     if is_terminal_or_honor { 32 } else { 16 }
@@ -382,11 +380,6 @@ fn calculate_menzen_ron_fu(status: &Status, details: &mut Vec<FuDetail>) -> Resu
     }
 
     Ok(())
-}
-
-/// 么九牌（1,9）または字牌かを判定する
-fn is_terminal_or_honor(tile: TileType) -> bool {
-    Tile::new(tile).is_1_9_honor()
 }
 
 #[cfg(test)]
