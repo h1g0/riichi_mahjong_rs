@@ -1,7 +1,7 @@
 //! 麻雀クライアント（Macroquad）
 //!
 //! ブラウザ上で動作する4人打ち日本式リーチ麻雀。
-//! LocalAdapterを通してサーバと直接通信する。
+//! GameAdapterを通してサーバとやり取りする（ローカル対戦はLocalAdapter）。
 
 use macroquad::prelude::*;
 
@@ -13,7 +13,7 @@ mod renderer;
 #[cfg(target_arch = "wasm32")]
 mod wasm_rng;
 
-use adapter::LocalAdapter;
+use adapter::{GameAdapter, LocalAdapter};
 use game::{GamePhase, GameState};
 use renderer::TileTextures;
 
@@ -36,7 +36,7 @@ async fn main() {
         eprintln!("警告: 日本語フォントを読み込めませんでした。デフォルトフォントで表示します。");
     }
 
-    let mut adapter: Option<LocalAdapter> = None;
+    let mut adapter: Option<Box<dyn GameAdapter>> = None;
     let mut game_state = GameState::new();
 
     loop {
@@ -52,11 +52,11 @@ async fn main() {
                     // 対局開始
                     let mut new_adapter = LocalAdapter::with_cpu_configs(configs);
                     new_adapter.start_game();
-                    let events = new_adapter.poll_events(0);
+                    let events = new_adapter.poll_events();
                     for event in events {
                         game_state.handle_event(event);
                     }
-                    adapter = Some(new_adapter);
+                    adapter = Some(Box::new(new_adapter));
                 }
             }
 
@@ -69,7 +69,7 @@ async fn main() {
 
                     adp.tick();
 
-                    let events = adp.poll_events(0);
+                    let events = adp.poll_events();
                     for event in events {
                         game_state.handle_event(event);
                     }
@@ -85,8 +85,8 @@ async fn main() {
                         if adp.is_game_over() {
                             game_state.phase = GamePhase::GameOver;
                         } else {
-                            adp.next_round();
-                            let events = adp.poll_events(0);
+                            adp.request_next_round();
+                            let events = adp.poll_events();
                             for event in events {
                                 game_state.handle_event(event);
                             }
