@@ -50,3 +50,32 @@ pub struct Meld {
     #[serde(default)]
     pub called_tile: Option<Tile>,
 }
+
+impl Meld {
+    /// カンの4枚目の牌を返す
+    ///
+    /// 解析用に `tiles` には3枚のみ保持するため、表示・ドラ計算用の4枚目は
+    /// 鳴いた牌（あれば）か、保持中の赤ドラでない牌から補う。
+    /// 赤ドラは4枚中1枚しか存在しないので、`tiles` に赤ドラが含まれる場合に
+    /// 4枚目を赤ドラとして複製してはならない。
+    pub fn kan_fourth_tile(&self) -> Tile {
+        if let Some(tile) = self.called_tile {
+            return tile;
+        }
+
+        self.tiles
+            .iter()
+            .copied()
+            .find(|tile| !tile.is_red_dora())
+            .unwrap_or(self.tiles[0])
+    }
+
+    /// 副露の牌を表示用に展開して返す（カンは4枚目を補完する）
+    pub fn expanded_tiles(&self) -> Vec<Tile> {
+        let mut tiles = self.tiles.clone();
+        if self.category.is_kan() && tiles.len() == 3 {
+            tiles.push(self.kan_fourth_tile());
+        }
+        tiles
+    }
+}

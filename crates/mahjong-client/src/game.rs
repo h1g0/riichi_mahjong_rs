@@ -775,7 +775,6 @@ impl GameState {
                 continue; // 自分はスキップ
             }
             let other = &mut self.other_players[relative_idx - 1];
-            // 副露を更新
             // 副露を更新（既存の from 情報を保持）
             if other.melds.is_empty() {
                 other.melds = info

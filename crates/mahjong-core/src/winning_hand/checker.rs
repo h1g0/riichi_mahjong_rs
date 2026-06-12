@@ -142,6 +142,7 @@ pub fn check(
         Kind::TerminalOrHonorInEachSet,
         check_terminal_or_honor_in_each_set(analyzer, status, settings)?,
     );
+    // 純全帯么九
     result.insert(
         Kind::TerminalInEachSet,
         check_terminal_in_each_set(analyzer, status, settings)?,
@@ -155,7 +156,6 @@ pub fn check(
     result.insert(
         Kind::LittleThreeDragons,
         check_little_three_dragons(analyzer, status, settings)?,
-        // 純全帯么九
     );
     // 混一色
     result.insert(

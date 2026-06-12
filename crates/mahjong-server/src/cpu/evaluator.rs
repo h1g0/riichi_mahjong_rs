@@ -5,6 +5,7 @@
 
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{ShantenNumber, calc_shanten_number};
+use mahjong_core::hand_info::meld::Meld;
 use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
 
 use super::client::CpuConfig;
@@ -42,6 +43,8 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
     }
 
     let visible_counts = state.visible_tile_counts();
+    // 副露がある手では副露も面子として数えないと向聴数を過大評価してしまう
+    let melds = state.my_melds_for_analysis();
     let mut candidates = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -55,13 +58,13 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
         let mut remaining: Vec<Tile> = all_tiles.clone();
         remaining.remove(i);
 
-        // 向聴数を高速計算（Vec割り当てなし）
-        let hand = Hand::new(remaining.clone(), None);
+        // 向聴数を高速計算（ブロック分解なし）
+        let hand = Hand::new_with_melds(remaining.clone(), melds.clone(), None);
         let shanten = calc_shanten_number(&hand);
 
         // 有効牌数（受入数）を計算（既知の向聴数を渡して重複計算を回避）
         let acceptance_count = if config.level.uses_acceptance_count() {
-            count_acceptance(&remaining, &visible_counts, shanten)
+            count_acceptance(&remaining, &melds, &visible_counts, shanten)
         } else {
             0
         };
@@ -99,6 +102,7 @@ pub fn evaluate_discards(state: &CpuGameState, config: &CpuConfig) -> Vec<Discar
 /// `current_shanten` は呼び出し元で既に計算済みの向聴数。
 fn count_acceptance(
     hand_tiles: &[Tile],
+    melds: &[Meld],
     visible_counts: &[u8; 34],
     current_shanten: ShantenNumber,
 ) -> u32 {
@@ -111,7 +115,11 @@ fn count_acceptance(
         }
 
         // この牌を加えて向聴数が下がるか（高速計算）
-        let test_hand = Hand::new(hand_tiles.to_vec(), Some(Tile::new(tile_type)));
+        let test_hand = Hand::new_with_melds(
+            hand_tiles.to_vec(),
+            melds.to_vec(),
+            Some(Tile::new(tile_type)),
+        );
         let new_shanten = calc_shanten_number(&test_hand);
 
         if new_shanten < current_shanten {
@@ -165,28 +173,12 @@ fn count_dora_in_hand(hand_tiles: &[Tile], dora_indicators: &[Tile]) -> u32 {
 /// 役牌となる牌種のリストを返す
 pub(crate) fn get_yakuhai_types(seat_wind: Wind, prevailing_wind: Wind) -> Vec<TileType> {
     use mahjong_core::tile::Tile as T;
-    let mut types = vec![T::Z5, T::Z6, T::Z7]; // 白發中
-
-    // 場風
-    let pw = match prevailing_wind {
-        Wind::East => T::Z1,
-        Wind::South => T::Z2,
-        Wind::West => T::Z3,
-        Wind::North => T::Z4,
-    };
-    types.push(pw);
-
-    // 自風
-    let sw = match seat_wind {
-        Wind::East => T::Z1,
-        Wind::South => T::Z2,
-        Wind::West => T::Z3,
-        Wind::North => T::Z4,
-    };
-    if !types.contains(&sw) {
-        types.push(sw);
+    // 白發中 + 場風 + 自風（Wind の判別値は対応する牌種と一致する）
+    let mut types = vec![T::Z5, T::Z6, T::Z7];
+    types.push(prevailing_wind as TileType);
+    if seat_wind != prevailing_wind {
+        types.push(seat_wind as TileType);
     }
-
     types
 }
 
@@ -278,6 +270,64 @@ mod tests {
 
     fn weak_config() -> CpuConfig {
         CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced)
+    }
+
+    // --- evaluate_discards（副露あり） ---
+
+    /// 回帰テスト: 副露のある手の向聴数に副露が面子として算入されること
+    ///
+    /// かつて副露なしの `Hand` で向聴数を計算していたため、
+    /// 鳴いた手の向聴数が大幅に過大評価されていた。
+    #[test]
+    fn test_evaluate_discards_counts_melds_as_blocks() {
+        use mahjong_core::hand_info::meld::{MeldFrom, MeldType};
+
+        let mut state = CpuGameState::new();
+        // 123m・456m をチー済み。残り手牌 789p + 11z + 34s、ツモ 7z
+        // 7z を切れば 2s/5s 待ちの聴牌
+        state.my_hand = vec![
+            Tile::new(Tile::P7),
+            Tile::new(Tile::P8),
+            Tile::new(Tile::P9),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::Z1),
+            Tile::new(Tile::S3),
+            Tile::new(Tile::S4),
+        ];
+        state.my_drawn = Some(Tile::new(Tile::Z7));
+        state.player_melds[0] = vec![
+            Meld {
+                tiles: vec![
+                    Tile::new(Tile::M1),
+                    Tile::new(Tile::M2),
+                    Tile::new(Tile::M3),
+                ],
+                category: MeldType::Chi,
+                from: MeldFrom::Previous,
+                called_tile: None,
+            },
+            Meld {
+                tiles: vec![
+                    Tile::new(Tile::M4),
+                    Tile::new(Tile::M5),
+                    Tile::new(Tile::M6),
+                ],
+                category: MeldType::Chi,
+                from: MeldFrom::Previous,
+                called_tile: None,
+            },
+        ];
+
+        let candidates = evaluate_discards(&state, &normal_config());
+        let z7 = candidates
+            .iter()
+            .find(|c| c.tile.get() == Tile::Z7)
+            .expect("7z は打牌候補にあるはず");
+        assert!(
+            z7.shanten.is_ready(),
+            "副露を含めれば 7z 切りで聴牌のはず（shanten = {}）",
+            z7.shanten
+        );
     }
 
     // --- count_dora_in_hand ---

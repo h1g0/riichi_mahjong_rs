@@ -169,21 +169,12 @@ impl Tile {
     }
     /// 搭子（連続した2枚）か否かを返す
     pub fn is_sequential_to(&self, tile: Tile) -> bool {
-        // 字牌ならば連続はありえない
-        if self.is_honor() {
-            return false;
-        }
-        // 一萬・一筒・一索の時に1つ前（九萬・九筒）が来ても連続とはみなさない
-        if matches!(self.index, Tile::M1 | Tile::P1 | Tile::S1) && self.get() == tile.get() + 1 {
-            return false;
-        }
-        // 九萬・九筒・九索の時に1つ後（一筒・一索・東）が来ても連続とはみなさない
-        if matches!(self.index, Tile::M9 | Tile::P9 | Tile::S9) && self.get() == tile.get() - 1 {
-            return false;
-        } else if self.get() == tile.get() - 1 || self.get() == tile.get() + 1 {
-            return true;
-        }
-        false
+        // 同じスートの数牌同士でなければ連続はありえない
+        // （字牌や、九萬→一筒のようなスートをまたぐ隣接インデックスを除外する）
+        let same_suit = (self.is_character() && tile.is_character())
+            || (self.is_circle() && tile.is_circle())
+            || (self.is_bamboo() && tile.is_bamboo());
+        same_suit && self.index.abs_diff(tile.index) == 1
     }
 
     pub fn to_char(&self) -> char {
@@ -468,6 +459,10 @@ mod tests {
         assert!(!Tile::new(Tile::M1).is_sequential_to(Tile::new(Tile::P1)));
         // 9m→8mは搭子
         assert!(Tile::new(Tile::M9).is_sequential_to(Tile::new(Tile::M8)));
+        // 2m→1mは搭子（回帰テスト: 引数が一萬のとき u32 アンダーフローでパニックしていた）
+        assert!(Tile::new(Tile::M2).is_sequential_to(Tile::new(Tile::M1)));
+        // 1p→9mは搭子ではない（スート境界の逆方向）
+        assert!(!Tile::new(Tile::P1).is_sequential_to(Tile::new(Tile::M9)));
         // 9m→1pは搭子ではない
         assert!(!Tile::new(Tile::M9).is_sequential_to(Tile::new(Tile::P1)));
         // 1s→9pは搭子ではない

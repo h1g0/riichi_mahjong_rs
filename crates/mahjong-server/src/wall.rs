@@ -3,13 +3,15 @@
 //! 136枚の牌（各34種×4枚、うち赤ドラ3枚）を管理する。
 //! 王牌（14枚）・ドラ表示牌・嶺上牌の分離も行う。
 
+use std::collections::VecDeque;
+
 use mahjong_core::tile::{Tile, TileType};
 use rand::seq::SliceRandom;
 
 /// 牌山
 pub struct Wall {
-    /// ツモ牌（通常の山）: インデックスが小さい方からツモる
-    tiles: Vec<Tile>,
+    /// ツモ牌（通常の山）: 先頭からツモる
+    tiles: VecDeque<Tile>,
     /// 王牌（14枚）
     dead_wall: Vec<Tile>,
     /// 嶺上牌のうち次にツモる位置（dead_wall 内のインデックス）
@@ -44,16 +46,7 @@ impl Wall {
     pub fn new() -> Self {
         let mut tiles = Self::create_all_tiles();
         tiles.shuffle(&mut rand::rng());
-
-        // 末尾14枚を王牌として分離
-        let dead_wall: Vec<Tile> = tiles.split_off(tiles.len() - 14);
-
-        Wall {
-            tiles,
-            dead_wall,
-            rinshan_index: 0,
-            dora_indicator_count: 1,
-        }
+        Self::from_shuffled(tiles)
     }
 
     /// 固定シードで牌山を生成する（再現性のある乱数）
@@ -64,21 +57,20 @@ impl Wall {
         let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
         let mut tiles = Self::create_all_tiles();
         tiles.shuffle(&mut rng);
-        let dead_wall: Vec<Tile> = tiles.split_off(tiles.len() - 14);
-        Wall {
-            tiles,
-            dead_wall,
-            rinshan_index: 0,
-            dora_indicator_count: 1,
-        }
+        Self::from_shuffled(tiles)
     }
 
     /// テスト用：指定した牌列で牌山を生成する（シャッフルなし）
     #[cfg(test)]
-    pub fn from_tiles(mut tiles: Vec<Tile>) -> Self {
+    pub fn from_tiles(tiles: Vec<Tile>) -> Self {
+        Self::from_shuffled(tiles)
+    }
+
+    /// 並び順確定済みの136枚から、末尾14枚を王牌として分離して牌山を作る
+    fn from_shuffled(mut tiles: Vec<Tile>) -> Self {
         let dead_wall: Vec<Tile> = tiles.split_off(tiles.len() - 14);
         Wall {
-            tiles,
+            tiles: tiles.into(),
             dead_wall,
             rinshan_index: 0,
             dora_indicator_count: 1,
@@ -87,10 +79,7 @@ impl Wall {
 
     /// 通常のツモを行う（山の先頭から1枚引く）
     pub fn draw(&mut self) -> Option<Tile> {
-        if self.tiles.is_empty() {
-            return None;
-        }
-        Some(self.tiles.remove(0))
+        self.tiles.pop_front()
     }
 
     /// 嶺上牌をツモる（王牌の嶺上牌位置から1枚引く）

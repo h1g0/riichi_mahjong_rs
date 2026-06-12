@@ -6,7 +6,6 @@
 
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
-use mahjong_core::hand_info::meld::Meld;
 use mahjong_core::hand_info::status::Status;
 use mahjong_core::scoring::score::{
     ScoreRank, ScoreResult, calculate_base_points, calculate_score, determine_rank, round_up_to_100,
@@ -315,12 +314,7 @@ pub fn add_dora_to_score(
         all_tiles.push(tile);
     }
     for open in hand.melds() {
-        for &tile in &open.tiles {
-            all_tiles.push(tile);
-        }
-        if open.category.is_kan() && open.tiles.len() == 3 {
-            all_tiles.push(kan_fourth_tile(open));
-        }
+        all_tiles.extend(open.expanded_tiles());
     }
 
     // ドラ表示牌からドラ牌を計算してカウント
@@ -368,18 +362,6 @@ pub fn add_dora_to_score(
     if uradora_count > 0 {
         score_result.yaku_list.push(("裏ドラ", uradora_count));
     }
-}
-
-fn kan_fourth_tile(open: &Meld) -> Tile {
-    if let Some(tile) = open.called_tile {
-        return tile;
-    }
-
-    open.tiles
-        .iter()
-        .copied()
-        .find(|tile| !tile.is_red_dora())
-        .unwrap_or(open.tiles[0])
 }
 
 /// プレイヤーがテンパイしているか判定する（13枚の手牌で）
