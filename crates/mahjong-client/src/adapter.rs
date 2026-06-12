@@ -4,11 +4,21 @@
 //! CPUプレイヤーは人間と同じプロトコル（ServerEvent / ClientAction）で
 //! サーバとやり取りする。
 
+use std::collections::VecDeque;
+
+use macroquad::miniquad::date;
 use mahjong_server::cpu::client::{CpuClient, CpuConfig};
 use mahjong_server::cpu::personalities::default_cpu_configs;
 use mahjong_server::protocol::{ClientAction, ServerEvent};
 use mahjong_server::round::TurnPhase;
 use mahjong_server::table::{GameSettings, Table};
+
+const CPU_ACTION_DELAY_SECONDS: f64 = 1.0;
+
+struct PendingCpuActionBatch {
+    actions: Vec<(usize, ClientAction)>,
+    ready_at: f64,
+}
 
 /// ローカルアダプター: サーバを内蔵し、直接通信する
 pub struct LocalAdapter {
@@ -19,6 +29,8 @@ pub struct LocalAdapter {
     cpu_clients: [Option<CpuClient>; 4],
     /// 人間プレイヤー向けのイベントバッファ
     human_event_buffer: Vec<ServerEvent>,
+    /// 思考待ち中のCPUアクション（イベント処理単位のFIFO）
+    pending_cpu_action_batches: VecDeque<PendingCpuActionBatch>,
 }
 
 impl LocalAdapter {
@@ -48,6 +60,7 @@ impl LocalAdapter {
             human_player,
             cpu_clients,
             human_event_buffer: Vec::new(),
+            pending_cpu_action_batches: VecDeque::new(),
         }
     }
 
@@ -61,6 +74,7 @@ impl LocalAdapter {
 
     /// ゲームを開始する（最初の局を開始）
     pub fn start_game(&mut self) {
+        self.pending_cpu_action_batches.clear();
         self.table.start_round();
         // 局開始時のイベントをCPUに配信（人間イベントはバッファへ）
         self.process_all_events();
@@ -90,6 +104,15 @@ impl LocalAdapter {
     /// - 人間プレイヤーの手番ならUIで入力待ち
     /// - CPUプレイヤーの手番ならイベント配信で自動判断
     pub fn tick(&mut self) {
+        self.tick_at(date::now());
+    }
+
+    fn tick_at(&mut self, now: f64) {
+        // CPUが操作したティックでは次のツモまで進めず、操作順を画面に反映する。
+        if self.process_all_events_at(now) || !self.pending_cpu_action_batches.is_empty() {
+            return;
+        }
+
         let round = match self.table.current_round_mut() {
             Some(r) => r,
             None => return,
@@ -113,38 +136,69 @@ impl LocalAdapter {
         }
 
         // 生成されたイベントを処理（CPU配信 + 人間バッファリング）
-        self.process_all_events();
+        self.process_all_events_at(now);
     }
 
     /// サーバからイベントを取得し、CPUに配信しつつ人間イベントをバッファする
     ///
-    /// CPUのアクションが新たなイベントを生成する可能性があるためループする。
+    /// CPUのアクションは待機キューへ追加し、次回以降の呼び出しで実行する。
     fn process_all_events(&mut self) {
-        loop {
-            let all_events = self.table.drain_events();
-            if all_events.is_empty() {
-                break;
-            }
+        self.process_all_events_at(date::now());
+    }
 
-            // 人間プレイヤーのイベントをバッファに追加
-            for (idx, event) in &all_events {
-                if *idx == self.human_player {
-                    self.human_event_buffer.push(event.clone());
-                }
-            }
+    fn process_all_events_at(&mut self, now: f64) -> bool {
+        let cpu_acted = self.apply_ready_cpu_actions(now);
 
-            // CPUプレイヤーにイベントを配信してアクションを収集
-            let cpu_actions = self.collect_cpu_actions(&all_events);
+        let all_events = self.table.drain_events();
+        if all_events.is_empty() {
+            return cpu_acted;
+        }
 
-            if cpu_actions.is_empty() {
-                break;
-            }
-
-            // CPUのアクションをサーバに送信（これが新たなイベントを生成する）
-            for (player_idx, action) in cpu_actions {
-                self.table.handle_action(player_idx, action);
+        // 人間プレイヤーのイベントをバッファに追加
+        for (idx, event) in &all_events {
+            if *idx == self.human_player {
+                self.human_event_buffer.push(event.clone());
             }
         }
+
+        // CPUプレイヤーにイベントを配信してアクションを収集
+        let cpu_actions = self.collect_cpu_actions(&all_events);
+        self.schedule_cpu_actions(cpu_actions, now);
+
+        cpu_acted
+    }
+
+    fn schedule_cpu_actions(&mut self, actions: Vec<(usize, ClientAction)>, now: f64) {
+        if actions.is_empty() {
+            return;
+        }
+
+        let ready_at = self
+            .pending_cpu_action_batches
+            .back()
+            .map_or(now + CPU_ACTION_DELAY_SECONDS, |pending| {
+                pending.ready_at.max(now) + CPU_ACTION_DELAY_SECONDS
+            });
+
+        // 同じイベント処理で生じた応答は、鳴き解決などのため同時に適用する。
+        self.pending_cpu_action_batches
+            .push_back(PendingCpuActionBatch { actions, ready_at });
+    }
+
+    fn apply_ready_cpu_actions(&mut self, now: f64) -> bool {
+        let Some(pending) = self.pending_cpu_action_batches.front() else {
+            return false;
+        };
+        if pending.ready_at > now {
+            return false;
+        }
+
+        let pending = self.pending_cpu_action_batches.pop_front().unwrap();
+        for (player_idx, action) in pending.actions {
+            self.table.handle_action(player_idx, action);
+        }
+
+        true
     }
 
     /// CPUプレイヤーにイベントを配信し、アクションを収集する
@@ -180,6 +234,7 @@ impl LocalAdapter {
 
     /// 次の局を開始する
     pub fn next_round(&mut self) {
+        self.pending_cpu_action_batches.clear();
         self.table.finish_round();
         if !self.table.is_game_over {
             self.table.start_round();
@@ -379,5 +434,66 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_cpu_action_is_applied_after_one_second_delay() {
+        let mut adapter = LocalAdapter::new();
+        adapter.table.start_round();
+
+        {
+            let round = adapter.table.current_round_mut().unwrap();
+            round.current_player = 1;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.players[1].draw(Tile::new(Tile::Z7));
+            round.drain_events();
+        }
+
+        adapter.schedule_cpu_actions(vec![(1, ClientAction::Discard { tile: None })], 10.0);
+
+        adapter.process_all_events_at(10.999);
+        assert_eq!(
+            adapter.table.current_round().unwrap().phase,
+            TurnPhase::WaitForDiscard
+        );
+
+        adapter.process_all_events_at(11.0);
+        assert_ne!(
+            adapter.table.current_round().unwrap().phase,
+            TurnPhase::WaitForDiscard
+        );
+    }
+
+    #[test]
+    fn test_only_one_cpu_action_batch_is_applied_per_tick() {
+        let mut adapter = LocalAdapter::new();
+        adapter.table.start_round();
+
+        {
+            let round = adapter.table.current_round_mut().unwrap();
+            for player_idx in [0, 2, 3] {
+                let seat_wind = round.players[player_idx].seat_wind;
+                let score = round.players[player_idx].score;
+                round.players[player_idx] = Player::new(seat_wind, Vec::new(), score);
+            }
+            round.current_player = 1;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.players[1].draw(Tile::new(Tile::Z7));
+            round.drain_events();
+        }
+
+        adapter.schedule_cpu_actions(vec![(1, ClientAction::Discard { tile: None })], 10.0);
+        adapter.schedule_cpu_actions(vec![(2, ClientAction::Discard { tile: None })], 10.0);
+
+        adapter.tick_at(11.0);
+
+        let round = adapter.table.current_round().unwrap();
+        assert_eq!(round.current_player, 2);
+        assert_eq!(round.phase, TurnPhase::Draw);
+        assert_eq!(adapter.pending_cpu_action_batches.len(), 1);
+        assert_eq!(
+            adapter.pending_cpu_action_batches.front().unwrap().ready_at,
+            12.0
+        );
     }
 }
