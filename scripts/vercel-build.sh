@@ -18,4 +18,14 @@ cargo build --release --target wasm32-unknown-unknown -p mahjong-client
 curl -L https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js -o public/mq_js_bundle.js
 cp target/wasm32-unknown-unknown/release/mahjong-client.wasm public/mahjong-client.wasm
 cp index.html public/index.html
-sed -i 's|target/wasm32-unknown-unknown/release/mahjong-client.wasm|mahjong-client.wasm|' public/index.html
+
+# Rename assets with a content hash so browsers can cache them immutably
+# (see the Cache-Control headers in vercel.json) without ever serving a
+# stale version after a new deployment.
+wasm_hash=$(sha1sum public/mahjong-client.wasm | cut -c1-8)
+js_hash=$(sha1sum public/mq_js_bundle.js | cut -c1-8)
+mv public/mahjong-client.wasm "public/mahjong-client.${wasm_hash}.wasm"
+mv public/mq_js_bundle.js "public/mq_js_bundle.${js_hash}.js"
+
+sed -i "s|target/wasm32-unknown-unknown/release/mahjong-client.wasm|mahjong-client.${wasm_hash}.wasm|" public/index.html
+sed -i "s|mq_js_bundle.js|mq_js_bundle.${js_hash}.js|" public/index.html
