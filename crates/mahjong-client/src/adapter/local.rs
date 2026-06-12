@@ -1,8 +1,10 @@
 //! ローカルアダプター
 //!
 //! サーバとクライアントを同一プロセス内で直接接続する。
-//! ゲーム進行とCPU処理は mahjong_server::driver::GameDriver に委譲する。
+//! ゲーム進行とCPU処理は mahjong_server::driver::GameDriver に委譲し、
+//! CPUの打牌には思考時間を演出する遅延を入れる。
 
+use macroquad::miniquad::date;
 use mahjong_server::cpu::client::CpuConfig;
 use mahjong_server::driver::GameDriver;
 use mahjong_server::protocol::{ClientAction, ServerEvent};
@@ -12,6 +14,9 @@ use super::GameAdapter;
 
 /// 人間プレイヤーの座席インデックス（0 = 東家/親）
 const HUMAN_SEAT: usize = 0;
+
+/// CPUアクションの適用間隔（秒）
+const CPU_ACTION_DELAY_SECONDS: f64 = 1.0;
 
 /// ローカルアダプター: サーバを内蔵し、直接通信する
 pub struct LocalAdapter {
@@ -27,6 +32,7 @@ impl LocalAdapter {
         for (i, config) in cpu_configs.into_iter().enumerate() {
             driver.set_cpu(HUMAN_SEAT + 1 + i, config);
         }
+        driver.set_cpu_action_delay(CPU_ACTION_DELAY_SECONDS);
         LocalAdapter { driver }
     }
 
@@ -38,19 +44,20 @@ impl LocalAdapter {
 
 impl GameAdapter for LocalAdapter {
     fn send_action(&mut self, action: ClientAction) {
-        self.driver.handle_action(HUMAN_SEAT, action);
+        self.driver
+            .handle_action_at(HUMAN_SEAT, action, date::now());
     }
 
     fn poll_events(&mut self) -> Vec<ServerEvent> {
-        self.driver.drain_events(HUMAN_SEAT)
+        self.driver.drain_events_at(HUMAN_SEAT, date::now())
     }
 
     fn tick(&mut self) {
-        self.driver.tick();
+        self.driver.tick_at(date::now());
     }
 
     fn request_next_round(&mut self) {
-        self.driver.next_round();
+        self.driver.next_round_at(date::now());
     }
 
     fn is_game_over(&self) -> bool {
