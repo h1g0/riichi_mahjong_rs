@@ -25,8 +25,8 @@ const AGARI_FONT: u16 = 32;
 const BOARD_CENTER_X: f32 = 500.0;
 const BOARD_CENTER_Y: f32 = 380.0;
 
-/// Camera2D の回転角度（度）— 自分(0°)、下家(90°)、対面(180°)、上家(-90°)
-const PLAYER_ROTATIONS: [f32; 4] = [0.0, 90.0, 180.0, -90.0];
+/// Camera2D の回転角度（度）— 自分(0°)、下家(-90°)、対面(180°)、上家(90°)
+const PLAYER_ROTATIONS: [f32; 4] = [0.0, -90.0, 180.0, 90.0];
 
 /// 盤面中心を軸に回転する Camera2D を生成する
 fn make_board_camera(rotation_deg: f32) -> Camera2D {
@@ -1214,4 +1214,14 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PLAYER_ROTATIONS;
+
+    #[test]
+    fn player_rotations_place_turn_order_counterclockwise() {
+        assert_eq!(PLAYER_ROTATIONS, [0.0, -90.0, 180.0, 90.0]);
+    }
 }
