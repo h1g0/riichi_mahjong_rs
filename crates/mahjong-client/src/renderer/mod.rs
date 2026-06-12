@@ -2,7 +2,11 @@
 //!
 //! 埋め込みPNGを使って麻雀牌を描画する。
 
+mod online;
 mod overlay;
+pub use online::{
+    OnlineLobbyAction, OnlineMenuAction, handle_online_lobby_input, handle_online_menu_input,
+};
 pub use overlay::OverlayClick;
 
 use macroquad::prelude::*;
@@ -154,6 +158,14 @@ pub fn draw_game(
             draw_setup(state, font);
             None
         }
+        GamePhase::OnlineMenu => {
+            online::draw_online_menu(state, font);
+            None
+        }
+        GamePhase::OnlineLobby => {
+            online::draw_online_lobby(state, font);
+            None
+        }
         GamePhase::WaitingForStart => {
             draw_jp_text(font, "ゲーム開始中...", 540.0, 400.0, 30, WHITE);
             None
@@ -165,7 +177,9 @@ pub fn draw_game(
             draw_other_player_hands(state, tile_textures);
             draw_hand(state, font, tile_textures);
             draw_melds(state, tile_textures);
-            overlay::draw_action_buttons(state, font, tile_textures)
+            let click = overlay::draw_action_buttons(state, font, tile_textures);
+            online::draw_connection_banner(state, font);
+            click
         }
         GamePhase::RoundResult => {
             draw_dora_indicators(state, font, tile_textures);
@@ -175,6 +189,7 @@ pub fn draw_game(
             draw_hand(state, font, tile_textures);
             draw_melds(state, tile_textures);
             draw_result(state, font, tile_textures);
+            online::draw_connection_banner(state, font);
             None
         }
         GamePhase::GameOver => {
@@ -1157,10 +1172,50 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         28,
         WHITE,
     );
+
+    // オンライン対戦ボタン
+    let online_btn = SetupButton {
+        x: 490.0,
+        y: 700.0,
+        w: 300.0,
+        h: 40.0,
+    };
+    draw_rectangle(
+        online_btn.x,
+        online_btn.y,
+        online_btn.w,
+        online_btn.h,
+        Color::new(0.15, 0.25, 0.5, 1.0),
+    );
+    draw_rectangle_lines(
+        online_btn.x,
+        online_btn.y,
+        online_btn.w,
+        online_btn.h,
+        2.0,
+        Color::new(0.3, 0.5, 0.9, 1.0),
+    );
+    // ボタン(40px)内でフォント(22px)を垂直中央: btn_y + (40+22)/2 = btn_y + 31
+    draw_jp_text(
+        font,
+        "オンライン対戦",
+        online_btn.x + 73.0,
+        online_btn.y + 31.0,
+        22,
+        WHITE,
+    );
 }
 
-/// 設定画面の入力を処理する。対局開始が押された場合 Some(configs) を返す。
-pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option<[CpuConfig; 3]> {
+/// 設定画面での操作
+pub enum SetupAction {
+    /// ローカル対局を開始する
+    StartLocal([CpuConfig; 3]),
+    /// オンライン対戦メニューへ
+    GoOnline,
+}
+
+/// 設定画面の入力を処理する。ボタンが押された場合 Some(action) を返す。
+pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option<SetupAction> {
     if !is_mouse_button_pressed(MouseButton::Left) {
         return None;
     }
@@ -1210,7 +1265,18 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
     if start_btn.contains(mx, my) {
         let configs = setup.build_configs();
         state.phase = GamePhase::WaitingForStart;
-        return Some(configs);
+        return Some(SetupAction::StartLocal(configs));
+    }
+
+    // オンライン対戦ボタン
+    let online_btn = SetupButton {
+        x: 490.0,
+        y: 700.0,
+        w: 300.0,
+        h: 40.0,
+    };
+    if online_btn.contains(mx, my) {
+        return Some(SetupAction::GoOnline);
     }
 
     None

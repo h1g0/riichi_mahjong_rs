@@ -5,8 +5,10 @@
 //! 同じインターフェースで扱えるようにする。
 
 mod local;
+mod remote;
 
 pub use local::LocalAdapter;
+pub use remote::{ConnStatus, RemoteAdapter, RoomView, error_code_message};
 
 use mahjong_server::protocol::{ClientAction, ServerEvent};
 
@@ -29,4 +31,9 @@ pub trait GameAdapter {
 
     /// ゲームが終了しているか
     fn is_game_over(&self) -> bool;
+
+    /// 接続状態などの表示用テキスト（問題がなければ None）
+    fn status_text(&self) -> Option<String> {
+        None
+    }
 }

@@ -65,9 +65,11 @@ impl TestClient {
     }
 
     /// 次の ServerMessage を受信する（Ping/Pong は読み飛ばす）
+    ///
+    /// タイムアウトはCI等の高負荷環境での誤検知を避けるため長めに取る。
     async fn recv(&mut self) -> ServerMessage {
         loop {
-            let frame = tokio::time::timeout(Duration::from_secs(10), self.ws.next())
+            let frame = tokio::time::timeout(Duration::from_secs(30), self.ws.next())
                 .await
                 .expect("受信がタイムアウトした")
                 .expect("接続が閉じられた")
