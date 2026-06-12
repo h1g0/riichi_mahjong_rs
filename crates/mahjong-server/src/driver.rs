@@ -5,7 +5,7 @@
 //! オンライン対戦（ネットワークサーバのルーム）の両方から再利用できる。
 //!
 //! CPU プレイヤーは人間と同じプロトコル（ServerEvent / ClientAction）で
-//! やり取りし、CPU でない座席のイベントは座席ごとのバッファに溜める。
+//! やり取りし、CPU が操作していない座席のイベントは座席ごとのバッファに溜める。
 //!
 //! CPU の打牌に思考時間を演出する遅延を入れる場合は
 //! [`set_cpu_action_delay`](GameDriver::set_cpu_action_delay) で有効化し、
@@ -28,12 +28,23 @@ struct PendingCpuActionBatch {
     ready_at: f64,
 }
 
+/// 座席に割り当てられたCPUクライアント
+struct CpuSeat {
+    client: CpuClient,
+    /// この座席をCPUが操作するか
+    ///
+    /// false の場合は「シャドーCPU」: イベントを受け取って内部状態を
+    /// 追跡するだけで、アクションは出さない（人間が操作する座席）。
+    /// 切断時に true に切り替えるだけで即座に代打ちできる。
+    controlled: bool,
+}
+
 /// ゲームドライバー: 卓とCPUクライアントを所有し、ゲームを進行する
 pub struct GameDriver {
     table: Table,
-    /// 各座席のCPUクライアント（Noneなら人間が操作する座席）
-    cpu_clients: [Option<CpuClient>; 4],
-    /// CPUでない座席向けのイベントバッファ
+    /// 各座席のCPUクライアント（Noneなら人間のみの座席）
+    cpus: [Option<CpuSeat>; 4],
+    /// CPUが操作していない座席向けのイベントバッファ
     event_buffers: [Vec<ServerEvent>; 4],
     /// CPUアクションの適用間隔（秒）。Noneなら即時適用
     action_delay: Option<f64>,
@@ -46,18 +57,53 @@ impl GameDriver {
     pub fn new(settings: GameSettings) -> Self {
         GameDriver {
             table: Table::new(settings),
-            cpu_clients: [None, None, None, None],
+            cpus: [None, None, None, None],
             event_buffers: [const { Vec::new() }; 4],
             action_delay: None,
             pending_cpu_batches: VecDeque::new(),
         }
     }
 
-    /// 指定した座席にCPUクライアントを割り当てる
+    /// 指定した座席にCPUクライアントを割り当てる（CPUが操作する）
     pub fn set_cpu(&mut self, seat: usize, config: CpuConfig) {
         if seat < 4 {
-            self.cpu_clients[seat] = Some(CpuClient::new(config));
+            self.cpus[seat] = Some(CpuSeat {
+                client: CpuClient::new(config),
+                controlled: true,
+            });
         }
+    }
+
+    /// 指定した座席にシャドーCPUを割り当てる
+    ///
+    /// イベントを配信して内部状態を追跡させるが、アクションは出さない。
+    /// 人間の座席に割り当てておくと、切断時に
+    /// [`set_cpu_controlled`](Self::set_cpu_controlled) で即座に代打ちできる。
+    pub fn set_shadow_cpu(&mut self, seat: usize, config: CpuConfig) {
+        if seat < 4 {
+            self.cpus[seat] = Some(CpuSeat {
+                client: CpuClient::new(config),
+                controlled: false,
+            });
+        }
+    }
+
+    /// 指定した座席のCPU操作を切り替える
+    ///
+    /// CPUクライアントが割り当てられていない座席は切り替えられず false を返す。
+    pub fn set_cpu_controlled(&mut self, seat: usize, controlled: bool) -> bool {
+        match self.cpus.get_mut(seat) {
+            Some(Some(cpu)) => {
+                cpu.controlled = controlled;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// 指定した座席をCPUが操作しているか
+    pub fn is_cpu_controlled(&self, seat: usize) -> bool {
+        matches!(self.cpus.get(seat), Some(Some(cpu)) if cpu.controlled)
     }
 
     /// CPUアクションの適用に遅延（秒）を設定する
@@ -92,7 +138,7 @@ impl GameDriver {
         self.pump(None);
     }
 
-    /// 指定した座席のイベントを取得する（CPU座席は常に空）
+    /// 指定した座席のイベントを取得する（CPU操作中の座席は常に空）
     pub fn drain_events(&mut self, seat: usize) -> Vec<ServerEvent> {
         self.drain_events_impl(seat, None)
     }
@@ -174,6 +220,61 @@ impl GameDriver {
 
         // 生成されたイベントを処理（CPU配信 + 人間バッファリング）
         self.pump(now);
+    }
+
+    /// 人間の入力が必要になるか局が終わるまでゲームを進める
+    ///
+    /// ツモフェーズを繰り返し実行し、CPUのアクションはイベントポンプで
+    /// 自動処理する。フレームループを持たないネットワークサーバ向けで、
+    /// CPU遅延の設定に関わらず即時に進行する。牌山が有限なので必ず停止する。
+    pub fn run_until_blocked(&mut self) {
+        loop {
+            let round = match self.table.current_round() {
+                Some(r) => r,
+                None => return,
+            };
+            if round.is_over() || round.phase != TurnPhase::Draw {
+                return;
+            }
+            self.tick();
+        }
+    }
+
+    /// 指定した座席が入力待ちなら既定のアクション（ツモ切り/パス/続行）を実行する
+    ///
+    /// CPU代打ちへの切り替え直後や行動タイムアウト時に、入力待ちで
+    /// 停止したゲームを進めるために使う。実行したら true を返す。
+    pub fn force_default_action(&mut self, seat: usize) -> bool {
+        let action = {
+            let round = match self.table.current_round() {
+                Some(r) => r,
+                None => return false,
+            };
+            if round.is_over() {
+                return false;
+            }
+            match round.phase {
+                TurnPhase::WaitForDiscard if round.current_player == seat => {
+                    ClientAction::Discard { tile: None }
+                }
+                TurnPhase::WaitForCalls => {
+                    let pending = round
+                        .call_state
+                        .as_ref()
+                        .map(|cs| !cs.responded[seat])
+                        .unwrap_or(false);
+                    if !pending {
+                        return false;
+                    }
+                    ClientAction::Pass
+                }
+                TurnPhase::WaitForNineTerminals if round.current_player == seat => {
+                    ClientAction::NineTerminals { declare: false }
+                }
+                _ => return false,
+            }
+        };
+        self.handle_action(seat, action)
     }
 
     /// 現在の局が終了しているか
@@ -277,10 +378,10 @@ impl GameDriver {
         cpu_acted
     }
 
-    /// CPUでない座席のイベントをバッファに追加する
+    /// CPUが操作していない座席のイベントをバッファに追加する
     fn buffer_human_events(&mut self, events: &[(usize, ServerEvent)]) {
         for (seat, event) in events {
-            if self.cpu_clients[*seat].is_none() {
+            if !self.is_cpu_controlled(*seat) {
                 self.event_buffers[*seat].push(event.clone());
             }
         }
@@ -318,7 +419,10 @@ impl GameDriver {
         true
     }
 
-    /// CPUプレイヤーにイベントを配信し、アクションを収集する
+    /// CPUクライアントにイベントを配信し、操作中の座席のアクションを収集する
+    ///
+    /// シャドーCPU（controlled = false）にもイベントは配信するが、
+    /// 返ってきたアクションは捨てる。
     fn collect_cpu_actions(
         &mut self,
         events: &[(usize, ServerEvent)],
@@ -326,8 +430,9 @@ impl GameDriver {
         let mut actions = Vec::new();
 
         for (seat, event) in events {
-            if let Some(cpu) = &mut self.cpu_clients[*seat]
-                && let Some(action) = cpu.handle_event(event)
+            if let Some(cpu) = &mut self.cpus[*seat]
+                && let Some(action) = cpu.client.handle_event(event)
+                && cpu.controlled
             {
                 actions.push((*seat, action));
             }
@@ -417,6 +522,79 @@ mod tests {
         // 局終了イベント（和了または流局）が人間座席に届いている
         let round = driver.table().current_round().unwrap();
         assert!(round.result.is_some(), "局結果が設定されていない");
+    }
+
+    /// シャドーCPUはイベントを受け取ってもアクションを出さないことを確認
+    #[test]
+    fn test_shadow_cpu_does_not_act() {
+        let mut driver = driver_with_three_cpus();
+        // 座席0にシャドーCPUを割り当てる（人間扱いのまま）
+        let config = default_cpu_configs()[0].clone();
+        driver.set_shadow_cpu(0, config);
+        assert!(!driver.is_cpu_controlled(0));
+
+        driver.start_game_with_seed(42);
+        driver.run_until_blocked();
+
+        // 座席0の入力待ちで停止している（シャドーCPUが勝手に打牌していない）
+        let round = driver.table().current_round().unwrap();
+        assert!(!round.is_over());
+        assert_eq!(round.current_player, 0);
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+
+        // 座席0にはイベントが届いている
+        let events = driver.drain_events(0);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::TileDrawn { .. })),
+            "シャドーCPU座席にTileDrawnが届いていない"
+        );
+    }
+
+    /// シャドーCPUを操作状態に切り替えると局が自動進行することを確認
+    #[test]
+    fn test_shadow_cpu_takeover_completes_round() {
+        let mut driver = driver_with_three_cpus();
+        let config = default_cpu_configs()[0].clone();
+        driver.set_shadow_cpu(0, config);
+
+        driver.start_game_with_seed(42);
+        driver.run_until_blocked();
+        assert!(!driver.is_round_over());
+
+        // 代打ちに切り替え
+        assert!(driver.set_cpu_controlled(0, true));
+        assert!(driver.is_cpu_controlled(0));
+
+        // 切り替え時点で座席0は打牌待ちのため、既定アクションで進める。
+        // 以降は全席CPUなので局は最後まで自動進行する。
+        assert!(driver.force_default_action(0));
+        driver.run_until_blocked();
+
+        assert!(driver.is_round_over(), "代打ち後に局が進行しなかった");
+    }
+
+    /// CPUクライアント未割り当ての座席は操作切り替えできないことを確認
+    #[test]
+    fn test_set_cpu_controlled_requires_cpu_client() {
+        let mut driver = GameDriver::new(GameSettings::default());
+        assert!(!driver.set_cpu_controlled(0, true));
+        assert!(!driver.is_cpu_controlled(0));
+    }
+
+    /// run_until_blocked が人間の打牌待ちで停止することを確認
+    #[test]
+    fn test_run_until_blocked_stops_at_human_turn() {
+        let mut driver = driver_with_three_cpus();
+        driver.start_game_with_seed(123);
+        driver.run_until_blocked();
+
+        let round = driver.table().current_round().unwrap();
+        if !round.is_over() {
+            // 停止位置はDrawフェーズ以外（人間入力待ちか局終了）
+            assert_ne!(round.phase, TurnPhase::Draw);
+        }
     }
 
     /// カン後にゲームが進行できることを確認するテスト
