@@ -6,11 +6,27 @@
 //!
 //! CPU プレイヤーは人間と同じプロトコル（ServerEvent / ClientAction）で
 //! やり取りし、CPU でない座席のイベントは座席ごとのバッファに溜める。
+//!
+//! CPU の打牌に思考時間を演出する遅延を入れる場合は
+//! [`set_cpu_action_delay`](GameDriver::set_cpu_action_delay) で有効化し、
+//! `*_at` 系メソッドで現在時刻（秒）を渡す。時刻を注入する設計のため
+//! このクレートは時計の実装（macroquad 等）に依存しない。
+//! 遅延を設定しない場合（ネットワークサーバなど）は即時に進行する。
+
+use std::collections::VecDeque;
 
 use crate::cpu::client::{CpuClient, CpuConfig};
 use crate::protocol::{ClientAction, ServerEvent};
 use crate::round::TurnPhase;
 use crate::table::{GameSettings, Table};
+
+/// 思考待ち中のCPUアクション（同一イベント処理で生じた応答の単位）
+///
+/// 同じイベント処理で生じた応答は、鳴き解決などのため同時に適用する。
+struct PendingCpuActionBatch {
+    actions: Vec<(usize, ClientAction)>,
+    ready_at: f64,
+}
 
 /// ゲームドライバー: 卓とCPUクライアントを所有し、ゲームを進行する
 pub struct GameDriver {
@@ -19,6 +35,10 @@ pub struct GameDriver {
     cpu_clients: [Option<CpuClient>; 4],
     /// CPUでない座席向けのイベントバッファ
     event_buffers: [Vec<ServerEvent>; 4],
+    /// CPUアクションの適用間隔（秒）。Noneなら即時適用
+    action_delay: Option<f64>,
+    /// 思考待ち中のCPUアクション（イベント処理単位のFIFO）
+    pending_cpu_batches: VecDeque<PendingCpuActionBatch>,
 }
 
 impl GameDriver {
@@ -28,6 +48,8 @@ impl GameDriver {
             table: Table::new(settings),
             cpu_clients: [None, None, None, None],
             event_buffers: [const { Vec::new() }; 4],
+            action_delay: None,
+            pending_cpu_batches: VecDeque::new(),
         }
     }
 
@@ -36,6 +58,14 @@ impl GameDriver {
         if seat < 4 {
             self.cpu_clients[seat] = Some(CpuClient::new(config));
         }
+    }
+
+    /// CPUアクションの適用に遅延（秒）を設定する
+    ///
+    /// 有効にした場合は `tick_at` / `handle_action_at` / `drain_events_at` /
+    /// `next_round_at` で現在時刻を渡して進行させること。
+    pub fn set_cpu_action_delay(&mut self, seconds: f64) {
+        self.action_delay = Some(seconds);
     }
 
     /// 卓への参照を取得する
@@ -50,20 +80,31 @@ impl GameDriver {
 
     /// ゲームを開始する（最初の局を開始）
     pub fn start_game(&mut self) {
+        self.pending_cpu_batches.clear();
         self.table.start_round();
-        self.process_all_events();
+        self.pump(None);
     }
 
     /// シード値を指定してゲームを開始する（テスト・再現用）
     pub fn start_game_with_seed(&mut self, seed: u64) {
+        self.pending_cpu_batches.clear();
         self.table.start_round_with_seed(seed);
-        self.process_all_events();
+        self.pump(None);
     }
 
     /// 指定した座席のイベントを取得する（CPU座席は常に空）
     pub fn drain_events(&mut self, seat: usize) -> Vec<ServerEvent> {
+        self.drain_events_impl(seat, None)
+    }
+
+    /// 現在時刻を渡してイベントを取得する（CPU遅延が有効な場合に使う）
+    pub fn drain_events_at(&mut self, seat: usize, now: f64) -> Vec<ServerEvent> {
+        self.drain_events_impl(seat, Some(now))
+    }
+
+    fn drain_events_impl(&mut self, seat: usize, now: Option<f64>) -> Vec<ServerEvent> {
         // まず未処理イベントを処理
-        self.process_all_events();
+        self.pump(now);
 
         match self.event_buffers.get_mut(seat) {
             Some(buffer) => std::mem::take(buffer),
@@ -75,9 +116,18 @@ impl GameDriver {
     ///
     /// 手番違いやフェーズ違いなど無効なアクションは `false` を返す。
     pub fn handle_action(&mut self, seat: usize, action: ClientAction) -> bool {
+        self.handle_action_impl(seat, action, None)
+    }
+
+    /// 現在時刻を渡してアクションを処理する（CPU遅延が有効な場合に使う）
+    pub fn handle_action_at(&mut self, seat: usize, action: ClientAction, now: f64) -> bool {
+        self.handle_action_impl(seat, action, Some(now))
+    }
+
+    fn handle_action_impl(&mut self, seat: usize, action: ClientAction, now: Option<f64>) -> bool {
         let accepted = self.table.handle_action(seat, action);
         // アクション後のイベントを処理
-        self.process_all_events();
+        self.pump(now);
         accepted
     }
 
@@ -86,6 +136,20 @@ impl GameDriver {
     /// - 人間プレイヤーの手番ならUIで入力待ち
     /// - CPUプレイヤーの手番ならイベント配信で自動判断
     pub fn tick(&mut self) {
+        self.tick_impl(None);
+    }
+
+    /// 現在時刻を渡してゲームを1ティック進める（CPU遅延が有効な場合に使う）
+    pub fn tick_at(&mut self, now: f64) {
+        self.tick_impl(Some(now));
+    }
+
+    fn tick_impl(&mut self, now: Option<f64>) {
+        // CPUが操作したティックでは次のツモまで進めず、操作順を画面に反映する。
+        if self.pump(now) || !self.pending_cpu_batches.is_empty() {
+            return;
+        }
+
         let round = match self.table.current_round_mut() {
             Some(r) => r,
             None => return,
@@ -109,7 +173,7 @@ impl GameDriver {
         }
 
         // 生成されたイベントを処理（CPU配信 + 人間バッファリング）
-        self.process_all_events();
+        self.pump(now);
     }
 
     /// 現在の局が終了しているか
@@ -122,11 +186,21 @@ impl GameDriver {
 
     /// 次の局を開始する
     pub fn next_round(&mut self) {
+        self.next_round_impl(None);
+    }
+
+    /// 現在時刻を渡して次の局を開始する（CPU遅延が有効な場合に使う）
+    pub fn next_round_at(&mut self, now: f64) {
+        self.next_round_impl(Some(now));
+    }
+
+    fn next_round_impl(&mut self, now: Option<f64>) {
+        self.pending_cpu_batches.clear();
         self.table.finish_round();
         if !self.table.is_game_over {
             self.table.start_round();
             // 新局のイベントを処理
-            self.process_all_events();
+            self.pump(now);
         }
     }
 
@@ -135,22 +209,38 @@ impl GameDriver {
         self.table.is_game_over
     }
 
+    /// イベントポンプを回す。CPUがアクションを適用したら true を返す
+    ///
+    /// 遅延が設定され `now` が渡された場合はペース制御付きで1回分だけ処理し、
+    /// それ以外は静止するまで即時にループする。
+    fn pump(&mut self, now: Option<f64>) -> bool {
+        match (self.action_delay, now) {
+            (Some(delay), Some(now)) => self.pump_paced(delay, now),
+            _ => {
+                self.pump_immediate();
+                false
+            }
+        }
+    }
+
     /// サーバからイベントを取得し、CPUに配信しつつ人間イベントをバッファする
     ///
     /// CPUのアクションが新たなイベントを生成する可能性があるためループする。
-    fn process_all_events(&mut self) {
+    fn pump_immediate(&mut self) {
+        // 残っている待機バッチがあれば先に適用する（遅延未使用なら常に空）
+        while let Some(batch) = self.pending_cpu_batches.pop_front() {
+            for (seat, action) in batch.actions {
+                self.table.handle_action(seat, action);
+            }
+        }
+
         loop {
             let all_events = self.table.drain_events();
             if all_events.is_empty() {
                 break;
             }
 
-            // CPUでない座席のイベントをバッファに追加
-            for (seat, event) in &all_events {
-                if self.cpu_clients[*seat].is_none() {
-                    self.event_buffers[*seat].push(event.clone());
-                }
-            }
+            self.buffer_human_events(&all_events);
 
             // CPUプレイヤーにイベントを配信してアクションを収集
             let cpu_actions = self.collect_cpu_actions(&all_events);
@@ -164,6 +254,68 @@ impl GameDriver {
                 self.table.handle_action(seat, action);
             }
         }
+    }
+
+    /// ペース制御付きでイベントを1回分処理する
+    ///
+    /// CPUのアクションは即時適用せず待機キューへ追加し、`ready_at` を
+    /// 迎えたバッチを1ティックに1つだけ適用する。
+    fn pump_paced(&mut self, delay: f64, now: f64) -> bool {
+        let cpu_acted = self.apply_ready_cpu_batch(now);
+
+        let all_events = self.table.drain_events();
+        if all_events.is_empty() {
+            return cpu_acted;
+        }
+
+        self.buffer_human_events(&all_events);
+
+        // CPUプレイヤーにイベントを配信してアクションを収集
+        let cpu_actions = self.collect_cpu_actions(&all_events);
+        self.schedule_cpu_actions(cpu_actions, delay, now);
+
+        cpu_acted
+    }
+
+    /// CPUでない座席のイベントをバッファに追加する
+    fn buffer_human_events(&mut self, events: &[(usize, ServerEvent)]) {
+        for (seat, event) in events {
+            if self.cpu_clients[*seat].is_none() {
+                self.event_buffers[*seat].push(event.clone());
+            }
+        }
+    }
+
+    /// CPUアクションのバッチを待機キューへ追加する
+    fn schedule_cpu_actions(&mut self, actions: Vec<(usize, ClientAction)>, delay: f64, now: f64) {
+        if actions.is_empty() {
+            return;
+        }
+
+        let ready_at = self
+            .pending_cpu_batches
+            .back()
+            .map_or(now + delay, |pending| pending.ready_at.max(now) + delay);
+
+        self.pending_cpu_batches
+            .push_back(PendingCpuActionBatch { actions, ready_at });
+    }
+
+    /// 適用時刻を迎えた先頭のバッチを1つだけ適用する
+    fn apply_ready_cpu_batch(&mut self, now: f64) -> bool {
+        let Some(pending) = self.pending_cpu_batches.front() else {
+            return false;
+        };
+        if pending.ready_at > now {
+            return false;
+        }
+
+        let pending = self.pending_cpu_batches.pop_front().unwrap();
+        for (seat, action) in pending.actions {
+            self.table.handle_action(seat, action);
+        }
+
+        true
     }
 
     /// CPUプレイヤーにイベントを配信し、アクションを収集する
@@ -289,7 +441,7 @@ mod tests {
         }
 
         // 初期イベントを処理
-        driver.process_all_events();
+        driver.pump(None);
         let _ = driver.drain_events(0);
 
         // 座席0 が暗カンを実行
@@ -355,7 +507,7 @@ mod tests {
         }
 
         // イベント処理（CPUが自動的にカンまたは打牌する）
-        driver.process_all_events();
+        driver.pump(None);
 
         // ゲームが進行した（RoundOverでなくWaitForDiscardかDrawになっている）ことを確認
         let phase = {
@@ -424,5 +576,76 @@ mod tests {
                 seat
             );
         }
+    }
+
+    /// CPUアクションが設定した遅延の後に適用されることを確認
+    #[test]
+    fn test_cpu_action_is_applied_after_configured_delay() {
+        let mut driver = driver_with_three_cpus();
+        driver.set_cpu_action_delay(1.0);
+        driver.table_mut().start_round();
+
+        {
+            let round = driver.table_mut().current_round_mut().unwrap();
+            round.current_player = 1;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.players[1].draw(Tile::new(Tile::Z7));
+            round.drain_events();
+        }
+
+        driver.schedule_cpu_actions(vec![(1, ClientAction::Discard { tile: None })], 1.0, 10.0);
+
+        driver.pump(Some(10.999));
+        assert_eq!(
+            driver.table().current_round().unwrap().phase,
+            TurnPhase::WaitForDiscard
+        );
+
+        driver.pump(Some(11.0));
+        assert_ne!(
+            driver.table().current_round().unwrap().phase,
+            TurnPhase::WaitForDiscard
+        );
+    }
+
+    /// 1ティックに1バッチしか適用されないことを確認
+    #[test]
+    fn test_only_one_cpu_action_batch_is_applied_per_tick() {
+        let mut driver = driver_with_three_cpus();
+        driver.set_cpu_action_delay(1.0);
+        driver.table_mut().start_round();
+
+        {
+            let round = driver.table_mut().current_round_mut().unwrap();
+            for player_idx in [0, 2, 3] {
+                let seat_wind = round.players[player_idx].seat_wind;
+                let score = round.players[player_idx].score;
+                round.players[player_idx] = Player::new(seat_wind, Vec::new(), score);
+            }
+            round.current_player = 1;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.players[1].draw(Tile::new(Tile::Z7));
+            round.drain_events();
+        }
+
+        driver.schedule_cpu_actions(vec![(1, ClientAction::Discard { tile: None })], 1.0, 10.0);
+        driver.schedule_cpu_actions(vec![(2, ClientAction::Discard { tile: None })], 1.0, 10.0);
+
+        driver.tick_at(11.0);
+
+        let round = driver.table().current_round().unwrap();
+        assert_eq!(round.current_player, 2);
+        assert_eq!(round.phase, TurnPhase::Draw);
+        assert_eq!(driver.pending_cpu_batches.len(), 1);
+        assert_eq!(driver.pending_cpu_batches.front().unwrap().ready_at, 12.0);
+    }
+
+    /// 遅延未設定なら待機キューを使わず即時進行することを確認
+    #[test]
+    fn test_no_delay_keeps_immediate_progression() {
+        let mut driver = driver_with_three_cpus();
+        driver.start_game_with_seed(42);
+        driver.tick();
+        assert!(driver.pending_cpu_batches.is_empty());
     }
 }
