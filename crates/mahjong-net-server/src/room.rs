@@ -221,21 +221,26 @@ impl Room {
                         .await;
                     return;
                 }
-                let accepted = self
-                    .driver
-                    .as_mut()
-                    .expect("checked above")
-                    .handle_action(seat, action);
+                let driver = self.driver.as_mut().expect("checked above");
+                let accepted = driver.handle_action(seat, action.clone());
                 if !accepted {
-                    self.send_error(seat, ErrorCode::InvalidAction, "action rejected")
-                        .await;
+                    let phase = driver
+                        .table()
+                        .current_round()
+                        .map(|r| format!("{:?}", r.phase));
+                    self.send_error(
+                        seat,
+                        ErrorCode::InvalidAction,
+                        &format!("action rejected: seat={seat} action={action:?} phase={phase:?}"),
+                    )
+                    .await;
                 }
                 self.progress_game().await;
             }
             ClientMessage::ReadyNextRound => {
                 if !self.awaiting_ready {
-                    self.send_error(seat, ErrorCode::InvalidAction, "not awaiting next round")
-                        .await;
+                    // 自動進行タイマーと行き違いになった遅延確認は無害なので
+                    // エラーにせず黙って無視する
                     return;
                 }
                 self.ready[seat] = true;

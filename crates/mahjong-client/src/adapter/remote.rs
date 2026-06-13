@@ -579,6 +579,10 @@ mod tests {
 
         let start = std::time::Instant::now();
         let mut started = false;
+        // 連続で届くイベント（TileDrawn + NineTerminalsAvailable など）を
+        // まとめて判断するため、50msの静止を待ってから行動する
+        let mut pending: Vec<ServerEvent> = Vec::new();
+        let mut last_event_at = std::time::Instant::now();
 
         loop {
             assert!(
@@ -596,6 +600,9 @@ mod tests {
                 ConnStatus::Disconnected,
                 "サーバから切断された"
             );
+            if adapter.is_game_over() {
+                break;
+            }
 
             if !started {
                 if adapter.room().is_some() {
@@ -605,9 +612,30 @@ mod tests {
                 continue;
             }
 
-            for event in adapter.poll_events() {
+            let mut new_events = adapter.poll_events();
+            if !new_events.is_empty() {
+                pending.append(&mut new_events);
+                last_event_at = std::time::Instant::now();
+                continue;
+            }
+            if pending.is_empty() || last_event_at.elapsed() < std::time::Duration::from_millis(50)
+            {
+                continue;
+            }
+
+            let batch = std::mem::take(&mut pending);
+            // 九種九牌の選択があるターンは宣言拒否のみ送る
+            // （拒否するとサーバが TileDrawn を再送して打牌を促す）
+            let nine_terminals = batch
+                .iter()
+                .any(|e| matches!(e, ServerEvent::NineTerminalsAvailable));
+            if nine_terminals {
+                adapter.send_action(ClientAction::NineTerminals { declare: false });
+            }
+
+            for event in batch {
                 match event {
-                    ServerEvent::TileDrawn { can_tsumo, .. } => {
+                    ServerEvent::TileDrawn { can_tsumo, .. } if !nine_terminals => {
                         let action = if can_tsumo {
                             ClientAction::Tsumo
                         } else {
@@ -618,18 +646,11 @@ mod tests {
                     ServerEvent::CallAvailable { .. } => {
                         adapter.send_action(ClientAction::Pass);
                     }
-                    ServerEvent::NineTerminalsAvailable => {
-                        adapter.send_action(ClientAction::NineTerminals { declare: false });
-                    }
                     ServerEvent::RoundWon { .. } | ServerEvent::RoundDraw { .. } => {
                         adapter.request_next_round();
                     }
                     _ => {}
                 }
-            }
-
-            if adapter.is_game_over() {
-                break;
             }
         }
     }

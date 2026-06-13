@@ -48,6 +48,30 @@ fn assert_scores_consistent(scores: [i32; 4]) {
     );
 }
 
+/// 診断トレース用にメッセージを短い文字列へ要約する
+fn summarize(msg: &ServerMessage) -> String {
+    match msg {
+        ServerMessage::Event(e) => match e {
+            ServerEvent::GameStarted { round_number, .. } => {
+                format!("GameStarted(round={round_number})")
+            }
+            ServerEvent::TileDrawn { can_tsumo, .. } => format!("TileDrawn(can_tsumo={can_tsumo})"),
+            ServerEvent::TileDiscarded { player, .. } => format!("TileDiscarded({player:?})"),
+            ServerEvent::CallAvailable { .. } => "CallAvailable".to_string(),
+            ServerEvent::PlayerCalled {
+                player, call_type, ..
+            } => format!("PlayerCalled({player:?},{call_type:?})"),
+            ServerEvent::NineTerminalsAvailable => "NineTerminalsAvailable".to_string(),
+            ServerEvent::RoundWon { winner, .. } => format!("RoundWon({winner:?})"),
+            ServerEvent::RoundDraw { reason, .. } => format!("RoundDraw({reason:?})"),
+            other => format!("{other:?}").chars().take(30).collect(),
+        },
+        ServerMessage::GameOver { .. } => "GameOver".to_string(),
+        ServerMessage::Error { code, message } => format!("Error({code:?},{message})"),
+        other => format!("{other:?}").chars().take(30).collect(),
+    }
+}
+
 /// テスト用 WebSocket クライアント
 struct TestClient {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
@@ -119,41 +143,82 @@ impl TestClient {
         }
     }
 
+    /// 受信済みのメッセージをまとめて取り出す（50msの静止で区切る）
+    ///
+    /// `TileDrawn` と `NineTerminalsAvailable` のように連続で送られる
+    /// イベントは別フレームで届くため、まとめてから行動を判断する。
+    async fn recv_batch(&mut self) -> Vec<ServerMessage> {
+        let mut batch = vec![self.recv().await];
+        loop {
+            let frame = match tokio::time::timeout(Duration::from_millis(50), self.ws.next()).await
+            {
+                Ok(Some(Ok(frame))) => frame,
+                // 静止 or 切断（切断は次の recv で検出する）
+                Err(_) | Ok(None) | Ok(Some(Err(_))) => break,
+            };
+            match frame {
+                Message::Text(text) => {
+                    batch.push(ServerMessage::from_json(text.as_str()).expect("不正なJSON"));
+                }
+                Message::Ping(_) | Message::Pong(_) => continue,
+                _ => break,
+            }
+        }
+        batch
+    }
+
     /// ツモ切りボットとして GameOver まで打ち続ける
     ///
     /// `send_ready` が false の場合は局結果の確認（ReadyNextRound）を送らず、
     /// サーバ側の自動進行に任せる。
     async fn play_until_game_over(&mut self, send_ready: bool) -> [i32; 4] {
         loop {
-            match self.recv().await {
-                ServerMessage::Event(event) => match event {
-                    ServerEvent::TileDrawn { can_tsumo, .. } => {
-                        let action = if can_tsumo {
-                            ClientAction::Tsumo
-                        } else {
-                            ClientAction::Discard { tile: None }
-                        };
-                        self.send(&ClientMessage::Action(action)).await;
-                    }
-                    ServerEvent::CallAvailable { .. } => {
-                        self.send(&ClientMessage::Action(ClientAction::Pass)).await;
-                    }
-                    ServerEvent::NineTerminalsAvailable => {
-                        self.send(&ClientMessage::Action(ClientAction::NineTerminals {
-                            declare: false,
-                        }))
-                        .await;
-                    }
-                    ServerEvent::RoundWon { .. } | ServerEvent::RoundDraw { .. } if send_ready => {
-                        self.send(&ClientMessage::ReadyNextRound).await;
+            let batch = self.recv_batch().await;
+            // 失敗時の診断用トレース（パニック時のみ表示される）
+            for msg in &batch {
+                println!("[bot] recv {}", summarize(msg));
+            }
+
+            // 九種九牌の選択があるターンはフェーズが WaitForNineTerminals の
+            // ため、同時に届いた TileDrawn への打牌は無効になる。宣言を
+            // 拒否すると、サーバが TileDrawn を再送して打牌を促す
+            let nine_terminals = batch
+                .iter()
+                .any(|m| matches!(m, ServerMessage::Event(ServerEvent::NineTerminalsAvailable)));
+            if nine_terminals {
+                self.send(&ClientMessage::Action(ClientAction::NineTerminals {
+                    declare: false,
+                }))
+                .await;
+            }
+
+            for msg in batch {
+                match msg {
+                    ServerMessage::Event(event) => match event {
+                        ServerEvent::TileDrawn { can_tsumo, .. } if !nine_terminals => {
+                            let action = if can_tsumo {
+                                ClientAction::Tsumo
+                            } else {
+                                ClientAction::Discard { tile: None }
+                            };
+                            self.send(&ClientMessage::Action(action)).await;
+                        }
+                        ServerEvent::CallAvailable { .. } => {
+                            self.send(&ClientMessage::Action(ClientAction::Pass)).await;
+                        }
+                        ServerEvent::RoundWon { .. } | ServerEvent::RoundDraw { .. }
+                            if send_ready =>
+                        {
+                            self.send(&ClientMessage::ReadyNextRound).await;
+                        }
+                        _ => {}
+                    },
+                    ServerMessage::GameOver { final_scores } => return final_scores,
+                    ServerMessage::Error { code, message } => {
+                        panic!("予期しないエラー: {code:?} {message}");
                     }
                     _ => {}
-                },
-                ServerMessage::GameOver { final_scores } => return final_scores,
-                ServerMessage::Error { code, message } => {
-                    panic!("予期しないエラー: {code:?} {message}");
                 }
-                _ => {}
             }
         }
     }
