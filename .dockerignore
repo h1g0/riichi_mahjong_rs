@@ -1,0 +1,10 @@
+# ビルド成果物・VCS・サーバビルドに不要なものを除外してコンテキストを小さくする
+/target
+/public
+.git
+.github
+# サーバ（mahjong-net-server）のビルドには不要（クライアントはビルドしない）
+/assets
+*.md
+index.html
+mq_js_bundle.js

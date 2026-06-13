@@ -1,0 +1,30 @@
+# Fly.io デプロイ設定（mahjong-net-server）
+#
+# `fly launch` で生成・調整できる雛形。app 名は自分のものに変更すること。
+# 詳細な手順は README の「Deployment」を参照。
+
+app = "mahjong-rs-server"       # ← 自分のアプリ名に変更する
+primary_region = "nrt"          # 東京（必要に応じて変更）
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true            # http を https にリダイレクトし wss を強制する
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # 無接続時にマシンを止めると進行中のルームは失われる（在席プレイなら許容）。
+  # 常時起動したい場合は 1 にする。
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
