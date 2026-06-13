@@ -361,3 +361,32 @@ pub fn draw_connection_banner(state: &GameState, font: Option<&Font>) {
         draw_jp_text(font, line, x + 16.0, 27.0, 20, WHITE);
     }
 }
+
+/// 自分の手番の制限時間カウントダウンを描画する
+///
+/// オンラインで自分が操作待ちのときだけ表示する。
+pub fn draw_turn_timer(state: &GameState, font: Option<&Font>) {
+    let Some(remaining) = state.online_state.turn_remaining else {
+        return;
+    };
+    // 自分が操作できる場面のみ表示する
+    let my_turn = state.is_my_turn || !state.available_calls.is_empty();
+    if !my_turn {
+        return;
+    }
+
+    // 残り10秒以下は赤、それ以外は黄
+    let color = if remaining <= 10 {
+        Color::new(1.0, 0.3, 0.3, 1.0)
+    } else {
+        Color::new(1.0, 0.9, 0.3, 1.0)
+    };
+    draw_jp_text(
+        font,
+        &format!("残り {remaining} 秒"),
+        870.0,
+        660.0,
+        28,
+        color,
+    );
+}

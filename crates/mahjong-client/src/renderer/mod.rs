@@ -179,6 +179,7 @@ pub fn draw_game(
             draw_melds(state, tile_textures);
             let click = overlay::draw_action_buttons(state, font, tile_textures);
             online::draw_connection_banner(state, font);
+            online::draw_turn_timer(state, font);
             click
         }
         GamePhase::RoundResult => {

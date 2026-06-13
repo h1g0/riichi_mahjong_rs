@@ -97,6 +97,15 @@ pub enum ServerMessage {
         connected: bool,
     },
 
+    /// 手番の制限時間の通知（自分の操作が待たれている座席に送る）
+    ///
+    /// 制限時間内に操作しないとサーバが既定アクション（ツモ切り/パス）を
+    /// 代行する。クライアントはこの秒数からカウントダウンを表示する。
+    TurnTimer {
+        /// 制限時間（秒）
+        seconds: u32,
+    },
+
     /// エラー通知
     Error {
         /// エラーコード
@@ -271,6 +280,7 @@ mod tests {
                 seat: 2,
                 connected: false,
             },
+            ServerMessage::TurnTimer { seconds: 90 },
             ServerMessage::Error {
                 code: ErrorCode::RoomNotFound,
                 message: "no such room".to_string(),

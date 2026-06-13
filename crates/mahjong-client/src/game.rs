@@ -167,6 +167,8 @@ pub struct OnlineUiState {
     pub status_is_error: bool,
     /// 入室中のルーム表示（メインループがアダプターからコピーする）
     pub room: Option<RoomViewUi>,
+    /// 手番の制限時間の残り秒数（オンラインで自分の手番のときのみ Some）
+    pub turn_remaining: Option<u32>,
 }
 
 impl OnlineUiState {
@@ -178,6 +180,7 @@ impl OnlineUiState {
             status_line: None,
             status_is_error: false,
             room: None,
+            turn_remaining: None,
         }
     }
 }

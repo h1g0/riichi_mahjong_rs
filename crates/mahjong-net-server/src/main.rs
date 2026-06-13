@@ -28,7 +28,11 @@ async fn main() {
         .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
     tracing::info!("listening on {addr}");
 
-    axum::serve(listener, app(RoomConfig::default()))
-        .await
-        .expect("server error");
+    // ConnectInfo<SocketAddr> を有効にして接続元IPを取得できるようにする
+    axum::serve(
+        listener,
+        app(RoomConfig::default()).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("server error");
 }

@@ -36,4 +36,9 @@ pub trait GameAdapter {
     fn status_text(&self) -> Option<String> {
         None
     }
+
+    /// 手番の制限時間の残り秒数（制限がなければ None）
+    fn turn_remaining_secs(&self) -> Option<u32> {
+        None
+    }
 }
