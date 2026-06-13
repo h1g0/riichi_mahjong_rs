@@ -4,7 +4,8 @@
 //! ノンブロッキングな WebSocket 抽象。
 //!
 //! - ネイティブ: tungstenite を別スレッドで動かし、mpsc チャネルで橋渡しする
-//! - WASM: フェーズ4（手書きJSグルー）まではスタブ（常にエラーを返す）
+//! - WASM: 手書きJSグルー (crates/mahjong-client/js/ws.js) の関数を
+//!   extern "C" で呼ぶ（wasm-bindgen 不使用。wasm_rng.rs と同じ方針）
 
 /// トランスポートで発生したイベント
 // WASMスタブは Error しか生成しないが、ネイティブでは全バリアントを使う
@@ -41,8 +42,8 @@ pub fn default_server_url() -> String {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        // フェーズ4で window.MAHJONG_SERVER_URL から取得する
-        "ws://127.0.0.1:8080/ws".to_string()
+        // index.html で window.MAHJONG_SERVER_URL が設定されていればそれを使う
+        wasm::page_server_url().unwrap_or_else(|| "ws://127.0.0.1:8080/ws".to_string())
     }
 }
 
@@ -56,8 +57,7 @@ pub fn connect(url: &str) -> Box<dyn Transport> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = url;
-        Box::new(wasm_stub::StubTransport::new())
+        Box::new(wasm::WasmTransport::connect(url))
     }
 }
 
@@ -204,31 +204,124 @@ mod native {
 }
 
 #[cfg(target_arch = "wasm32")]
-mod wasm_stub {
+mod wasm {
     use super::{Transport, WsEvent};
 
-    /// WASM用スタブ: 接続せず、一度だけエラーを通知する
-    pub struct StubTransport {
-        reported: bool,
+    // 接続ステータス（ws.js と一致させる）
+    const STATUS_OPEN: i32 = 1;
+    const STATUS_CLOSED: i32 = 2;
+    const STATUS_ERROR: i32 = 3;
+
+    // ws.js が miniquad のプラグイン機構で importObject.env に注入する関数群
+    unsafe extern "C" {
+        fn mahjong_ws_connect(url_ptr: *const u8, url_len: usize) -> i32;
+        fn mahjong_ws_status(handle: i32) -> i32;
+        fn mahjong_ws_send(handle: i32, ptr: *const u8, len: usize) -> i32;
+        fn mahjong_ws_next_msg_len(handle: i32) -> i32;
+        fn mahjong_ws_read_msg(handle: i32, buf_ptr: *mut u8);
+        fn mahjong_ws_close(handle: i32);
+        fn mahjong_ws_default_url(buf_ptr: *mut u8, cap: usize) -> i32;
     }
 
-    impl StubTransport {
-        pub fn new() -> Self {
-            StubTransport { reported: false }
+    /// ws.js プラグインのバージョン照合用
+    ///
+    /// mq_js_bundle.js の init_plugins が `{プラグイン名}_crate_version` を
+    /// 呼び、JS側のバージョンと一致するか検証する。
+    #[unsafe(no_mangle)]
+    pub extern "C" fn mahjong_ws_crate_version() -> u32 {
+        1
+    }
+
+    /// ページに設定された接続先URL (window.MAHJONG_SERVER_URL) を取得する
+    pub fn page_server_url() -> Option<String> {
+        let mut buf = vec![0u8; 1024];
+        let len = unsafe { mahjong_ws_default_url(buf.as_mut_ptr(), buf.len()) };
+        if len <= 0 {
+            return None;
+        }
+        buf.truncate(len as usize);
+        String::from_utf8(buf).ok()
+    }
+
+    /// WASM用トランスポート: ws.js の WebSocket をハンドル経由で操作する
+    pub struct WasmTransport {
+        handle: i32,
+        /// Opened を通知済みか
+        opened_reported: bool,
+        /// Closed/Error を通知済みか（以後 poll は空を返す）
+        terminated: bool,
+    }
+
+    impl WasmTransport {
+        pub fn connect(url: &str) -> Self {
+            let handle = unsafe { mahjong_ws_connect(url.as_ptr(), url.len()) };
+            WasmTransport {
+                handle,
+                opened_reported: false,
+                terminated: false,
+            }
         }
     }
 
-    impl Transport for StubTransport {
-        fn send_text(&mut self, _text: &str) {}
+    impl Transport for WasmTransport {
+        fn send_text(&mut self, text: &str) {
+            // 失敗（未接続・切断後）はステータス変化として poll で検出される
+            unsafe {
+                mahjong_ws_send(self.handle, text.as_ptr(), text.len());
+            }
+        }
 
         fn poll(&mut self) -> Vec<WsEvent> {
-            if self.reported {
-                Vec::new()
-            } else {
-                self.reported = true;
-                vec![WsEvent::Error(
-                    "このビルドではオンライン対戦は未対応です".to_string(),
-                )]
+            let mut events = Vec::new();
+            if self.terminated {
+                return events;
+            }
+
+            let status = unsafe { mahjong_ws_status(self.handle) };
+            if status == STATUS_OPEN && !self.opened_reported {
+                self.opened_reported = true;
+                events.push(WsEvent::Opened);
+            }
+
+            // 受信済みメッセージを取り出す（長さ取得 → コピーの2段階）
+            loop {
+                let len = unsafe { mahjong_ws_next_msg_len(self.handle) };
+                if len < 0 {
+                    break;
+                }
+                let mut buf = vec![0u8; len as usize];
+                unsafe {
+                    mahjong_ws_read_msg(self.handle, buf.as_mut_ptr());
+                }
+                match String::from_utf8(buf) {
+                    Ok(text) => events.push(WsEvent::Message(text)),
+                    Err(_) => events.push(WsEvent::Error(
+                        "サーバからのメッセージを解釈できません".to_string(),
+                    )),
+                }
+            }
+
+            // 終了状態は受信済みメッセージを流し切ってから通知する
+            match status {
+                STATUS_CLOSED => {
+                    self.terminated = true;
+                    events.push(WsEvent::Closed);
+                }
+                STATUS_ERROR => {
+                    self.terminated = true;
+                    events.push(WsEvent::Error("WebSocket接続エラー".to_string()));
+                }
+                _ => {}
+            }
+
+            events
+        }
+    }
+
+    impl Drop for WasmTransport {
+        fn drop(&mut self) {
+            unsafe {
+                mahjong_ws_close(self.handle);
             }
         }
     }
