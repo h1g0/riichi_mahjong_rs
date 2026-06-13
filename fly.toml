@@ -12,11 +12,13 @@ primary_region = "nrt"          # 東京（必要に応じて変更）
 [http_service]
   internal_port = 8080
   force_https = true            # http を https にリダイレクトし wss を強制する
-  auto_stop_machines = "stop"
-  auto_start_machines = true
-  # 無接続時にマシンを止めると進行中のルームは失われる（在席プレイなら許容）。
-  # 常時起動したい場合は 1 にする。
-  min_machines_running = 0
+  # ルームはメモリ上にあり、マシンをまたいで共有されない。複数マシンや
+  # autostop による切り替えが起きると、接続先とルームのあるマシンが一致せず
+  # 接続が切れる。必ず単一マシンを常時起動すること。
+  # デプロイ後に一度だけ `fly scale count 1` でマシン数を 1 にする。
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
 
   [[http_service.checks]]
     interval = "15s"
