@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 use axum::extract::State;
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::response::Response;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use mahjong_server::protocol::net::{ClientMessage, ErrorCode, PROTOCOL_VERSION, ServerMessage};
@@ -53,12 +54,30 @@ pub async fn ws_handler(
     ws: WebSocketUpgrade,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Response {
+    // Origin 制限（ALLOWED_ORIGIN 設定時のみ）
+    let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
+    if !origin_allowed(state.allowed_origin.as_deref(), origin) {
+        tracing::warn!(?origin, "rejected connection from disallowed origin");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
     // フレーム/メッセージサイズを制限して巨大ペイロードを防ぐ
     let ws = ws
         .max_message_size(MAX_MESSAGE_SIZE)
         .max_frame_size(MAX_MESSAGE_SIZE);
     ws.on_upgrade(move |socket| handle_socket(socket, addr.ip(), state))
+}
+
+/// 接続元 Origin が許可されるか判定する
+///
+/// `allowed` が None なら全許可。Some なら Origin ヘッダが一致した場合のみ許可。
+fn origin_allowed(allowed: Option<&str>, origin: Option<&str>) -> bool {
+    match allowed {
+        None => true,
+        Some(allowed) => origin == Some(allowed),
+    }
 }
 
 async fn handle_socket(socket: WebSocket, peer_ip: IpAddr, state: AppState) {
@@ -396,5 +415,25 @@ impl Connection {
             message: message.to_string(),
         })
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::origin_allowed;
+
+    #[test]
+    fn test_origin_allowed_when_unset_allows_all() {
+        assert!(origin_allowed(None, Some("https://example.com")));
+        assert!(origin_allowed(None, None));
+    }
+
+    #[test]
+    fn test_origin_allowed_requires_exact_match() {
+        let allowed = Some("https://mahjong.example.com");
+        assert!(origin_allowed(allowed, Some("https://mahjong.example.com")));
+        // 不一致・欠落は拒否
+        assert!(!origin_allowed(allowed, Some("https://evil.example.com")));
+        assert!(!origin_allowed(allowed, None));
     }
 }
