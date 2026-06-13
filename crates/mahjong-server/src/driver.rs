@@ -298,6 +298,30 @@ impl GameDriver {
         }
     }
 
+    /// 現在アクションが待たれている座席の一覧を返す
+    ///
+    /// 打牌/九種九牌の選択中は手番のプレイヤー、鳴き待ち中は未応答の
+    /// プレイヤーを返す。それ以外（ツモ前・局終了）は空。行動タイムアウトの
+    /// 対象座席を求めるのに使う。
+    pub fn pending_action_seats(&self) -> Vec<usize> {
+        let Some(round) = self.table.current_round() else {
+            return Vec::new();
+        };
+        if round.is_over() {
+            return Vec::new();
+        }
+        match round.phase {
+            TurnPhase::WaitForDiscard | TurnPhase::WaitForNineTerminals => {
+                vec![round.current_player]
+            }
+            TurnPhase::WaitForCalls => match &round.call_state {
+                Some(cs) => (0..4).filter(|&i| !cs.responded[i]).collect(),
+                None => Vec::new(),
+            },
+            TurnPhase::Draw | TurnPhase::RoundOver => Vec::new(),
+        }
+    }
+
     /// 次の局を開始する
     pub fn next_round(&mut self) {
         self.next_round_impl(None);

@@ -11,12 +11,14 @@
 
 pub mod connection;
 pub mod lobby;
+pub mod ratelimit;
 pub mod room;
 
 use axum::Router;
 use axum::routing::get;
 
 use lobby::Lobby;
+use ratelimit::RateLimiter;
 use room::RoomConfig;
 
 /// アプリケーション全体の共有状態
@@ -24,6 +26,8 @@ use room::RoomConfig;
 pub struct AppState {
     /// ルームレジストリ
     pub lobby: Lobby,
+    /// IPごとの入室レート制限
+    pub rate_limiter: RateLimiter,
 }
 
 /// ルーターを構築する
@@ -32,6 +36,7 @@ pub struct AppState {
 pub fn app(config: RoomConfig) -> Router {
     let state = AppState {
         lobby: Lobby::new(config),
+        rate_limiter: RateLimiter::new(),
     };
     Router::new()
         .route("/healthz", get(|| async { "ok" }))

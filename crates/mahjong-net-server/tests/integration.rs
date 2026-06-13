@@ -21,6 +21,8 @@ fn fast_config() -> RoomConfig {
         ready_timeout: Duration::from_millis(200),
         lobby_timeout: Duration::from_secs(30),
         abandoned_timeout: Duration::from_secs(5),
+        // 既存テストの自動進行を阻害しないよう長めにする
+        action_timeout: Some(Duration::from_secs(30)),
     }
 }
 
@@ -29,7 +31,12 @@ async fn start_server(config: RoomConfig) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, app(config)).await.unwrap();
+        axum::serve(
+            listener,
+            app(config).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
     });
     addr
 }
@@ -479,6 +486,69 @@ async fn test_disconnect_mid_game_cpu_takes_over() {
     })
     .await
     .expect("テスト全体がタイムアウトした");
+}
+
+/// 操作しない（AFK）プレイヤーがいてもタイムアウトで対局が完走することを確認する
+#[tokio::test]
+async fn test_action_timeout_auto_acts() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let config = RoomConfig {
+            action_timeout: Some(Duration::from_millis(100)),
+            ..fast_config()
+        };
+        let addr = start_server(config).await;
+
+        let mut host = TestClient::connect(addr).await;
+        host.hello("AFKホスト").await;
+        host.create_room().await;
+        host.send(&ClientMessage::StartGame).await;
+
+        // ホストは一切操作せず受信し続ける。
+        // サーバが既定アクション（ツモ切り/パス）を代行して対局が進む。
+        // 制限時間は 100ms なので表示秒数は 0 に丸められる（サーバは実時間で強制）
+        let mut saw_turn_timer = false;
+        loop {
+            match host.recv().await {
+                ServerMessage::TurnTimer { .. } => {
+                    saw_turn_timer = true;
+                }
+                ServerMessage::GameOver { final_scores } => {
+                    assert_scores_consistent(final_scores);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_turn_timer, "TurnTimer が一度も届かなかった");
+    })
+    .await
+    .expect("テスト全体がタイムアウトした");
+}
+
+/// 同一IPからの入室試行が多すぎると RateLimited で拒否されることを確認する
+#[tokio::test]
+async fn test_join_rate_limit() {
+    let addr = start_server(fast_config()).await;
+    let mut client = TestClient::connect(addr).await;
+    client.hello("スパマー").await;
+
+    // 上限（10回）までは存在しないルームとして RoomNotFound
+    for _ in 0..10 {
+        client
+            .send(&ClientMessage::JoinRoom {
+                code: "ZZZZZZ".to_string(),
+            })
+            .await;
+        assert_eq!(client.recv_error().await, ErrorCode::RoomNotFound);
+    }
+
+    // 11回目はレート制限で拒否される
+    client
+        .send(&ClientMessage::JoinRoom {
+            code: "ZZZZZZ".to_string(),
+        })
+        .await;
+    assert_eq!(client.recv_error().await, ErrorCode::RateLimited);
 }
 
 /// 切断したプレイヤーがトークンで再入室し、Resync で状態を再同期できることを確認する

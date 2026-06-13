@@ -100,6 +100,8 @@ pub struct RemoteAdapter {
     reconnect_attempts: u32,
     /// 各座席の人間プレイヤーの接続状態（None = 人間以外/不明）
     peer_connected: [Option<bool>; 4],
+    /// 手番の制限時間の期限（秒, clock 基準）。None なら表示しない
+    turn_deadline: Option<f64>,
 }
 
 impl RemoteAdapter {
@@ -130,6 +132,7 @@ impl RemoteAdapter {
             reconnect_at: None,
             reconnect_attempts: 0,
             peer_connected: [None; 4],
+            turn_deadline: None,
         }
     }
 
@@ -367,6 +370,9 @@ impl RemoteAdapter {
                     }
                 }
             }
+            ServerMessage::TurnTimer { seconds } => {
+                self.turn_deadline = Some((self.clock)() + seconds as f64);
+            }
             ServerMessage::GameOver { .. } => {
                 self.game_over = true;
                 self.reconnecting = false;
@@ -392,6 +398,14 @@ impl RemoteAdapter {
         self.peer_connected.iter().any(|p| p == &Some(false))
     }
 
+    /// 手番の制限時間の残り秒数（手番待ちでなければ None）
+    pub fn turn_remaining_secs(&self) -> Option<u32> {
+        self.turn_deadline.map(|deadline| {
+            let remaining = (deadline - (self.clock)()).max(0.0);
+            remaining.ceil() as u32
+        })
+    }
+
     fn send(&mut self, msg: &ClientMessage) {
         match msg.to_json() {
             Ok(json) => self.transport.send_text(&json),
@@ -407,6 +421,8 @@ impl RemoteAdapter {
 
 impl GameAdapter for RemoteAdapter {
     fn send_action(&mut self, action: ClientAction) {
+        // 操作したので手番のカウントダウンを止める
+        self.turn_deadline = None;
         self.send(&ClientMessage::Action(action));
     }
 
@@ -446,6 +462,11 @@ impl GameAdapter for RemoteAdapter {
                 }
             }
         }
+    }
+
+    fn turn_remaining_secs(&self) -> Option<u32> {
+        // 固有メソッドへ委譲する（固有メソッドが優先解決されるため再帰しない）
+        RemoteAdapter::turn_remaining_secs(self)
     }
 }
 
@@ -752,7 +773,17 @@ mod tests {
     #[ignore = "要ローカルサーバ (cargo run -p mahjong-net-server)"]
     fn test_e2e_full_game_against_local_server() {
         let url = crate::transport::default_server_url();
-        let mut adapter = RemoteAdapter::create_room(&url, "E2Eテスト", 1);
+        // 本番の時計は macroquad（ウィンドウ前提）なので、ヘッドレスな
+        // E2E では std の経過秒で代用する
+        let (transport, connector) = RemoteAdapter::connector_for(&url);
+        let clock_start = std::time::Instant::now();
+        let mut adapter = RemoteAdapter::build(
+            transport,
+            connector,
+            Box::new(move || clock_start.elapsed().as_secs_f64()),
+            "E2Eテスト",
+            LobbyIntent::Create { round_count: 1 },
+        );
 
         let start = std::time::Instant::now();
         let mut started = false;
@@ -1028,6 +1059,52 @@ mod tests {
         });
         adapter.tick();
         assert!(adapter.status_text().is_none());
+    }
+
+    #[test]
+    fn test_turn_timer_counts_down_and_clears_on_action() {
+        let (transport, handle) = mock_pair();
+        let now = Rc::new(RefCell::new(100.0_f64));
+        let now_clock = now.clone();
+        let mut adapter = RemoteAdapter::build(
+            transport,
+            Box::new(|| panic!("再接続なし")),
+            Box::new(move || *now_clock.borrow()),
+            "テスト",
+            LobbyIntent::Create { round_count: 1 },
+        );
+
+        // 手番タイマー（90秒）を受信
+        handle.push_msg(&ServerMessage::TurnTimer { seconds: 90 });
+        adapter.tick();
+        assert_eq!(adapter.turn_remaining_secs(), Some(90));
+
+        // 30秒経過 → 残り60秒
+        *now.borrow_mut() = 130.0;
+        assert_eq!(adapter.turn_remaining_secs(), Some(60));
+
+        // 操作するとカウントダウンが消える
+        adapter.send_action(ClientAction::Discard { tile: None });
+        assert_eq!(adapter.turn_remaining_secs(), None);
+    }
+
+    #[test]
+    fn test_turn_timer_floors_at_zero() {
+        let (transport, handle) = mock_pair();
+        let now = Rc::new(RefCell::new(0.0_f64));
+        let now_clock = now.clone();
+        let mut adapter = RemoteAdapter::build(
+            transport,
+            Box::new(|| panic!("再接続なし")),
+            Box::new(move || *now_clock.borrow()),
+            "テスト",
+            LobbyIntent::Create { round_count: 1 },
+        );
+        handle.push_msg(&ServerMessage::TurnTimer { seconds: 5 });
+        adapter.tick();
+        // 期限を過ぎても負にならず 0
+        *now.borrow_mut() = 100.0;
+        assert_eq!(adapter.turn_remaining_secs(), Some(0));
     }
 
     #[test]

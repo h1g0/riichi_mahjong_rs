@@ -4,9 +4,12 @@
 //! 入室後のメッセージ中継を行う。1接続につき読み取りタスク（本体）と
 //! 書き込みタスクの2つが動く。
 
-use std::time::Duration;
+use std::collections::VecDeque;
+use std::net::{IpAddr, SocketAddr};
+use std::time::{Duration, Instant};
 
 use axum::extract::State;
+use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use futures_util::stream::{SplitSink, SplitStream};
@@ -31,17 +34,34 @@ const PING_INTERVAL: Duration = Duration::from_secs(30);
 /// 接続ごとの送信バッファ（メッセージ数）
 const OUT_BUFFER: usize = 256;
 
+/// WebSocket フレーム/メッセージの最大サイズ（バイト）
+const MAX_MESSAGE_SIZE: usize = 4 * 1024;
+
+/// 1秒あたりに許す受信メッセージ数
+const MAX_MSG_PER_SEC: usize = 20;
+
+/// 接続を切るまでに許す違反（不正メッセージ・レート超過）の累計
+const MAX_STRIKES: u32 = 10;
+
 /// セッショントークンを生成する（128ビットのランダム16進文字列）
 fn generate_token() -> String {
     format!("{:032x}", rand::rng().random::<u128>())
 }
 
 /// `/ws` ハンドラ
-pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+) -> Response {
+    // フレーム/メッセージサイズを制限して巨大ペイロードを防ぐ
+    let ws = ws
+        .max_message_size(MAX_MESSAGE_SIZE)
+        .max_frame_size(MAX_MESSAGE_SIZE);
+    ws.on_upgrade(move |socket| handle_socket(socket, addr.ip(), state))
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState) {
+async fn handle_socket(socket: WebSocket, peer_ip: IpAddr, state: AppState) {
     let (sender, receiver) = socket.split();
     let (out_tx, out_rx) = mpsc::channel::<ServerMessage>(OUT_BUFFER);
 
@@ -51,6 +71,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         receiver,
         out_tx,
         state,
+        peer_ip,
+        recent_msgs: VecDeque::new(),
+        strikes: 0,
     };
     conn.run().await;
 
@@ -116,6 +139,12 @@ struct Connection {
     receiver: SplitStream<WebSocket>,
     out_tx: mpsc::Sender<ServerMessage>,
     state: AppState,
+    /// 接続元のIP（レート制限のキー）
+    peer_ip: IpAddr,
+    /// 直近1秒間の受信時刻（メッセージレート計測）
+    recent_msgs: VecDeque<Instant>,
+    /// 違反（不正メッセージ・レート超過）の累計
+    strikes: u32,
 }
 
 impl Connection {
@@ -160,6 +189,11 @@ impl Connection {
 
             let room_tx = match msg {
                 ClientMessage::CreateRoom { round_count } => {
+                    if !self.allow_room_entry() {
+                        self.send_error(ErrorCode::RateLimited, "too many room attempts")
+                            .await;
+                        continue;
+                    }
                     if !(1..=2).contains(&round_count) {
                         self.send_error(ErrorCode::BadMessage, "round_count must be 1 or 2")
                             .await;
@@ -173,6 +207,11 @@ impl Connection {
                     Some(room_tx)
                 }
                 ClientMessage::JoinRoom { code } => {
+                    if !self.allow_room_entry() {
+                        self.send_error(ErrorCode::RateLimited, "too many room attempts")
+                            .await;
+                        continue;
+                    }
                     let found = self.state.lobby.get(&code);
                     if found.is_none() {
                         self.send_error(ErrorCode::RoomNotFound, "no such room")
@@ -273,6 +312,7 @@ impl Connection {
     ///
     /// 不正な形式のフレームには `BadMessage` を返して読み続ける。
     /// `IDLE_TIMEOUT` の間なにも届かなければ切断と判断する。
+    /// 不正メッセージ・レート超過が累計 `MAX_STRIKES` に達したら切断する。
     async fn read(&mut self) -> Read {
         loop {
             let frame = match tokio::time::timeout(IDLE_TIMEOUT, self.receiver.next()).await {
@@ -282,22 +322,68 @@ impl Connection {
             };
 
             match frame {
-                Message::Text(text) => match ClientMessage::from_json(text.as_str()) {
-                    Ok(msg) => return Read::Msg(msg),
-                    Err(_) => {
-                        self.send_error(ErrorCode::BadMessage, "invalid message")
+                Message::Text(text) => {
+                    // メッセージレートを超過したら違反として扱う
+                    if self.over_message_rate() {
+                        self.send_error(ErrorCode::RateLimited, "too many messages")
                             .await;
+                        if self.strike() {
+                            return Read::Closed;
+                        }
+                        continue;
                     }
-                },
+                    match ClientMessage::from_json(text.as_str()) {
+                        Ok(msg) => return Read::Msg(msg),
+                        Err(_) => {
+                            self.send_error(ErrorCode::BadMessage, "invalid message")
+                                .await;
+                            if self.strike() {
+                                return Read::Closed;
+                            }
+                        }
+                    }
+                }
                 Message::Binary(_) => {
                     self.send_error(ErrorCode::BadMessage, "binary frames not supported")
                         .await;
+                    if self.strike() {
+                        return Read::Closed;
+                    }
                 }
                 // Ping への Pong 応答は下層が自動で行う
                 Message::Ping(_) | Message::Pong(_) => {}
                 Message::Close(_) => return Read::Closed,
             }
         }
+    }
+
+    /// 受信メッセージが直近1秒の上限を超えているか判定する
+    ///
+    /// 呼び出しごとに現在時刻を記録し、1秒より古い記録を捨てる。
+    fn over_message_rate(&mut self) -> bool {
+        let now = Instant::now();
+        let cutoff = now.checked_sub(Duration::from_secs(1));
+        while let Some(&front) = self.recent_msgs.front() {
+            match cutoff {
+                Some(cutoff) if front < cutoff => {
+                    self.recent_msgs.pop_front();
+                }
+                _ => break,
+            }
+        }
+        self.recent_msgs.push_back(now);
+        self.recent_msgs.len() > MAX_MSG_PER_SEC
+    }
+
+    /// 違反を1つ加算し、累計が上限に達したら true（切断すべき）を返す
+    fn strike(&mut self) -> bool {
+        self.strikes += 1;
+        self.strikes >= MAX_STRIKES
+    }
+
+    /// IPごとの入室レート制限を確認する（超過なら false）
+    fn allow_room_entry(&self) -> bool {
+        self.state.rate_limiter.check(self.peer_ip)
     }
 
     async fn send(&self, msg: ServerMessage) {

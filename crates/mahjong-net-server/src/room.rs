@@ -27,6 +27,9 @@ pub struct RoomConfig {
     pub lobby_timeout: Duration,
     /// 対局中に全員切断してからルームを破棄するまでの猶予
     pub abandoned_timeout: Duration,
+    /// 1手番ごとの制限時間（None なら無制限）。
+    /// 超過するとサーバが既定アクション（ツモ切り/パス）を代行する。
+    pub action_timeout: Option<Duration>,
 }
 
 impl Default for RoomConfig {
@@ -35,6 +38,7 @@ impl Default for RoomConfig {
             ready_timeout: Duration::from_secs(60),
             lobby_timeout: Duration::from_secs(30 * 60),
             abandoned_timeout: Duration::from_secs(5 * 60),
+            action_timeout: Some(Duration::from_secs(90)),
         }
     }
 }
@@ -114,6 +118,8 @@ struct Room {
     ready_deadline: Option<Instant>,
     /// ルーム破棄の期限
     close_deadline: Option<Instant>,
+    /// 手番の制限時間の期限
+    action_deadline: Option<Instant>,
     /// ルームを閉じるフラグ
     closing: bool,
     /// 次に割り当てる接続の世代番号
@@ -139,6 +145,7 @@ pub async fn run_room(
         game_over_sent: false,
         ready_deadline: None,
         close_deadline: Some(Instant::now() + config.lobby_timeout),
+        action_deadline: None,
         closing: false,
         next_conn_gen: 0,
     };
@@ -146,6 +153,7 @@ pub async fn run_room(
     loop {
         let ready_at = deadline_or_far(room.ready_deadline);
         let close_at = deadline_or_far(room.close_deadline);
+        let action_at = deadline_or_far(room.action_deadline);
 
         tokio::select! {
             msg = rx.recv() => match msg {
@@ -155,6 +163,10 @@ pub async fn run_room(
             _ = tokio::time::sleep_until(ready_at), if room.ready_deadline.is_some() => {
                 tracing::debug!(code = room.code, "ready timeout; auto-advancing round");
                 room.advance_round().await;
+            }
+            _ = tokio::time::sleep_until(action_at), if room.action_deadline.is_some() => {
+                tracing::debug!(code = room.code, "action timeout; forcing default action");
+                room.on_action_timeout().await;
             }
             _ = tokio::time::sleep_until(close_at), if room.close_deadline.is_some() => {
                 tracing::info!(code = room.code, "room expired");
@@ -300,6 +312,8 @@ impl Room {
         if let Some(tx) = self.seats[seat].as_ref().and_then(|s| s.tx.clone()) {
             let _ = tx.send(ServerMessage::Resync { events: history }).await;
         }
+        // 再接続で操作待ちの主体が変わった可能性があるため期限を張り直す
+        self.refresh_action_deadline().await;
     }
 
     async fn handle_client_message(&mut self, seat: usize, msg: ClientMessage) {
@@ -386,6 +400,69 @@ impl Room {
         }
         self.flush_events().await;
         self.check_round_end();
+        self.refresh_action_deadline().await;
+    }
+
+    /// 指定した座席が接続中の人間か
+    fn is_connected_human(&self, seat: usize) -> bool {
+        self.seats[seat].as_ref().is_some_and(|s| s.tx.is_some())
+    }
+
+    /// 手番の制限時間を再設定する
+    ///
+    /// 接続中の人間の操作待ちなら期限を張り直し、対象座席へ残り秒数を通知する。
+    /// それ以外（CPU進行中・確認待ち・局終了）は期限を解除する。
+    async fn refresh_action_deadline(&mut self) {
+        let Some(timeout) = self.config.action_timeout else {
+            self.action_deadline = None;
+            return;
+        };
+        if self.awaiting_ready || self.game_over_sent {
+            self.action_deadline = None;
+            return;
+        }
+
+        let seats: Vec<usize> = self
+            .driver
+            .as_ref()
+            .map(|d| d.pending_action_seats())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|&s| self.is_connected_human(s))
+            .collect();
+
+        if seats.is_empty() {
+            self.action_deadline = None;
+            return;
+        }
+
+        self.action_deadline = Some(Instant::now() + timeout);
+        // 端数は切り上げる（短い制限でも 0 秒表示にならないように）
+        let seconds = timeout.as_secs_f64().ceil() as u32;
+        for seat in seats {
+            if let Some(tx) = self.seats[seat].as_ref().and_then(|s| s.tx.clone()) {
+                let _ = tx.send(ServerMessage::TurnTimer { seconds }).await;
+            }
+        }
+    }
+
+    /// 手番の制限時間切れ: 待っている接続中の人間に既定アクションを代行する
+    async fn on_action_timeout(&mut self) {
+        let seats: Vec<usize> = self
+            .driver
+            .as_ref()
+            .map(|d| d.pending_action_seats())
+            .unwrap_or_default();
+        for seat in seats {
+            if self.is_connected_human(seat)
+                && let Some(driver) = self.driver.as_mut()
+            {
+                tracing::info!(code = self.code, seat, "action timed out; auto-acting");
+                driver.force_default_action(seat);
+            }
+        }
+        self.action_deadline = None;
+        self.progress_game().await;
     }
 
     /// 各座席のイベントを履歴へ記録し、接続中の座席へ送信する
@@ -471,6 +548,7 @@ impl Room {
             self.broadcast(ServerMessage::GameOver { final_scores })
                 .await;
             self.game_over_sent = true;
+            self.action_deadline = None;
             // 全員が切断したら閉じる。念のため期限も設定する
             self.close_deadline = Some(Instant::now() + self.config.abandoned_timeout);
             tracing::info!(code = self.code, "game over");

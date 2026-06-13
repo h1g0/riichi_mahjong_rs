@@ -145,6 +145,8 @@ async fn main() {
             // 対局中の接続バナー（ローカル対戦では常に None）
             game_state.online_state.status_line = adp.status_text();
             game_state.online_state.status_is_error = true;
+            // 手番の残り時間（オンラインのみ）
+            game_state.online_state.turn_remaining = adp.turn_remaining_secs();
         }
 
         match game_state.phase {
