@@ -148,6 +148,52 @@ pub struct GameState {
     pub nine_terminals_pending: bool,
     /// 対局開始前設定
     pub setup_state: SetupState,
+    /// オンライン対戦UIの状態
+    pub online_state: OnlineUiState,
+}
+
+/// オンライン対戦UI（メニュー・ロビー）の状態
+#[derive(Debug, Clone)]
+pub struct OnlineUiState {
+    /// 表示名の入力欄
+    pub name_input: String,
+    /// ルームコードの入力欄
+    pub code_input: String,
+    /// true ならルームコード欄、false なら名前欄にフォーカス
+    pub code_focused: bool,
+    /// 接続状況・エラーの表示文言
+    pub status_line: Option<String>,
+    /// status_line がエラーか（赤色で表示する）
+    pub status_is_error: bool,
+    /// 入室中のルーム表示（メインループがアダプターからコピーする）
+    pub room: Option<RoomViewUi>,
+    /// 手番の制限時間の残り秒数（オンラインで自分の手番のときのみ Some）
+    pub turn_remaining: Option<u32>,
+}
+
+impl OnlineUiState {
+    pub fn new() -> Self {
+        OnlineUiState {
+            name_input: "プレイヤー".to_string(),
+            code_input: String::new(),
+            code_focused: false,
+            status_line: None,
+            status_is_error: false,
+            room: None,
+            turn_remaining: None,
+        }
+    }
+}
+
+/// ロビー画面に表示するルーム情報
+#[derive(Debug, Clone)]
+pub struct RoomViewUi {
+    /// ルームコード
+    pub code: String,
+    /// 各座席の表示文言（東南西北の順）
+    pub seat_labels: [String; 4],
+    /// 自分がホストか（対局開始ボタンの表示に使う）
+    pub is_host: bool,
 }
 
 /// 対局開始前の設定画面の状態
@@ -232,6 +278,10 @@ impl SetupState {
 pub enum GamePhase {
     /// 対局開始前の設定画面
     Setup,
+    /// オンライン対戦メニュー（名前・ルームコード入力）
+    OnlineMenu,
+    /// オンラインロビー（メンバー待ち）
+    OnlineLobby,
     /// ゲーム開始前
     WaitingForStart,
     /// 対局中
@@ -294,6 +344,7 @@ impl GameState {
             pon_pending_options: Vec::new(),
             nine_terminals_pending: false,
             setup_state: SetupState::new(),
+            online_state: OnlineUiState::new(),
         }
     }
 

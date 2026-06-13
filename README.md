@@ -14,8 +14,10 @@ Implementation for Japanese Riichi Mahjong in Rust.
 - A playable client that runs in both native and WASM builds is included.
   - The current client is a temporary simplified version.
   - A CPU opponent is implemented. The current CPU is a provisional implementation.
-  - The design also takes future networked multiplayer implementation into consideration.
-- Vercel deployment using the included scripts is supported.
+- Online multiplayer (room-code based) is supported via `mahjong-net-server`.
+  - Host creates a room, shares a 6-character code, and friends join; empty seats are filled by the CPU.
+  - Disconnected players are taken over by the CPU and can rejoin to resync.
+- Vercel deployment using the included scripts is supported (static web client).
 
 ## Structure
 
@@ -26,6 +28,7 @@ This repository is currently composed of the following crates.
 - `mahjong-core`: core logic such as hand representation, shanten calculation, yaku evaluation, fu calculation, and score calculation
 - `mahjong-server`: progression management and rule handling used for local matches
 - `mahjong-client`: a Macroquad-based four-player Riichi Mahjong client that supports both native and browser execution
+- `mahjong-net-server`: a single-binary WebSocket server (tokio + axum) that hosts online room-code matches
 
 ### Directory structure
 
@@ -117,3 +120,60 @@ The Vercel build performs the following steps.
 - places deployable web assets under `public/`
 
 To reproduce the same flow locally, run equivalent steps in an environment where Bash, curl, Rust, and the WASM target are available.
+
+To point the deployed web client at your online server, set the `MAHJONG_SERVER_URL` environment variable in the Vercel project (for example `wss://your-app.fly.dev/ws`). The build injects it into `window.MAHJONG_SERVER_URL`. If it is unset, the client falls back to `ws://127.0.0.1:8080/ws` (local development only).
+
+## Online multiplayer server
+
+`mahjong-net-server` hosts room-code online matches. The static web client (above) and the game server are deployed separately: Vercel only serves static files, so the WebSocket server needs its own host.
+
+### Run locally
+
+~~~sh
+cargo run -p mahjong-net-server
+~~~
+
+Environment variables:
+
+- `PORT`: listen port (default `8080`).
+- `RUST_LOG`: log filter (for example `mahjong_net_server=debug`).
+- `ALLOWED_ORIGIN`: if set, only WebSocket connections with a matching `Origin` header are accepted (for example `https://your-app.vercel.app`). If unset, all origins are allowed.
+
+`GET /healthz` returns `ok` for health checks. The WebSocket endpoint is `GET /ws`.
+
+To play against a local server, run a native client with `MAHJONG_SERVER_URL` pointed at it:
+
+~~~sh
+MAHJONG_SERVER_URL=ws://127.0.0.1:8080/ws cargo run -p mahjong-client
+~~~
+
+### Deploy to Fly.io
+
+The repository includes a `Dockerfile` and `fly.toml`. TLS (`wss://`) is terminated by Fly's proxy, so the server itself speaks plain WebSocket on `PORT`.
+
+~~~sh
+# one-time: create the app (edit the app name in fly.toml or let fly launch set it)
+fly launch --no-deploy
+
+# (optional) restrict accepted origins to your web client
+fly secrets set ALLOWED_ORIGIN=https://your-app.vercel.app
+
+# deploy
+fly deploy
+~~~
+
+After deploying, set `MAHJONG_SERVER_URL` in Vercel to `wss://<your-app>.fly.dev/ws` and redeploy the web client.
+
+A container image can also be built and run anywhere Docker runs:
+
+~~~sh
+docker build -t mahjong-net-server .
+docker run -e PORT=8080 -p 8080:8080 mahjong-net-server
+~~~
+
+### Operational notes
+
+- **Rooms are in-memory.** A redeploy or machine restart drops all active rooms; players reconnect by creating/joining a new room. This is acceptable for friends-play; there is no persistence layer.
+- With `min_machines_running = 0` in `fly.toml`, the machine stops when idle and cold-starts on the next connection. Set it to `1` for an always-on server.
+- Monitor `GET /healthz` (Fly is configured to check it every 15s).
+- The server applies a per-IP room-entry rate limit and per-connection message/frame-size caps; no additional WAF is required for casual use.
