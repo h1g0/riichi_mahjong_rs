@@ -496,9 +496,18 @@ mod tests {
             driver.tick();
             let events = driver.drain_events(0);
 
+            // 九種九牌の選択があるターンは宣言拒否のみ送る
+            // （拒否するとサーバが TileDrawn を再送して打牌を促す）
+            let nine_terminals = events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::NineTerminalsAvailable));
+            if nine_terminals {
+                driver.handle_action(0, ClientAction::NineTerminals { declare: false });
+            }
+
             for event in &events {
                 match event {
-                    ServerEvent::TileDrawn { can_tsumo, .. } => {
+                    ServerEvent::TileDrawn { can_tsumo, .. } if !nine_terminals => {
                         // ツモ切り（和了可能ならツモ和了）
                         if *can_tsumo {
                             driver.handle_action(0, ClientAction::Tsumo);
@@ -508,9 +517,6 @@ mod tests {
                     }
                     ServerEvent::CallAvailable { .. } => {
                         driver.handle_action(0, ClientAction::Pass);
-                    }
-                    ServerEvent::NineTerminalsAvailable => {
-                        driver.handle_action(0, ClientAction::NineTerminals { declare: false });
                     }
                     _ => {}
                 }
