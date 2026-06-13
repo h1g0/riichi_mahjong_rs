@@ -37,6 +37,12 @@ struct CpuSeat {
     /// 追跡するだけで、アクションは出さない（人間が操作する座席）。
     /// 切断時に true に切り替えるだけで即座に代打ちできる。
     controlled: bool,
+    /// この座席のイベントを常にバッファするか
+    ///
+    /// シャドーCPU（人間の座席）では true。CPUが代打ち中
+    /// （controlled = true）でもイベントをバッファし続けるため、
+    /// ルームが再接続用の履歴を記録できる。純粋なCPU席では false。
+    mirror: bool,
 }
 
 /// ゲームドライバー: 卓とCPUクライアントを所有し、ゲームを進行する
@@ -70,6 +76,7 @@ impl GameDriver {
             self.cpus[seat] = Some(CpuSeat {
                 client: CpuClient::new(config),
                 controlled: true,
+                mirror: false,
             });
         }
     }
@@ -79,11 +86,14 @@ impl GameDriver {
     /// イベントを配信して内部状態を追跡させるが、アクションは出さない。
     /// 人間の座席に割り当てておくと、切断時に
     /// [`set_cpu_controlled`](Self::set_cpu_controlled) で即座に代打ちできる。
+    /// シャドーCPUの座席は代打ち中もイベントをバッファし続けるため、
+    /// [`drain_events`](Self::drain_events) で再接続用の履歴を取得できる。
     pub fn set_shadow_cpu(&mut self, seat: usize, config: CpuConfig) {
         if seat < 4 {
             self.cpus[seat] = Some(CpuSeat {
                 client: CpuClient::new(config),
                 controlled: false,
+                mirror: true,
             });
         }
     }
@@ -138,7 +148,10 @@ impl GameDriver {
         self.pump(None);
     }
 
-    /// 指定した座席のイベントを取得する（CPU操作中の座席は常に空）
+    /// 指定した座席のイベントを取得する
+    ///
+    /// 人間席とシャドーCPU席のイベントを返す。シャドーCPU席は代打ち中も
+    /// バッファし続けるため、再接続用の履歴記録に使える。純粋なCPU席は常に空。
     pub fn drain_events(&mut self, seat: usize) -> Vec<ServerEvent> {
         self.drain_events_impl(seat, None)
     }
@@ -378,12 +391,27 @@ impl GameDriver {
         cpu_acted
     }
 
-    /// CPUが操作していない座席のイベントをバッファに追加する
+    /// 人間に紐づく座席のイベントをバッファに追加する
+    ///
+    /// 純粋なCPU席（[`set_cpu`](Self::set_cpu)）以外、すなわち人間席
+    /// （CPUなし）とシャドーCPU席（[`set_shadow_cpu`](Self::set_shadow_cpu)）の
+    /// イベントをバッファする。シャドーCPU席は代打ち中もバッファし続ける。
     fn buffer_human_events(&mut self, events: &[(usize, ServerEvent)]) {
         for (seat, event) in events {
-            if !self.is_cpu_controlled(*seat) {
+            if self.should_buffer(*seat) {
                 self.event_buffers[*seat].push(event.clone());
             }
+        }
+    }
+
+    /// 指定した座席のイベントをバッファすべきか
+    fn should_buffer(&self, seat: usize) -> bool {
+        match self.cpus.get(seat) {
+            // 人間席（CPUなし）はバッファする
+            Some(None) => true,
+            // シャドーCPU席はバッファ、純粋なCPU席はしない
+            Some(Some(cpu)) => cpu.mirror,
+            None => false,
         }
     }
 
@@ -579,6 +607,50 @@ mod tests {
         driver.run_until_blocked();
 
         assert!(driver.is_round_over(), "代打ち後に局が進行しなかった");
+    }
+
+    /// シャドーCPU席は代打ち中もイベントをバッファし続けることを確認
+    ///
+    /// 切断後の再接続用に、ルームがCPU代打ち中の局の進行を
+    /// 記録できる必要がある。
+    #[test]
+    fn test_mirror_seat_buffers_events_during_takeover() {
+        let mut driver = driver_with_three_cpus();
+        let config = default_cpu_configs()[0].clone();
+        driver.set_shadow_cpu(0, config);
+
+        driver.start_game_with_seed(42);
+        driver.run_until_blocked();
+        let _ = driver.drain_events(0);
+
+        // 座席0を代打ちに切り替え（切断をシミュレート）
+        assert!(driver.set_cpu_controlled(0, true));
+        assert!(driver.force_default_action(0));
+
+        // 数巡進める
+        for _ in 0..20 {
+            if driver.is_round_over() {
+                break;
+            }
+            driver.run_until_blocked();
+            if !driver.is_round_over() {
+                // 代打ち席が手番なら既定アクションで進める
+                driver.force_default_action(driver.table().current_round().unwrap().current_player);
+            }
+        }
+
+        // 代打ち中でも座席0にイベントが記録されている
+        let events = driver.drain_events(0);
+        assert!(
+            !events.is_empty(),
+            "代打ち中のシャドーCPU席にイベントが記録されていない"
+        );
+
+        // 純粋なCPU席（座席1）は依然として空
+        assert!(
+            driver.drain_events(1).is_empty(),
+            "純粋なCPU席にイベントがバッファされている"
+        );
     }
 
     /// CPUクライアント未割り当ての座席は操作切り替えできないことを確認

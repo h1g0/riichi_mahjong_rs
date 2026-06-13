@@ -209,8 +209,8 @@ impl Connection {
                     .await;
                 continue;
             }
-            let seat = match reply_rx.await {
-                Ok(Ok(seat)) => seat,
+            let (seat, conn_gen) = match reply_rx.await {
+                Ok(Ok(assigned)) => assigned,
                 Ok(Err(code)) => {
                     self.send_error(code, "join rejected").await;
                     continue;
@@ -223,7 +223,7 @@ impl Connection {
             };
 
             // --- 中継ループ ---
-            match self.relay(room_tx, seat).await {
+            match self.relay(room_tx, seat, conn_gen).await {
                 InRoomOutcome::Closed => return,
                 InRoomOutcome::LeftRoom => continue,
             }
@@ -231,12 +231,17 @@ impl Connection {
     }
 
     /// 入室後: クライアントのメッセージをルームへ中継する
-    async fn relay(&mut self, room_tx: mpsc::Sender<RoomMsg>, seat: usize) -> InRoomOutcome {
+    async fn relay(
+        &mut self,
+        room_tx: mpsc::Sender<RoomMsg>,
+        seat: usize,
+        conn_gen: u64,
+    ) -> InRoomOutcome {
         loop {
             let msg = match self.read().await {
                 Read::Msg(msg) => msg,
                 Read::Closed => {
-                    let _ = room_tx.send(RoomMsg::Disconnected { seat }).await;
+                    let _ = room_tx.send(RoomMsg::Disconnected { seat, conn_gen }).await;
                     return InRoomOutcome::Closed;
                 }
             };

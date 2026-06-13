@@ -64,47 +64,82 @@ enum LobbyIntent {
     Join { code: String },
 }
 
+/// 自動再接続のバックオフ間隔（秒）。試行回数で頭打ちにする。
+const RECONNECT_BACKOFF: [f64; 5] = [1.0, 2.0, 4.0, 8.0, 10.0];
+
+/// 新しいトランスポートを生成する関数（再接続で使う）
+type Connector = Box<dyn FnMut() -> Box<dyn Transport>>;
+
+/// 現在時刻（秒）を返す関数
+type Clock = Box<dyn Fn() -> f64>;
+
 /// リモートアダプター: ネットワーク越しにサーバとやり取りする
 pub struct RemoteAdapter {
     transport: Box<dyn Transport>,
+    /// 再接続用に新しいトランスポートを作る
+    connector: Connector,
+    /// 現在時刻（秒）。再接続のバックオフ計測に使う
+    clock: Clock,
     status: ConnStatus,
     display_name: String,
     session_token: Option<String>,
     pending_intent: Option<LobbyIntent>,
     room: Option<RoomView>,
+    /// 再接続に使うルームコード（RoomState で判明する）
+    room_code: Option<String>,
     events: Vec<ServerEvent>,
     last_error: Option<RemoteError>,
     game_started: bool,
     game_over: bool,
     ready_sent: bool,
+    /// 自動再接続中か
+    reconnecting: bool,
+    /// 次の再接続を試みる時刻
+    reconnect_at: Option<f64>,
+    /// 再接続の試行回数
+    reconnect_attempts: u32,
+    /// 各座席の人間プレイヤーの接続状態（None = 人間以外/不明）
+    peer_connected: [Option<bool>; 4],
 }
 
 impl RemoteAdapter {
-    /// トランスポートと意図を指定して作成する（テスト用にも使う）
-    fn with_transport(
+    /// トランスポート・コネクタ・時計を指定して作成する
+    fn build(
         transport: Box<dyn Transport>,
+        connector: Connector,
+        clock: Clock,
         display_name: &str,
         intent: LobbyIntent,
     ) -> Self {
         RemoteAdapter {
             transport,
+            connector,
+            clock,
             status: ConnStatus::Connecting,
             display_name: display_name.to_string(),
             session_token: None,
             pending_intent: Some(intent),
             room: None,
+            room_code: None,
             events: Vec::new(),
             last_error: None,
             game_started: false,
             game_over: false,
             ready_sent: false,
+            reconnecting: false,
+            reconnect_at: None,
+            reconnect_attempts: 0,
+            peer_connected: [None; 4],
         }
     }
 
     /// サーバに接続してルームを作成する
     pub fn create_room(url: &str, display_name: &str, round_count: u8) -> Self {
-        Self::with_transport(
-            crate::transport::connect(url),
+        let (transport, connector) = Self::connector_for(url);
+        Self::build(
+            transport,
+            connector,
+            default_clock(),
             display_name,
             LobbyIntent::Create { round_count },
         )
@@ -112,13 +147,24 @@ impl RemoteAdapter {
 
     /// サーバに接続して既存のルームに参加する
     pub fn join_room(url: &str, display_name: &str, code: &str) -> Self {
-        Self::with_transport(
-            crate::transport::connect(url),
+        let (transport, connector) = Self::connector_for(url);
+        Self::build(
+            transport,
+            connector,
+            default_clock(),
             display_name,
             LobbyIntent::Join {
                 code: code.trim().to_ascii_uppercase(),
             },
         )
+    }
+
+    /// 指定URL用のコネクタと最初のトランスポートを作る
+    fn connector_for(url: &str) -> (Box<dyn Transport>, Connector) {
+        let url = url.to_string();
+        let mut connector: Connector = Box::new(move || crate::transport::connect(&url));
+        let transport = connector();
+        (transport, connector)
     }
 
     /// 対局を開始する（ホストのみ有効。結果はサーバが判断する）
@@ -154,6 +200,7 @@ impl RemoteAdapter {
 
     /// 受信を処理して内部状態を更新する
     fn pump(&mut self) {
+        self.maybe_reconnect();
         for ws_event in self.transport.poll() {
             match ws_event {
                 WsEvent::Opened => {
@@ -173,18 +220,85 @@ impl RemoteAdapter {
                         });
                     }
                 },
-                WsEvent::Closed => {
-                    self.status = ConnStatus::Disconnected;
-                }
-                WsEvent::Error(message) => {
-                    self.status = ConnStatus::Disconnected;
-                    self.last_error = Some(RemoteError {
-                        code: None,
-                        message,
-                    });
-                }
+                WsEvent::Closed => self.handle_disconnect(None),
+                WsEvent::Error(message) => self.handle_disconnect(Some(message)),
             }
         }
+    }
+
+    /// 切断・通信エラーを処理する
+    ///
+    /// 対局中は自動再接続を試みる（エラーは表に出さず「再接続中」を表示）。
+    /// ロビーや対局終了後は通常の切断として扱う。
+    fn handle_disconnect(&mut self, message: Option<String>) {
+        if self.should_auto_reconnect() {
+            // 一時的な切断: 再接続モードへ（既に再接続中なら継続）
+            if !self.reconnecting {
+                self.enter_reconnect();
+            } else {
+                self.status = ConnStatus::Disconnected;
+            }
+            return;
+        }
+        self.status = ConnStatus::Disconnected;
+        if let Some(message) = message {
+            self.last_error = Some(RemoteError {
+                code: None,
+                message,
+            });
+        }
+    }
+
+    /// 自動再接続すべき状況か（対局中で終了していない）
+    fn should_auto_reconnect(&self) -> bool {
+        self.game_started && !self.game_over && self.room_code.is_some()
+    }
+
+    /// 自動再接続モードに入る
+    fn enter_reconnect(&mut self) {
+        self.reconnecting = true;
+        self.reconnect_attempts = 0;
+        self.status = ConnStatus::Disconnected;
+        self.reconnect_at = Some((self.clock)() + RECONNECT_BACKOFF[0]);
+    }
+
+    /// 再接続の時刻になっていれば新しい接続を張る
+    fn maybe_reconnect(&mut self) {
+        if !self.reconnecting {
+            return;
+        }
+        let Some(at) = self.reconnect_at else {
+            return;
+        };
+        if (self.clock)() < at {
+            return;
+        }
+        let Some(code) = self.room_code.clone() else {
+            // ルームコード不明なら再接続できない
+            self.reconnecting = false;
+            self.reconnect_at = None;
+            return;
+        };
+
+        // 新しいトランスポートを張り、再入室をやり直す
+        self.transport = (self.connector)();
+        self.status = ConnStatus::Connecting;
+        self.pending_intent = Some(LobbyIntent::Join { code });
+
+        let idx = (self.reconnect_attempts as usize + 1).min(RECONNECT_BACKOFF.len() - 1);
+        self.reconnect_attempts += 1;
+        self.reconnect_at = Some((self.clock)() + RECONNECT_BACKOFF[idx]);
+    }
+
+    /// 再接続を断念すべき種類のエラーか
+    fn is_terminal_reconnect_error(code: ErrorCode) -> bool {
+        matches!(
+            code,
+            ErrorCode::RoomNotFound
+                | ErrorCode::GameInProgress
+                | ErrorCode::NotInRoom
+                | ErrorCode::VersionMismatch
+        )
     }
 
     fn handle_server_message(&mut self, msg: ServerMessage) {
@@ -208,6 +322,14 @@ impl RemoteAdapter {
                 host_seat,
                 your_seat,
             } => {
+                self.room_code = Some(code.clone());
+                // 座席情報から人間プレイヤーの接続状態を取り込む
+                for (i, info) in seats.iter().enumerate() {
+                    self.peer_connected[i] = match info {
+                        SeatInfo::Human { connected, .. } if i != your_seat => Some(*connected),
+                        _ => None,
+                    };
+                }
                 self.room = Some(RoomView {
                     code,
                     seats,
@@ -223,18 +345,51 @@ impl RemoteAdapter {
                 }
                 self.events.push(event);
             }
+            ServerMessage::Resync { events } => {
+                // 現在の局を最初から再生する。再接続が完了したので通常状態へ戻す。
+                self.reconnecting = false;
+                self.reconnect_at = None;
+                self.status = ConnStatus::Connected;
+                for event in events {
+                    if matches!(event, ServerEvent::GameStarted { .. }) {
+                        self.game_started = true;
+                        self.ready_sent = false;
+                    }
+                    self.events.push(event);
+                }
+            }
+            ServerMessage::PlayerConnectionChanged { seat, connected } => {
+                if let Some(slot) = self.peer_connected.get_mut(seat) {
+                    // 自分以外の座席のみ追跡する（自分は status で表す）
+                    let is_self = self.room.as_ref().is_some_and(|r| r.your_seat == seat);
+                    if !is_self {
+                        *slot = Some(connected);
+                    }
+                }
+            }
             ServerMessage::GameOver { .. } => {
                 self.game_over = true;
+                self.reconnecting = false;
+                self.reconnect_at = None;
             }
             ServerMessage::Error { code, message } => {
+                if self.reconnecting && Self::is_terminal_reconnect_error(code) {
+                    // 再入室できない種類のエラー: 再接続を断念する
+                    self.reconnecting = false;
+                    self.reconnect_at = None;
+                    self.status = ConnStatus::Disconnected;
+                }
                 self.last_error = Some(RemoteError {
                     code: Some(code),
                     message,
                 });
             }
-            // 再接続（フェーズ5）で対応する
-            ServerMessage::Resync { .. } | ServerMessage::PlayerConnectionChanged { .. } => {}
         }
+    }
+
+    /// 接続中の他プレイヤーに切断者がいるか
+    fn any_peer_disconnected(&self) -> bool {
+        self.peer_connected.iter().any(|p| p == &Some(false))
     }
 
     fn send(&mut self, msg: &ClientMessage) {
@@ -277,12 +432,26 @@ impl GameAdapter for RemoteAdapter {
     }
 
     fn status_text(&self) -> Option<String> {
+        if self.reconnecting {
+            return Some("再接続中...".to_string());
+        }
         match self.status {
             ConnStatus::Disconnected => Some("サーバとの接続が切れました".to_string()),
             ConnStatus::Connecting => Some("接続中...".to_string()),
-            ConnStatus::Connected => None,
+            ConnStatus::Connected => {
+                if self.any_peer_disconnected() {
+                    Some("他のプレイヤーが切断中（CPUが代打ち）".to_string())
+                } else {
+                    None
+                }
+            }
         }
     }
+}
+
+/// 本番用の時計（macroquad の経過秒）
+fn default_clock() -> Clock {
+    Box::new(macroquad::time::get_time)
 }
 
 /// エラーコードを表示用の日本語文言に変換する
@@ -360,13 +529,22 @@ mod tests {
         (Box::new(transport), MockHandle { incoming, sent })
     }
 
+    /// 再接続不要なテスト用のアダプターを作る
+    ///
+    /// コネクタは呼ばれない前提（呼ばれたら panic）、時計は常に 0 を返す。
+    fn build_test(transport: Box<dyn Transport>, intent: LobbyIntent) -> RemoteAdapter {
+        RemoteAdapter::build(
+            transport,
+            Box::new(|| panic!("このテストでは再接続を想定していません")),
+            Box::new(|| 0.0),
+            "テスト",
+            intent,
+        )
+    }
+
     fn create_adapter() -> (RemoteAdapter, MockHandle) {
         let (transport, handle) = mock_pair();
-        let adapter = RemoteAdapter::with_transport(
-            transport,
-            "テスト",
-            LobbyIntent::Create { round_count: 1 },
-        );
+        let adapter = build_test(transport, LobbyIntent::Create { round_count: 1 });
         (adapter, handle)
     }
 
@@ -445,9 +623,8 @@ mod tests {
     #[test]
     fn test_join_intent_uppercases_code() {
         let (transport, handle) = mock_pair();
-        let mut adapter = RemoteAdapter::with_transport(
+        let mut adapter = build_test(
             transport,
-            "ゲスト",
             LobbyIntent::Join {
                 code: " abc234 ".trim().to_ascii_uppercase(),
             },
@@ -664,5 +841,211 @@ mod tests {
         });
         adapter.tick();
         assert!(adapter.is_game_over());
+    }
+
+    #[test]
+    fn test_resync_replays_events_and_clears_reconnecting() {
+        let (mut adapter, handle) = create_adapter();
+        // 再接続中の状態を作る
+        adapter.reconnecting = true;
+        adapter.status = ConnStatus::Connecting;
+
+        handle.push_msg(&ServerMessage::Resync {
+            events: vec![
+                game_started_event(),
+                ServerEvent::TileDiscarded {
+                    player: Wind::South,
+                    tile: Tile::new(Tile::S9),
+                    is_tsumogiri: true,
+                },
+            ],
+        });
+
+        let events = adapter.poll_events();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], ServerEvent::GameStarted { .. }));
+        assert!(adapter.game_started());
+        // 再接続が完了して通常状態へ戻る
+        assert_eq!(adapter.status(), ConnStatus::Connected);
+        assert!(adapter.status_text().is_none());
+    }
+
+    /// 連続するモックを払い出すコネクタを作る
+    fn queued_connector(
+        transports: Vec<Box<dyn Transport>>,
+    ) -> Box<dyn FnMut() -> Box<dyn Transport>> {
+        let mut queue = VecDeque::from(transports);
+        Box::new(move || queue.pop_front().expect("コネクタが想定より多く呼ばれた"))
+    }
+
+    #[test]
+    fn test_auto_reconnect_after_midgame_disconnect() {
+        // 1本目のトランスポートで対局を開始し、2本目で再接続させる
+        let (t1, h1) = mock_pair();
+        let (t2, h2) = mock_pair();
+        let now = Rc::new(RefCell::new(0.0_f64));
+        let now_clock = now.clone();
+
+        let mut adapter = RemoteAdapter::build(
+            t1,
+            queued_connector(vec![t2]),
+            Box::new(move || *now_clock.borrow()),
+            "テスト",
+            LobbyIntent::Join {
+                code: "ABC234".to_string(),
+            },
+        );
+
+        // ハンドシェイク → ルーム入室 → 対局開始
+        h1.push(WsEvent::Opened);
+        h1.push_msg(&welcome());
+        h1.push_msg(&room_state(1));
+        h1.push_msg(&ServerMessage::Event(game_started_event()));
+        adapter.tick();
+        assert!(adapter.game_started());
+        assert_eq!(adapter.status(), ConnStatus::Connected);
+
+        // 対局中に切断: 再接続モードに入り、エラーは表に出さない
+        h1.push(WsEvent::Closed);
+        adapter.tick();
+        assert_eq!(adapter.status_text().as_deref(), Some("再接続中..."));
+        assert!(adapter.take_error().is_none());
+
+        // バックオフ前は再接続しない
+        *now.borrow_mut() = 0.5;
+        adapter.tick();
+        assert!(h2.sent().is_empty());
+
+        // バックオフ経過後に2本目で再接続: Hello を送る
+        *now.borrow_mut() = 1.5;
+        h2.push(WsEvent::Opened);
+        adapter.tick();
+        let sent = h2.sent();
+        assert!(matches!(
+            sent.first(),
+            Some(ClientMessage::Hello {
+                session_token: Some(_),
+                ..
+            })
+        ));
+
+        // Welcome → JoinRoom（保持していたルームコードで再入室）
+        h2.push_msg(&welcome());
+        adapter.tick();
+        assert!(
+            h2.sent()
+                .iter()
+                .any(|m| matches!(m, ClientMessage::JoinRoom { code } if code == "ABC234"))
+        );
+
+        // サーバが RoomState + Resync を返す → 再接続完了
+        h2.push_msg(&room_state(1));
+        h2.push_msg(&ServerMessage::Resync {
+            events: vec![game_started_event()],
+        });
+        let events = adapter.poll_events();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::GameStarted { .. }))
+        );
+        assert_eq!(adapter.status(), ConnStatus::Connected);
+        assert!(adapter.status_text().is_none());
+    }
+
+    #[test]
+    fn test_reconnect_stops_on_terminal_error() {
+        let (t1, h1) = mock_pair();
+        let (t2, h2) = mock_pair();
+        let now = Rc::new(RefCell::new(0.0_f64));
+        let now_clock = now.clone();
+
+        let mut adapter = RemoteAdapter::build(
+            t1,
+            queued_connector(vec![t2]),
+            Box::new(move || *now_clock.borrow()),
+            "テスト",
+            LobbyIntent::Join {
+                code: "ABC234".to_string(),
+            },
+        );
+
+        h1.push(WsEvent::Opened);
+        h1.push_msg(&welcome());
+        h1.push_msg(&room_state(1));
+        h1.push_msg(&ServerMessage::Event(game_started_event()));
+        adapter.tick();
+
+        h1.push(WsEvent::Closed);
+        adapter.tick();
+
+        // 再接続を試みるがルームが消えていた
+        *now.borrow_mut() = 1.5;
+        h2.push(WsEvent::Opened);
+        h2.push_msg(&welcome());
+        h2.push_msg(&ServerMessage::Error {
+            code: ErrorCode::RoomNotFound,
+            message: "room closed".to_string(),
+        });
+        adapter.tick();
+
+        // 再接続を断念し、エラーと切断状態を表に出す
+        assert_eq!(adapter.status(), ConnStatus::Disconnected);
+        assert_eq!(
+            adapter.status_text().as_deref(),
+            Some("サーバとの接続が切れました")
+        );
+        let err = adapter.take_error().expect("エラーが記録されていない");
+        assert_eq!(err.code, Some(ErrorCode::RoomNotFound));
+    }
+
+    #[test]
+    fn test_peer_disconnect_shows_status() {
+        let (mut adapter, handle) = create_adapter();
+        handle.push(WsEvent::Opened);
+        handle.push_msg(&welcome());
+        // 自分は座席1、座席0（ホスト）が接続中
+        handle.push_msg(&room_state(1));
+        handle.push_msg(&ServerMessage::Event(game_started_event()));
+        adapter.tick();
+        assert!(adapter.status_text().is_none());
+
+        // 座席0が切断 → 状態表示が出る
+        handle.push_msg(&ServerMessage::PlayerConnectionChanged {
+            seat: 0,
+            connected: false,
+        });
+        adapter.tick();
+        assert_eq!(
+            adapter.status_text().as_deref(),
+            Some("他のプレイヤーが切断中（CPUが代打ち）")
+        );
+
+        // 座席0が再接続 → 表示が消える
+        handle.push_msg(&ServerMessage::PlayerConnectionChanged {
+            seat: 0,
+            connected: true,
+        });
+        adapter.tick();
+        assert!(adapter.status_text().is_none());
+    }
+
+    #[test]
+    fn test_lobby_disconnect_does_not_reconnect() {
+        // 対局開始前の切断は通常エラー扱い（再接続しない）
+        let (mut adapter, handle) = create_adapter();
+        handle.push(WsEvent::Opened);
+        handle.push_msg(&welcome());
+        handle.push_msg(&room_state(0));
+        adapter.tick();
+
+        handle.push(WsEvent::Error("接続失敗".to_string()));
+        adapter.tick();
+
+        assert_eq!(adapter.status(), ConnStatus::Disconnected);
+        assert_eq!(
+            adapter.status_text().as_deref(),
+            Some("サーバとの接続が切れました")
+        );
     }
 }
