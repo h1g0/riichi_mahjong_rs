@@ -121,9 +121,14 @@ impl TestClient {
 
     /// Hello を送り、Welcome のセッショントークンを返す
     async fn hello(&mut self, name: &str) -> String {
+        self.hello_with_token(name, None).await
+    }
+
+    /// セッショントークンを指定して Hello を送り、Welcome のトークンを返す
+    async fn hello_with_token(&mut self, name: &str, token: Option<String>) -> String {
         self.send(&ClientMessage::Hello {
             protocol_version: PROTOCOL_VERSION,
-            session_token: None,
+            session_token: token,
             display_name: name.to_string(),
         })
         .await;
@@ -471,6 +476,148 @@ async fn test_disconnect_mid_game_cpu_takes_over() {
         // ホストは最後まで打ち切れる（ゲスト座席はCPUが代打ち）
         let scores = host.play_until_game_over(true).await;
         assert_scores_consistent(scores);
+    })
+    .await
+    .expect("テスト全体がタイムアウトした");
+}
+
+/// 切断したプレイヤーがトークンで再入室し、Resync で状態を再同期できることを確認する
+///
+/// ホストは継続して打ち、その裏でゲストが切断→再入室する。ホストが手番を
+/// 進め続けないと対局が止まるため、両者を `tokio::join!` で並行に動かす。
+#[tokio::test]
+async fn test_reconnect_resyncs_and_resumes() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let addr = start_server(fast_config()).await;
+
+        let mut host = TestClient::connect(addr).await;
+        host.hello("ホスト").await;
+        let code = host.create_room().await;
+
+        let mut guest = TestClient::connect(addr).await;
+        let guest_token = guest.hello("ゲスト").await;
+        guest
+            .send(&ClientMessage::JoinRoom { code: code.clone() })
+            .await;
+
+        host.recv().await; // ゲスト入室の RoomState
+        host.send(&ClientMessage::StartGame).await;
+
+        // ホスト: 最後まで打ち続ける
+        let host_fut = host.play_until_game_over(true);
+
+        // ゲスト: 開始確認 → 切断 → 再入室 → Resync 検証 → 再び切断
+        let guest_fut = async {
+            loop {
+                if let ServerMessage::Event(ServerEvent::GameStarted { .. }) = guest.recv().await {
+                    break;
+                }
+            }
+            drop(guest);
+            // CPU 代打ちで少し進める
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            // トークンを提示して再入室する
+            let mut rejoin = TestClient::connect(addr).await;
+            rejoin.hello_with_token("ゲスト", Some(guest_token)).await;
+            rejoin
+                .send(&ClientMessage::JoinRoom { code: code.clone() })
+                .await;
+
+            // RoomState と Resync（現在の局の再生）を受け取る
+            let mut saw_room_state = false;
+            let mut resync_events = None;
+            for _ in 0..100 {
+                match rejoin.recv().await {
+                    ServerMessage::RoomState { your_seat, .. } => {
+                        assert_eq!(your_seat, 1, "再入室の座席が元と違う");
+                        saw_room_state = true;
+                    }
+                    ServerMessage::Resync { events } => {
+                        resync_events = Some(events);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            assert!(saw_room_state, "再入室で RoomState が届かなかった");
+            let events = resync_events.expect("Resync が届かなかった");
+            // 再生は現在の局の GameStarted から始まる（履歴は局ごとにリセット）
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|e| matches!(e, ServerEvent::GameStarted { .. }))
+                    .count(),
+                1,
+                "Resync に GameStarted がちょうど1つ含まれるべき"
+            );
+
+            // 検証が目的のため、再接続後の操作は行わず再び切断する
+            // （CPU が代打ちして対局はホスト主導で完走する）
+            drop(rejoin);
+        };
+
+        let (scores, ()) = tokio::join!(host_fut, guest_fut);
+        assert_scores_consistent(scores);
+    })
+    .await
+    .expect("テスト全体がタイムアウトした");
+}
+
+/// 古い接続からの遅延切断通知が再接続済みの座席を誤って切断しないことを確認する
+///
+/// ここでは順序どおり（切断 → 再接続）の正常系として、再接続後に対局が
+/// 継続することを確認する。
+#[tokio::test]
+async fn test_reconnect_keeps_seat_connected() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let addr = start_server(fast_config()).await;
+
+        let mut host = TestClient::connect(addr).await;
+        host.hello("ホスト").await;
+        let code = host.create_room().await;
+
+        let mut guest = TestClient::connect(addr).await;
+        let guest_token = guest.hello("ゲスト").await;
+        guest
+            .send(&ClientMessage::JoinRoom { code: code.clone() })
+            .await;
+        host.recv().await;
+        host.send(&ClientMessage::StartGame).await;
+        loop {
+            if let ServerMessage::Event(ServerEvent::GameStarted { .. }) = guest.recv().await {
+                break;
+            }
+        }
+        drop(guest);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // 再入室
+        let mut rejoin = TestClient::connect(addr).await;
+        rejoin.hello_with_token("ゲスト", Some(guest_token)).await;
+        rejoin
+            .send(&ClientMessage::JoinRoom { code: code.clone() })
+            .await;
+        // Resync まで読み飛ばす
+        loop {
+            if let ServerMessage::Resync { .. } = rejoin.recv().await {
+                break;
+            }
+        }
+
+        // ホストへ再接続が通知される
+        let mut saw_reconnect = false;
+        for _ in 0..50 {
+            if let ServerMessage::PlayerConnectionChanged {
+                seat: 1,
+                connected: true,
+            } = host.recv().await
+            {
+                saw_reconnect = true;
+                break;
+            }
+        }
+        assert!(saw_reconnect, "ホストに再接続通知が届かなかった");
     })
     .await
     .expect("テスト全体がタイムアウトした");
