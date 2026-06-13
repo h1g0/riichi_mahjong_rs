@@ -1,5 +1,6 @@
 /target
-/public/mahjong-client.wasm
-/public/mq_js_bundle.js
+# ローカルで scripts/vercel-build.sh を実行したときの生成物（ハッシュ付き含む）
+/public/*.wasm
+/public/*.js
 .DS_Store
 .claude/*

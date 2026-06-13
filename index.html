@@ -18,7 +18,14 @@
 </head>
 <body>
     <canvas id="glcanvas" tabindex='1' width="1280" height="800"></canvas>
+    <script>
+        // オンライン対戦サーバのURL。
+        // 未設定なら ws://127.0.0.1:8080/ws（ローカル開発用）が使われる。
+        // 本番デプロイ時はビルドスクリプトがここを差し替える。
+        // window.MAHJONG_SERVER_URL = "wss://example.com/ws";
+    </script>
     <script src="mq_js_bundle.js"></script>
+    <script src="crates/mahjong-client/js/ws.js"></script>
     <script>
         if (typeof load === "function") {
             load("target/wasm32-unknown-unknown/release/mahjong-client.wasm");
