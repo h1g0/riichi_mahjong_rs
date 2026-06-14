@@ -30,6 +30,10 @@ pub struct RoomConfig {
     /// 1手番ごとの制限時間（None なら無制限）。
     /// 超過するとサーバが既定アクション（ツモ切り/パス）を代行する。
     pub action_timeout: Option<Duration>,
+    /// CPUの打牌間隔（思考時間の演出）。0 なら即時に進行する。
+    pub cpu_action_delay: Duration,
+    /// ゲーム進行ティックの間隔。CPU遅延を計りながら進める粒度。
+    pub tick_interval: Duration,
 }
 
 impl Default for RoomConfig {
@@ -39,6 +43,8 @@ impl Default for RoomConfig {
             lobby_timeout: Duration::from_secs(30 * 60),
             abandoned_timeout: Duration::from_secs(5 * 60),
             action_timeout: Some(Duration::from_secs(90)),
+            cpu_action_delay: Duration::from_secs(1),
+            tick_interval: Duration::from_millis(100),
         }
     }
 }
@@ -120,6 +126,8 @@ struct Room {
     close_deadline: Option<Instant>,
     /// 手番の制限時間の期限
     action_deadline: Option<Instant>,
+    /// ゲーム進行の時刻基準（対局開始時刻）。CPU遅延の計測に使う
+    game_clock: Option<Instant>,
     /// ルームを閉じるフラグ
     closing: bool,
     /// 次に割り当てる接続の世代番号
@@ -146,9 +154,14 @@ pub async fn run_room(
         ready_deadline: None,
         close_deadline: Some(Instant::now() + config.lobby_timeout),
         action_deadline: None,
+        game_clock: None,
         closing: false,
         next_conn_gen: 0,
     };
+
+    // CPU遅延を計りながらゲームを進めるためのティック
+    let mut game_tick = tokio::time::interval(config.tick_interval);
+    game_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         let ready_at = deadline_or_far(room.ready_deadline);
@@ -160,6 +173,9 @@ pub async fn run_room(
                 Some(msg) => room.handle_msg(msg).await,
                 None => break,
             },
+            _ = game_tick.tick(), if room.needs_game_tick() => {
+                room.game_tick().await;
+            }
             _ = tokio::time::sleep_until(ready_at), if room.ready_deadline.is_some() => {
                 tracing::debug!(code = room.code, "ready timeout; auto-advancing round");
                 room.advance_round().await;
@@ -325,8 +341,9 @@ impl Room {
                         .await;
                     return;
                 }
+                let now = self.now_secs();
                 let driver = self.driver.as_mut().expect("checked above");
-                let accepted = driver.handle_action(seat, action.clone());
+                let accepted = driver.handle_action_at(seat, action.clone(), now);
                 if !accepted {
                     let phase = driver
                         .table()
@@ -383,8 +400,11 @@ impl Room {
                 driver.set_cpu(s, config);
             }
         }
+        driver.set_cpu_action_delay(self.config.cpu_action_delay.as_secs_f64());
         driver.start_game();
         self.driver = Some(driver);
+        // CPU遅延を計る時刻基準を起動。以降は now_secs() で経過秒を渡す
+        self.game_clock = Some(Instant::now());
         // 開始したのでロビーの生存期限は解除
         self.close_deadline = None;
 
@@ -393,14 +413,43 @@ impl Room {
         self.progress_game().await;
     }
 
-    /// 入力待ちまでゲームを進め、イベントを配信し、局終了を確認する
+    /// 直前のアクション結果を配信し、局終了の確認・期限の再設定を行う
+    ///
+    /// CPUの進行は [`game_tick`](Self::game_tick) が遅延を計りながら進めるため、
+    /// ここではツモまで一気に進めない（イベントの送出と状態更新のみ）。
     async fn progress_game(&mut self) {
+        self.flush_events().await;
+        self.check_round_end();
+        self.refresh_action_deadline().await;
+    }
+
+    /// CPU遅延を計りながらゲームを1ティック進める
+    ///
+    /// 待機中のCPUアクションが期限を迎えれば適用し、ツモフェーズなら牌を引く。
+    /// `needs_game_tick` が true の間だけ呼ばれる。
+    async fn game_tick(&mut self) {
+        let now = self.now_secs();
         if let Some(driver) = self.driver.as_mut() {
-            driver.run_until_blocked();
+            driver.tick_at(now);
         }
         self.flush_events().await;
         self.check_round_end();
         self.refresh_action_deadline().await;
+    }
+
+    /// CPUの進行（ツモ・遅延待ちの打牌など）のために tick が必要か
+    fn needs_game_tick(&self) -> bool {
+        if self.awaiting_ready || self.game_over_sent {
+            return false;
+        }
+        self.driver.as_ref().is_some_and(|d| d.needs_tick())
+    }
+
+    /// ゲーム時刻基準からの経過秒（CPU遅延の計測に渡す）
+    fn now_secs(&self) -> f64 {
+        self.game_clock
+            .map(|c| c.elapsed().as_secs_f64())
+            .unwrap_or(0.0)
     }
 
     /// 指定した座席が接続中の人間か
@@ -448,6 +497,7 @@ impl Room {
 
     /// 手番の制限時間切れ: 待っている接続中の人間に既定アクションを代行する
     async fn on_action_timeout(&mut self) {
+        let now = self.now_secs();
         let seats: Vec<usize> = self
             .driver
             .as_ref()
@@ -458,7 +508,7 @@ impl Room {
                 && let Some(driver) = self.driver.as_mut()
             {
                 tracing::info!(code = self.code, seat, "action timed out; auto-acting");
-                driver.force_default_action(seat);
+                driver.force_default_action_at(seat, now);
             }
         }
         self.action_deadline = None;
@@ -473,10 +523,12 @@ impl Room {
         if self.driver.is_none() {
             return;
         }
-        // 先に全座席のイベントを取り出す（driver の借用をここで手放す）
+        // 先に全座席のイベントを取り出す（driver の借用をここで手放す）。
+        // drain_events_at は CPU遅延を計りながらイベントを処理する。
+        let now = self.now_secs();
         let per_seat: [Vec<ServerEvent>; 4] = {
             let driver = self.driver.as_mut().expect("checked above");
-            std::array::from_fn(|seat| driver.drain_events(seat))
+            std::array::from_fn(|seat| driver.drain_events_at(seat, now))
         };
 
         for (seat, events) in per_seat.into_iter().enumerate() {
@@ -538,10 +590,11 @@ impl Room {
         self.awaiting_ready = false;
         self.ready_deadline = None;
 
+        let now = self.now_secs();
         let Some(driver) = self.driver.as_mut() else {
             return;
         };
-        driver.next_round();
+        driver.next_round_at(now);
 
         if driver.is_game_over() {
             let final_scores = driver.table().scores;
@@ -595,10 +648,11 @@ impl Room {
             seat,
             "player disconnected; CPU takes over"
         );
+        let now = self.now_secs();
         if let Some(driver) = self.driver.as_mut() {
             driver.set_cpu_controlled(seat, true);
             // 切断した座席の入力待ちで止まっていたら既定アクションで進める
-            driver.force_default_action(seat);
+            driver.force_default_action_at(seat, now);
         }
         // 残りの接続者へ切断を通知する
         self.broadcast(ServerMessage::PlayerConnectionChanged {
