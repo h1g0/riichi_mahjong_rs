@@ -137,7 +137,7 @@ cargo run -p mahjong-net-server
 
 - `PORT`: リッスンポート（デフォルト `8080`）
 - `RUST_LOG`: ログフィルタ（例: `mahjong_net_server=debug`）
-- `ALLOWED_ORIGIN`: 設定すると、`Origin` ヘッダが一致する WebSocket 接続のみ許可（例: `https://your-app.vercel.app`）。未設定なら全許可
+- `ALLOWED_ORIGIN`: 設定すると、`Origin` ヘッダが一致する WebSocket 接続のみ許可（例: `https://your-app.vercel.app`）。未設定なら全許可。**ネイティブクライアントは `Origin` ヘッダを送らないため、設定中は弾かれます（HTTP 403）** — ネイティブから接続したい場合は未設定にし、ブラウザクライアント + 組み込みのレート制限で運用してください
 
 `GET /healthz` は `ok` を返します（ヘルスチェック用）。WebSocket は `GET /ws`。
 

@@ -14,3 +14,5 @@ getrandom = "0.4"
 # ネイティブのみ: WebSocket クライアント（WASM はフェーズ4で手書きJSグルーを使う）
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
+# wss 接続前に rustls のプロセス既定 CryptoProvider を用意するために使う
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
