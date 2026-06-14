@@ -1273,7 +1273,7 @@ impl GameState {
             return None;
         }
 
-        let (mx, my) = mouse_position();
+        let (mx, my) = crate::renderer::mouse_position_design();
 
         // 手牌クリック
         let hand_start_x = 100.0;

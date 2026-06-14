@@ -145,6 +145,9 @@ async fn main() {
     loop {
         clear_background(Color::from_rgba(0, 100, 0, 255));
 
+        // 設計座標系(DESIGN_W×DESIGN_H)を実キャンバスに合わせて拡大縮小して描画する
+        renderer::set_design_camera();
+
         let overlay_click = renderer::draw_game(&game_state, font.as_ref(), &tile_textures);
 
         // ロビー段階のリモート接続を進める
