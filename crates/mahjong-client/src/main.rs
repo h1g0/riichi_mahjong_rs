@@ -16,7 +16,7 @@ mod transport;
 mod wasm_rng;
 
 use adapter::{ConnStatus, GameAdapter, LocalAdapter, RemoteAdapter, RoomView, error_code_message};
-use game::{GamePhase, GameState, RoomViewUi};
+use game::{GamePhase, GameState, PlayerLabel, RoomViewUi};
 use mahjong_server::protocol::net::SeatInfo;
 use renderer::{OnlineLobbyAction, OnlineMenuAction, SetupAction, TileTextures};
 
@@ -51,7 +51,13 @@ fn build_seat_labels(room: &RoomView) -> [String; 4] {
     std::array::from_fn(|i| {
         let who = match &room.seats[i] {
             SeatInfo::Empty => "空席".to_string(),
-            SeatInfo::Cpu => "CPU".to_string(),
+            SeatInfo::Cpu { level, personality } => {
+                format!(
+                    "CPU ({}・{})",
+                    level.display_name(),
+                    personality.display_name()
+                )
+            }
             SeatInfo::Human { name, connected } => {
                 if *connected {
                     name.clone()
@@ -68,6 +74,24 @@ fn build_seat_labels(room: &RoomView) -> [String; 4] {
             marks.push_str("（ホスト）");
         }
         format!("{}: {}{}", winds[i], who, marks)
+    })
+}
+
+/// ルーム情報から各座席のプレイヤー種別（座席インデックス順）を組み立てる
+fn build_online_player_labels(room: &RoomView) -> [PlayerLabel; 4] {
+    std::array::from_fn(|s| {
+        if s == room.your_seat {
+            PlayerLabel::Me
+        } else {
+            match &room.seats[s] {
+                SeatInfo::Human { name, .. } => PlayerLabel::Human(name.clone()),
+                SeatInfo::Cpu { level, personality } => PlayerLabel::Cpu {
+                    level: level.display_name().to_string(),
+                    personality: personality.display_name().to_string(),
+                },
+                SeatInfo::Empty => PlayerLabel::Human("空席".to_string()),
+            }
+        }
     })
 }
 
@@ -132,6 +156,12 @@ async fn main() {
                 // 対局開始: ゲームアダプターとして引き継ぐ
                 game_state.online_state.status_line = None;
                 game_state.online_state.status_is_error = false;
+                // 各座席のプレイヤー種別（強さ・性格）を取り込む
+                if let Some(room) = remote.room() {
+                    let labels = build_online_player_labels(room);
+                    let your_seat = room.your_seat;
+                    game_state.set_online_players(&labels, your_seat);
+                }
                 adapter = Some(Box::new(online.take().expect("checked above")));
             }
         }
@@ -156,6 +186,7 @@ async fn main() {
                     match action {
                         SetupAction::StartLocal(configs) => {
                             // ローカル対局開始
+                            game_state.set_local_players(&configs);
                             let mut new_adapter = LocalAdapter::with_cpu_configs(configs);
                             new_adapter.start_game();
                             let events = new_adapter.poll_events();

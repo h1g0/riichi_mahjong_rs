@@ -311,6 +311,20 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
             Color::new(0.9, 0.9, 0.9, 1.0),
         );
 
+        // CPU の強さ・性格（または相手の名前）を風・得点の下に表示する
+        if let Some(detail) = state.player_labels[player_idx].detail() {
+            const DETAIL_FONT: u16 = 13;
+            let ddims = measure_text(&detail, font, DETAIL_FONT, 1.0);
+            draw_jp_text(
+                font,
+                &detail,
+                BOARD_CENTER_X - ddims.width / 2.0,
+                BOARD_CENTER_Y + label_dist + 16.0,
+                DETAIL_FONT,
+                Color::new(0.7, 0.85, 1.0, 1.0),
+            );
+        }
+
         set_default_camera();
     }
 
@@ -999,7 +1013,6 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
 
     draw_jp_text(font, "ゲーム終了", 520.0, 250.0, 36, WHITE);
 
-    let wind_names = ["プレイヤー", "CPU1", "CPU2", "CPU3"];
     let mut rankings: Vec<(usize, i32)> = state
         .scores
         .iter()
@@ -1009,14 +1022,16 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
     rankings.sort_by_key(|r| std::cmp::Reverse(r.1));
 
     for (rank, (player_idx, score)) in rankings.iter().enumerate() {
-        let color = if *player_idx == 0 {
+        let is_me = *player_idx == state.my_seat;
+        let color = if is_me {
             Color::new(1.0, 0.9, 0.3, 1.0)
         } else {
             WHITE
         };
+        let name = state.player_labels[*player_idx].name();
         draw_jp_text(
             font,
-            &format!("{}位: {} {}点", rank + 1, wind_names[*player_idx], score),
+            &format!("{}位: {} {}点", rank + 1, name, score),
             440.0,
             330.0 + rank as f32 * 40.0,
             24,

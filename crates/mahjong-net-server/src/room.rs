@@ -688,7 +688,13 @@ impl Room {
             },
             None => {
                 if self.game_started() {
-                    SeatInfo::Cpu
+                    // 対局開始時の割り当てと同じ規則で強さ・性格を求める
+                    let configs = default_cpu_configs();
+                    let config = &configs[s % configs.len()];
+                    SeatInfo::Cpu {
+                        level: config.level,
+                        personality: config.personality,
+                    }
                 } else {
                     SeatInfo::Empty
                 }

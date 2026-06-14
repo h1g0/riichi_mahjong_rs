@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{ClientAction, ServerEvent};
+use crate::cpu::client::{CpuLevel, CpuPersonality};
 
 /// プロトコルバージョン
 ///
@@ -120,8 +121,13 @@ pub enum ServerMessage {
 pub enum SeatInfo {
     /// 空席
     Empty,
-    /// CPU
-    Cpu,
+    /// CPU（強さと性格を含む）
+    Cpu {
+        /// 強さレベル
+        level: CpuLevel,
+        /// 性格
+        personality: CpuPersonality,
+    },
     /// 人間プレイヤー
     Human {
         /// 表示名
@@ -247,7 +253,10 @@ mod tests {
                         name: "ゲスト".to_string(),
                         connected: false,
                     },
-                    SeatInfo::Cpu,
+                    SeatInfo::Cpu {
+                        level: CpuLevel::Normal,
+                        personality: CpuPersonality::Speedy,
+                    },
                     SeatInfo::Empty,
                 ],
                 host_seat: 0,
