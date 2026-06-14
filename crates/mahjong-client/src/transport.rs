@@ -83,12 +83,26 @@ mod native {
 
     impl NativeTransport {
         pub fn connect(url: &str) -> Self {
+            ensure_crypto_provider();
             let (out_tx, out_rx) = channel::<String>();
             let (in_tx, in_rx) = channel::<WsEvent>();
             let url = url.to_string();
             std::thread::spawn(move || run_socket(&url, &out_rx, &in_tx));
             NativeTransport { out_tx, in_rx }
         }
+    }
+
+    /// rustls のプロセス既定 CryptoProvider を一度だけ用意する
+    ///
+    /// rustls 0.23 は wss 接続前にプロセス既定のプロバイダが必要で、
+    /// 未設定だと tungstenite が接続時に panic する。複数の機能で rustls を
+    /// 引き込んでも安全なよう、`install_default` の失敗（設定済み）は無視する。
+    fn ensure_crypto_provider() {
+        use std::sync::Once;
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
     }
 
     impl Transport for NativeTransport {

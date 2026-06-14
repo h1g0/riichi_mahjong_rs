@@ -137,7 +137,7 @@ Environment variables:
 
 - `PORT`: listen port (default `8080`).
 - `RUST_LOG`: log filter (for example `mahjong_net_server=debug`).
-- `ALLOWED_ORIGIN`: if set, only WebSocket connections with a matching `Origin` header are accepted (for example `https://your-app.vercel.app`). If unset, all origins are allowed.
+- `ALLOWED_ORIGIN`: if set, only WebSocket connections with a matching `Origin` header are accepted (for example `https://your-app.vercel.app`). If unset, all origins are allowed. Note that **native clients do not send an `Origin` header and are rejected (HTTP 403) while this is set** — leave it unset if you need native clients to connect, and rely on browser clients plus the built-in rate limiting otherwise.
 
 `GET /healthz` returns `ok` for health checks. The WebSocket endpoint is `GET /ws`.
 
