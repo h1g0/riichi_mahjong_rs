@@ -12,13 +12,14 @@ primary_region = 'nrt'
 [http_service]
   internal_port = 8080
   force_https = true
-  # ルームはメモリ上にあり、マシンをまたいで共有されない。複数マシンや
-  # autostop による切り替えが起きると、接続先とルームのあるマシンが一致せず
-  # 接続が切れる。必ず単一マシンを常時起動すること。
-  # デプロイ後に一度だけ `fly scale count 1` でマシン数を 1 にする。
-  auto_stop_machines = 'off'
-  auto_start_machines = false
-  min_machines_running = 1
+  # ルームはメモリ上にあり、マシンをまたいで共有されない。必ず単一マシンで
+  # 運用すること（デプロイ後に一度だけ `fly scale count 1` でマシン数を 1 にする）。
+  # 1台であれば autostop で停止しても同じ1台が起動するため、ルームの不整合は
+  # 起きない。遊んでいない時間はマシンを止めて課金を抑える（久々の初回接続は
+  # 数秒のコールドスタートが入る）。複数マシンには絶対にスケールしないこと。
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
 
   [[http_service.checks]]
     interval = '15s'
