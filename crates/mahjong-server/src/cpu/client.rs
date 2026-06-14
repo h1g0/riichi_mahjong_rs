@@ -7,6 +7,7 @@ use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::calc_shanten_number;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::Tile;
+use serde::{Deserialize, Serialize};
 
 use crate::protocol::{AvailableCall, ClientAction, ServerEvent};
 
@@ -18,7 +19,7 @@ use super::state::CpuGameState;
 ///
 /// `Weak < Normal < Strong` の順序を持つ。
 /// 定石（heuristics）の「弱以上」「中以上」などの有効化判定に使用する。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CpuLevel {
     /// 初心者: 向聴数のみ考慮、防御なし、ミスあり
     Weak,
@@ -29,6 +30,15 @@ pub enum CpuLevel {
 }
 
 impl CpuLevel {
+    /// 表示用の名称
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            CpuLevel::Weak => "Weak",
+            CpuLevel::Normal => "Normal",
+            CpuLevel::Strong => "Strong",
+        }
+    }
+
     /// 有効牌数を考慮するか
     pub fn uses_acceptance_count(&self) -> bool {
         matches!(self, CpuLevel::Normal | CpuLevel::Strong)
@@ -51,7 +61,7 @@ impl CpuLevel {
 }
 
 /// CPUの性格（攻撃スタイル）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CpuPersonality {
     /// バランス型
     Balanced,
@@ -61,6 +71,18 @@ pub enum CpuPersonality {
     HighValue,
     /// 守備型（安全打優先、放銃回避重視）
     Defensive,
+}
+
+impl CpuPersonality {
+    /// 表示用の名称
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            CpuPersonality::Balanced => "Balanced",
+            CpuPersonality::Speedy => "Speedy",
+            CpuPersonality::HighValue => "HighValue",
+            CpuPersonality::Defensive => "Defensive",
+        }
+    }
 }
 
 /// 性格ごとのパラメータ

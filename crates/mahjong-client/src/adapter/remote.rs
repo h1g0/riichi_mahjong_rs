@@ -11,7 +11,7 @@
 //! 5. ホストが `start_game` → `Event(GameStarted)` で対局開始
 
 use mahjong_server::protocol::net::{
-    ClientMessage, ErrorCode, PROTOCOL_VERSION, SeatInfo, ServerMessage,
+    ClientMessage, CpuSpec, ErrorCode, PROTOCOL_VERSION, SeatInfo, ServerMessage,
 };
 use mahjong_server::protocol::{ClientAction, ServerEvent};
 
@@ -171,8 +171,10 @@ impl RemoteAdapter {
     }
 
     /// 対局を開始する（ホストのみ有効。結果はサーバが判断する）
-    pub fn start_game(&mut self) {
-        self.send(&ClientMessage::StartGame);
+    ///
+    /// `cpu_configs` でCPUの強さ・性格を指定する（`None` ならサーバ既定）。
+    pub fn start_game(&mut self, cpu_configs: Option<[CpuSpec; 3]>) {
+        self.send(&ClientMessage::StartGame { cpu_configs });
     }
 
     /// ルームから退出する
@@ -814,7 +816,7 @@ mod tests {
 
             if !started {
                 if adapter.room().is_some() {
-                    adapter.start_game();
+                    adapter.start_game(None);
                     started = true;
                 }
                 continue;

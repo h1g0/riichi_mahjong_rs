@@ -6,12 +6,39 @@
 use serde::{Deserialize, Serialize};
 
 use super::{ClientAction, ServerEvent};
+use crate::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 
 /// プロトコルバージョン
 ///
 /// 互換性のない変更を入れる際にインクリメントする。
 /// `Hello` で照合し、不一致なら `ErrorCode::VersionMismatch` で切断する。
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
+
+/// CPUの強さ・性格の指定
+///
+/// ホストが対局開始時に送り、サーバが空席・シャドーCPUに割り当てる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CpuSpec {
+    /// 強さレベル
+    pub level: CpuLevel,
+    /// 性格
+    pub personality: CpuPersonality,
+}
+
+impl CpuSpec {
+    /// `CpuConfig` へ変換する
+    pub fn to_config(self) -> CpuConfig {
+        CpuConfig::new(self.level, self.personality)
+    }
+
+    /// `CpuConfig` から作る
+    pub fn from_config(config: &CpuConfig) -> Self {
+        CpuSpec {
+            level: config.level,
+            personality: config.personality,
+        }
+    }
+}
 
 /// クライアントからサーバへのメッセージ
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,7 +69,11 @@ pub enum ClientMessage {
     LeaveRoom,
 
     /// 対局を開始する（ホストのみ。空席はCPUで埋める）
-    StartGame,
+    StartGame {
+        /// ホストが選んだ各CPUの強さ・性格（下家・対面・上家の順）。
+        /// `None` ならサーバ既定の構成を使う。
+        cpu_configs: Option<[CpuSpec; 3]>,
+    },
 
     /// ゲーム内アクション
     Action(ClientAction),
@@ -120,8 +151,13 @@ pub enum ServerMessage {
 pub enum SeatInfo {
     /// 空席
     Empty,
-    /// CPU
-    Cpu,
+    /// CPU（強さと性格を含む）
+    Cpu {
+        /// 強さレベル
+        level: CpuLevel,
+        /// 性格
+        personality: CpuPersonality,
+    },
     /// 人間プレイヤー
     Human {
         /// 表示名
@@ -211,7 +247,23 @@ mod tests {
                 code: "ABC234".to_string(),
             },
             ClientMessage::LeaveRoom,
-            ClientMessage::StartGame,
+            ClientMessage::StartGame { cpu_configs: None },
+            ClientMessage::StartGame {
+                cpu_configs: Some([
+                    CpuSpec {
+                        level: CpuLevel::Weak,
+                        personality: CpuPersonality::Balanced,
+                    },
+                    CpuSpec {
+                        level: CpuLevel::Normal,
+                        personality: CpuPersonality::Speedy,
+                    },
+                    CpuSpec {
+                        level: CpuLevel::Strong,
+                        personality: CpuPersonality::HighValue,
+                    },
+                ]),
+            },
             ClientMessage::Action(ClientAction::Discard {
                 tile: Some(Tile::new(Tile::M1)),
             }),
@@ -247,7 +299,10 @@ mod tests {
                         name: "ゲスト".to_string(),
                         connected: false,
                     },
-                    SeatInfo::Cpu,
+                    SeatInfo::Cpu {
+                        level: CpuLevel::Normal,
+                        personality: CpuPersonality::Speedy,
+                    },
                     SeatInfo::Empty,
                 ],
                 host_seat: 0,

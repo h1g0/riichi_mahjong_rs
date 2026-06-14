@@ -8,6 +8,7 @@ use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType, Wind};
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
+use mahjong_server::protocol::net::CpuSpec;
 use mahjong_server::protocol::{
     AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent,
 };
@@ -53,6 +54,47 @@ impl OtherPlayerHand {
             revealed: false,
             concealed_count: 13,
         }
+    }
+}
+
+/// 各座席のプレイヤー種別（強さ・性格の表示に使う）
+#[derive(Debug, Clone)]
+pub enum PlayerLabel {
+    /// 自分
+    Me,
+    /// 他の人間プレイヤー（オンライン対戦の相手）
+    Human(String),
+    /// CPU（強さ・性格つき）
+    Cpu { level: String, personality: String },
+}
+
+impl PlayerLabel {
+    /// 風・得点の下に表示する補助テキスト（自分は非表示）
+    pub fn detail(&self) -> Option<String> {
+        match self {
+            PlayerLabel::Me => None,
+            PlayerLabel::Human(name) => Some(name.clone()),
+            PlayerLabel::Cpu { level, personality } => Some(format!("{}・{}", level, personality)),
+        }
+    }
+
+    /// 順位表などで使う表示名
+    pub fn name(&self) -> String {
+        match self {
+            PlayerLabel::Me => "あなた".to_string(),
+            PlayerLabel::Human(name) => name.clone(),
+            PlayerLabel::Cpu { level, personality } => {
+                format!("CPU ({}・{})", level, personality)
+            }
+        }
+    }
+}
+
+/// CPU設定から CPU 用の [`PlayerLabel`] を作る
+fn cpu_label(config: &CpuConfig) -> PlayerLabel {
+    PlayerLabel::Cpu {
+        level: config.level.display_name().to_string(),
+        personality: config.personality.display_name().to_string(),
     }
 }
 
@@ -150,6 +192,10 @@ pub struct GameState {
     pub setup_state: SetupState,
     /// オンライン対戦UIの状態
     pub online_state: OnlineUiState,
+    /// 各座席のプレイヤー種別（座席インデックス順 = scores と同じ並び）
+    pub player_labels: [PlayerLabel; 4],
+    /// 自分の座席インデックス（ローカルは常に0、オンラインは your_seat）
+    pub my_seat: usize,
 }
 
 /// オンライン対戦UI（メニュー・ロビー）の状態
@@ -271,6 +317,12 @@ impl SetupState {
             ),
         ]
     }
+
+    /// 設定から CPU 指定（オンライン対戦でホストが送る）を生成する
+    pub fn build_cpu_specs(&self) -> [CpuSpec; 3] {
+        self.build_configs()
+            .map(|config| CpuSpec::from_config(&config))
+    }
 }
 
 /// ゲームフェーズ
@@ -345,7 +397,42 @@ impl GameState {
             nine_terminals_pending: false,
             setup_state: SetupState::new(),
             online_state: OnlineUiState::new(),
+            player_labels: [
+                PlayerLabel::Me,
+                PlayerLabel::Cpu {
+                    level: "Normal".to_string(),
+                    personality: "Balanced".to_string(),
+                },
+                PlayerLabel::Cpu {
+                    level: "Normal".to_string(),
+                    personality: "Speedy".to_string(),
+                },
+                PlayerLabel::Cpu {
+                    level: "Normal".to_string(),
+                    personality: "HighValue".to_string(),
+                },
+            ],
+            my_seat: 0,
         }
+    }
+
+    /// ローカル対局のプレイヤー種別を設定する（自分=座席0, CPU=座席1〜3）
+    pub fn set_local_players(&mut self, cpu_configs: &[CpuConfig; 3]) {
+        self.my_seat = 0;
+        self.player_labels = [
+            PlayerLabel::Me,
+            cpu_label(&cpu_configs[0]),
+            cpu_label(&cpu_configs[1]),
+            cpu_label(&cpu_configs[2]),
+        ];
+    }
+
+    /// オンライン対局のプレイヤー種別を設定する
+    ///
+    /// `seats` は座席インデックス順、`your_seat` は自分の座席。
+    pub fn set_online_players(&mut self, seats: &[PlayerLabel; 4], your_seat: usize) {
+        self.my_seat = your_seat;
+        self.player_labels = seats.clone();
     }
 
     /// サーバイベントを処理する
@@ -1294,6 +1381,55 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_set_local_players_assigns_cpu_labels_to_seats_1_to_3() {
+        let mut state = GameState::new();
+        let configs = [
+            CpuConfig::new(CpuLevel::Weak, CpuPersonality::Defensive),
+            CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue),
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Speedy),
+        ];
+        state.set_local_players(&configs);
+
+        assert_eq!(state.my_seat, 0);
+        assert!(matches!(state.player_labels[0], PlayerLabel::Me));
+        assert_eq!(state.player_labels[0].detail(), None);
+        assert_eq!(
+            state.player_labels[1].detail(),
+            Some("Weak・Defensive".to_string())
+        );
+        assert_eq!(
+            state.player_labels[2].name(),
+            "CPU (Strong・HighValue)".to_string()
+        );
+    }
+
+    #[test]
+    fn test_set_online_players_keeps_seat_order_and_self() {
+        let mut state = GameState::new();
+        let labels = [
+            PlayerLabel::Human("ホスト".to_string()),
+            PlayerLabel::Me,
+            PlayerLabel::Cpu {
+                level: "Normal".to_string(),
+                personality: "Speedy".to_string(),
+            },
+            PlayerLabel::Cpu {
+                level: "Normal".to_string(),
+                personality: "HighValue".to_string(),
+            },
+        ];
+        state.set_online_players(&labels, 1);
+
+        assert_eq!(state.my_seat, 1);
+        assert!(matches!(state.player_labels[1], PlayerLabel::Me));
+        assert_eq!(state.player_labels[0].detail(), Some("ホスト".to_string()));
+        assert_eq!(
+            state.player_labels[2].detail(),
+            Some("Normal・Speedy".to_string())
+        );
+    }
 
     #[test]
     fn test_enter_riichi_selection_marks_only_tenpai_discards() {

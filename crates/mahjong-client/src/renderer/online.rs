@@ -285,7 +285,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     );
     draw_jp_text(
         font,
-        "このコードを友人に伝えて参加してもらいましょう",
+        "このコードを参加プレイヤーに共有してください",
         440.0,
         252.0,
         18,

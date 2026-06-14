@@ -278,7 +278,8 @@ async fn test_full_game_with_two_humans() {
             other => panic!("RoomStateでないメッセージ: {other:?}"),
         }
 
-        host.send(&ClientMessage::StartGame).await;
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
 
         let (host_scores, guest_scores) = tokio::join!(
             host.play_until_game_over(true),
@@ -302,10 +303,78 @@ async fn test_ready_timeout_auto_advances() {
         let mut host = TestClient::connect(addr).await;
         host.hello("ホスト").await;
         host.create_room().await;
-        host.send(&ClientMessage::StartGame).await;
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
 
         let scores = host.play_until_game_over(false).await;
         assert_scores_consistent(scores);
+    })
+    .await
+    .expect("テスト全体がタイムアウトした");
+}
+
+/// ホストが指定したCPUの強さ・性格が各座席に反映される
+#[tokio::test]
+async fn test_host_chosen_cpu_configs_apply() {
+    use mahjong_server::cpu::client::{CpuLevel, CpuPersonality};
+    use mahjong_server::protocol::net::{CpuSpec, SeatInfo};
+
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let addr = start_server(fast_config()).await;
+        let mut host = TestClient::connect(addr).await;
+        host.hello("ホスト").await;
+        host.create_room().await;
+
+        let specs = [
+            CpuSpec {
+                level: CpuLevel::Strong,
+                personality: CpuPersonality::Defensive,
+            },
+            CpuSpec {
+                level: CpuLevel::Weak,
+                personality: CpuPersonality::Speedy,
+            },
+            CpuSpec {
+                level: CpuLevel::Normal,
+                personality: CpuPersonality::HighValue,
+            },
+        ];
+        host.send(&ClientMessage::StartGame {
+            cpu_configs: Some(specs),
+        })
+        .await;
+
+        // 対局開始時に届く RoomState で各CPU席の設定を確認する
+        let seats = loop {
+            if let ServerMessage::RoomState { seats, .. } = host.recv().await {
+                break seats;
+            }
+        };
+
+        // 座席0 はホスト（人間）
+        assert!(matches!(seats[0], SeatInfo::Human { .. }));
+        // 座席1〜3（下家・対面・上家）にホストの configs[0..3] が順に対応する
+        assert_eq!(
+            seats[1],
+            SeatInfo::Cpu {
+                level: CpuLevel::Strong,
+                personality: CpuPersonality::Defensive,
+            }
+        );
+        assert_eq!(
+            seats[2],
+            SeatInfo::Cpu {
+                level: CpuLevel::Weak,
+                personality: CpuPersonality::Speedy,
+            }
+        );
+        assert_eq!(
+            seats[3],
+            SeatInfo::Cpu {
+                level: CpuLevel::Normal,
+                personality: CpuPersonality::HighValue,
+            }
+        );
     })
     .await
     .expect("テスト全体がタイムアウトした");
@@ -331,7 +400,9 @@ async fn test_version_mismatch() {
 async fn test_message_before_hello() {
     let addr = start_server(fast_config()).await;
     let mut client = TestClient::connect(addr).await;
-    client.send(&ClientMessage::StartGame).await;
+    client
+        .send(&ClientMessage::StartGame { cpu_configs: None })
+        .await;
     assert_eq!(client.recv_error().await, ErrorCode::BadMessage);
 }
 
@@ -394,7 +465,9 @@ async fn test_non_host_cannot_start() {
     guest
         .send(&ClientMessage::JoinRoom { code: code.clone() })
         .await;
-    guest.send(&ClientMessage::StartGame).await;
+    guest
+        .send(&ClientMessage::StartGame { cpu_configs: None })
+        .await;
     assert_eq!(guest.recv_error().await, ErrorCode::NotHost);
 }
 
@@ -414,7 +487,8 @@ async fn test_out_of_turn_action_rejected() {
         .await;
 
     host.recv().await; // ゲスト入室の RoomState
-    host.send(&ClientMessage::StartGame).await;
+    host.send(&ClientMessage::StartGame { cpu_configs: None })
+        .await;
 
     // 開始直後の手番はホスト（座席0=親）。ゲストの打牌は拒否される
     guest
@@ -431,7 +505,8 @@ async fn test_join_after_start_rejected() {
     let mut host = TestClient::connect(addr).await;
     host.hello("ホスト").await;
     let code = host.create_room().await;
-    host.send(&ClientMessage::StartGame).await;
+    host.send(&ClientMessage::StartGame { cpu_configs: None })
+        .await;
 
     let mut late = TestClient::connect(addr).await;
     late.hello("遅刻").await;
@@ -480,7 +555,8 @@ async fn test_disconnect_mid_game_cpu_takes_over() {
             .await;
 
         host.recv().await; // ゲスト入室の RoomState
-        host.send(&ClientMessage::StartGame).await;
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
 
         // ゲストはゲーム開始を確認してから切断する
         loop {
@@ -511,7 +587,8 @@ async fn test_action_timeout_auto_acts() {
         let mut host = TestClient::connect(addr).await;
         host.hello("AFKホスト").await;
         host.create_room().await;
-        host.send(&ClientMessage::StartGame).await;
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
 
         // ホストは一切操作せず受信し続ける。
         // サーバが既定アクション（ツモ切り/パス）を代行して対局が進む。
@@ -588,7 +665,8 @@ async fn test_reconnect_resyncs_and_resumes() {
             .await;
 
         host.recv().await; // ゲスト入室の RoomState
-        host.send(&ClientMessage::StartGame).await;
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
 
         // ホスト: 最後まで打ち続ける
         let host_fut = host.play_until_game_over(true);
@@ -670,7 +748,8 @@ async fn test_reconnect_keeps_seat_connected() {
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
         host.recv().await;
-        host.send(&ClientMessage::StartGame).await;
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
         loop {
             if let ServerMessage::Event(ServerEvent::GameStarted { .. }) = guest.recv().await {
                 break;
