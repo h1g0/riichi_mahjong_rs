@@ -38,6 +38,13 @@ const BOARD_CENTER_Y: f32 = 380.0;
 /// Camera2D の回転角度（度）— 自分(0°)、下家(-90°)、対面(180°)、上家(90°)
 const PLAYER_ROTATIONS: [f32; 4] = [0.0, -90.0, 180.0, 90.0];
 
+/// 自分から見た相対位置(0=自分,1=下家,2=対面,3=上家)を固定の座席インデックスへ変換する。
+/// `scores` や `player_labels` は座席インデックス順に並ぶため、画面の各向きへ描画する際は
+/// この変換を通す（オンライン非ホストで自分の座席が0以外でも正しい席に表示される）。
+fn seat_at_relative_position(my_seat: usize, relative_idx: usize) -> usize {
+    (my_seat + relative_idx) % 4
+}
+
 /// 設計座標 (0,0)-(DESIGN_W,DESIGN_H) をキャンバス全体に写すカメラ。
 /// 実バッファ解像度に依存しないため、ウィンドウサイズが変わっても
 /// レイアウトはそのまま拡大・縮小される。
@@ -332,8 +339,12 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
     let label_dist: f32 = 64.0; // 中心からラベルまでの距離
 
     for (player_idx, &rotation) in PLAYER_ROTATIONS.iter().enumerate() {
+        // player_idx は自分から見た相対位置(0=自分,1=下家,2=対面,3=上家)。
+        // scores / player_labels は固定の座席インデックス順なので、相対位置を
+        // 絶対座席へ変換してから引く(オンライン非ホストで自分の座席が0以外でもずれない)。
+        let seat = seat_at_relative_position(state.my_seat, player_idx);
         let display_wind = mahjong_core::tile::Wind::from_index(my_wind_idx + player_idx);
-        let score = state.scores[player_idx];
+        let score = state.scores[seat];
         let label = format!("{} {}点", wind_to_str(display_wind), score);
 
         set_camera(&make_board_camera(rotation));
@@ -349,7 +360,7 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         );
 
         // CPU の強さ・性格（または相手の名前）を風・得点の下に表示する
-        if let Some(detail) = state.player_labels[player_idx].detail() {
+        if let Some(detail) = state.player_labels[seat].detail() {
             const DETAIL_FONT: u16 = 13;
             let ddims = measure_text(&detail, font, DETAIL_FONT, 1.0);
             draw_jp_text(
@@ -1337,10 +1348,28 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
 
 #[cfg(test)]
 mod tests {
-    use super::PLAYER_ROTATIONS;
+    use super::{PLAYER_ROTATIONS, seat_at_relative_position};
 
     #[test]
     fn player_rotations_place_turn_order_counterclockwise() {
         assert_eq!(PLAYER_ROTATIONS, [0.0, -90.0, 180.0, 90.0]);
+    }
+
+    #[test]
+    fn seat0_relative_positions_match_seat_indices() {
+        // 自分が座席0なら相対位置と座席インデックスは一致する（ローカル対局）。
+        for rel in 0..4 {
+            assert_eq!(seat_at_relative_position(0, rel), rel);
+        }
+    }
+
+    #[test]
+    fn nonzero_seat_maps_relative_positions_to_correct_seats() {
+        // オンライン非ホスト: 自分の座席が0以外でも、相対位置→絶対座席へ正しく回る。
+        // 自分(0)=座席2, 下家(1)=座席3, 対面(2)=座席0, 上家(3)=座席1。
+        assert_eq!(seat_at_relative_position(2, 0), 2);
+        assert_eq!(seat_at_relative_position(2, 1), 3);
+        assert_eq!(seat_at_relative_position(2, 2), 0);
+        assert_eq!(seat_at_relative_position(2, 3), 1);
     }
 }
