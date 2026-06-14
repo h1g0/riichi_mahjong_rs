@@ -229,7 +229,7 @@ pub fn handle_online_menu_input(state: &mut GameState) -> Option<OnlineMenuActio
     if !is_mouse_button_pressed(MouseButton::Left) {
         return None;
     }
-    let (mx, my) = mouse_position();
+    let (mx, my) = super::mouse_position_design();
 
     if NAME_BOX.contains(mx, my) {
         online.code_focused = false;
@@ -335,7 +335,7 @@ pub fn handle_online_lobby_input(state: &GameState) -> Option<OnlineLobbyAction>
     if !is_mouse_button_pressed(MouseButton::Left) {
         return None;
     }
-    let (mx, my) = mouse_position();
+    let (mx, my) = super::mouse_position_design();
 
     let is_host = state
         .online_state

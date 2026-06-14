@@ -25,6 +25,12 @@ const FONT_SIZE: u16 = 20;
 const SMALL_FONT: u16 = 16;
 const AGARI_FONT: u16 = 32;
 
+/// 設計上の基準解像度。すべての UI 座標はこの仮想キャンバス上で定義され、
+/// 実際のウィンドウ／キャンバスサイズに合わせて一様に拡大・縮小される。
+/// （HTML 側でキャンバスのアスペクト比を DESIGN_W:DESIGN_H に固定しているため歪まない）
+pub const DESIGN_W: f32 = 1280.0;
+pub const DESIGN_H: f32 = 800.0;
+
 /// 盤面の中心点 — 捨て牌・他家手牌の回転の軸
 const BOARD_CENTER_X: f32 = 500.0;
 const BOARD_CENTER_Y: f32 = 380.0;
@@ -32,17 +38,48 @@ const BOARD_CENTER_Y: f32 = 380.0;
 /// Camera2D の回転角度（度）— 自分(0°)、下家(-90°)、対面(180°)、上家(90°)
 const PLAYER_ROTATIONS: [f32; 4] = [0.0, -90.0, 180.0, 90.0];
 
+/// 設計座標 (0,0)-(DESIGN_W,DESIGN_H) をキャンバス全体に写すカメラ。
+/// 実バッファ解像度に依存しないため、ウィンドウサイズが変わっても
+/// レイアウトはそのまま拡大・縮小される。
+///
+/// 画面へ直接描画する場合、`Camera2D::from_display_rect`（zoom.y が負）だと
+/// 上下反転してしまうため、盤面カメラと同じく zoom.y を正にして上向きに合わせる。
+fn design_camera() -> Camera2D {
+    Camera2D {
+        target: vec2(DESIGN_W / 2.0, DESIGN_H / 2.0),
+        zoom: vec2(2.0 / DESIGN_W, 2.0 / DESIGN_H),
+        ..Default::default()
+    }
+}
+
+/// フレーム冒頭やオーバーレイ描画で使う、設計座標系のデフォルトカメラを適用する。
+pub fn set_design_camera() {
+    set_camera(&design_camera());
+}
+
+/// 設計座標 → 実バッファ座標の拡大率。キャンバスはアスペクト比固定なので
+/// 横・縦どちらで割っても同じ値になる（横を採用）。
+fn design_scale() -> f32 {
+    screen_width() / DESIGN_W
+}
+
+/// マウス座標を実バッファ座標から設計座標へ変換して返す。
+/// クリック判定はすべて設計座標で行うため、入力側もここで合わせる。
+pub fn mouse_position_design() -> (f32, f32) {
+    let (mx, my) = mouse_position();
+    let scale = design_scale();
+    (mx / scale, my / scale)
+}
+
 /// 盤面中心を軸に回転する Camera2D を生成する
 fn make_board_camera(rotation_deg: f32) -> Camera2D {
-    let sw = screen_width();
-    let sh = screen_height();
     Camera2D {
         target: vec2(BOARD_CENTER_X, BOARD_CENTER_Y),
         rotation: rotation_deg,
-        zoom: vec2(2.0 / sw, 2.0 / sh),
+        zoom: vec2(2.0 / DESIGN_W, 2.0 / DESIGN_H),
         offset: vec2(
-            2.0 * BOARD_CENTER_X / sw - 1.0,
-            1.0 - 2.0 * BOARD_CENTER_Y / sh,
+            2.0 * BOARD_CENTER_X / DESIGN_W - 1.0,
+            1.0 - 2.0 * BOARD_CENTER_Y / DESIGN_H,
         ),
         ..Default::default()
     }
@@ -325,7 +362,7 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
             );
         }
 
-        set_default_camera();
+        set_design_camera();
     }
 
     // 局情報（プレイヤー＝自分に読める方向で描画）
@@ -437,7 +474,7 @@ fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
             }
         }
 
-        set_default_camera();
+        set_design_camera();
     }
 }
 
@@ -851,7 +888,7 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
             x += calc_meld_width(meld, tw, th);
         }
 
-        set_default_camera();
+        set_design_camera();
     }
 }
 
@@ -1236,7 +1273,7 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
         return None;
     }
 
-    let (mx, my) = mouse_position();
+    let (mx, my) = mouse_position_design();
     let setup = &mut state.setup_state;
     let col_x = [250.0, 520.0, 790.0];
     let base_y = 180.0;

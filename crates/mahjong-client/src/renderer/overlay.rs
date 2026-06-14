@@ -77,7 +77,7 @@ pub(super) fn draw_action_buttons(
     tile_textures: &TileTextures,
 ) -> Option<OverlayClick> {
     let clicked = is_mouse_button_pressed(MouseButton::Left);
-    let (mx, my) = mouse_position();
+    let (mx, my) = super::mouse_position_design();
 
     // 九種九牌選択オーバーレイ
     if state.nine_terminals_pending {

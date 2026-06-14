@@ -8,18 +8,49 @@
         html, body {
             margin: 0;
             padding: 0;
+            width: 100%;
+            height: 100%;
             overflow: hidden;
             background: #000;
         }
 
+        /* キャンバスをウィンドウ中央にレターボックス表示する */
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
         canvas {
             display: block;
-            margin: 0 auto;
         }
     </style>
 </head>
 <body>
     <canvas id="glcanvas" tabindex="1" width="1280" height="800"></canvas>
+    <script>
+        // 設計解像度。クライアント側(DESIGN_W/DESIGN_H)と一致させること。
+        var MAHJONG_DESIGN_W = 1280;
+        var MAHJONG_DESIGN_H = 800;
+        // アスペクト比を保ったままウィンドウの縦横どちらかに収まるよう
+        // キャンバスの表示サイズを調整する。
+        // macroquad は canvas の clientWidth/clientHeight に描画バッファを合わせるため、
+        // ここで CSS サイズを変えるだけで内部解像度も追従する。
+        function fitMahjongCanvas() {
+            var canvas = document.getElementById("glcanvas");
+            if (!canvas) return;
+            var scale = Math.min(
+                window.innerWidth / MAHJONG_DESIGN_W,
+                window.innerHeight / MAHJONG_DESIGN_H
+            );
+            canvas.style.width = Math.round(MAHJONG_DESIGN_W * scale) + "px";
+            canvas.style.height = Math.round(MAHJONG_DESIGN_H * scale) + "px";
+        }
+        // macroquad が window.onresize を設定するより前にリスナーを登録しておくと、
+        // リサイズ時にこちらが先に走り、描画バッファのサイズずれを防げる。
+        window.addEventListener("resize", fitMahjongCanvas);
+        fitMahjongCanvas();
+    </script>
     <script src="mq_js_bundle.js"></script>
     <script>
         if (typeof load === "function") {
