@@ -251,7 +251,9 @@ async fn main() {
                     match action {
                         OnlineLobbyAction::StartGame => {
                             if let Some(remote) = &mut online {
-                                remote.start_game();
+                                // ホストが設定画面で選んだCPUの強さ・性格を送る
+                                let specs = game_state.setup_state.build_cpu_specs();
+                                remote.start_game(Some(specs));
                             }
                         }
                         OnlineLobbyAction::Leave => {

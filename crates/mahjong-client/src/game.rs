@@ -8,6 +8,7 @@ use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType, Wind};
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
+use mahjong_server::protocol::net::CpuSpec;
 use mahjong_server::protocol::{
     AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent,
 };
@@ -315,6 +316,12 @@ impl SetupState {
                 to_personality(self.cpu_personalities[2]),
             ),
         ]
+    }
+
+    /// 設定から CPU 指定（オンライン対戦でホストが送る）を生成する
+    pub fn build_cpu_specs(&self) -> [CpuSpec; 3] {
+        self.build_configs()
+            .map(|config| CpuSpec::from_config(&config))
     }
 }
 

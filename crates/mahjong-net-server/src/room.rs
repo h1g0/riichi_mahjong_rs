@@ -6,10 +6,11 @@
 
 use std::time::Duration;
 
+use mahjong_server::cpu::client::CpuConfig;
 use mahjong_server::cpu::personalities::default_cpu_configs;
 use mahjong_server::driver::GameDriver;
 use mahjong_server::protocol::ServerEvent;
-use mahjong_server::protocol::net::{ClientMessage, ErrorCode, SeatInfo, ServerMessage};
+use mahjong_server::protocol::net::{ClientMessage, CpuSpec, ErrorCode, SeatInfo, ServerMessage};
 use mahjong_server::table::GameSettings;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
@@ -132,6 +133,17 @@ struct Room {
     closing: bool,
     /// 次に割り当てる接続の世代番号
     next_conn_gen: u64,
+    /// CPU（空席・シャドー）の強さ・性格。ホストが対局開始時に指定する
+    cpu_configs: [CpuConfig; 3],
+}
+
+/// 座席に割り当てるCPU設定を返す
+///
+/// 座席1〜3（ホストから見た下家・対面・上家）にホストの `configs[0..3]` を
+/// 順に対応させる。座席0（ホスト）はシャドーCPU用に `configs[0]` を流用する。
+fn config_for_seat(configs: &[CpuConfig; 3], seat: usize) -> CpuConfig {
+    let idx = seat.saturating_sub(1).min(2);
+    configs[idx].clone()
 }
 
 /// ルームアクターのメインループ
@@ -157,6 +169,7 @@ pub async fn run_room(
         game_clock: None,
         closing: false,
         next_conn_gen: 0,
+        cpu_configs: default_cpu_configs(),
     };
 
     // CPU遅延を計りながらゲームを進めるためのティック
@@ -334,7 +347,9 @@ impl Room {
 
     async fn handle_client_message(&mut self, seat: usize, msg: ClientMessage) {
         match msg {
-            ClientMessage::StartGame => self.handle_start_game(seat).await,
+            ClientMessage::StartGame { cpu_configs } => {
+                self.handle_start_game(seat, cpu_configs).await
+            }
             ClientMessage::Action(action) => {
                 if !self.game_started() || self.awaiting_ready {
                     self.send_error(seat, ErrorCode::InvalidAction, "no action expected now")
@@ -377,7 +392,7 @@ impl Room {
         }
     }
 
-    async fn handle_start_game(&mut self, seat: usize) {
+    async fn handle_start_game(&mut self, seat: usize, cpu_configs: Option<[CpuSpec; 3]>) {
         if seat != HOST_SEAT {
             self.send_error(seat, ErrorCode::NotHost, "only the host can start")
                 .await;
@@ -389,10 +404,14 @@ impl Room {
             return;
         }
 
+        // ホストが指定したCPU構成を採用する（無指定なら既定のまま）
+        if let Some(specs) = cpu_configs {
+            self.cpu_configs = specs.map(|spec| spec.to_config());
+        }
+
         let mut driver = GameDriver::new(self.settings.clone());
-        let configs = default_cpu_configs();
         for s in 0..4 {
-            let config = configs[s % configs.len()].clone();
+            let config = config_for_seat(&self.cpu_configs, s);
             if self.seats[s].is_some() {
                 // 人間の座席にもシャドーCPUを常駐させ、切断時に即代打ちできるようにする
                 driver.set_shadow_cpu(s, config);
@@ -689,8 +708,7 @@ impl Room {
             None => {
                 if self.game_started() {
                     // 対局開始時の割り当てと同じ規則で強さ・性格を求める
-                    let configs = default_cpu_configs();
-                    let config = &configs[s % configs.len()];
+                    let config = config_for_seat(&self.cpu_configs, s);
                     SeatInfo::Cpu {
                         level: config.level,
                         personality: config.personality,
