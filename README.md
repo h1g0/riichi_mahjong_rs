@@ -173,7 +173,8 @@ docker run -e PORT=8080 -p 8080:8080 mahjong-net-server
 
 ### Operational notes
 
-- **Run exactly one always-on machine.** Rooms are in-memory and are **not** shared across machines, so the server must run as a single instance. If multiple machines are running (Fly may create two by default) or `auto_stop_machines` switches between them, a client can reconnect to a machine that does not hold its room and the connection drops. After the first deploy, run `fly scale count 1 -a <app>` once, and keep `auto_stop_machines = "off"` / `min_machines_running = 1` (as in `fly.toml`).
-- **Rooms do not survive a restart.** A redeploy or machine restart drops all active rooms; players just create/join a new room. There is no persistence layer.
+- **Run a single machine.** Rooms are in-memory and are **not** shared across machines, so the server must run as exactly one instance — run `fly scale count 1 -a <app>` once after the first deploy. With a single machine, `auto_stop_machines = "stop"` (as in `fly.toml`) is safe and cheap: the machine stops when idle and the **same** one machine cold-starts on the next connection. Do **not** scale to multiple machines, or a client can reconnect to a machine without its room and the connection drops.
+- **Cold start.** After an idle period the first connection waits a few seconds for the machine to start; that first attempt may need a retry. For an always-on server instead, set `auto_stop_machines = "off"` / `min_machines_running = 1` (costs more).
+- **Rooms do not survive a restart.** A redeploy, restart, or idle-stop drops all active rooms; players just create/join a new room. There is no persistence layer.
 - Monitor `GET /healthz` (Fly is configured to check it every 15s).
 - The server applies a per-IP room-entry rate limit and per-connection message/frame-size caps; no additional WAF is required for casual use.
