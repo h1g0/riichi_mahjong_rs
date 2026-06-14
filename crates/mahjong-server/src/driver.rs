@@ -258,6 +258,15 @@ impl GameDriver {
     /// CPU代打ちへの切り替え直後や行動タイムアウト時に、入力待ちで
     /// 停止したゲームを進めるために使う。実行したら true を返す。
     pub fn force_default_action(&mut self, seat: usize) -> bool {
+        self.force_default_action_impl(seat, None)
+    }
+
+    /// 現在時刻を渡して既定アクションを実行する（CPU遅延が有効な場合に使う）
+    pub fn force_default_action_at(&mut self, seat: usize, now: f64) -> bool {
+        self.force_default_action_impl(seat, Some(now))
+    }
+
+    fn force_default_action_impl(&mut self, seat: usize, now: Option<f64>) -> bool {
         let action = {
             let round = match self.table.current_round() {
                 Some(r) => r,
@@ -287,7 +296,35 @@ impl GameDriver {
                 _ => return false,
             }
         };
-        self.handle_action(seat, action)
+        self.handle_action_impl(seat, action, now)
+    }
+
+    /// CPU進行やツモのために tick が必要か（人間の入力待ちなら false）
+    ///
+    /// 待機中のCPUアクション、ツモフェーズ、CPU操作中の座席の手番では true。
+    /// CPU遅延を効かせながら進行させるネットワークサーバが、`tick_at` を
+    /// 呼ぶべきかの判定に使う。人間の入力待ちでは false を返し、無駄な tick を避ける。
+    pub fn needs_tick(&self) -> bool {
+        if !self.pending_cpu_batches.is_empty() {
+            return true;
+        }
+        let Some(round) = self.table.current_round() else {
+            return false;
+        };
+        if round.is_over() {
+            return false;
+        }
+        match round.phase {
+            TurnPhase::Draw => true,
+            TurnPhase::WaitForDiscard | TurnPhase::WaitForNineTerminals => {
+                self.is_cpu_controlled(round.current_player)
+            }
+            TurnPhase::WaitForCalls => round
+                .call_state
+                .as_ref()
+                .is_some_and(|cs| (0..4).any(|i| !cs.responded[i] && self.is_cpu_controlled(i))),
+            TurnPhase::RoundOver => false,
+        }
     }
 
     /// 現在の局が終了しているか
@@ -675,6 +712,37 @@ mod tests {
             driver.drain_events(1).is_empty(),
             "純粋なCPU席にイベントがバッファされている"
         );
+    }
+
+    /// needs_tick が人間の打牌待ちで false、CPU進行が必要なら true を返すことを確認
+    #[test]
+    fn test_needs_tick_distinguishes_human_wait_from_cpu_progress() {
+        let mut driver = driver_with_three_cpus();
+        driver.start_game_with_seed(42);
+        driver.run_until_blocked();
+
+        // 座席0（人間）の打牌待ちで停止 → tick 不要
+        let round = driver.table().current_round().unwrap();
+        assert_eq!(round.current_player, 0);
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+        assert!(!driver.needs_tick(), "人間の打牌待ちでは tick 不要");
+
+        // 人間が打牌 → 次は CPU の進行（ツモ/pending）→ tick 必要
+        driver.handle_action(0, ClientAction::Discard { tile: None });
+        // 即時処理だと CPU まで一気に進むので、遅延を入れて pending を残す
+        let mut paced = driver_with_three_cpus();
+        paced.set_cpu_action_delay(1.0);
+        paced.start_game_with_seed(42);
+        // 人間の打牌待ちまで時刻ベースで進める
+        for _ in 0..50 {
+            if !paced.needs_tick() {
+                break;
+            }
+            paced.tick_at(0.0);
+        }
+        assert!(!paced.needs_tick(), "人間の打牌待ちで停止するはず");
+        paced.handle_action_at(0, ClientAction::Discard { tile: None }, 0.0);
+        assert!(paced.needs_tick(), "打牌後は CPU 進行のため tick が必要");
     }
 
     /// CPUクライアント未割り当ての座席は操作切り替えできないことを確認

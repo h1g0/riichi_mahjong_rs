@@ -23,6 +23,9 @@ fn fast_config() -> RoomConfig {
         abandoned_timeout: Duration::from_secs(5),
         // 既存テストの自動進行を阻害しないよう長めにする
         action_timeout: Some(Duration::from_secs(30)),
+        // テストは遅延なし・細かいティックでほぼ即時に進める
+        cpu_action_delay: Duration::ZERO,
+        tick_interval: Duration::from_millis(1),
     }
 }
 
@@ -226,6 +229,13 @@ impl TestClient {
                         _ => {}
                     },
                     ServerMessage::GameOver { final_scores } => return final_scores,
+                    ServerMessage::Error {
+                        code: ErrorCode::InvalidAction,
+                        ..
+                    } => {
+                        // 鳴き解決などのレースで無効になったアクション。
+                        // ツモ切りボットでは無害なので無視する。
+                    }
                     ServerMessage::Error { code, message } => {
                         panic!("予期しないエラー: {code:?} {message}");
                     }
@@ -558,7 +568,14 @@ async fn test_join_rate_limit() {
 #[tokio::test]
 async fn test_reconnect_resyncs_and_resumes() {
     tokio::time::timeout(Duration::from_secs(120), async {
-        let addr = start_server(fast_config()).await;
+        // CPU をわずかに遅延させ、再入室するまで対局が終わらないようにする
+        // （即時進行だと 300ms のスリープ中に終局してしまう）
+        let config = RoomConfig {
+            cpu_action_delay: Duration::from_millis(50),
+            tick_interval: Duration::from_millis(10),
+            ..fast_config()
+        };
+        let addr = start_server(config).await;
 
         let mut host = TestClient::connect(addr).await;
         host.hello("ホスト").await;
