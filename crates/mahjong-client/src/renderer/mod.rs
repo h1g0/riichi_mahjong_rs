@@ -4,6 +4,7 @@
 
 mod online;
 mod overlay;
+mod theme;
 pub use online::{
     OnlineLobbyAction, OnlineMenuAction, handle_online_lobby_input, handle_online_menu_input,
 };
@@ -183,13 +184,7 @@ fn load_texture_from_png(bytes: &[u8]) -> Texture2D {
 }
 
 fn draw_jp_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16, color: Color) {
-    let params = TextParams {
-        font,
-        font_size,
-        color,
-        ..Default::default()
-    };
-    draw_text_ex(text, x, y, params);
+    theme::draw_text(font, text, x, y, font_size, color);
 }
 
 pub fn draw_game(
@@ -211,28 +206,38 @@ pub fn draw_game(
             None
         }
         GamePhase::WaitingForStart => {
-            draw_jp_text(font, "ゲーム開始中...", 540.0, 400.0, 30, WHITE);
+            draw_setup_background();
+            theme::draw_text_centered(
+                font,
+                "ゲーム開始中...",
+                DESIGN_W / 2.0,
+                400.0,
+                28,
+                theme::TEXT_BR,
+            );
             None
         }
         GamePhase::Playing => {
-            draw_dora_indicators(state, font, tile_textures);
+            draw_felt_background();
             draw_discards(state, tile_textures);
             draw_center_panel(state, font);
             draw_other_player_hands(state, tile_textures);
-            draw_hand(state, font, tile_textures);
             draw_melds(state, tile_textures);
+            draw_hand(state, font, tile_textures);
+            draw_top_bar(state, font, tile_textures);
             let click = overlay::draw_action_buttons(state, font, tile_textures);
             online::draw_connection_banner(state, font);
             online::draw_turn_timer(state, font);
             click
         }
         GamePhase::RoundResult => {
-            draw_dora_indicators(state, font, tile_textures);
+            draw_felt_background();
             draw_discards(state, tile_textures);
             draw_center_panel(state, font);
             draw_other_player_hands(state, tile_textures);
-            draw_hand(state, font, tile_textures);
             draw_melds(state, tile_textures);
+            draw_hand(state, font, tile_textures);
+            draw_top_bar(state, font, tile_textures);
             draw_result(state, font, tile_textures);
             online::draw_connection_banner(state, font);
             None
@@ -244,94 +249,260 @@ pub fn draw_game(
     }
 }
 
-/// ドラ表示牌・供託棒・本場を画面左上に描画する
-fn draw_dora_indicators(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
-    let dora_w: f32 = 30.0;
-    let dora_h: f32 = 42.0;
-    let dora_step: f32 = dora_w; // 牌同士がくっつく（隙間なし）
-    let padding: f32 = 6.0;
-    let base_x: f32 = padding;
-    let base_y: f32 = padding;
-    let revealed_count = state.dora_indicators.len();
+/// 対局画面の背景（中央が明るい放射状のフェルト）。
+fn draw_felt_background() {
+    theme::draw_radial_bg(
+        DESIGN_W,
+        DESIGN_H,
+        DESIGN_W / 2.0,
+        DESIGN_H * 0.46,
+        DESIGN_W * 0.62,
+        DESIGN_H * 0.62,
+        theme::FELT,
+        theme::FELT_EDGE,
+    );
+}
 
-    // 供託棒・本場の表示パラメータ
-    let stick_w: f32 = 50.0;
-    let stick_h: f32 = 8.0;
-    let stick_area_x = base_x + 5.0 * dora_step + 8.0; // ドラ牌の右側
-    let stick_font: u16 = 14;
+/// 設定・終了画面の背景（やや明るい緑から暗緑へ）。
+fn draw_setup_background() {
+    theme::draw_radial_bg(
+        DESIGN_W,
+        DESIGN_H,
+        DESIGN_W / 2.0,
+        DESIGN_H * 0.42,
+        DESIGN_W * 0.6,
+        DESIGN_H * 0.6,
+        theme::SETUP_BG_INNER,
+        theme::FELT_EDGE,
+    );
+}
 
-    // 背景の半透明黒四角
-    let bg_w = stick_area_x + stick_w + 30.0 + padding;
-    let bg_h = dora_h + padding * 2.0;
-    draw_rectangle(0.0, 0.0, bg_w, bg_h, Color::new(0.0, 0.0, 0.0, 0.5));
+/// 画面上部のバー（ドラ表示・局/残り枚数・各家の得点チップ）を描画する。
+fn draw_top_bar(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
+    const BAR_H: f32 = 50.0;
+    // バー背景＋下境界線
+    draw_rectangle(0.0, 0.0, DESIGN_W, BAR_H, Color::new(0.0, 0.0, 0.0, 0.48));
+    draw_rectangle(0.0, BAR_H - 1.0, DESIGN_W, 1.0, theme::BORDER);
 
-    // ドラ表示牌（5枚: 表向き＋裏向き）
+    draw_dora_panel(state, font, tile_textures);
+    draw_round_center(state, font, BAR_H);
+    draw_score_chips(state, font, BAR_H);
+}
+
+/// 上部バー左側：ドラ表示牌＋供託リーチ棒＋本場。
+fn draw_dora_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
+    let panel_x = 12.0;
+    let panel_y = 8.0;
+    let panel_h = 34.0;
+    let dora_w = 20.0;
+    let dora_h = 28.0;
+    let tiles_x = panel_x + 44.0;
+    let tiles_y = panel_y + 3.0;
+    let sticks_x = tiles_x + 5.0 * (dora_w + 1.0) + 12.0;
+    let panel_w = sticks_x + 64.0 - panel_x;
+
+    theme::draw_panel(
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        6.0,
+        Color::new(0.0, 0.0, 0.0, 0.5),
+        theme::rgba(0xc9a227, 0.18),
+    );
+
+    // 「ドラ」ラベル
+    draw_jp_text(
+        font,
+        "ドラ",
+        panel_x + 10.0,
+        panel_y + 14.0,
+        11,
+        theme::TEXT_DIM,
+    );
+    draw_jp_text(
+        font,
+        "Dora",
+        panel_x + 10.0,
+        panel_y + 27.0,
+        9,
+        theme::rgba(0x4a6050, 1.0),
+    );
+
+    let revealed = state.dora_indicators.len();
     for i in 0..5 {
-        let x = base_x + i as f32 * dora_step;
-        if i < revealed_count {
+        let x = tiles_x + i as f32 * (dora_w + 1.0);
+        if i < revealed {
             draw_tile_sprite(
                 tile_textures.for_tile(&state.dora_indicators[i]),
                 x,
-                base_y,
+                tiles_y,
                 dora_w,
                 dora_h,
                 WHITE,
             );
         } else {
-            draw_tile_sprite(&tile_textures.back, x, base_y, dora_w, dora_h, WHITE);
+            draw_tile_sprite(&tile_textures.back, x, tiles_y, dora_w, dora_h, WHITE);
         }
     }
 
-    // 千点棒 × 供託数（上段）
-    let stick_y_top = base_y + 6.0;
+    // 供託リーチ棒（上段）／本場（下段）
     draw_tile_sprite(
         &tile_textures.stick1000,
-        stick_area_x,
-        stick_y_top,
-        stick_w,
-        stick_h,
-        WHITE,
+        sticks_x,
+        panel_y + 8.0,
+        34.0,
+        5.0,
+        Color::new(1.0, 1.0, 1.0, 0.75),
     );
     draw_jp_text(
         font,
         &format!("×{}", state.riichi_sticks),
-        stick_area_x + stick_w + 2.0,
-        stick_y_top + stick_h,
-        stick_font,
-        WHITE,
+        sticks_x + 38.0,
+        panel_y + 14.0,
+        11,
+        theme::TEXT_DIM,
     );
-
-    // 百点棒 × 本場数（下段）
-    let stick_y_bottom = stick_y_top + stick_h + 10.0;
     draw_tile_sprite(
         &tile_textures.stick100,
-        stick_area_x,
-        stick_y_bottom,
-        stick_w,
-        stick_h,
-        WHITE,
+        sticks_x,
+        panel_y + 22.0,
+        34.0,
+        5.0,
+        Color::new(1.0, 1.0, 1.0, 0.75),
     );
     draw_jp_text(
         font,
         &format!("×{}", state.honba),
-        stick_area_x + stick_w + 2.0,
-        stick_y_bottom + stick_h,
-        stick_font,
-        WHITE,
+        sticks_x + 38.0,
+        panel_y + 28.0,
+        11,
+        theme::TEXT_DIM,
     );
+}
+
+/// 上部バー中央：局表示と残り枚数。
+fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f32) {
+    let round_wind = match state.round_number / 4 {
+        0 => "東",
+        1 => "南",
+        2 => "西",
+        _ => "北",
+    };
+    let round_num = (state.round_number % 4) + 1;
+    let round_text = format!("{}{}局", round_wind, round_num);
+    let remain_text = format!("{}枚", state.remaining_tiles);
+
+    let baseline = bar_h / 2.0 + 6.0;
+    let rdims = theme::measure_scaled(font, &round_text, 16);
+    let gap = 12.0;
+    let rmdims = theme::measure_scaled(font, &remain_text, 14);
+    let total_w = rdims.width + gap + rmdims.width;
+    let start_x = DESIGN_W / 2.0 - total_w / 2.0;
+
+    draw_jp_text(font, &round_text, start_x, baseline, 16, theme::GOLD_LT);
+    draw_jp_text(
+        font,
+        &remain_text,
+        start_x + rdims.width + gap,
+        baseline,
+        14,
+        theme::TEXT_DIM,
+    );
+}
+
+/// 上部バー右側：各家の得点チップ（自分を強調）。
+fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f32) {
+    const CHIP_W: f32 = 70.0;
+    const CHIP_H: f32 = 38.0;
+    const GAP: f32 = 7.0;
+    let count = 4;
+    let total = count as f32 * CHIP_W + (count as f32 - 1.0) * GAP;
+    let start_x = DESIGN_W - 14.0 - total;
+    let chip_y = (bar_h - CHIP_H) / 2.0;
+
+    for rel in 0..4 {
+        let seat = seat_at_relative_position(state.my_seat, rel);
+        let is_me = seat == state.my_seat;
+        let x = start_x + rel as f32 * (CHIP_W + GAP);
+
+        let (fill, border) = if is_me {
+            (theme::rgba(0xc8a227, 0.10), theme::rgba(0xc8a227, 0.28))
+        } else {
+            (
+                Color::new(1.0, 1.0, 1.0, 0.04),
+                Color::new(1.0, 1.0, 1.0, 0.06),
+            )
+        };
+        theme::draw_rounded_rect(x, chip_y, CHIP_W, CHIP_H, 4.0, fill);
+        theme::draw_rounded_rect_lines(x, chip_y, CHIP_W, CHIP_H, 4.0, 1.0, border);
+
+        let name = short_player_name(&state.player_labels[seat], rel);
+        theme::draw_text_centered(
+            font,
+            &name,
+            x + CHIP_W / 2.0,
+            chip_y + 14.0,
+            9,
+            theme::TEXT_DIM,
+        );
+        let val = format_score(state.scores[seat]);
+        let val_color = if is_me { theme::GOLD_LT } else { theme::TEXT };
+        theme::draw_text_centered(font, &val, x + CHIP_W / 2.0, chip_y + 30.0, 13, val_color);
+    }
+}
+
+/// 得点チップ用の短いプレイヤー名。
+fn short_player_name(label: &crate::game::PlayerLabel, rel: usize) -> String {
+    use crate::game::PlayerLabel;
+    match label {
+        PlayerLabel::Me => "あなた".to_string(),
+        PlayerLabel::Human(name) => {
+            let mut s: String = name.chars().take(5).collect();
+            if name.chars().count() > 5 {
+                s.push('…');
+            }
+            s
+        }
+        PlayerLabel::Cpu { .. } => format!("CPU{}", rel),
+    }
+}
+
+/// 桁区切り付きの得点表記。
+fn format_score(score: i32) -> String {
+    let neg = score < 0;
+    let mut n = score.unsigned_abs();
+    if n == 0 {
+        return "0".to_string();
+    }
+    let mut parts = Vec::new();
+    while n > 0 {
+        parts.push(format!("{:03}", n % 1000));
+        n /= 1000;
+    }
+    parts.reverse();
+    // 先頭の余分なゼロを除去
+    let mut joined = parts.join(",");
+    joined = joined.trim_start_matches('0').to_string();
+    if joined.starts_with(',') {
+        joined = joined.trim_start_matches(',').to_string();
+    }
+    if neg { format!("-{}", joined) } else { joined }
 }
 
 /// 盤面中央の情報パネル（半透明の黒い四角＋各家の風と得点＋局情報）を描画する
 fn draw_center_panel(state: &GameState, font: Option<&Font>) {
-    // 捨て牌の内側に収まるサイズの半透明黒四角
+    // 捨て牌の内側に収まる角丸のゴールド枠パネル
     let panel_size: f32 = 160.0;
     let half = panel_size / 2.0;
-    draw_rectangle(
+    theme::draw_panel(
         BOARD_CENTER_X - half,
         BOARD_CENTER_Y - half,
         panel_size,
         panel_size,
-        Color::new(0.0, 0.0, 0.0, 0.55),
+        5.0,
+        theme::rgba(0x030a06, 0.92),
+        theme::PANEL_BORDER,
     );
 
     // 各家の風と得点をそれぞれの向きで描画
@@ -345,31 +516,37 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         let seat = seat_at_relative_position(state.my_seat, player_idx);
         let display_wind = mahjong_core::tile::Wind::from_index(my_wind_idx + player_idx);
         let score = state.scores[seat];
-        let label = format!("{} {}点", wind_to_str(display_wind), score);
 
         set_camera(&make_board_camera(rotation));
 
-        let dims = measure_text(&label, font, SMALL_FONT, 1.0);
-        draw_jp_text(
+        // 風（ゴールド）＋得点（千点単位）を中心の各方向に描画
+        theme::draw_text_centered(
             font,
-            &label,
-            BOARD_CENTER_X - dims.width / 2.0,
+            wind_to_str(display_wind),
+            BOARD_CENTER_X,
             BOARD_CENTER_Y + label_dist,
-            SMALL_FONT,
-            Color::new(0.9, 0.9, 0.9, 1.0),
+            14,
+            theme::GOLD_LT,
+        );
+        let score_label = format!("{}k", score / 1000);
+        theme::draw_text_centered(
+            font,
+            &score_label,
+            BOARD_CENTER_X,
+            BOARD_CENTER_Y + label_dist + 14.0,
+            11,
+            theme::TEXT_DIM,
         );
 
         // CPU の強さ・性格（または相手の名前）を風・得点の下に表示する
         if let Some(detail) = state.player_labels[seat].detail() {
-            const DETAIL_FONT: u16 = 13;
-            let ddims = measure_text(&detail, font, DETAIL_FONT, 1.0);
-            draw_jp_text(
+            theme::draw_text_centered(
                 font,
                 &detail,
-                BOARD_CENTER_X - ddims.width / 2.0,
-                BOARD_CENTER_Y + label_dist + 16.0,
-                DETAIL_FONT,
-                Color::new(0.7, 0.85, 1.0, 1.0),
+                BOARD_CENTER_X,
+                BOARD_CENTER_Y + label_dist + 28.0,
+                11,
+                theme::rgba(0x7a9880, 0.85),
             );
         }
 
@@ -386,26 +563,23 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
     let round_num = (state.round_number % 4) + 1;
 
     let round_text = format!("{}{}局", round_wind, round_num);
-    let remaining_text = format!("残{}枚", state.remaining_tiles);
+    let remaining_text = format!("残 {}枚", state.remaining_tiles);
 
-    let round_dims = measure_text(&round_text, font, FONT_SIZE, 1.0);
-    let remain_dims = measure_text(&remaining_text, font, FONT_SIZE, 1.0);
-
-    draw_jp_text(
+    theme::draw_text_centered(
         font,
         &round_text,
-        BOARD_CENTER_X - round_dims.width / 2.0,
-        BOARD_CENTER_Y - 6.0,
-        FONT_SIZE,
-        WHITE,
+        BOARD_CENTER_X,
+        BOARD_CENTER_Y + 2.0,
+        21,
+        theme::TEXT_BR,
     );
-    draw_jp_text(
+    theme::draw_text_centered(
         font,
         &remaining_text,
-        BOARD_CENTER_X - remain_dims.width / 2.0,
-        BOARD_CENTER_Y + round_dims.offset_y + 4.0,
-        FONT_SIZE,
-        WHITE,
+        BOARD_CENTER_X,
+        BOARD_CENTER_Y + 22.0,
+        13,
+        theme::TEXT_DIM,
     );
 }
 
@@ -489,32 +663,76 @@ fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
     }
 }
 
+/// 手牌の上に表示する状態バッジ（ピル）を描画し、次のバッジの x を返す。
+fn draw_badge(
+    font: Option<&Font>,
+    x: f32,
+    y: f32,
+    text: &str,
+    fill: Color,
+    border: Color,
+    text_color: Color,
+) -> f32 {
+    let dims = theme::measure_scaled(font, text, 11);
+    let pad = 8.0;
+    let w = dims.width + pad * 2.0;
+    let h = 18.0;
+    theme::draw_rounded_rect(x, y, w, h, 3.0, fill);
+    theme::draw_rounded_rect_lines(x, y, w, h, 3.0, 1.0, border);
+    draw_jp_text(font, text, x + pad, y + 13.0, 11, text_color);
+    x + w + 6.0
+}
+
 fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
     let hand_start_x = 100.0;
     let hand_y = 680.0;
 
-    // フリテン状態の表示
+    // 状態バッジ（フリテン・リーチ中・リーチ打牌選択中）
+    let badge_y = hand_y - 26.0;
+    let mut bx = hand_start_x;
     if state.is_furiten {
-        draw_jp_text(
+        bx = draw_badge(
             font,
-            "！！振聴です！！",
-            hand_start_x,
-            hand_y - 20.0,
-            FONT_SIZE,
-            Color::new(1.0, 0.2, 0.2, 1.0),
+            bx,
+            badge_y,
+            "振聴 · Furiten",
+            theme::rgba(0xcc2828, 0.18),
+            theme::RED,
+            theme::RED_LT,
         );
     }
-
-    // 選択中の牌を捨てるとフリテンになる場合の警告
+    if state.is_riichi {
+        bx = draw_badge(
+            font,
+            bx,
+            badge_y,
+            "リーチ中 · Riichi",
+            theme::rgba(0xcc2828, 0.12),
+            theme::rgba(0xcc2828, 0.35),
+            theme::RED,
+        );
+    }
+    if state.riichi_selection_mode {
+        bx = draw_badge(
+            font,
+            bx,
+            badge_y,
+            "打牌を選択 · Select",
+            theme::rgba(0xc8a227, 0.12),
+            theme::rgba(0xc8a227, 0.35),
+            theme::GOLD_LT,
+        );
+    }
     if state.selected_would_cause_furiten && (state.selected_tile.is_some() || state.selected_drawn)
     {
-        draw_jp_text(
+        draw_badge(
             font,
+            bx,
+            badge_y,
             "振聴になります！",
-            hand_start_x + 200.0,
-            hand_y - 20.0,
-            FONT_SIZE,
-            Color::new(1.0, 0.6, 0.1, 1.0),
+            theme::rgba(0xcc6411, 0.18),
+            theme::rgba(0xe88a1a, 0.6),
+            Color::new(1.0, 0.7, 0.3, 1.0),
         );
     }
 
@@ -523,8 +741,11 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
         let selected = state.selected_tile == Some(i);
         let riichi_selectable =
             state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);
-        let y_offset = if selected { -10.0 } else { 0.0 };
+        let y_offset = if selected { -14.0 } else { 0.0 };
         let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
+        if selected {
+            draw_tile_highlight(x, hand_y + y_offset);
+        }
         draw_tile(x, hand_y + y_offset, tile, riichi_disabled, tile_textures);
     }
 
@@ -532,8 +753,30 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
         let drawn_x = hand_start_x + state.hand.len() as f32 * TILE_W + 20.0;
         let selected = state.selected_drawn;
         let riichi_selectable = state.riichi_selection_mode && state.riichi_selectable_drawn;
-        let y_offset = if selected { -10.0 } else { 0.0 };
+        let y_offset = if selected { -14.0 } else { 0.0 };
         let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
+
+        // 「ツモ」ラベル
+        theme::draw_text_centered(
+            font,
+            "ツモ",
+            drawn_x + TILE_W / 2.0,
+            hand_y + y_offset - 16.0,
+            11,
+            theme::GOLD_LT,
+        );
+        theme::draw_text_centered(
+            font,
+            "Tsumo",
+            drawn_x + TILE_W / 2.0,
+            hand_y + y_offset - 4.0,
+            8,
+            theme::GOLD_DK,
+        );
+
+        if selected {
+            draw_tile_highlight(drawn_x, hand_y + y_offset);
+        }
         draw_tile(
             drawn_x,
             hand_y + y_offset,
@@ -541,16 +784,20 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             riichi_disabled,
             tile_textures,
         );
-
-        draw_jp_text(
-            font,
-            "ツモ",
-            drawn_x,
-            hand_y + y_offset - 5.0,
-            SMALL_FONT,
-            Color::new(1.0, 0.9, 0.3, 1.0),
-        );
     }
+}
+
+/// 選択中の牌の周囲にゴールドの縁取りを描く。
+fn draw_tile_highlight(x: f32, y: f32) {
+    theme::draw_rounded_rect_lines(
+        x - 2.0,
+        y - 2.0,
+        TILE_W - 2.0 + 4.0,
+        TILE_H - 2.0 + 4.0,
+        4.0,
+        2.0,
+        theme::GOLD_LT,
+    );
 }
 
 fn draw_melds(state: &GameState, tile_textures: &TileTextures) {
@@ -903,163 +1150,268 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
     }
 }
 
+/// 局結果オーバーレイ。和了は構造化パネル、流局はメッセージパネルを描画する。
 fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
-    draw_rectangle(150.0, 150.0, 980.0, 420.0, Color::new(0.0, 0.0, 0.0, 0.85));
+    // 全面を暗くする
+    draw_rectangle(
+        0.0,
+        0.0,
+        DESIGN_W,
+        DESIGN_H,
+        Color::new(0.0, 0.0, 0.0, 0.78),
+    );
 
-    let tw: f32 = 24.0; // 小さめの牌サイズ
-    let th: f32 = 34.0;
-    let meld_gap: f32 = 4.0;
-    let win_tile_gap: f32 = 6.0;
+    if state.current_win_result().is_some() {
+        draw_win_panel(state, font, tile_textures);
+    } else {
+        draw_draw_panel(state, font);
+    }
+}
 
-    // 手牌の合計幅を計算して開始位置を決定（ドラ表示もこの左端に揃える）
-    let hand_tiles = state.win_hand.len() as f32;
-    let win_tile_w = if state.win_tile.is_some() {
-        tw + win_tile_gap
+/// 角丸ゴールド枠のオーバーレイパネルを描き、内側コンテンツ用の左端・右端を返す。
+fn draw_overlay_panel(panel_w: f32, panel_h: f32) -> (f32, f32, f32) {
+    let panel_x = (DESIGN_W - panel_w) / 2.0;
+    let panel_y = ((DESIGN_H - panel_h) / 2.0).max(24.0);
+    theme::draw_panel(
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        12.0,
+        theme::rgba(0x050e08, 0.97),
+        theme::GOLD_DK,
+    );
+    (panel_x, panel_y, panel_x + panel_w)
+}
+
+/// 結果パネル下部の「次へ」誘導ボタンを描画する。
+fn draw_result_next_button(state: &GameState, font: Option<&Font>, cx: f32, y: f32, w: f32) {
+    let h = 40.0;
+    let x = cx - w / 2.0;
+    theme::draw_rounded_rect(x, y, w, h, 6.0, theme::rgba(0xc8a227, 0.10));
+    theme::draw_rounded_rect_lines(x, y, w, h, 6.0, 1.0, theme::GOLD_DK);
+    let label = if state.win_result_index + 1 < state.win_results.len() {
+        "次の和了へ · Continue →"
+    } else {
+        "次へ · Continue →"
+    };
+    theme::draw_text_centered(font, label, cx, y + 25.0, 14, theme::GOLD_LT);
+}
+
+/// 横一列の表示牌を描く（ドラ／裏ドラ用）。
+fn draw_indicator_row(
+    tiles: &[Tile],
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    tile_textures: &TileTextures,
+) -> f32 {
+    let mut cx = x;
+    for tile in tiles {
+        draw_tile_sprite(tile_textures.for_tile(tile), cx, y, w, h, WHITE);
+        cx += w + 2.0;
+    }
+    cx
+}
+
+/// 和了結果パネル。
+fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
+    let wr = match state.current_win_result() {
+        Some(w) => w,
+        None => return,
+    };
+    let yaku_count = wr.yaku.len().max(1);
+    let panel_w = 700.0;
+    let panel_h = 326.0 + yaku_count as f32 * 22.0;
+    let (panel_x, panel_y, panel_right) = draw_overlay_panel(panel_w, panel_h);
+    let cx = panel_x + panel_w / 2.0;
+    let content_l = panel_x + 40.0;
+    let content_r = panel_right - 40.0;
+    let mut y = panel_y + 28.0;
+
+    // 種別（ツモ / ロン）
+    let type_label = if wr.win_is_tsumo {
+        "ツモ · TSUMO"
+    } else {
+        "ロン · RON"
+    };
+    theme::draw_text_centered(font, type_label, cx, y, 12, theme::GOLD);
+    y += 22.0;
+
+    // 和了者（ロンは放銃者を併記）
+    let winner_line = match &wr.loser_name {
+        Some(loser) => format!("{} ← {}", wr.winner_name, loser),
+        None => wr.winner_name.clone(),
+    };
+    theme::draw_text_centered(font, &winner_line, cx, y, 21, theme::TEXT_BR);
+    y += 24.0;
+
+    // 手牌＋和了牌（センタリング）
+    let tw = 26.0;
+    let th = 36.0;
+    let win_gap = 14.0;
+    let meld_gap = 4.0;
+    let hand_w = state.win_hand.len() as f32 * tw;
+    let win_w = if state.win_tile.is_some() {
+        win_gap + tw
     } else {
         0.0
     };
-    let meld_tiles: f32 = state
+    let meld_w: f32 = state
         .win_melds
         .iter()
-        .map(|m| calc_meld_width(m, tw, th))
+        .map(|m| calc_meld_width(m, tw, th) + meld_gap)
         .sum();
-    let meld_gaps = if state.win_melds.is_empty() {
+    let row_w = hand_w + win_w + meld_w;
+    let mut x = cx - row_w / 2.0;
+    let hand_y = y;
+    for tile in &state.win_hand {
+        draw_tile_sprite(tile_textures.for_tile(tile), x, hand_y, tw, th, WHITE);
+        x += tw;
+    }
+    if let Some(win_tile) = &state.win_tile {
+        x += win_gap;
+        theme::draw_rounded_rect_lines(
+            x - 2.0,
+            hand_y - 2.0,
+            tw + 4.0,
+            th + 4.0,
+            4.0,
+            2.0,
+            theme::GOLD_LT,
+        );
+        draw_tile_sprite(tile_textures.for_tile(win_tile), x, hand_y, tw, th, WHITE);
+        x += tw;
+    }
+    for meld in &state.win_melds {
+        x += meld_gap;
+        draw_meld_group(meld, x, hand_y, tw, th, tile_textures);
+        x += calc_meld_width(meld, tw, th);
+    }
+    y = hand_y + th + 20.0;
+
+    // ドラ・裏ドラ
+    let dw = 20.0;
+    let dh = 28.0;
+    let dora_label_w = theme::measure_scaled(font, "ドラ", 11).width;
+    let dora_tiles_w = state.dora_indicators.len() as f32 * (dw + 2.0);
+    let ura_block_w = if state.uradora_indicators.is_empty() {
         0.0
     } else {
-        meld_gap + (state.win_melds.len() as f32 - 1.0) * meld_gap
+        24.0 + theme::measure_scaled(font, "裏ドラ", 11).width
+            + 6.0
+            + state.uradora_indicators.len() as f32 * (dw + 2.0)
     };
-    let total_hand_w = hand_tiles * tw + win_tile_w + meld_tiles + meld_gaps;
-    let dora_w = 5.0 * tw;
-    let content_w = total_hand_w.max(dora_w);
-    let start_x = (1120.0 - content_w).max(170.0);
-
-    // ドラ表示牌・裏ドラ・手牌は和了時のみ表示（流局時は非表示）
-    let is_win_result = state.win_tile.is_some() || !state.win_hand.is_empty();
-
-    let dora_y: f32 = 170.0;
-    let mut next_y = dora_y;
-
-    if is_win_result {
-        // ドラ表示牌（上段: 5枚）
-        let revealed_count = state.dora_indicators.len();
-        for i in 0..5 {
-            let x = start_x + i as f32 * tw;
-            if i < revealed_count {
-                draw_tile_sprite(
-                    tile_textures.for_tile(&state.dora_indicators[i]),
-                    x,
-                    dora_y,
-                    tw,
-                    th,
-                    WHITE,
-                );
-            } else {
-                draw_tile_sprite(&tile_textures.back, x, dora_y, tw, th, WHITE);
-            }
-        }
-        next_y = dora_y + th;
-    } // end is_win_result (dora)
-
-    // 裏ドラ表示牌（リーチ和了時のみ表示）
-    if is_win_result && !state.uradora_indicators.is_empty() {
-        let ura_count = state.uradora_indicators.len();
-        for i in 0..5 {
-            let x = start_x + i as f32 * tw;
-            if i < ura_count {
-                draw_tile_sprite(
-                    tile_textures.for_tile(&state.uradora_indicators[i]),
-                    x,
-                    next_y,
-                    tw,
-                    th,
-                    WHITE,
-                );
-            } else {
-                draw_tile_sprite(&tile_textures.back, x, next_y, tw, th, WHITE);
-            }
-        }
-        next_y += th;
+    let total_w = dora_label_w + 6.0 + dora_tiles_w + ura_block_w;
+    let mut dx = cx - total_w / 2.0;
+    draw_jp_text(font, "ドラ", dx, y + dh / 2.0 + 4.0, 11, theme::TEXT_DIM);
+    dx += dora_label_w + 6.0;
+    dx = draw_indicator_row(&state.dora_indicators, dx, y, dw, dh, tile_textures);
+    if !state.uradora_indicators.is_empty() {
+        dx += 18.0;
+        draw_jp_text(font, "裏ドラ", dx, y + dh / 2.0 + 4.0, 11, theme::TEXT_DIM);
+        dx += theme::measure_scaled(font, "裏ドラ", 11).width + 6.0;
+        draw_indicator_row(&state.uradora_indicators, dx, y, dw, dh, tile_textures);
     }
+    y += dh + 16.0;
 
-    // 和了者の手牌＋副露＋和了牌を描画
-    if !state.win_hand.is_empty() || !state.win_melds.is_empty() {
-        next_y += 6.0;
-        let mut x = start_x;
-
-        // 手牌（閉じた部分）
-        for tile in &state.win_hand {
-            draw_tile_sprite(tile_textures.for_tile(tile), x, next_y, tw, th, WHITE);
-            x += tw;
-        }
-
-        // 和了牌（少し離して描画）
-        if let Some(win_tile) = &state.win_tile {
-            x += win_tile_gap;
-            let win_x = x;
-            draw_tile_sprite(tile_textures.for_tile(win_tile), x, next_y, tw, th, WHITE);
-
-            // 和了牌の下に「ツモ」or「ロン」
-            let win_label = if state.win_is_tsumo {
-                "ツモ"
-            } else {
-                "ロン"
-            };
-            let dims = measure_text(win_label, font, 12, 1.0);
-            draw_jp_text(
-                font,
-                win_label,
-                win_x + tw / 2.0 - dims.width / 2.0,
-                next_y + th + 12.0,
-                12,
-                Color::new(1.0, 0.9, 0.3, 1.0),
-            );
-            x += tw;
-        }
-
-        // 副露
-        if !state.win_melds.is_empty() {
-            x += meld_gap;
-            for (i, meld) in state.win_melds.iter().enumerate() {
-                if i > 0 {
-                    x += meld_gap;
-                }
-                draw_meld_group(meld, x, next_y, tw, th, tile_textures);
-                x += calc_meld_width(meld, tw, th);
-            }
-        }
+    // 役一覧（上に区切り線）
+    draw_rectangle(content_l, y, content_r - content_l, 1.0, theme::BORDER);
+    y += 8.0;
+    for (name, han) in &wr.yaku {
+        draw_jp_text(font, name, content_l, y + 14.0, 14, theme::TEXT);
+        let han_text = format!("{}飜", han);
+        let hw = theme::measure_scaled(font, &han_text, 14).width;
+        draw_jp_text(
+            font,
+            &han_text,
+            content_r - hw,
+            y + 14.0,
+            14,
+            theme::GOLD_LT,
+        );
+        draw_rectangle(
+            content_l,
+            y + 22.0,
+            content_r - content_l,
+            1.0,
+            theme::rgba(0xffffff, 0.04),
+        );
+        y += 22.0;
     }
-
-    if let Some(msg) = &state.result_message {
-        let lines: Vec<&str> = msg.lines().collect();
-        for (i, line) in lines.iter().enumerate() {
-            let (font_size, color) = if i == 0 {
-                (28, WHITE)
-            } else {
-                (22, Color::new(0.9, 0.9, 0.7, 1.0))
-            };
-            draw_jp_text(font, line, 220.0, 240.0 + i as f32 * 35.0, font_size, color);
-        }
+    if wr.yaku.is_empty() {
+        y += 22.0;
     }
+    y += 8.0;
 
-    let next_label = if state.win_result_index + 1 < state.win_results.len() {
-        "クリックで次の和了へ"
+    // 合計（飜符 ＋ 大きな点数）
+    let mut hanfu = if wr.rank_name.is_empty() {
+        format!("{}飜 {}符", wr.han, wr.fu)
     } else {
-        "クリックで次の局へ"
+        format!("{}飜 {}符 · {}", wr.han, wr.fu, wr.rank_name)
     };
-    draw_jp_text(
-        font,
-        next_label,
-        480.0,
-        530.0,
-        FONT_SIZE,
-        Color::new(0.8, 0.8, 0.8, 0.7),
-    );
+    if wr.riichi_sticks > 0 {
+        hanfu.push_str(&format!("  供託 {}本", wr.riichi_sticks));
+    }
+    draw_jp_text(font, &hanfu, content_l, y + 24.0, 13, theme::TEXT_DIM);
+    let pts = format!("{}点", format_score(wr.score_points));
+    let pw = theme::measure_scaled(font, &pts, 28).width;
+    draw_jp_text(font, &pts, content_r - pw, y + 28.0, 28, theme::GOLD_LT);
+    y += 44.0;
+
+    draw_result_next_button(state, font, cx, y, panel_w - 80.0);
+}
+
+/// 流局パネル。
+fn draw_draw_panel(state: &GameState, font: Option<&Font>) {
+    let lines: Vec<&str> = state
+        .result_message
+        .as_deref()
+        .unwrap_or("流局")
+        .lines()
+        .collect();
+    let panel_w = 560.0;
+    let panel_h = 140.0 + lines.len() as f32 * 30.0;
+    let (panel_x, panel_y, _) = draw_overlay_panel(panel_w, panel_h);
+    let cx = panel_x + panel_w / 2.0;
+    let mut y = panel_y + 40.0;
+
+    theme::draw_text_centered(font, "流局 · DRAW", cx, y, 12, theme::GOLD);
+    y += 30.0;
+    for (i, line) in lines.iter().enumerate() {
+        let (size, color) = if i == 0 {
+            (20, theme::TEXT_BR)
+        } else {
+            (14, theme::TEXT)
+        };
+        theme::draw_text_centered(font, line, cx, y, size, color);
+        y += 30.0;
+    }
+    y += 4.0;
+    draw_result_next_button(state, font, cx, y, panel_w - 80.0);
 }
 
 fn draw_game_over(state: &GameState, font: Option<&Font>) {
-    draw_rectangle(200.0, 150.0, 880.0, 500.0, Color::new(0.0, 0.0, 0.0, 0.9));
+    draw_setup_background();
 
-    draw_jp_text(font, "ゲーム終了", 520.0, 250.0, 36, WHITE);
+    let panel_w = 620.0;
+    let panel_h = 420.0;
+    let panel_x = (DESIGN_W - panel_w) / 2.0;
+    let panel_y = (DESIGN_H - panel_h) / 2.0;
+    theme::draw_panel(
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        12.0,
+        theme::PANEL_BG,
+        theme::PANEL_BORDER,
+    );
+    let cx = panel_x + panel_w / 2.0;
+
+    theme::draw_text_centered(font, "ゲーム終了", cx, panel_y + 44.0, 26, theme::TEXT_BR);
+    theme::draw_text_centered(font, "Game Over", cx, panel_y + 62.0, 12, theme::TEXT_DIM);
 
     let mut rankings: Vec<(usize, i32)> = state
         .scores
@@ -1069,31 +1421,95 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         .collect();
     rankings.sort_by_key(|r| std::cmp::Reverse(r.1));
 
+    // 順位の色（金・銀・銅・その他）
+    let rank_colors = [
+        theme::rgb_pub(0xe8c84a),
+        theme::rgb_pub(0xb8c4cc),
+        theme::rgb_pub(0xc48c60),
+        theme::rgb_pub(0x708090),
+    ];
+
+    let row_x = panel_x + 40.0;
+    let row_w = panel_w - 80.0;
+    let row_h = 48.0;
+    let row_gap = 10.0;
+    let mut ry = panel_y + 92.0;
+
     for (rank, (player_idx, score)) in rankings.iter().enumerate() {
         let is_me = *player_idx == state.my_seat;
-        let color = if is_me {
-            Color::new(1.0, 0.9, 0.3, 1.0)
+        let rc = rank_colors[rank.min(3)];
+
+        let (fill, border) = if is_me {
+            (theme::rgba(0xc8a227, 0.07), theme::rgba(0xc8a227, 0.20))
         } else {
-            WHITE
+            (
+                Color::new(1.0, 1.0, 1.0, 0.03),
+                Color::new(1.0, 1.0, 1.0, 0.05),
+            )
         };
-        let name = state.player_labels[*player_idx].name();
+        theme::draw_rounded_rect(row_x, ry, row_w, row_h, 6.0, fill);
+        theme::draw_rounded_rect_lines(row_x, ry, row_w, row_h, 6.0, 1.0, border);
+
+        // 順位
         draw_jp_text(
             font,
-            &format!("{}位: {} {}点", rank + 1, name, score),
-            440.0,
-            330.0 + rank as f32 * 40.0,
+            &format!("{}", rank + 1),
+            row_x + 16.0,
+            ry + 32.0,
             24,
-            color,
+            rc,
         );
+        draw_jp_text(font, "位", row_x + 34.0, ry + 32.0, 11, rc);
+
+        // 名前
+        let name = state.player_labels[*player_idx].name();
+        draw_jp_text(font, &name, row_x + 64.0, ry + 30.0, 14, theme::TEXT);
+
+        // バー
+        let bar_x = row_x + 300.0;
+        let bar_w = 130.0;
+        draw_rectangle(
+            bar_x,
+            ry + row_h / 2.0 - 2.0,
+            bar_w,
+            4.0,
+            theme::rgba(0xffffff, 0.07),
+        );
+        let fill_w = (bar_w * (*score as f32 / 50000.0).clamp(0.05, 1.0)).max(6.0);
+        draw_rectangle(bar_x, ry + row_h / 2.0 - 2.0, fill_w, 4.0, rc);
+
+        // 得点
+        let pts = format!("{}点", format_score(*score));
+        let pw = theme::measure_scaled(font, &pts, 17).width;
+        draw_jp_text(font, &pts, row_x + row_w - pw - 8.0, ry + 32.0, 17, rc);
+
+        ry += row_h + row_gap;
     }
 
-    draw_jp_text(
+    // もう一度ボタン
+    let btn_w = 200.0;
+    let btn_h = 50.0;
+    let btn_x = cx - btn_w / 2.0;
+    let btn_y = panel_y + panel_h - btn_h - 24.0;
+    theme::draw_gradient_button(
+        btn_x,
+        btn_y,
+        btn_w,
+        btn_h,
+        8.0,
+        theme::rgb_pub(0x9a7a1a),
+        theme::rgb_pub(0x6a5210),
+        theme::GOLD,
+        2.0,
+    );
+    theme::draw_text_centered(font, "もう一度", cx, btn_y + 26.0, 16, theme::GOLD_LT);
+    theme::draw_text_centered(
         font,
-        "クリックで新しいゲーム",
-        480.0,
-        530.0,
-        FONT_SIZE,
-        Color::new(0.8, 0.8, 0.8, 0.7),
+        "Play Again",
+        cx,
+        btn_y + 40.0,
+        9,
+        theme::rgba(0xe8c84a, 0.65),
     );
 }
 
@@ -1122,152 +1538,250 @@ impl SetupButton {
     }
 }
 
+// 設定画面のレイアウト定数（描画と入力判定で共有する）
+const SETUP_PANEL_W: f32 = 980.0;
+const SETUP_PANEL_Y: f32 = 56.0;
+const SETUP_PANEL_H: f32 = 612.0;
+const SETUP_CARD_PAD: f32 = 40.0;
+const SETUP_CARD_GAP: f32 = 20.0;
+const SETUP_CARD_Y: f32 = 142.0;
+const SETUP_CARD_H: f32 = 348.0;
+const SETUP_OPT_H: f32 = 28.0;
+const SETUP_OPT_STEP: f32 = 32.0;
+
+// CPU カードの表示ラベル
+const SETUP_WINDS: [&str; 3] = ["南", "西", "北"];
+const SETUP_CPU_JP: [&str; 3] = ["下家", "対面", "上家"];
+const SETUP_CPU_EN: [&str; 3] = ["CPU 1", "CPU 2", "CPU 3"];
+const STRENGTH_LABELS: [(&str, &str); 3] = [("弱い", "Easy"), ("普通", "Normal"), ("強い", "Hard")];
+const PERSONALITY_LABELS: [(&str, &str); 4] = [
+    ("バランス", "Balanced"),
+    ("スピード", "Speedy"),
+    ("高得点", "HighValue"),
+    ("守備的", "Defensive"),
+];
+
+fn setup_panel_x() -> f32 {
+    (DESIGN_W - SETUP_PANEL_W) / 2.0
+}
+
+fn setup_card_w() -> f32 {
+    (SETUP_PANEL_W - 2.0 * SETUP_CARD_PAD - 2.0 * SETUP_CARD_GAP) / 3.0
+}
+
+fn setup_card_x(i: usize) -> f32 {
+    setup_panel_x() + SETUP_CARD_PAD + i as f32 * (setup_card_w() + SETUP_CARD_GAP)
+}
+
+fn setup_opt_rect(cpu_idx: usize, base_offset: f32, opt_idx: usize) -> SetupButton {
+    let card_x = setup_card_x(cpu_idx);
+    SetupButton {
+        x: card_x + 14.0,
+        y: SETUP_CARD_Y + base_offset + opt_idx as f32 * SETUP_OPT_STEP,
+        w: setup_card_w() - 28.0,
+        h: SETUP_OPT_H,
+    }
+}
+
+const SETUP_STR_OFFSET: f32 = 84.0;
+const SETUP_PERS_OFFSET: f32 = 210.0;
+
+fn setup_start_rect() -> SetupButton {
+    let y = SETUP_CARD_Y + SETUP_CARD_H + 18.0;
+    SetupButton {
+        x: DESIGN_W / 2.0 - 120.0,
+        y,
+        w: 240.0,
+        h: 56.0,
+    }
+}
+
+fn setup_online_rect() -> SetupButton {
+    let s = setup_start_rect();
+    SetupButton {
+        x: DESIGN_W / 2.0 - 110.0,
+        y: s.y + s.h + 12.0,
+        w: 220.0,
+        h: 38.0,
+    }
+}
+
+/// 設定画面のオプションボタンを 1 個描画する。
+fn draw_setup_option(font: Option<&Font>, btn: &SetupButton, jp: &str, en: &str, selected: bool) {
+    let (fill, border, text_color) = if selected {
+        (theme::rgba(0xc8a227, 0.14), theme::GOLD_DK, theme::GOLD_LT)
+    } else {
+        (
+            Color::new(1.0, 1.0, 1.0, 0.04),
+            Color::new(1.0, 1.0, 1.0, 0.07),
+            theme::TEXT_DIM,
+        )
+    };
+    theme::draw_rounded_rect(btn.x, btn.y, btn.w, btn.h, 4.0, fill);
+    theme::draw_rounded_rect_lines(btn.x, btn.y, btn.w, btn.h, 4.0, 1.0, border);
+    draw_jp_text(font, jp, btn.x + 12.0, btn.y + 18.0, 13, text_color);
+    let ew = theme::measure_scaled(font, en, 10).width;
+    draw_jp_text(
+        font,
+        en,
+        btn.x + btn.w - ew - 12.0,
+        btn.y + 17.0,
+        10,
+        theme::rgba(0x7a9880, 0.65),
+    );
+}
+
 /// 設定画面を描画する
 fn draw_setup(state: &GameState, font: Option<&Font>) {
+    draw_setup_background();
     let setup = &state.setup_state;
+    let panel_x = setup_panel_x();
 
-    // 背景パネル
-    draw_rectangle(190.0, 80.0, 900.0, 640.0, Color::new(0.0, 0.0, 0.0, 0.85));
-    draw_rectangle_lines(
-        190.0,
-        80.0,
-        900.0,
-        640.0,
-        2.0,
-        Color::new(0.5, 0.5, 0.5, 1.0),
+    // パネル背景
+    theme::draw_panel(
+        panel_x,
+        SETUP_PANEL_Y,
+        SETUP_PANEL_W,
+        SETUP_PANEL_H,
+        12.0,
+        theme::PANEL_BG,
+        theme::PANEL_BORDER,
     );
 
     // タイトル
-    draw_jp_text(font, "対局設定", 540.0, 130.0, 36, WHITE);
+    let cx = DESIGN_W / 2.0;
+    theme::draw_text_centered(
+        font,
+        "対局設定",
+        cx - 36.0,
+        SETUP_PANEL_Y + 50.0,
+        26,
+        theme::TEXT_BR,
+    );
+    draw_jp_text(
+        font,
+        "Game Setup",
+        cx + 24.0,
+        SETUP_PANEL_Y + 50.0,
+        13,
+        theme::TEXT_DIM,
+    );
 
-    let cpu_names = ["下家 (CPU1)", "対面 (CPU2)", "上家 (CPU3)"];
-    let col_x = [250.0, 520.0, 790.0]; // 3列の左端X座標
+    // CPU カード
+    let card_w = setup_card_w();
+    for cpu_idx in 0..3 {
+        let card_x = setup_card_x(cpu_idx);
+        theme::draw_rounded_rect(
+            card_x,
+            SETUP_CARD_Y,
+            card_w,
+            SETUP_CARD_H,
+            8.0,
+            theme::rgba(0xffffff, 0.03),
+        );
+        theme::draw_rounded_rect_lines(
+            card_x,
+            SETUP_CARD_Y,
+            card_w,
+            SETUP_CARD_H,
+            8.0,
+            1.0,
+            theme::BORDER,
+        );
 
-    for (cpu_idx, &name) in cpu_names.iter().enumerate() {
-        let cx = col_x[cpu_idx];
-        let base_y = 180.0;
-
-        // CPU名（ベースライン基準なので +24 で文字下端を揃える）
+        // ヘッダー：風リング＋名前
+        let ring_cx = card_x + 16.0 + 18.0;
+        let ring_cy = SETUP_CARD_Y + 16.0 + 18.0;
+        draw_circle(ring_cx, ring_cy, 18.0, theme::rgba(0x9a7a1a, 0.30));
+        draw_circle_lines(ring_cx, ring_cy, 18.0, 1.5, theme::GOLD_DK);
+        theme::draw_text_centered(
+            font,
+            SETUP_WINDS[cpu_idx],
+            ring_cx,
+            ring_cy + 6.0,
+            16,
+            theme::GOLD_LT,
+        );
         draw_jp_text(
             font,
-            name,
-            cx + 30.0,
-            base_y + 24.0,
-            24,
-            Color::new(1.0, 0.9, 0.3, 1.0),
+            SETUP_CPU_JP[cpu_idx],
+            card_x + 56.0,
+            SETUP_CARD_Y + 28.0,
+            14,
+            theme::TEXT,
+        );
+        draw_jp_text(
+            font,
+            SETUP_CPU_EN[cpu_idx],
+            card_x + 56.0,
+            SETUP_CARD_Y + 44.0,
+            10,
+            theme::TEXT_DIM,
         );
 
         // 強さ
         draw_jp_text(
             font,
-            "強さ:",
-            cx,
-            base_y + 70.0,
-            FONT_SIZE,
-            Color::new(0.8, 0.8, 0.8, 1.0),
+            "強さ",
+            card_x + 14.0,
+            SETUP_CARD_Y + 76.0,
+            10,
+            theme::TEXT_DIM,
         );
-        for level_idx in 0..SetupState::level_count() {
-            let btn_y = base_y + 80.0 + level_idx as f32 * 42.0;
-            let selected = setup.cpu_levels[cpu_idx] == level_idx;
-            let bg = if selected {
-                Color::new(0.2, 0.5, 0.2, 1.0)
-            } else {
-                Color::new(0.25, 0.25, 0.25, 1.0)
-            };
-            draw_rectangle(cx, btn_y, 200.0, 34.0, bg);
-            draw_rectangle_lines(cx, btn_y, 200.0, 34.0, 1.0, Color::new(0.5, 0.5, 0.5, 1.0));
-            let label = SetupState::level_name(level_idx);
-            // ボタン(34px)内でフォント(20px)を垂直中央: btn_y + (34+20)/2 = btn_y + 24
-            draw_jp_text(font, label, cx + 10.0, btn_y + 24.0, FONT_SIZE, WHITE);
+        for (level_idx, &(jp, en)) in STRENGTH_LABELS.iter().enumerate() {
+            let btn = setup_opt_rect(cpu_idx, SETUP_STR_OFFSET, level_idx);
+            draw_setup_option(font, &btn, jp, en, setup.cpu_levels[cpu_idx] == level_idx);
         }
 
         // 性格
         draw_jp_text(
             font,
-            "性格:",
-            cx,
-            base_y + 230.0,
-            FONT_SIZE,
-            Color::new(0.8, 0.8, 0.8, 1.0),
+            "性格",
+            card_x + 14.0,
+            SETUP_CARD_Y + 202.0,
+            10,
+            theme::TEXT_DIM,
         );
-        for pers_idx in 0..SetupState::personality_count() {
-            let btn_y = base_y + 240.0 + pers_idx as f32 * 42.0;
-            let selected = setup.cpu_personalities[cpu_idx] == pers_idx;
-            let bg = if selected {
-                Color::new(0.2, 0.3, 0.6, 1.0)
-            } else {
-                Color::new(0.25, 0.25, 0.25, 1.0)
-            };
-            draw_rectangle(cx, btn_y, 200.0, 34.0, bg);
-            draw_rectangle_lines(cx, btn_y, 200.0, 34.0, 1.0, Color::new(0.5, 0.5, 0.5, 1.0));
-            let label = SetupState::personality_name(pers_idx);
-            draw_jp_text(font, label, cx + 10.0, btn_y + 24.0, FONT_SIZE, WHITE);
+        for (pers_idx, &(jp, en)) in PERSONALITY_LABELS.iter().enumerate() {
+            let btn = setup_opt_rect(cpu_idx, SETUP_PERS_OFFSET, pers_idx);
+            draw_setup_option(
+                font,
+                &btn,
+                jp,
+                en,
+                setup.cpu_personalities[cpu_idx] == pers_idx,
+            );
         }
     }
 
-    // 対局開始ボタン
-    let start_btn = SetupButton {
-        x: 490.0,
-        y: 630.0,
-        w: 300.0,
-        h: 56.0,
-    };
-    draw_rectangle(
-        start_btn.x,
-        start_btn.y,
-        start_btn.w,
-        start_btn.h,
-        Color::new(0.6, 0.15, 0.15, 1.0),
-    );
-    draw_rectangle_lines(
-        start_btn.x,
-        start_btn.y,
-        start_btn.w,
-        start_btn.h,
+    // 対局開始ボタン（ゴールド）
+    let s = setup_start_rect();
+    theme::draw_gradient_button(
+        s.x,
+        s.y,
+        s.w,
+        s.h,
+        8.0,
+        theme::rgb_pub(0x9a7a1a),
+        theme::rgb_pub(0x6a5210),
+        theme::GOLD,
         2.0,
-        Color::new(0.9, 0.3, 0.3, 1.0),
     );
-    // ボタン(56px)内でフォント(28px)を垂直中央: btn_y + (56+28)/2 = btn_y + 38
-    draw_jp_text(
+    theme::draw_text_centered(font, "対局開始", cx, s.y + 26.0, 20, theme::GOLD_LT);
+    theme::draw_text_centered(
         font,
-        "対局開始",
-        start_btn.x + 80.0,
-        start_btn.y + 38.0,
-        28,
-        WHITE,
+        "Start Game",
+        cx,
+        s.y + 42.0,
+        9,
+        theme::rgba(0xe8c84a, 0.65),
     );
 
     // オンライン対戦ボタン
-    let online_btn = SetupButton {
-        x: 490.0,
-        y: 700.0,
-        w: 300.0,
-        h: 40.0,
-    };
-    draw_rectangle(
-        online_btn.x,
-        online_btn.y,
-        online_btn.w,
-        online_btn.h,
-        Color::new(0.15, 0.25, 0.5, 1.0),
-    );
-    draw_rectangle_lines(
-        online_btn.x,
-        online_btn.y,
-        online_btn.w,
-        online_btn.h,
-        2.0,
-        Color::new(0.3, 0.5, 0.9, 1.0),
-    );
-    // ボタン(40px)内でフォント(22px)を垂直中央: btn_y + (40+22)/2 = btn_y + 31
-    draw_jp_text(
-        font,
-        "オンライン対戦",
-        online_btn.x + 73.0,
-        online_btn.y + 31.0,
-        22,
-        WHITE,
-    );
+    let o = setup_online_rect();
+    theme::draw_rounded_rect(o.x, o.y, o.w, o.h, 6.0, theme::rgba(0xffffff, 0.05));
+    theme::draw_rounded_rect_lines(o.x, o.y, o.w, o.h, 6.0, 1.0, theme::rgba(0xc8a227, 0.3));
+    theme::draw_text_centered(font, "オンライン対戦", cx, o.y + 24.0, 14, theme::TEXT);
 }
 
 /// 設定画面での操作
@@ -1286,33 +1800,18 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
 
     let (mx, my) = mouse_position_design();
     let setup = &mut state.setup_state;
-    let col_x = [250.0, 520.0, 790.0];
-    let base_y = 180.0;
 
-    for (cpu_idx, &cx) in col_x.iter().enumerate() {
+    for cpu_idx in 0..3 {
         // 強さボタン
         for level_idx in 0..SetupState::level_count() {
-            let btn = SetupButton {
-                x: cx,
-                y: base_y + 80.0 + level_idx as f32 * 42.0,
-                w: 200.0,
-                h: 34.0,
-            };
-            if btn.contains(mx, my) {
+            if setup_opt_rect(cpu_idx, SETUP_STR_OFFSET, level_idx).contains(mx, my) {
                 setup.cpu_levels[cpu_idx] = level_idx;
                 return None;
             }
         }
-
         // 性格ボタン
         for pers_idx in 0..SetupState::personality_count() {
-            let btn = SetupButton {
-                x: cx,
-                y: base_y + 240.0 + pers_idx as f32 * 42.0,
-                w: 200.0,
-                h: 34.0,
-            };
-            if btn.contains(mx, my) {
+            if setup_opt_rect(cpu_idx, SETUP_PERS_OFFSET, pers_idx).contains(mx, my) {
                 setup.cpu_personalities[cpu_idx] = pers_idx;
                 return None;
             }
@@ -1320,26 +1819,14 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
     }
 
     // 対局開始ボタン
-    let start_btn = SetupButton {
-        x: 490.0,
-        y: 630.0,
-        w: 300.0,
-        h: 56.0,
-    };
-    if start_btn.contains(mx, my) {
+    if setup_start_rect().contains(mx, my) {
         let configs = setup.build_configs();
         state.phase = GamePhase::WaitingForStart;
         return Some(SetupAction::StartLocal(configs));
     }
 
     // オンライン対戦ボタン
-    let online_btn = SetupButton {
-        x: 490.0,
-        y: 700.0,
-        w: 300.0,
-        h: 40.0,
-    };
-    if online_btn.contains(mx, my) {
+    if setup_online_rect().contains(mx, my) {
         return Some(SetupAction::GoOnline);
     }
 

@@ -143,7 +143,7 @@ async fn main() {
     let mut game_state = GameState::new();
 
     loop {
-        clear_background(Color::from_rgba(0, 100, 0, 255));
+        clear_background(Color::from_rgba(6, 14, 9, 255));
 
         // 設計座標系(DESIGN_W×DESIGN_H)を実キャンバスに合わせて拡大縮小して描画する
         renderer::set_design_camera();

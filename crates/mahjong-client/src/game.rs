@@ -22,6 +22,22 @@ pub struct WinResult {
     pub win_is_tsumo: bool,
     pub uradora_indicators: Vec<Tile>,
     pub result_message: String,
+    /// 和了者の表示名（例: 「東家」「あなた」）
+    pub winner_name: String,
+    /// 放銃者の表示名（ツモの場合は None）
+    pub loser_name: Option<String>,
+    /// 成立した役の一覧（役名, 翻数）
+    pub yaku: Vec<(String, u32)>,
+    /// 翻数
+    pub han: u32,
+    /// 符
+    pub fu: u32,
+    /// 和了点
+    pub score_points: i32,
+    /// 点数等級名（満貫・跳満など。通常は空）
+    pub rank_name: String,
+    /// この和了で受け取った供託リーチ棒の本数
+    pub riichi_sticks: usize,
 }
 
 /// 捨て牌の表示情報
@@ -256,25 +272,6 @@ impl SetupState {
         SetupState {
             cpu_levels: [1, 1, 1],        // 全員 Normal
             cpu_personalities: [0, 1, 2], // Balanced, Speedy, HighValue
-        }
-    }
-
-    pub fn level_name(idx: usize) -> &'static str {
-        match idx {
-            0 => "Weak",
-            1 => "Normal",
-            2 => "Strong",
-            _ => "Normal",
-        }
-    }
-
-    pub fn personality_name(idx: usize) -> &'static str {
-        match idx {
-            0 => "Balanced",
-            1 => "Speedy",
-            2 => "HighValue",
-            3 => "Defensive",
-            _ => "Balanced",
         }
     }
 
@@ -773,7 +770,19 @@ impl GameState {
 
                 self.update_other_player_hands_on_win(&player_hands, winner);
 
-                let winner_name = self.wind_to_name(winner);
+                let winner_is_me = self.relative_player_index(winner) == 0;
+                let winner_name = if winner_is_me {
+                    "あなた".to_string()
+                } else {
+                    self.wind_to_name(winner).to_string()
+                };
+                let loser_name = loser.map(|l| {
+                    if self.relative_player_index(l) == 0 {
+                        "あなた".to_string()
+                    } else {
+                        self.wind_to_name(l).to_string()
+                    }
+                });
                 let win_type = if loser.is_some() { "ロン" } else { "ツモ" };
                 let loser_text = if let Some(l) = loser {
                     format!("（{}が放銃）", self.wind_to_name(l))
@@ -819,6 +828,14 @@ impl GameState {
                     win_is_tsumo: loser.is_none(),
                     uradora_indicators,
                     result_message: msg,
+                    winner_name,
+                    loser_name,
+                    yaku: yaku_list.clone(),
+                    han,
+                    fu,
+                    score_points,
+                    rank_name: rank_name.clone(),
+                    riichi_sticks,
                 });
 
                 // 最初のRoundWonでフェーズ遷移・表示を初期化
@@ -875,6 +892,11 @@ impl GameState {
                 self.self_kan_options.clear();
             }
         }
+    }
+
+    /// 現在表示中の和了結果ページを返す（流局時は None）。
+    pub fn current_win_result(&self) -> Option<&WinResult> {
+        self.win_results.get(self.win_result_index)
     }
 
     /// 現在の win_result_index が指すページを GameState の表示用フィールドに反映する

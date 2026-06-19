@@ -6,7 +6,9 @@ use macroquad::prelude::*;
 use mahjong_core::tile::Tile;
 use mahjong_server::protocol::{AvailableCall, ClientAction};
 
-use super::{AGARI_FONT, FONT_SIZE, SMALL_FONT, TileTextures, draw_jp_text, draw_tile_sprite};
+use super::{
+    AGARI_FONT, FONT_SIZE, SMALL_FONT, TileTextures, draw_jp_text, draw_tile_sprite, theme,
+};
 use crate::game::GameState;
 
 // ─── チー／ポン選択UI定数 ─────────────────────────────────────────────────────
@@ -46,6 +48,57 @@ const AGARI_BTN_GAP: f32 = 8.0;
 
 fn hit_rect(mx: f32, my: f32, x: f32, y: f32, w: f32, h: f32) -> bool {
     mx >= x && mx <= x + w && my >= y && my <= y + h
+}
+
+/// 鳴きボタンの種類ごとの配色。
+enum CallBtnKind {
+    Pon,
+    Chi,
+    Kan,
+    Pass,
+}
+
+/// 鳴き／パスボタンを 1 個描画する。
+fn draw_call_button(
+    font: Option<&Font>,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    label: &str,
+    kind: CallBtnKind,
+) {
+    let (top, bottom, border) = match kind {
+        CallBtnKind::Pon | CallBtnKind::Kan => (
+            theme::rgb_pub(0x1a3a99),
+            theme::rgb_pub(0x0f2260),
+            theme::rgb_pub(0x4466cc),
+        ),
+        CallBtnKind::Chi => (
+            theme::rgb_pub(0x1a6633),
+            theme::rgb_pub(0x0f4422),
+            theme::rgb_pub(0x44aa66),
+        ),
+        CallBtnKind::Pass => (
+            theme::rgba(0x232323, 0.9),
+            theme::rgba(0x161616, 0.9),
+            theme::rgba(0xffffff, 0.1),
+        ),
+    };
+    theme::draw_gradient_button(x, y, w, h, 6.0, top, bottom, border, 1.0);
+    let color = if matches!(kind, CallBtnKind::Pass) {
+        theme::TEXT_DIM
+    } else {
+        WHITE
+    };
+    theme::draw_text_centered(
+        font,
+        label,
+        x + w / 2.0,
+        y + h / 2.0 + 6.0,
+        FONT_SIZE,
+        color,
+    );
 }
 
 // ─── 公開型 ──────────────────────────────────────────────────────────────────
@@ -152,21 +205,35 @@ pub(super) fn draw_action_buttons(
         } else {
             AGARI_BTN_Y
         };
-        let riichi_bg = Color::new(0.8, 0.2, 0.2, 1.0);
-        draw_rectangle(AGARI_BTN_X, riichi_y, RIICHI_BTN_W, RIICHI_BTN_H, riichi_bg);
-        draw_rectangle_lines(
+        let (top, bottom, border) = if state.riichi_selection_mode {
+            (
+                theme::rgb_pub(0xcc2222),
+                theme::rgb_pub(0x881111),
+                theme::RED_LT,
+            )
+        } else {
+            (
+                theme::rgb_pub(0x8a1a1a),
+                theme::rgb_pub(0x5a0f0f),
+                theme::rgba(0xdc3c3c, 0.45),
+            )
+        };
+        theme::draw_gradient_button(
             AGARI_BTN_X,
             riichi_y,
             RIICHI_BTN_W,
             RIICHI_BTN_H,
-            2.0,
-            WHITE,
+            6.0,
+            top,
+            bottom,
+            border,
+            1.0,
         );
-        draw_jp_text(
+        theme::draw_text_centered(
             font,
             "リーチ",
-            AGARI_BTN_X + 8.0,
-            riichi_y + RIICHI_BTN_H - 8.0,
+            AGARI_BTN_X + RIICHI_BTN_W / 2.0,
+            riichi_y + RIICHI_BTN_H / 2.0 + 6.0,
             SMALL_FONT,
             WHITE,
         );
@@ -183,13 +250,21 @@ pub(super) fn draw_action_buttons(
         let x = 720.0 + idx as f32 * 110.0;
         const KAN_BTN_W: f32 = 100.0;
         const KAN_BTN_H: f32 = 40.0;
-        let kan_bg = Color::new(0.1, 0.3, 0.8, 1.0);
-        draw_rectangle(x, 670.0, KAN_BTN_W, KAN_BTN_H, kan_bg);
-        draw_rectangle_lines(x, 670.0, KAN_BTN_W, KAN_BTN_H, 2.0, WHITE);
-        draw_jp_text(
+        theme::draw_gradient_button(
+            x,
+            670.0,
+            KAN_BTN_W,
+            KAN_BTN_H,
+            6.0,
+            theme::rgb_pub(0x1a3a99),
+            theme::rgb_pub(0x0f2260),
+            theme::rgb_pub(0x4466cc),
+            1.0,
+        );
+        theme::draw_text_centered(
             font,
             &format!("{tile}カン"),
-            x + 10.0,
+            x + KAN_BTN_W / 2.0,
             697.0,
             SMALL_FONT,
             WHITE,
@@ -228,11 +303,25 @@ pub(super) fn draw_action_buttons(
 
 /// 和了ボタンを描画する（ロン・ツモ共通）。x/y は左上座標。
 fn draw_agari_button(font: Option<&Font>, x: f32, y: f32) {
-    let bg = Color::new(0.9, 0.05, 0.05, 1.0);
-    let border = Color::new(1.0, 0.85, 0.0, 1.0);
-    draw_rectangle(x, y, AGARI_BTN_W, AGARI_BTN_H, bg);
-    draw_rectangle_lines(x, y, AGARI_BTN_W, AGARI_BTN_H, 4.0, border);
-    draw_jp_text(font, "和　了", x + 50.0, y + 42.0, AGARI_FONT, WHITE);
+    theme::draw_gradient_button(
+        x,
+        y,
+        AGARI_BTN_W,
+        AGARI_BTN_H,
+        6.0,
+        theme::rgb_pub(0xc42020),
+        theme::rgb_pub(0x7a1010),
+        theme::GOLD,
+        2.0,
+    );
+    theme::draw_text_centered(
+        font,
+        "和了",
+        x + AGARI_BTN_W / 2.0,
+        y + 40.0,
+        AGARI_FONT,
+        WHITE,
+    );
 }
 
 // ─── 鳴き確認オーバーレイ ────────────────────────────────────────────────────
@@ -301,20 +390,14 @@ fn draw_call_overlay(
     }
 
     // パネル背景
-    draw_rectangle(
+    theme::draw_panel(
         panel_x,
         panel_y,
         panel_w,
         panel_h,
-        Color::new(0.0, 0.0, 0.0, 0.88),
-    );
-    draw_rectangle_lines(
-        panel_x,
-        panel_y,
-        panel_w,
-        panel_h,
-        2.0,
-        Color::new(1.0, 0.85, 0.3, 1.0),
+        8.0,
+        theme::rgba(0x050e08, 0.95),
+        theme::GOLD_DK,
     );
 
     draw_jp_text(
@@ -323,7 +406,7 @@ fn draw_call_overlay(
         panel_x + pad,
         panel_y + 30.0,
         FONT_SIZE,
-        Color::new(1.0, 0.95, 0.5, 1.0),
+        theme::GOLD_LT,
     );
 
     // 捨て牌アイコン
@@ -340,8 +423,6 @@ fn draw_call_overlay(
         );
     }
 
-    let call_btn_bg = Color::new(0.8, 0.2, 0.2, 1.0);
-    let pass_btn_bg = Color::new(0.35, 0.35, 0.35, 1.0);
     let mut btn_idx = 0;
 
     for call in &state.available_calls {
@@ -352,9 +433,7 @@ fn draw_call_overlay(
         match call {
             AvailableCall::Ron => unreachable!(),
             AvailableCall::Pon { options } => {
-                draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
-                draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
-                draw_jp_text(font, "ポン", x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
+                draw_call_button(font, x, base_y, btn_w, btn_h, "ポン", CallBtnKind::Pon);
                 if clicked && result.is_none() && hit_rect(mx, my, x, base_y, btn_w, btn_h) {
                     result = if options.len() == 1 {
                         Some(OverlayClick::Action(ClientAction::Pon {
@@ -370,9 +449,7 @@ fn draw_call_overlay(
                 }
             }
             AvailableCall::Daiminkan => {
-                draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
-                draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
-                draw_jp_text(font, "カン", x + 18.0, base_y + 27.0, SMALL_FONT, WHITE);
+                draw_call_button(font, x, base_y, btn_w, btn_h, "カン", CallBtnKind::Kan);
                 if clicked
                     && result.is_none()
                     && hit_rect(mx, my, x, base_y, btn_w, btn_h)
@@ -384,9 +461,7 @@ fn draw_call_overlay(
                 }
             }
             AvailableCall::Chi { options } => {
-                draw_rectangle(x, base_y, btn_w, btn_h, call_btn_bg);
-                draw_rectangle_lines(x, base_y, btn_w, btn_h, 2.0, WHITE);
-                draw_jp_text(font, "チー", x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
+                draw_call_button(font, x, base_y, btn_w, btn_h, "チー", CallBtnKind::Chi);
                 if clicked && result.is_none() && hit_rect(mx, my, x, base_y, btn_w, btn_h) {
                     result = if options.len() == 1 {
                         Some(OverlayClick::Action(ClientAction::Chi {
@@ -407,9 +482,15 @@ fn draw_call_overlay(
 
     // パスボタン
     let pass_x = base_x + btn_idx as f32 * (btn_w + btn_spacing);
-    draw_rectangle(pass_x, base_y, btn_w, btn_h, pass_btn_bg);
-    draw_rectangle_lines(pass_x, base_y, btn_w, btn_h, 2.0, WHITE);
-    draw_jp_text(font, "パス", pass_x + 28.0, base_y + 27.0, FONT_SIZE, WHITE);
+    draw_call_button(
+        font,
+        pass_x,
+        base_y,
+        btn_w,
+        btn_h,
+        "パス",
+        CallBtnKind::Pass,
+    );
     if clicked && result.is_none() && hit_rect(mx, my, pass_x, base_y, btn_w, btn_h) {
         result = Some(OverlayClick::Action(ClientAction::Pass));
     }
