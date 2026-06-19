@@ -7,9 +7,13 @@ use mahjong_core::tile::Tile;
 use mahjong_server::protocol::{AvailableCall, ClientAction};
 
 use super::{
-    AGARI_FONT, FONT_SIZE, SMALL_FONT, TileTextures, draw_jp_text, draw_tile_sprite, theme,
+    AGARI_FONT, DESIGN_W, FONT_SIZE, SMALL_FONT, TileTextures, draw_jp_text, draw_tile_sprite,
+    theme,
 };
 use crate::game::GameState;
+
+/// 手牌の下に表示する状態ヒントの Y 座標（中央の捨て牌と重ならないよう手牌より下）。
+const HINT_Y: f32 = 772.0;
 
 // ─── チー／ポン選択UI定数 ─────────────────────────────────────────────────────
 
@@ -27,8 +31,9 @@ const CALL_BTN_SPACING: f32 = 10.0;
 const CALL_PANEL_PAD: f32 = 14.0;
 const CALL_PANEL_TILE_W: f32 = 44.0;
 const CALL_PANEL_TILE_H: f32 = 62.0;
-/// ノーロン時：鳴きパネル右端 X 座標（下家の手牌右端に合わせる）
-const CALL_PANEL_RIGHT_X_NO_RON: f32 = 820.0;
+/// ノーロン時：鳴き・和了ボタン群の右端 X 座標。
+/// 盤面を画面中央に揃えたため、中央の捨て牌（右端 ≈724）と重ならないよう右側に置く。
+const CALL_PANEL_RIGHT_X_NO_RON: f32 = 980.0;
 /// ノーロン時：鳴きパネル下端 Y 座標（手牌 y=680 のわずか上）
 const CALL_PANEL_BOTTOM_Y_NO_RON: f32 = 672.0;
 /// ノーロン時：鳴きパネルのボタン基準 Y 座標
@@ -40,7 +45,7 @@ const CALL_OVERLAY_PANEL_H: f32 = 96.0;
 
 const AGARI_BTN_W: f32 = 200.0;
 const AGARI_BTN_H: f32 = 60.0;
-const AGARI_BTN_X: f32 = CALL_PANEL_RIGHT_X_NO_RON - AGARI_BTN_W; // 620
+const AGARI_BTN_X: f32 = CALL_PANEL_RIGHT_X_NO_RON - AGARI_BTN_W; // 780
 const AGARI_BTN_Y: f32 = CALL_PANEL_BOTTOM_Y_NO_RON - AGARI_BTN_H; // 612
 const AGARI_BTN_GAP: f32 = 8.0;
 
@@ -149,34 +154,34 @@ pub(super) fn draw_action_buttons(
     }
 
     if !state.is_my_turn {
-        draw_jp_text(
+        theme::draw_text_centered(
             font,
             "他のプレイヤーの手番です...",
-            480.0,
-            640.0,
+            DESIGN_W / 2.0,
+            HINT_Y,
             FONT_SIZE,
-            Color::new(0.8, 0.8, 0.8, 0.7),
+            theme::TEXT_DIM,
         );
         return None;
     }
 
     if state.riichi_selection_mode {
-        draw_jp_text(
+        theme::draw_text_centered(
             font,
             "【リーチ】聴牌になる牌を選んで打牌",
-            330.0,
-            640.0,
+            DESIGN_W / 2.0,
+            HINT_Y,
             FONT_SIZE,
-            Color::new(1.0, 0.9, 0.3, 1.0),
+            theme::GOLD_LT,
         );
     } else if state.is_riichi {
-        draw_jp_text(
+        theme::draw_text_centered(
             font,
             "【リーチ中】自動ツモ切り",
-            400.0,
-            640.0,
+            DESIGN_W / 2.0,
+            HINT_Y,
             FONT_SIZE,
-            Color::new(1.0, 0.3, 0.3, 1.0),
+            theme::RED_LT,
         );
     }
 
@@ -245,14 +250,15 @@ pub(super) fn draw_action_buttons(
         }
     }
 
-    // 暗カンボタン
+    // 暗カンボタン（和了・リーチ列の上に積む）
+    const KAN_BTN_W: f32 = 100.0;
+    const KAN_BTN_H: f32 = 40.0;
+    const KAN_BTN_Y: f32 = 510.0;
     for (idx, tile) in state.self_kan_options.iter().enumerate() {
-        let x = 720.0 + idx as f32 * 110.0;
-        const KAN_BTN_W: f32 = 100.0;
-        const KAN_BTN_H: f32 = 40.0;
+        let x = AGARI_BTN_X + idx as f32 * (KAN_BTN_W + 10.0);
         theme::draw_gradient_button(
             x,
-            670.0,
+            KAN_BTN_Y,
             KAN_BTN_W,
             KAN_BTN_H,
             6.0,
@@ -265,34 +271,25 @@ pub(super) fn draw_action_buttons(
             font,
             &format!("{tile}カン"),
             x + KAN_BTN_W / 2.0,
-            697.0,
+            KAN_BTN_Y + KAN_BTN_H / 2.0 + 6.0,
             SMALL_FONT,
             WHITE,
         );
-        if clicked && result.is_none() && hit_rect(mx, my, x, 670.0, KAN_BTN_W, KAN_BTN_H) {
+        if clicked && result.is_none() && hit_rect(mx, my, x, KAN_BTN_Y, KAN_BTN_W, KAN_BTN_H) {
             result = Some(OverlayClick::Action(ClientAction::Kan {
                 tile_index: tile.get() as usize,
             }));
         }
     }
 
-    if state.riichi_selection_mode {
-        draw_jp_text(
-            font,
-            "黄色の牌だけがリーチ打牌できます。リーチボタンでも解除できます。",
-            100.0,
-            770.0,
-            SMALL_FONT,
-            Color::new(0.9, 0.9, 0.5, 0.8),
-        );
-    } else if !state.is_riichi {
-        draw_jp_text(
+    if !state.riichi_selection_mode && !state.is_riichi {
+        theme::draw_text_centered(
             font,
             "牌をクリックで選択、もう一度クリックで打牌",
-            100.0,
-            770.0,
+            DESIGN_W / 2.0,
+            HINT_Y,
             SMALL_FONT,
-            Color::new(0.8, 0.8, 0.8, 0.7),
+            theme::TEXT_DIM,
         );
     }
 

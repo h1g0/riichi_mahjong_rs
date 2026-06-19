@@ -32,9 +32,23 @@ const AGARI_FONT: u16 = 32;
 pub const DESIGN_W: f32 = 1280.0;
 pub const DESIGN_H: f32 = 800.0;
 
-/// 盤面の中心点 — 捨て牌・他家手牌の回転の軸
-const BOARD_CENTER_X: f32 = 500.0;
+/// 盤面の中心点 — 捨て牌・他家手牌の回転の軸（画面横中央に合わせる）
+const BOARD_CENTER_X: f32 = DESIGN_W / 2.0;
 const BOARD_CENTER_Y: f32 = 380.0;
+
+/// 自分の手牌の Y 座標（上端）
+pub const HAND_Y: f32 = 680.0;
+/// ツモ牌を手牌の右に離して置くときの間隔
+pub const DRAWN_GAP: f32 = 20.0;
+
+/// 自分の手牌（伏せ牌 `hand_len` 枚）を画面中央に揃えるための左端 X を返す。
+///
+/// ツモ牌は中央寄せの基準には含めず、手牌の右側に張り出す（一般的な配置）。
+/// 描画（[`draw_hand`]）とクリック判定（`GameState::handle_input`）で共有する。
+pub fn player_hand_start_x(hand_len: usize) -> f32 {
+    let hand_w = hand_len as f32 * TILE_W;
+    (DESIGN_W - hand_w) / 2.0
+}
 
 /// Camera2D の回転角度（度）— 自分(0°)、下家(-90°)、対面(180°)、上家(90°)
 const PLAYER_ROTATIONS: [f32; 4] = [0.0, -90.0, 180.0, 90.0];
@@ -528,7 +542,7 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
             14,
             theme::GOLD_LT,
         );
-        let score_label = format!("{}k", score / 1000);
+        let score_label = format_score(score);
         theme::draw_text_centered(
             font,
             &score_label,
@@ -563,23 +577,24 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
     let round_num = (state.round_number % 4) + 1;
 
     let round_text = format!("{}{}局", round_wind, round_num);
-    let remaining_text = format!("残 {}枚", state.remaining_tiles);
+    let remaining_text = format!("残{}枚", state.remaining_tiles);
 
+    // 局表示は小さく、残数表示を大きく強調する
     theme::draw_text_centered(
         font,
         &round_text,
         BOARD_CENTER_X,
-        BOARD_CENTER_Y + 2.0,
-        21,
-        theme::TEXT_BR,
+        BOARD_CENTER_Y - 8.0,
+        13,
+        theme::TEXT_DIM,
     );
     theme::draw_text_centered(
         font,
         &remaining_text,
         BOARD_CENTER_X,
-        BOARD_CENTER_Y + 22.0,
-        13,
-        theme::TEXT_DIM,
+        BOARD_CENTER_Y + 18.0,
+        21,
+        theme::TEXT_BR,
     );
 }
 
@@ -684,8 +699,8 @@ fn draw_badge(
 }
 
 fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
-    let hand_start_x = 100.0;
-    let hand_y = 680.0;
+    let hand_start_x = player_hand_start_x(state.hand.len());
+    let hand_y = HAND_Y;
 
     // 状態バッジ（フリテン・リーチ中・リーチ打牌選択中）
     let badge_y = hand_y - 26.0;
@@ -750,7 +765,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
     }
 
     if let Some(drawn) = &state.drawn {
-        let drawn_x = hand_start_x + state.hand.len() as f32 * TILE_W + 20.0;
+        let drawn_x = hand_start_x + state.hand.len() as f32 * TILE_W + DRAWN_GAP;
         let selected = state.selected_drawn;
         let riichi_selectable = state.riichi_selection_mode && state.riichi_selectable_drawn;
         let y_offset = if selected { -14.0 } else { 0.0 };

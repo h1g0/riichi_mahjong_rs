@@ -1297,12 +1297,12 @@ impl GameState {
 
         let (mx, my) = crate::renderer::mouse_position_design();
 
-        // 手牌クリック
-        let hand_start_x = 100.0;
-        let hand_y = 680.0;
+        // 手牌クリック（描画と同じ中央寄せ基準を使う）
+        let hand_len = self.hand.len();
+        let hand_start_x = crate::renderer::player_hand_start_x(hand_len);
+        let hand_y = crate::renderer::HAND_Y;
         let tile_w = 48.0;
         let tile_h = 68.0;
-        let hand_len = self.hand.len();
 
         for i in 0..hand_len {
             let x = hand_start_x + i as f32 * tile_w;
@@ -1333,7 +1333,7 @@ impl GameState {
         }
 
         if self.drawn.is_some() {
-            let drawn_x = hand_start_x + hand_len as f32 * tile_w + 20.0;
+            let drawn_x = hand_start_x + hand_len as f32 * tile_w + crate::renderer::DRAWN_GAP;
             if mx >= drawn_x && mx <= drawn_x + tile_w && my >= hand_y && my <= hand_y + tile_h {
                 if self.riichi_selection_mode && !self.riichi_selectable_drawn {
                     return None;
