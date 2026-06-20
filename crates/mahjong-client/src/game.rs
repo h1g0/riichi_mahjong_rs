@@ -558,6 +558,9 @@ impl GameState {
                 is_tsumogiri,
             } => {
                 self.last_discarder = Some(player);
+                // 新しい打牌が出たら、過去の鳴き打診で残った call_discarder を捨てる。
+                // （パスして鳴かなかった場合に古い値が残り、次の鳴き元判定を誤らせていた）
+                self.call_discarder = None;
                 let relative_idx = self.relative_player_index(player);
                 let is_riichi = self.pending_riichi_player == Some(player);
                 if is_riichi {
@@ -1522,6 +1525,30 @@ mod tests {
             call_type: CallType::Pon,
             called_tile: tile,
             tiles: vec![tile, tile],
+        });
+        assert!(state.discards[1][0].is_called);
+    }
+
+    #[test]
+    fn test_called_tile_marked_despite_stale_call_offer() {
+        let mut state = GameState::new();
+        state.seat_wind = Some(Wind::East);
+        // 過去の鳴き打診で call_discarder が残っている状況（パスした後など）
+        state.call_discarder = Some(Wind::North);
+
+        let tile = Tile::new(Tile::S5);
+        // 下家（南）が捨てる
+        state.handle_event(ServerEvent::TileDiscarded {
+            player: Wind::South,
+            tile,
+            is_tsumogiri: false,
+        });
+        // 対面（西）がチー → 古い call_discarder ではなく直前の打牌者を鳴き元とする
+        state.handle_event(ServerEvent::PlayerCalled {
+            player: Wind::West,
+            call_type: CallType::Chi,
+            called_tile: tile,
+            tiles: vec![Tile::new(Tile::S6), Tile::new(Tile::S7)],
         });
         assert!(state.discards[1][0].is_called);
     }
