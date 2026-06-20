@@ -1461,19 +1461,6 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         let name = state.player_labels[*player_idx].name(cpu_number);
         draw_jp_text(font, &name, row_x + 64.0, ry + 30.0, 14, theme::TEXT);
 
-        // バー
-        let bar_x = row_x + 300.0;
-        let bar_w = 130.0;
-        draw_rectangle(
-            bar_x,
-            ry + row_h / 2.0 - 2.0,
-            bar_w,
-            4.0,
-            theme::rgba(0xffffff, 0.07),
-        );
-        let fill_w = (bar_w * (*score as f32 / 50000.0).clamp(0.05, 1.0)).max(6.0);
-        draw_rectangle(bar_x, ry + row_h / 2.0 - 2.0, fill_w, 4.0, rc);
-
         // 得点
         let pts = format!("{}点", format_score(*score));
         let pw = theme::measure_scaled(font, &pts, 17).width;
