@@ -63,18 +63,40 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
     }
 }
 
-/// 角丸の塗りつぶし矩形。半透明色を渡すと角で僅かに重なるため、原則不透明色で使う。
+/// 中心 (cx, cy)・半径 r の四分円（扇形）を三角形ファンで塗る（a0 から 90 度）。
+fn fill_quarter_circle(cx: f32, cy: f32, r: f32, a0: f32, color: Color) {
+    use std::f32::consts::PI;
+    let a1 = a0 + PI / 2.0;
+    let segs = 8;
+    let center = vec2(cx, cy);
+    for i in 0..segs {
+        let t0 = a0 + (a1 - a0) * (i as f32 / segs as f32);
+        let t1 = a0 + (a1 - a0) * ((i + 1) as f32 / segs as f32);
+        draw_triangle(
+            center,
+            vec2(cx + r * t0.cos(), cy + r * t0.sin()),
+            vec2(cx + r * t1.cos(), cy + r * t1.sin()),
+            color,
+        );
+    }
+}
+
+/// 角丸の塗りつぶし矩形。
+///
+/// 四隅はフル円ではなく四分円（扇形）で塗るため、本体の帯と重ならない。
+/// これにより半透明色でも角でアルファが二重に乗らず、うっすら円が見えなくなる。
 pub fn draw_rounded_rect(x: f32, y: f32, w: f32, h: f32, radius: f32, color: Color) {
+    use std::f32::consts::PI;
     let r = radius.min(w / 2.0).min(h / 2.0);
     // 中央の縦帯（全高）＋ 左右の帯（角を除く高さ）で本体を塗る。
     draw_rectangle(x + r, y, w - 2.0 * r, h, color);
     draw_rectangle(x, y + r, r, h - 2.0 * r, color);
     draw_rectangle(x + w - r, y + r, r, h - 2.0 * r, color);
-    // 四隅
-    draw_circle(x + r, y + r, r, color);
-    draw_circle(x + w - r, y + r, r, color);
-    draw_circle(x + r, y + h - r, r, color);
-    draw_circle(x + w - r, y + h - r, r, color);
+    // 四隅（重なりを避けるため扇形で塗る）
+    fill_quarter_circle(x + r, y + r, r, PI, color); // 左上
+    fill_quarter_circle(x + w - r, y + r, r, PI * 1.5, color); // 右上
+    fill_quarter_circle(x + w - r, y + h - r, r, 0.0, color); // 右下
+    fill_quarter_circle(x + r, y + h - r, r, PI * 0.5, color); // 左下
 }
 
 /// 中心 (cx, cy)・半径 r の円弧（a0→a1 ラジアン）を線分で描く。
