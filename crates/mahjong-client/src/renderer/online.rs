@@ -5,8 +5,14 @@
 
 use macroquad::prelude::*;
 
-use super::draw_jp_text;
+use super::{DESIGN_W, draw_jp_text, theme};
 use crate::game::GameState;
+
+/// パネルのレイアウト（設定画面と揃える）
+const PANEL_X: f32 = 150.0;
+const PANEL_Y: f32 = 50.0;
+const PANEL_W: f32 = 980.0;
+const PANEL_H: f32 = 690.0;
 
 /// ボタン・入力欄の矩形
 struct Rect2 {
@@ -19,6 +25,10 @@ struct Rect2 {
 impl Rect2 {
     fn contains(&self, mx: f32, my: f32) -> bool {
         mx >= self.x && mx < self.x + self.w && my >= self.y && my < self.y + self.h
+    }
+
+    fn center_x(&self) -> f32 {
+        self.x + self.w / 2.0
     }
 }
 
@@ -91,62 +101,111 @@ pub enum OnlineLobbyAction {
     Leave,
 }
 
-fn draw_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool) {
-    let bg = if accent {
-        Color::new(0.6, 0.15, 0.15, 1.0)
-    } else {
-        Color::new(0.25, 0.25, 0.25, 1.0)
-    };
-    let border = if accent {
-        Color::new(0.9, 0.3, 0.3, 1.0)
-    } else {
-        Color::new(0.5, 0.5, 0.5, 1.0)
-    };
-    draw_rectangle(rect.x, rect.y, rect.w, rect.h, bg);
-    draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, border);
-    // ボタン内でフォント(24px)を垂直中央に: y + (h+24)/2
-    let text_w = label.chars().count() as f32 * 24.0;
-    draw_jp_text(
-        font,
-        label,
-        rect.x + (rect.w - text_w) / 2.0,
-        rect.y + (rect.h + 24.0) / 2.0,
-        24,
-        WHITE,
+/// オンライン画面共通のパネルを描画する（タイトル）。
+fn draw_online_panel(font: Option<&Font>, title: &str) {
+    super::draw_setup_background();
+    theme::draw_panel(
+        PANEL_X,
+        PANEL_Y,
+        PANEL_W,
+        PANEL_H,
+        12.0,
+        theme::PANEL_BG,
+        theme::PANEL_BORDER,
     );
+    let cx = DESIGN_W / 2.0;
+    theme::draw_text_centered(font, title, cx, PANEL_Y + 60.0, 26, theme::TEXT_BR);
+}
+
+fn draw_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool) {
+    if accent {
+        theme::draw_gradient_button(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            8.0,
+            theme::rgb_pub(0x9a7a1a),
+            theme::rgb_pub(0x6a5210),
+            theme::GOLD,
+            2.0,
+        );
+        theme::draw_text_centered(
+            font,
+            label,
+            rect.center_x(),
+            rect.y + rect.h / 2.0 + 7.0,
+            17,
+            theme::GOLD_LT,
+        );
+    } else {
+        theme::draw_rounded_rect(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            6.0,
+            theme::rgba(0xffffff, 0.05),
+        );
+        theme::draw_rounded_rect_lines(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            6.0,
+            1.0,
+            theme::rgba(0xc8a227, 0.3),
+        );
+        theme::draw_text_centered(
+            font,
+            label,
+            rect.center_x(),
+            rect.y + rect.h / 2.0 + 6.0,
+            15,
+            theme::TEXT,
+        );
+    }
 }
 
 fn draw_input_box(font: Option<&Font>, rect: &Rect2, text: &str, focused: bool) {
-    draw_rectangle(
+    theme::draw_rounded_rect(
         rect.x,
         rect.y,
         rect.w,
         rect.h,
-        Color::new(0.1, 0.1, 0.1, 1.0),
+        6.0,
+        theme::rgba(0x000000, 0.4),
     );
     let border = if focused {
-        Color::new(1.0, 0.9, 0.3, 1.0)
+        theme::GOLD_LT
     } else {
-        Color::new(0.5, 0.5, 0.5, 1.0)
+        theme::rgba(0xffffff, 0.12)
     };
-    draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, border);
+    theme::draw_rounded_rect_lines(rect.x, rect.y, rect.w, rect.h, 6.0, 1.5, border);
     // カーソル付きで内容を表示
     let shown = if focused {
         format!("{text}_")
     } else {
         text.to_string()
     };
-    draw_jp_text(font, &shown, rect.x + 10.0, rect.y + 31.0, 24, WHITE);
+    draw_jp_text(
+        font,
+        &shown,
+        rect.x + 14.0,
+        rect.y + rect.h / 2.0 + 7.0,
+        16,
+        theme::TEXT,
+    );
 }
 
 fn draw_status_line(state: &GameState, font: Option<&Font>, y: f32) {
     if let Some(line) = &state.online_state.status_line {
         let color = if state.online_state.status_is_error {
-            Color::new(1.0, 0.4, 0.4, 1.0)
+            theme::RED_LT
         } else {
-            Color::new(0.8, 0.8, 0.8, 1.0)
+            theme::TEXT_DIM
         };
-        draw_jp_text(font, line, 440.0, y, 22, color);
+        theme::draw_text_centered(font, line, DESIGN_W / 2.0, y, 15, color);
     }
 }
 
@@ -154,35 +213,25 @@ fn draw_status_line(state: &GameState, font: Option<&Font>, y: f32) {
 pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
     let online = &state.online_state;
 
-    draw_rectangle(190.0, 80.0, 900.0, 640.0, Color::new(0.0, 0.0, 0.0, 0.85));
-    draw_rectangle_lines(
-        190.0,
-        80.0,
-        900.0,
-        640.0,
-        2.0,
-        Color::new(0.5, 0.5, 0.5, 1.0),
-    );
-
-    draw_jp_text(font, "オンライン対戦", 500.0, 140.0, 36, WHITE);
+    draw_online_panel(font, "オンライン対戦");
 
     draw_jp_text(
         font,
-        "名前:",
+        "名前",
         NAME_BOX.x,
-        NAME_BOX.y - 10.0,
-        22,
-        Color::new(0.8, 0.8, 0.8, 1.0),
+        NAME_BOX.y - 9.0,
+        11,
+        theme::TEXT_DIM,
     );
     draw_input_box(font, &NAME_BOX, &online.name_input, !online.code_focused);
 
     draw_jp_text(
         font,
-        "ルームコード（参加する場合）:",
+        "ルームコード（参加する場合）",
         CODE_BOX.x,
-        CODE_BOX.y - 10.0,
-        22,
-        Color::new(0.8, 0.8, 0.8, 1.0),
+        CODE_BOX.y - 9.0,
+        11,
+        theme::TEXT_DIM,
     );
     draw_input_box(font, &CODE_BOX, &online.code_input, online.code_focused);
 
@@ -190,7 +239,7 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
     draw_button(font, &JOIN_BTN, "ルームに参加", true);
     draw_button(font, &BACK_BTN, "戻る", false);
 
-    draw_status_line(state, font, BACK_BTN.y + BACK_BTN.h + 40.0);
+    draw_status_line(state, font, BACK_BTN.y + BACK_BTN.h + 30.0);
 }
 
 /// オンラインメニューの入力を処理する
@@ -255,79 +304,73 @@ pub fn handle_online_menu_input(state: &mut GameState) -> Option<OnlineMenuActio
 /// ロビー画面を描画する
 pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     let online = &state.online_state;
+    let cx = DESIGN_W / 2.0;
 
-    draw_rectangle(190.0, 80.0, 900.0, 640.0, Color::new(0.0, 0.0, 0.0, 0.85));
-    draw_rectangle_lines(
-        190.0,
-        80.0,
-        900.0,
-        640.0,
-        2.0,
-        Color::new(0.5, 0.5, 0.5, 1.0),
-    );
-
-    draw_jp_text(font, "ロビー", 580.0, 140.0, 36, WHITE);
+    draw_online_panel(font, "ロビー");
 
     let Some(room) = &online.room else {
-        draw_jp_text(font, "ルーム情報を取得中...", 500.0, 300.0, 26, WHITE);
-        draw_status_line(state, font, 380.0);
+        theme::draw_text_centered(font, "ルーム情報を取得中...", cx, 300.0, 18, theme::TEXT);
+        draw_status_line(state, font, 340.0);
         return;
     };
 
     // ルームコード（友人に共有する）
-    draw_jp_text(
+    theme::draw_text_centered(
         font,
-        &format!("ルームコード: {}", room.code),
-        440.0,
-        220.0,
-        32,
-        Color::new(1.0, 0.9, 0.3, 1.0),
+        &format!("ルームコード  {}", room.code),
+        cx,
+        210.0,
+        28,
+        theme::GOLD_LT,
     );
-    draw_jp_text(
+    theme::draw_text_centered(
         font,
         "このコードを参加プレイヤーに共有してください",
-        440.0,
-        252.0,
-        18,
-        Color::new(0.7, 0.7, 0.7, 1.0),
+        cx,
+        236.0,
+        12,
+        theme::TEXT_DIM,
     );
 
     // 座席一覧
+    let row_x = 440.0;
+    let row_w = 400.0;
     for (i, label) in room.seat_labels.iter().enumerate() {
-        let y = 310.0 + i as f32 * 50.0;
-        draw_rectangle(
-            440.0,
-            y - 28.0,
-            400.0,
-            40.0,
-            Color::new(0.15, 0.15, 0.15, 1.0),
-        );
-        draw_jp_text(font, label, 452.0, y, 24, WHITE);
+        let y = 282.0 + i as f32 * 46.0;
+        let is_me = label.contains("（あなた）");
+        let (fill, border) = if is_me {
+            (theme::rgba(0xc8a227, 0.07), theme::rgba(0xc8a227, 0.20))
+        } else {
+            (theme::rgba(0xffffff, 0.03), theme::rgba(0xffffff, 0.05))
+        };
+        theme::draw_rounded_rect(row_x, y, row_w, 38.0, 6.0, fill);
+        theme::draw_rounded_rect_lines(row_x, y, row_w, 38.0, 6.0, 1.0, border);
+        draw_jp_text(font, label, row_x + 14.0, y + 24.0, 14, theme::TEXT);
     }
 
     if room.is_host {
         draw_button(font, &START_BTN, "対局開始", true);
-        draw_jp_text(
+        theme::draw_text_centered(
             font,
             "空席はCPUが入ります",
-            START_BTN.x + 110.0,
+            cx,
             START_BTN.y - 8.0,
-            18,
-            Color::new(0.7, 0.7, 0.7, 1.0),
+            12,
+            theme::TEXT_DIM,
         );
     } else {
-        draw_jp_text(
+        theme::draw_text_centered(
             font,
             "ホストの開始を待っています...",
-            480.0,
+            cx,
             START_BTN.y + 34.0,
-            24,
-            Color::new(0.8, 0.8, 0.8, 1.0),
+            16,
+            theme::TEXT_DIM,
         );
     }
     draw_button(font, &LEAVE_BTN, "退出", false);
 
-    draw_status_line(state, font, LEAVE_BTN.y + LEAVE_BTN.h + 36.0);
+    draw_status_line(state, font, LEAVE_BTN.y + LEAVE_BTN.h + 28.0);
 }
 
 /// ロビーの入力を処理する
@@ -355,10 +398,12 @@ pub fn handle_online_lobby_input(state: &GameState) -> Option<OnlineLobbyAction>
 /// 対局中の接続状態バナーを描画する
 pub fn draw_connection_banner(state: &GameState, font: Option<&Font>) {
     if let Some(line) = &state.online_state.status_line {
-        let w = 420.0;
-        let x = (1280.0 - w) / 2.0;
-        draw_rectangle(x, 4.0, w, 32.0, Color::new(0.5, 0.1, 0.1, 0.9));
-        draw_jp_text(font, line, x + 16.0, 27.0, 20, WHITE);
+        let w = 440.0;
+        let x = (DESIGN_W - w) / 2.0;
+        // 上部バーの直下に角丸の赤いバナーを表示する
+        theme::draw_rounded_rect(x, 56.0, w, 30.0, 6.0, theme::rgba(0x7a1010, 0.92));
+        theme::draw_rounded_rect_lines(x, 56.0, w, 30.0, 6.0, 1.0, theme::RED);
+        theme::draw_text_centered(font, line, DESIGN_W / 2.0, 76.0, 13, WHITE);
     }
 }
 
@@ -375,18 +420,24 @@ pub fn draw_turn_timer(state: &GameState, font: Option<&Font>) {
         return;
     }
 
-    // 残り10秒以下は赤、それ以外は黄
-    let color = if remaining <= 10 {
-        Color::new(1.0, 0.3, 0.3, 1.0)
+    // 残り10秒以下は赤、それ以外はゴールド
+    let (accent, border) = if remaining <= 10 {
+        (theme::RED_LT, theme::RED)
     } else {
-        Color::new(1.0, 0.9, 0.3, 1.0)
+        (theme::GOLD_LT, theme::GOLD_DK)
     };
-    draw_jp_text(
+    let w = 130.0;
+    let h = 34.0;
+    let x = 880.0;
+    let y = 632.0;
+    theme::draw_rounded_rect(x, y, w, h, 6.0, theme::rgba(0x000000, 0.55));
+    theme::draw_rounded_rect_lines(x, y, w, h, 6.0, 1.0, border);
+    theme::draw_text_centered(
         font,
         &format!("残り {remaining} 秒"),
-        870.0,
-        660.0,
-        28,
-        color,
+        x + w / 2.0,
+        y + h / 2.0 + 6.0,
+        16,
+        accent,
     );
 }

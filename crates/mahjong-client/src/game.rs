@@ -22,6 +22,22 @@ pub struct WinResult {
     pub win_is_tsumo: bool,
     pub uradora_indicators: Vec<Tile>,
     pub result_message: String,
+    /// 和了者の表示名（例: 「東家」「あなた」）
+    pub winner_name: String,
+    /// 放銃者の表示名（ツモの場合は None）
+    pub loser_name: Option<String>,
+    /// 成立した役の一覧（役名, 翻数）
+    pub yaku: Vec<(String, u32)>,
+    /// 翻数
+    pub han: u32,
+    /// 符
+    pub fu: u32,
+    /// 和了点
+    pub score_points: i32,
+    /// 点数等級名（満貫・跳満など。通常は空）
+    pub rank_name: String,
+    /// この和了で受け取った供託リーチ棒の本数
+    pub riichi_sticks: usize,
 }
 
 /// 捨て牌の表示情報
@@ -31,6 +47,8 @@ pub struct DiscardInfo {
     pub is_tsumogiri: bool,
     /// リーチ宣言牌かどうか（横向きに表示）
     pub is_riichi: bool,
+    /// 他家に鳴かれた牌かどうか（薄く表示する）
+    pub is_called: bool,
 }
 
 /// 他プレイヤーの手牌表示情報（相対インデックスで管理）
@@ -68,24 +86,52 @@ pub enum PlayerLabel {
     Cpu { level: String, personality: String },
 }
 
+/// CPU の強さ（英語の表示名）を日本語へ変換する。
+fn localize_cpu_level(level: &str) -> &'static str {
+    match level {
+        "Weak" => "弱い",
+        "Strong" => "強い",
+        _ => "普通",
+    }
+}
+
+/// CPU の性格（英語の表示名）を日本語へ変換する。
+fn localize_cpu_personality(personality: &str) -> &'static str {
+    match personality {
+        "Speedy" => "スピード",
+        "HighValue" => "高得点",
+        "Defensive" => "守備的",
+        _ => "バランス",
+    }
+}
+
 impl PlayerLabel {
-    /// 風・得点の下に表示する補助テキスト（自分は非表示）
-    pub fn detail(&self) -> Option<String> {
+    /// 風・得点の下に表示する補助テキスト（自分は非表示）。
+    /// CPU は「CPU{n}（強さ・性格）」、人間プレイヤーは名前を返す。
+    pub fn detail(&self, cpu_number: usize) -> Option<String> {
         match self {
             PlayerLabel::Me => None,
             PlayerLabel::Human(name) => Some(name.clone()),
-            PlayerLabel::Cpu { level, personality } => Some(format!("{}・{}", level, personality)),
+            PlayerLabel::Cpu { level, personality } => Some(format!(
+                "CPU{}（{}・{}）",
+                cpu_number,
+                localize_cpu_level(level),
+                localize_cpu_personality(personality),
+            )),
         }
     }
 
-    /// 順位表などで使う表示名
-    pub fn name(&self) -> String {
+    /// 順位表などで使う表示名。CPU は「CPU{n}（強さ・性格）」。
+    pub fn name(&self, cpu_number: usize) -> String {
         match self {
             PlayerLabel::Me => "あなた".to_string(),
             PlayerLabel::Human(name) => name.clone(),
-            PlayerLabel::Cpu { level, personality } => {
-                format!("CPU ({}・{})", level, personality)
-            }
+            PlayerLabel::Cpu { level, personality } => format!(
+                "CPU{}（{}・{}）",
+                cpu_number,
+                localize_cpu_level(level),
+                localize_cpu_personality(personality),
+            ),
         }
     }
 }
@@ -256,25 +302,6 @@ impl SetupState {
         SetupState {
             cpu_levels: [1, 1, 1],        // 全員 Normal
             cpu_personalities: [0, 1, 2], // Balanced, Speedy, HighValue
-        }
-    }
-
-    pub fn level_name(idx: usize) -> &'static str {
-        match idx {
-            0 => "Weak",
-            1 => "Normal",
-            2 => "Strong",
-            _ => "Normal",
-        }
-    }
-
-    pub fn personality_name(idx: usize) -> &'static str {
-        match idx {
-            0 => "Balanced",
-            1 => "Speedy",
-            2 => "HighValue",
-            3 => "Defensive",
-            _ => "Balanced",
         }
     }
 
@@ -531,6 +558,9 @@ impl GameState {
                 is_tsumogiri,
             } => {
                 self.last_discarder = Some(player);
+                // 新しい打牌が出たら、過去の鳴き打診で残った call_discarder を捨てる。
+                // （パスして鳴かなかった場合に古い値が残り、次の鳴き元判定を誤らせていた）
+                self.call_discarder = None;
                 let relative_idx = self.relative_player_index(player);
                 let is_riichi = self.pending_riichi_player == Some(player);
                 if is_riichi {
@@ -540,6 +570,7 @@ impl GameState {
                     tile,
                     is_tsumogiri,
                     is_riichi,
+                    is_called: false,
                 });
 
                 // 他プレイヤーが捨てた場合、隠し手牌の枚数を更新
@@ -597,6 +628,23 @@ impl GameState {
                         }
                     }
                 };
+
+                // 鳴かれた牌（ポン・チー・大明槓）を河で薄く表示するためマークする。
+                // 取られた牌は鳴いた側の手番直前に捨てられた、放銃元の河の最後の該当牌。
+                if matches!(
+                    call_type,
+                    CallType::Pon | CallType::Chi | CallType::Daiminkan
+                ) && let Some(discarder) = self.call_discarder.or(self.last_discarder)
+                {
+                    let discarder_idx = self.relative_player_index(discarder);
+                    if let Some(discard) = self.discards[discarder_idx]
+                        .iter_mut()
+                        .rev()
+                        .find(|d| d.tile == called_tile && !d.is_called)
+                    {
+                        discard.is_called = true;
+                    }
+                }
 
                 self.call_discarder = None;
 
@@ -773,7 +821,19 @@ impl GameState {
 
                 self.update_other_player_hands_on_win(&player_hands, winner);
 
-                let winner_name = self.wind_to_name(winner);
+                let winner_is_me = self.relative_player_index(winner) == 0;
+                let winner_name = if winner_is_me {
+                    "あなた".to_string()
+                } else {
+                    self.wind_to_name(winner).to_string()
+                };
+                let loser_name = loser.map(|l| {
+                    if self.relative_player_index(l) == 0 {
+                        "あなた".to_string()
+                    } else {
+                        self.wind_to_name(l).to_string()
+                    }
+                });
                 let win_type = if loser.is_some() { "ロン" } else { "ツモ" };
                 let loser_text = if let Some(l) = loser {
                     format!("（{}が放銃）", self.wind_to_name(l))
@@ -819,6 +879,14 @@ impl GameState {
                     win_is_tsumo: loser.is_none(),
                     uradora_indicators,
                     result_message: msg,
+                    winner_name,
+                    loser_name,
+                    yaku: yaku_list.clone(),
+                    han,
+                    fu,
+                    score_points,
+                    rank_name: rank_name.clone(),
+                    riichi_sticks,
                 });
 
                 // 最初のRoundWonでフェーズ遷移・表示を初期化
@@ -875,6 +943,11 @@ impl GameState {
                 self.self_kan_options.clear();
             }
         }
+    }
+
+    /// 現在表示中の和了結果ページを返す（流局時は None）。
+    pub fn current_win_result(&self) -> Option<&WinResult> {
+        self.win_results.get(self.win_result_index)
     }
 
     /// 現在の win_result_index が指すページを GameState の表示用フィールドに反映する
@@ -1275,12 +1348,12 @@ impl GameState {
 
         let (mx, my) = crate::renderer::mouse_position_design();
 
-        // 手牌クリック
-        let hand_start_x = 100.0;
-        let hand_y = 680.0;
+        // 手牌クリック（描画と同じ中央寄せ基準を使う）
+        let hand_len = self.hand.len();
+        let hand_start_x = crate::renderer::player_hand_start_x(hand_len);
+        let hand_y = crate::renderer::HAND_Y;
         let tile_w = 48.0;
         let tile_h = 68.0;
-        let hand_len = self.hand.len();
 
         for i in 0..hand_len {
             let x = hand_start_x + i as f32 * tile_w;
@@ -1311,7 +1384,7 @@ impl GameState {
         }
 
         if self.drawn.is_some() {
-            let drawn_x = hand_start_x + hand_len as f32 * tile_w + 20.0;
+            let drawn_x = hand_start_x + hand_len as f32 * tile_w + crate::renderer::DRAWN_GAP;
             if mx >= drawn_x && mx <= drawn_x + tile_w && my >= hand_y && my <= hand_y + tile_h {
                 if self.riichi_selection_mode && !self.riichi_selectable_drawn {
                     return None;
@@ -1394,14 +1467,14 @@ mod tests {
 
         assert_eq!(state.my_seat, 0);
         assert!(matches!(state.player_labels[0], PlayerLabel::Me));
-        assert_eq!(state.player_labels[0].detail(), None);
+        assert_eq!(state.player_labels[0].detail(0), None);
         assert_eq!(
-            state.player_labels[1].detail(),
-            Some("Weak・Defensive".to_string())
+            state.player_labels[1].detail(1),
+            Some("CPU1（弱い・守備的）".to_string())
         );
         assert_eq!(
-            state.player_labels[2].name(),
-            "CPU (Strong・HighValue)".to_string()
+            state.player_labels[2].name(2),
+            "CPU2（強い・高得点）".to_string()
         );
     }
 
@@ -1424,11 +1497,60 @@ mod tests {
 
         assert_eq!(state.my_seat, 1);
         assert!(matches!(state.player_labels[1], PlayerLabel::Me));
-        assert_eq!(state.player_labels[0].detail(), Some("ホスト".to_string()));
+        assert_eq!(state.player_labels[0].detail(3), Some("ホスト".to_string()));
         assert_eq!(
-            state.player_labels[2].detail(),
-            Some("Normal・Speedy".to_string())
+            state.player_labels[2].detail(1),
+            Some("CPU1（普通・スピード）".to_string())
         );
+    }
+
+    #[test]
+    fn test_called_tile_is_marked_in_river() {
+        let mut state = GameState::new();
+        state.seat_wind = Some(Wind::East);
+        let tile = Tile::new(Tile::P3);
+
+        // 南家が捨てる（河に積まれ、まだ鳴かれていない）
+        state.handle_event(ServerEvent::TileDiscarded {
+            player: Wind::South,
+            tile,
+            is_tsumogiri: false,
+        });
+        assert_eq!(state.discards[1].len(), 1);
+        assert!(!state.discards[1][0].is_called);
+
+        // 西家がポン → 南家の河の該当牌が鳴かれた扱いになる
+        state.handle_event(ServerEvent::PlayerCalled {
+            player: Wind::West,
+            call_type: CallType::Pon,
+            called_tile: tile,
+            tiles: vec![tile, tile],
+        });
+        assert!(state.discards[1][0].is_called);
+    }
+
+    #[test]
+    fn test_called_tile_marked_despite_stale_call_offer() {
+        let mut state = GameState::new();
+        state.seat_wind = Some(Wind::East);
+        // 過去の鳴き打診で call_discarder が残っている状況（パスした後など）
+        state.call_discarder = Some(Wind::North);
+
+        let tile = Tile::new(Tile::S5);
+        // 下家（南）が捨てる
+        state.handle_event(ServerEvent::TileDiscarded {
+            player: Wind::South,
+            tile,
+            is_tsumogiri: false,
+        });
+        // 対面（西）がチー → 古い call_discarder ではなく直前の打牌者を鳴き元とする
+        state.handle_event(ServerEvent::PlayerCalled {
+            player: Wind::West,
+            call_type: CallType::Chi,
+            called_tile: tile,
+            tiles: vec![Tile::new(Tile::S6), Tile::new(Tile::S7)],
+        });
+        assert!(state.discards[1][0].is_called);
     }
 
     #[test]
