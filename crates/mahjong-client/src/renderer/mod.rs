@@ -1345,19 +1345,31 @@ fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTe
     }
     y += 8.0;
 
-    // 合計（飜符 ＋ 大きな点数）
-    let mut hanfu = if wr.rank_name.is_empty() {
-        format!("{}飜 {}符", wr.han, wr.fu)
-    } else {
-        format!("{}飜 {}符 · {}", wr.han, wr.fu, wr.rank_name)
-    };
+    // 合計（左に飜符の小さな表示、右に等級名＋大きな点数）
+    let mut hanfu = format!("{}飜 {}符", wr.han, wr.fu);
     if wr.riichi_sticks > 0 {
         hanfu.push_str(&format!("  供託 {}本", wr.riichi_sticks));
     }
     draw_jp_text(font, &hanfu, content_l, y + 24.0, 13, theme::TEXT_DIM);
+
+    // 大きな点数（右寄せ）
     let pts = format!("{}点", format_score(wr.score_points));
     let pw = theme::measure_scaled(font, &pts, 28).width;
-    draw_jp_text(font, &pts, content_r - pw, y + 28.0, 28, theme::GOLD_LT);
+    let pts_x = content_r - pw;
+    draw_jp_text(font, &pts, pts_x, y + 28.0, 28, theme::GOLD_LT);
+
+    // 満貫以上の等級名は点数と同じ大きさ・色で点数の左に表示
+    if !wr.rank_name.is_empty() {
+        let rw = theme::measure_scaled(font, &wr.rank_name, 28).width;
+        draw_jp_text(
+            font,
+            &wr.rank_name,
+            pts_x - 14.0 - rw,
+            y + 28.0,
+            28,
+            theme::GOLD_LT,
+        );
+    }
     y += 44.0;
 
     draw_result_next_button(state, font, cx, y, panel_w - 80.0);
