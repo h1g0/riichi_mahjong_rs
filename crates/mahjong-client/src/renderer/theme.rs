@@ -143,15 +143,39 @@ pub fn draw_panel(x: f32, y: f32, w: f32, h: f32, radius: f32, fill: Color, bord
     draw_rounded_rect_lines(x, y, w, h, radius, 1.5, border);
 }
 
-/// 縦方向のグラデーション矩形（上 → 下）。横帯を重ねて近似する。
-pub fn draw_vgradient_rect(x: f32, y: f32, w: f32, h: f32, top: Color, bottom: Color) {
-    let steps = 24;
+/// 角丸の形状を縦方向グラデーション（上 → 下）で塗る。
+///
+/// 1px 幅の横帯ごとに、その高さでの色と、角丸による左右のへこみ量を計算して塗る。
+/// 角部分もグラデーション色で塗られるため、角に別色の扇形が残らない。
+pub fn draw_rounded_vgradient_rect(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: f32,
+    top: Color,
+    bottom: Color,
+) {
+    let r = radius.min(w / 2.0).min(h / 2.0);
+    let steps = h.ceil().max(1.0) as usize;
     let step_h = h / steps as f32;
     for i in 0..steps {
-        let t = i as f32 / (steps - 1) as f32;
-        let c = lerp_color(top, bottom, t);
+        let yy = y + i as f32 * step_h;
+        let cy = yy + step_h / 2.0; // 帯の中心（色・へこみ量の基準）
+        let t = ((cy - y) / h).clamp(0.0, 1.0);
+        let color = lerp_color(top, bottom, t);
+        // 角丸によるこの高さでの左右のへこみ量
+        let dx = if cy < y + r {
+            let d = (y + r) - cy;
+            r - (r * r - d * d).max(0.0).sqrt()
+        } else if cy > y + h - r {
+            let d = cy - (y + h - r);
+            r - (r * r - d * d).max(0.0).sqrt()
+        } else {
+            0.0
+        };
         // 帯同士の継ぎ目を消すため僅かに重ねる
-        draw_rectangle(x, y + i as f32 * step_h, w, step_h + 1.0, c);
+        draw_rectangle(x + dx, yy, w - 2.0 * dx, step_h + 1.0, color);
     }
 }
 
@@ -168,12 +192,7 @@ pub fn draw_gradient_button(
     border: Color,
     border_thickness: f32,
 ) {
-    // 角丸マスク代わりに、まず枠色で角丸ベースを描いてからグラデーションを内側に重ねる。
-    draw_rounded_rect(x, y, w, h, radius, bottom);
-    // 中央部分にグラデーション（角の丸みは bottom 色のベースで隠れる）
-    let inset = radius.min(w / 2.0).min(h / 2.0);
-    draw_vgradient_rect(x + inset, y, w - 2.0 * inset, h, top, bottom);
-    draw_vgradient_rect(x, y + inset, w, h - 2.0 * inset, top, bottom);
+    draw_rounded_vgradient_rect(x, y, w, h, radius, top, bottom);
     draw_rounded_rect_lines(x, y, w, h, radius, border_thickness, border);
 }
 
