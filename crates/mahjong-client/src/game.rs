@@ -84,24 +84,52 @@ pub enum PlayerLabel {
     Cpu { level: String, personality: String },
 }
 
+/// CPU の強さ（英語の表示名）を日本語へ変換する。
+fn localize_cpu_level(level: &str) -> &'static str {
+    match level {
+        "Weak" => "弱い",
+        "Strong" => "強い",
+        _ => "普通",
+    }
+}
+
+/// CPU の性格（英語の表示名）を日本語へ変換する。
+fn localize_cpu_personality(personality: &str) -> &'static str {
+    match personality {
+        "Speedy" => "スピード",
+        "HighValue" => "高得点",
+        "Defensive" => "守備的",
+        _ => "バランス",
+    }
+}
+
 impl PlayerLabel {
-    /// 風・得点の下に表示する補助テキスト（自分は非表示）
-    pub fn detail(&self) -> Option<String> {
+    /// 風・得点の下に表示する補助テキスト（自分は非表示）。
+    /// CPU は「CPU{n}（強さ・性格）」、人間プレイヤーは名前を返す。
+    pub fn detail(&self, cpu_number: usize) -> Option<String> {
         match self {
             PlayerLabel::Me => None,
             PlayerLabel::Human(name) => Some(name.clone()),
-            PlayerLabel::Cpu { level, personality } => Some(format!("{}・{}", level, personality)),
+            PlayerLabel::Cpu { level, personality } => Some(format!(
+                "CPU{}（{}・{}）",
+                cpu_number,
+                localize_cpu_level(level),
+                localize_cpu_personality(personality),
+            )),
         }
     }
 
-    /// 順位表などで使う表示名
-    pub fn name(&self) -> String {
+    /// 順位表などで使う表示名。CPU は「CPU{n}（強さ・性格）」。
+    pub fn name(&self, cpu_number: usize) -> String {
         match self {
             PlayerLabel::Me => "あなた".to_string(),
             PlayerLabel::Human(name) => name.clone(),
-            PlayerLabel::Cpu { level, personality } => {
-                format!("CPU ({}・{})", level, personality)
-            }
+            PlayerLabel::Cpu { level, personality } => format!(
+                "CPU{}（{}・{}）",
+                cpu_number,
+                localize_cpu_level(level),
+                localize_cpu_personality(personality),
+            ),
         }
     }
 }
@@ -1416,14 +1444,14 @@ mod tests {
 
         assert_eq!(state.my_seat, 0);
         assert!(matches!(state.player_labels[0], PlayerLabel::Me));
-        assert_eq!(state.player_labels[0].detail(), None);
+        assert_eq!(state.player_labels[0].detail(0), None);
         assert_eq!(
-            state.player_labels[1].detail(),
-            Some("Weak・Defensive".to_string())
+            state.player_labels[1].detail(1),
+            Some("CPU1（弱い・守備的）".to_string())
         );
         assert_eq!(
-            state.player_labels[2].name(),
-            "CPU (Strong・HighValue)".to_string()
+            state.player_labels[2].name(2),
+            "CPU2（強い・高得点）".to_string()
         );
     }
 
@@ -1446,10 +1474,10 @@ mod tests {
 
         assert_eq!(state.my_seat, 1);
         assert!(matches!(state.player_labels[1], PlayerLabel::Me));
-        assert_eq!(state.player_labels[0].detail(), Some("ホスト".to_string()));
+        assert_eq!(state.player_labels[0].detail(3), Some("ホスト".to_string()));
         assert_eq!(
-            state.player_labels[2].detail(),
-            Some("Normal・Speedy".to_string())
+            state.player_labels[2].detail(1),
+            Some("CPU1（普通・スピード）".to_string())
         );
     }
 

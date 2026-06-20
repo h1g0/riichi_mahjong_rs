@@ -544,8 +544,9 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
             theme::TEXT_DIM,
         );
 
-        // CPU の強さ・性格（または相手の名前）を風・得点の下に表示する
-        if let Some(detail) = state.player_labels[seat].detail() {
+        // CPU の強さ・性格（または相手の名前）を風・得点の下に表示する。
+        // player_idx は自分からの相対位置で、得点チップの CPU 番号と一致する。
+        if let Some(detail) = state.player_labels[seat].detail(player_idx) {
             theme::draw_text_centered(
                 font,
                 &detail,
@@ -1455,8 +1456,9 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         );
         draw_jp_text(font, "位", row_x + 34.0, ry + 32.0, 11, rc);
 
-        // 名前
-        let name = state.player_labels[*player_idx].name();
+        // 名前（CPU 番号は得点チップと同じ自分からの相対位置）
+        let cpu_number = (*player_idx + 4 - state.my_seat) % 4;
+        let name = state.player_labels[*player_idx].name(cpu_number);
         draw_jp_text(font, &name, row_x + 64.0, ry + 30.0, 14, theme::TEXT);
 
         // バー
