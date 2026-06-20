@@ -201,6 +201,76 @@ fn draw_jp_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16,
     theme::draw_text(font, text, x, y, font_size, color);
 }
 
+/// 起動時にフォントアトラスを必要なグリフ・サイズで作り切る。
+///
+/// ネイティブ(OpenGL)では、回転カメラ下のテキスト描画中にフォントアトラスが
+/// 拡張されると、アトラステクスチャが delete→再生成され、未フラッシュの描画
+/// バッチが壊れて文字が黒い■に化ける（対局画面はカメラを切り替えながら描く
+/// ため発症する）。描画を伴わない `measure` で事前にアトラスを最終サイズまで
+/// 構築しておけば、フレーム途中での拡張が起きず発症しない。
+pub fn prewarm_fonts(font: Option<&Font>) {
+    // UI に現れる全グリフ（生成スクリプト: scripts/extract_glyphs.py）
+    let mut glyphs: String = include_str!("../../glyphs.txt").to_string();
+    // ASCII（数字・記号・CPU などのラテン文字）も網羅する
+    for c in 0x20u8..0x7f {
+        glyphs.push(c as char);
+    }
+    // 使用する基準フォントサイズを総当たりで事前キャッシュする
+    for base in 8..=AGARI_FONT {
+        let _ = theme::measure_scaled(font, &glyphs, base);
+    }
+}
+
+/// 動的テキスト（対戦相手の名前・入力欄・接続状態・ルームコードなど、外部由来で
+/// 任意のグリフを含み得る文字列）を、このフレームの描画前に事前キャッシュする。
+///
+/// [`prewarm_fonts`] は固定 UI 文言しか網羅できないため、こうした文字は毎フレーム
+/// measure してアトラスへ載せておく。これにより、描画途中（特に対局画面のカメラ
+/// 切り替え中）にアトラスが拡張されて文字が黒い■に化けるのを防ぐ。
+pub fn cache_dynamic_text(font: Option<&Font>, state: &GameState) {
+    use crate::game::PlayerLabel;
+    let cache = |s: &str| {
+        if s.is_empty() {
+            return;
+        }
+        for base in 8..=AGARI_FONT {
+            let _ = theme::measure_scaled(font, s, base);
+        }
+    };
+    for label in &state.player_labels {
+        if let PlayerLabel::Human(name) = label {
+            cache(name);
+        }
+    }
+    let online = &state.online_state;
+    cache(&online.name_input);
+    cache(&online.code_input);
+    if let Some(status) = &online.status_line {
+        cache(status);
+    }
+    if let Some(room) = &online.room {
+        cache(&room.code);
+        for label in &room.seat_labels {
+            cache(label);
+        }
+    }
+
+    // 局結果（役名・等級名・和了者名・流局メッセージ）も外部由来なので備える
+    if let Some(message) = &state.result_message {
+        cache(message);
+    }
+    if let Some(result) = state.current_win_result() {
+        cache(&result.winner_name);
+        if let Some(loser) = &result.loser_name {
+            cache(loser);
+        }
+        cache(&result.rank_name);
+        for (name, _) in &result.yaku {
+            cache(name);
+        }
+    }
+}
+
 pub fn draw_game(
     state: &GameState,
     font: Option<&Font>,

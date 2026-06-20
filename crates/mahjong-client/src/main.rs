@@ -136,6 +136,10 @@ async fn main() {
         eprintln!("警告: 日本語フォントを読み込めませんでした。デフォルトフォントで表示します。");
     }
 
+    // フォントアトラスを起動時に作り切る（ネイティブで対局画面の文字が
+    // 黒い■に化けるのを防ぐ。詳細は renderer::prewarm_fonts を参照）。
+    renderer::prewarm_fonts(font.as_ref());
+
     // 対局中のアダプター（ローカル or リモート）
     let mut adapter: Option<Box<dyn GameAdapter>> = None;
     // ロビー段階のリモート接続（対局開始時に adapter へ引き継ぐ）
@@ -147,6 +151,9 @@ async fn main() {
 
         // 設計座標系(DESIGN_W×DESIGN_H)を実キャンバスに合わせて拡大縮小して描画する
         renderer::set_design_camera();
+
+        // 描画前に動的テキスト（相手名など）のグリフをアトラスへ載せておく
+        renderer::cache_dynamic_text(font.as_ref(), &game_state);
 
         let overlay_click = renderer::draw_game(&game_state, font.as_ref(), &tile_textures);
 
