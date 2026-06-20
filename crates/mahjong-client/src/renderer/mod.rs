@@ -330,17 +330,9 @@ fn draw_dora_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileT
         font,
         "ドラ",
         panel_x + 10.0,
-        panel_y + 14.0,
+        panel_y + 21.0,
         11,
         theme::TEXT_DIM,
-    );
-    draw_jp_text(
-        font,
-        "Dora",
-        panel_x + 10.0,
-        panel_y + 27.0,
-        9,
-        theme::rgba(0x4a6050, 1.0),
     );
 
     let revealed = state.dora_indicators.len();
@@ -710,7 +702,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             font,
             bx,
             badge_y,
-            "振聴 · Furiten",
+            "振聴",
             theme::rgba(0xcc2828, 0.18),
             theme::RED,
             theme::RED_LT,
@@ -721,7 +713,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             font,
             bx,
             badge_y,
-            "リーチ中 · Riichi",
+            "リーチ中",
             theme::rgba(0xcc2828, 0.12),
             theme::rgba(0xcc2828, 0.35),
             theme::RED,
@@ -732,7 +724,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             font,
             bx,
             badge_y,
-            "打牌を選択 · Select",
+            "打牌を選択",
             theme::rgba(0xc8a227, 0.12),
             theme::rgba(0xc8a227, 0.35),
             theme::GOLD_LT,
@@ -776,17 +768,9 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             font,
             "ツモ",
             drawn_x + TILE_W / 2.0,
-            hand_y + y_offset - 16.0,
+            hand_y + y_offset - 8.0,
             11,
             theme::GOLD_LT,
-        );
-        theme::draw_text_centered(
-            font,
-            "Tsumo",
-            drawn_x + TILE_W / 2.0,
-            hand_y + y_offset - 4.0,
-            8,
-            theme::GOLD_DK,
         );
 
         if selected {
@@ -1206,9 +1190,9 @@ fn draw_result_next_button(state: &GameState, font: Option<&Font>, cx: f32, y: f
     theme::draw_rounded_rect(x, y, w, h, 6.0, theme::rgba(0xc8a227, 0.10));
     theme::draw_rounded_rect_lines(x, y, w, h, 6.0, 1.0, theme::GOLD_DK);
     let label = if state.win_result_index + 1 < state.win_results.len() {
-        "次の和了へ · Continue →"
+        "次の和了へ →"
     } else {
-        "次へ · Continue →"
+        "次へ →"
     };
     theme::draw_text_centered(font, label, cx, y + 25.0, 14, theme::GOLD_LT);
 }
@@ -1246,11 +1230,7 @@ fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTe
     let mut y = panel_y + 28.0;
 
     // 種別（ツモ / ロン）
-    let type_label = if wr.win_is_tsumo {
-        "ツモ · TSUMO"
-    } else {
-        "ロン · RON"
-    };
+    let type_label = if wr.win_is_tsumo { "ツモ" } else { "ロン" };
     theme::draw_text_centered(font, type_label, cx, y, 12, theme::GOLD);
     y += 22.0;
 
@@ -1392,7 +1372,7 @@ fn draw_draw_panel(state: &GameState, font: Option<&Font>) {
     let cx = panel_x + panel_w / 2.0;
     let mut y = panel_y + 40.0;
 
-    theme::draw_text_centered(font, "流局 · DRAW", cx, y, 12, theme::GOLD);
+    theme::draw_text_centered(font, "流局", cx, y, 12, theme::GOLD);
     y += 30.0;
     for (i, line) in lines.iter().enumerate() {
         let (size, color) = if i == 0 {
@@ -1425,8 +1405,7 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
     );
     let cx = panel_x + panel_w / 2.0;
 
-    theme::draw_text_centered(font, "ゲーム終了", cx, panel_y + 44.0, 26, theme::TEXT_BR);
-    theme::draw_text_centered(font, "Game Over", cx, panel_y + 62.0, 12, theme::TEXT_DIM);
+    theme::draw_text_centered(font, "ゲーム終了", cx, panel_y + 52.0, 26, theme::TEXT_BR);
 
     let mut rankings: Vec<(usize, i32)> = state
         .scores
@@ -1517,15 +1496,7 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         theme::GOLD,
         2.0,
     );
-    theme::draw_text_centered(font, "もう一度", cx, btn_y + 26.0, 16, theme::GOLD_LT);
-    theme::draw_text_centered(
-        font,
-        "Play Again",
-        cx,
-        btn_y + 40.0,
-        9,
-        theme::rgba(0xe8c84a, 0.65),
-    );
+    theme::draw_text_centered(font, "もう一度", cx, btn_y + 31.0, 16, theme::GOLD_LT);
 }
 
 fn wind_to_str(wind: mahjong_core::tile::Wind) -> &'static str {
@@ -1567,14 +1538,8 @@ const SETUP_OPT_STEP: f32 = 32.0;
 // CPU カードの表示ラベル
 const SETUP_WINDS: [&str; 3] = ["南", "西", "北"];
 const SETUP_CPU_JP: [&str; 3] = ["下家", "対面", "上家"];
-const SETUP_CPU_EN: [&str; 3] = ["CPU 1", "CPU 2", "CPU 3"];
-const STRENGTH_LABELS: [(&str, &str); 3] = [("弱い", "Easy"), ("普通", "Normal"), ("強い", "Hard")];
-const PERSONALITY_LABELS: [(&str, &str); 4] = [
-    ("バランス", "Balanced"),
-    ("スピード", "Speedy"),
-    ("高得点", "HighValue"),
-    ("守備的", "Defensive"),
-];
+const STRENGTH_LABELS: [&str; 3] = ["弱い", "普通", "強い"];
+const PERSONALITY_LABELS: [&str; 4] = ["バランス", "スピード", "高得点", "守備的"];
 
 fn setup_panel_x() -> f32 {
     (DESIGN_W - SETUP_PANEL_W) / 2.0
@@ -1622,7 +1587,7 @@ fn setup_online_rect() -> SetupButton {
 }
 
 /// 設定画面のオプションボタンを 1 個描画する。
-fn draw_setup_option(font: Option<&Font>, btn: &SetupButton, jp: &str, en: &str, selected: bool) {
+fn draw_setup_option(font: Option<&Font>, btn: &SetupButton, label: &str, selected: bool) {
     let (fill, border, text_color) = if selected {
         (theme::rgba(0xc8a227, 0.14), theme::GOLD_DK, theme::GOLD_LT)
     } else {
@@ -1634,16 +1599,7 @@ fn draw_setup_option(font: Option<&Font>, btn: &SetupButton, jp: &str, en: &str,
     };
     theme::draw_rounded_rect(btn.x, btn.y, btn.w, btn.h, 4.0, fill);
     theme::draw_rounded_rect_lines(btn.x, btn.y, btn.w, btn.h, 4.0, 1.0, border);
-    draw_jp_text(font, jp, btn.x + 12.0, btn.y + 18.0, 13, text_color);
-    let ew = theme::measure_scaled(font, en, 10).width;
-    draw_jp_text(
-        font,
-        en,
-        btn.x + btn.w - ew - 12.0,
-        btn.y + 17.0,
-        10,
-        theme::rgba(0x7a9880, 0.65),
-    );
+    draw_jp_text(font, label, btn.x + 12.0, btn.y + 18.0, 13, text_color);
 }
 
 /// 設定画面を描画する
@@ -1668,18 +1624,10 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
     theme::draw_text_centered(
         font,
         "対局設定",
-        cx - 36.0,
-        SETUP_PANEL_Y + 50.0,
+        cx,
+        SETUP_PANEL_Y + 52.0,
         26,
         theme::TEXT_BR,
-    );
-    draw_jp_text(
-        font,
-        "Game Setup",
-        cx + 24.0,
-        SETUP_PANEL_Y + 50.0,
-        13,
-        theme::TEXT_DIM,
     );
 
     // CPU カード
@@ -1721,17 +1669,9 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
             font,
             SETUP_CPU_JP[cpu_idx],
             card_x + 56.0,
-            SETUP_CARD_Y + 28.0,
-            14,
+            SETUP_CARD_Y + 39.0,
+            15,
             theme::TEXT,
-        );
-        draw_jp_text(
-            font,
-            SETUP_CPU_EN[cpu_idx],
-            card_x + 56.0,
-            SETUP_CARD_Y + 44.0,
-            10,
-            theme::TEXT_DIM,
         );
 
         // 強さ
@@ -1743,9 +1683,9 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
             10,
             theme::TEXT_DIM,
         );
-        for (level_idx, &(jp, en)) in STRENGTH_LABELS.iter().enumerate() {
+        for (level_idx, &label) in STRENGTH_LABELS.iter().enumerate() {
             let btn = setup_opt_rect(cpu_idx, SETUP_STR_OFFSET, level_idx);
-            draw_setup_option(font, &btn, jp, en, setup.cpu_levels[cpu_idx] == level_idx);
+            draw_setup_option(font, &btn, label, setup.cpu_levels[cpu_idx] == level_idx);
         }
 
         // 性格
@@ -1757,13 +1697,12 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
             10,
             theme::TEXT_DIM,
         );
-        for (pers_idx, &(jp, en)) in PERSONALITY_LABELS.iter().enumerate() {
+        for (pers_idx, &label) in PERSONALITY_LABELS.iter().enumerate() {
             let btn = setup_opt_rect(cpu_idx, SETUP_PERS_OFFSET, pers_idx);
             draw_setup_option(
                 font,
                 &btn,
-                jp,
-                en,
+                label,
                 setup.cpu_personalities[cpu_idx] == pers_idx,
             );
         }
@@ -1782,15 +1721,7 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         theme::GOLD,
         2.0,
     );
-    theme::draw_text_centered(font, "対局開始", cx, s.y + 26.0, 20, theme::GOLD_LT);
-    theme::draw_text_centered(
-        font,
-        "Start Game",
-        cx,
-        s.y + 42.0,
-        9,
-        theme::rgba(0xe8c84a, 0.65),
-    );
+    theme::draw_text_centered(font, "対局開始", cx, s.y + 34.0, 20, theme::GOLD_LT);
 
     // オンライン対戦ボタン
     let o = setup_online_rect();

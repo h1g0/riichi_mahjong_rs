@@ -101,8 +101,8 @@ pub enum OnlineLobbyAction {
     Leave,
 }
 
-/// オンライン画面共通のパネルを描画する（タイトル＋英字サブタイトル）。
-fn draw_online_panel(font: Option<&Font>, title: &str, subtitle: &str) {
+/// オンライン画面共通のパネルを描画する（タイトル）。
+fn draw_online_panel(font: Option<&Font>, title: &str) {
     super::draw_setup_background();
     theme::draw_panel(
         PANEL_X,
@@ -114,8 +114,7 @@ fn draw_online_panel(font: Option<&Font>, title: &str, subtitle: &str) {
         theme::PANEL_BORDER,
     );
     let cx = DESIGN_W / 2.0;
-    theme::draw_text_centered(font, title, cx, PANEL_Y + 54.0, 26, theme::TEXT_BR);
-    theme::draw_text_centered(font, subtitle, cx, PANEL_Y + 74.0, 12, theme::TEXT_DIM);
+    theme::draw_text_centered(font, title, cx, PANEL_Y + 60.0, 26, theme::TEXT_BR);
 }
 
 fn draw_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool) {
@@ -214,11 +213,11 @@ fn draw_status_line(state: &GameState, font: Option<&Font>, y: f32) {
 pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
     let online = &state.online_state;
 
-    draw_online_panel(font, "オンライン対戦", "Online Match");
+    draw_online_panel(font, "オンライン対戦");
 
     draw_jp_text(
         font,
-        "名前 · Name",
+        "名前",
         NAME_BOX.x,
         NAME_BOX.y - 9.0,
         11,
@@ -228,7 +227,7 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
 
     draw_jp_text(
         font,
-        "ルームコード（参加する場合） · Room Code",
+        "ルームコード（参加する場合）",
         CODE_BOX.x,
         CODE_BOX.y - 9.0,
         11,
@@ -307,7 +306,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     let online = &state.online_state;
     let cx = DESIGN_W / 2.0;
 
-    draw_online_panel(font, "ロビー", "Lobby");
+    draw_online_panel(font, "ロビー");
 
     let Some(room) = &online.room else {
         theme::draw_text_centered(font, "ルーム情報を取得中...", cx, 300.0, 18, theme::TEXT);
