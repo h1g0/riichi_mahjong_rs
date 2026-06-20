@@ -634,11 +634,15 @@ fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
 
         for (i, discard) in discards.iter().enumerate() {
             let row = i / 6;
-            let tint = if discard.is_tsumogiri {
+            let mut tint = if discard.is_tsumogiri {
                 Color::new(0.72, 0.72, 0.72, 1.0)
             } else {
                 WHITE
             };
+            // 鳴かれた牌はごく薄い半透明で描く
+            if discard.is_called {
+                tint.a = 0.28;
+            }
 
             if row != current_row {
                 col_offset = 0.0;

@@ -47,6 +47,8 @@ pub struct DiscardInfo {
     pub is_tsumogiri: bool,
     /// リーチ宣言牌かどうか（横向きに表示）
     pub is_riichi: bool,
+    /// 他家に鳴かれた牌かどうか（薄く表示する）
+    pub is_called: bool,
 }
 
 /// 他プレイヤーの手牌表示情報（相対インデックスで管理）
@@ -565,6 +567,7 @@ impl GameState {
                     tile,
                     is_tsumogiri,
                     is_riichi,
+                    is_called: false,
                 });
 
                 // 他プレイヤーが捨てた場合、隠し手牌の枚数を更新
@@ -622,6 +625,23 @@ impl GameState {
                         }
                     }
                 };
+
+                // 鳴かれた牌（ポン・チー・大明槓）を河で薄く表示するためマークする。
+                // 取られた牌は鳴いた側の手番直前に捨てられた、放銃元の河の最後の該当牌。
+                if matches!(
+                    call_type,
+                    CallType::Pon | CallType::Chi | CallType::Daiminkan
+                ) && let Some(discarder) = self.call_discarder.or(self.last_discarder)
+                {
+                    let discarder_idx = self.relative_player_index(discarder);
+                    if let Some(discard) = self.discards[discarder_idx]
+                        .iter_mut()
+                        .rev()
+                        .find(|d| d.tile == called_tile && !d.is_called)
+                    {
+                        discard.is_called = true;
+                    }
+                }
 
                 self.call_discarder = None;
 
@@ -1479,6 +1499,31 @@ mod tests {
             state.player_labels[2].detail(1),
             Some("CPU1（普通・スピード）".to_string())
         );
+    }
+
+    #[test]
+    fn test_called_tile_is_marked_in_river() {
+        let mut state = GameState::new();
+        state.seat_wind = Some(Wind::East);
+        let tile = Tile::new(Tile::P3);
+
+        // 南家が捨てる（河に積まれ、まだ鳴かれていない）
+        state.handle_event(ServerEvent::TileDiscarded {
+            player: Wind::South,
+            tile,
+            is_tsumogiri: false,
+        });
+        assert_eq!(state.discards[1].len(), 1);
+        assert!(!state.discards[1][0].is_called);
+
+        // 西家がポン → 南家の河の該当牌が鳴かれた扱いになる
+        state.handle_event(ServerEvent::PlayerCalled {
+            player: Wind::West,
+            call_type: CallType::Pon,
+            called_tile: tile,
+            tiles: vec![tile, tile],
+        });
+        assert!(state.discards[1][0].is_called);
     }
 
     #[test]
