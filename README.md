@@ -1,10 +1,12 @@
 # riichi_mahjong_rs
 
-[日本語版はこちら](README.ja.md)
+[日本語版はこちら](./docs/README.ja.md)
 
 [![Build and test](https://github.com/h1g0/mahjong_rs/actions/workflows/build_and_test.yml/badge.svg?branch=main)](https://github.com/h1g0/mahjong_rs/actions/workflows/build_and_test.yml)
 
 Implementation for Japanese Riichi Mahjong in Rust.
+
+![Screenshot of gameplay](./docs/image1.png)
 
 ## Current status
 
@@ -13,7 +15,7 @@ Implementation for Japanese Riichi Mahjong in Rust.
 - Fu calculation and score calculation are implemented.
 - A playable client that runs in both native and WASM builds is included.
   - The current client is a temporary simplified version.
-  - A CPU opponent is implemented. The current CPU is a provisional implementation.
+  - CPU opponents are implemented, with selectable strengths (weak / normal / strong) and personalities (balanced / speedy / high-value / defensive). They use strategy conventions for discard efficiency, calling, riichi/damaten judgement, push/fold, and threat-based defense (including suji/flush/yakuman reads).
 - Online multiplayer (room-code based) is supported via `mahjong-net-server`.
   - Host creates a room, shares a 6-character code, and friends join; empty seats are filled by the CPU.
   - Disconnected players are taken over by the CPU and can rejoin to resync.

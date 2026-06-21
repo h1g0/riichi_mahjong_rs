@@ -1,10 +1,12 @@
 # riichi_mahjong_rs
 
-[English version](README.md)
+[English version](../README.md)
 
 [![Build and test](https://github.com/h1g0/mahjong_rs/actions/workflows/build_and_test.yml/badge.svg?branch=main)](https://github.com/h1g0/mahjong_rs/actions/workflows/build_and_test.yml)
 
 麻雀（一般的なリーチ麻雀）のRustでの実装です。
+
+![プレイ中の画面](./image1.png)
 
 ## 現在の実装状況
 
@@ -13,7 +15,7 @@
 - 符計算および点数計算を実装済み
 - ネイティブ版と WASM 版の両方で動かせるプレイ可能なクライアントを同梱
   - 現在のクライアントは仮の簡易版
-  - CPU 対戦を実装済み（現在の実装は仮実装）
+  - CPU 対戦を実装済み。強さ（弱 / 普通 / 強）と性格（バランス / スピード / 高打点 / 守備型）を選択可能。牌効率・鳴き・リーチ/ダマ判断・押し引き・脅威ベースの守備（スジ/染め手/役満読みを含む）といった定石に基づいて打牌する
 - `mahjong-net-server` によるオンライン対戦（ルームコード制）に対応
   - ホストがルームを作成し 6 文字のコードを共有、友人が参加。空席は CPU が埋める
   - 切断したプレイヤーは CPU が代打ちし、再入室で状態を再同期できる
