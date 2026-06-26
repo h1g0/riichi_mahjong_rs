@@ -883,14 +883,28 @@ fn draw_melds(state: &GameState, tile_textures: &TileTextures) {
     let th: f32 = 56.0;
     let meld_y: f32 = 692.0;
     let meld_gap: f32 = 12.0;
-    let mut x = 1220.0;
+    let right_edge: f32 = 1220.0;
 
-    for meld in state.melds.iter().rev() {
-        let meld_width = calc_meld_width(meld, tw, th);
-        x -= meld_width;
+    // 最初に鳴いた牌を右端に、後の牌ほど左へ並べる。
+    let xs = self_meld_x_positions(&state.melds, tw, th, meld_gap, right_edge);
+    for (meld, &x) in state.melds.iter().zip(&xs) {
         draw_meld_group(meld, x, meld_y, tw, th, tile_textures);
-        x -= meld_gap;
     }
+}
+
+/// 自分の副露を「最初に鳴いた牌ほど右」に並べたときの各副露の左端 x 座標を返す。
+///
+/// 返り値は `melds` と同じ順（index 0 = 最初に鳴いた牌）。`right_edge` を右端として
+/// 右→左に詰めていくため、`xs[0]` が最も大きく（右）、後の副露ほど小さく（左）なる。
+fn self_meld_x_positions(melds: &[Meld], tw: f32, th: f32, gap: f32, right_edge: f32) -> Vec<f32> {
+    let mut xs = Vec::with_capacity(melds.len());
+    let mut x = right_edge;
+    for meld in melds.iter() {
+        x -= calc_meld_width(meld, tw, th);
+        xs.push(x);
+        x -= gap;
+    }
+    xs
 }
 
 fn draw_meld_tile(
@@ -1212,16 +1226,33 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
         if !other.melds.is_empty() {
             x += meld_gap;
         }
-        for (i, meld) in other.melds.iter().enumerate() {
-            if i > 0 {
-                x += meld_gap;
-            }
-            draw_meld_group(meld, x, base_y, tw, th, tile_textures);
-            x += calc_meld_width(meld, tw, th);
+        let xs = other_meld_x_positions(&other.melds, tw, th, meld_gap, x);
+        for (meld, &mx) in other.melds.iter().zip(&xs) {
+            draw_meld_group(meld, mx, base_y, tw, th, tile_textures);
         }
 
         set_design_camera();
     }
+}
+
+/// 他家の副露を、そのプレイヤーから見て「最初に鳴いた牌ほど右」に並べたときの
+/// 各副露の左端 x 座標を返す。
+///
+/// 返り値は `melds` と同じ順（index 0 = 最初に鳴いた牌）。手牌の右隣の `start_x` を
+/// 左端として左→右に詰めるが、最初に鳴いた牌が右端（x が大きい側）へ来るよう逆順で
+/// 配置するため、`xs[0]` が最も大きくなる。
+fn other_meld_x_positions(melds: &[Meld], tw: f32, th: f32, gap: f32, start_x: f32) -> Vec<f32> {
+    let mut xs = vec![0.0; melds.len()];
+    let mut x = start_x;
+    for (draw_i, meld) in melds.iter().rev().enumerate() {
+        if draw_i > 0 {
+            x += gap;
+        }
+        let call_i = melds.len() - 1 - draw_i;
+        xs[call_i] = x;
+        x += calc_meld_width(meld, tw, th);
+    }
+    xs
 }
 
 /// 局結果オーバーレイ。和了は構造化パネル、流局はメッセージパネルを描画する。
@@ -1856,7 +1887,65 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
 
 #[cfg(test)]
 mod tests {
-    use super::{PLAYER_ROTATIONS, seat_at_relative_position};
+    use super::{
+        PLAYER_ROTATIONS, calc_meld_width, other_meld_x_positions, seat_at_relative_position,
+        self_meld_x_positions,
+    };
+    use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+    use mahjong_core::tile::{Tile, TileType};
+
+    /// 並び順検証用の最小のポン副露を作る。
+    fn pon(tile_type: TileType) -> Meld {
+        let tile = Tile::new(tile_type);
+        Meld {
+            tiles: vec![tile, tile, tile],
+            category: MeldType::Pon,
+            from: MeldFrom::Previous,
+            called_tile: Some(tile),
+        }
+    }
+
+    // 副露の並び順は「最初に鳴いた牌ほどプレイヤーから見て右」が正。
+    // 自分の手牌では右端 (x が大きい側) から左へ詰める。
+    #[test]
+    fn self_melds_place_first_called_on_the_right() {
+        let (tw, th, gap, right_edge) = (40.0, 56.0, 12.0, 1220.0);
+        let melds = vec![pon(Tile::M1), pon(Tile::P2), pon(Tile::S3)];
+        let xs = self_meld_x_positions(&melds, tw, th, gap, right_edge);
+
+        assert_eq!(xs.len(), 3);
+        // 最初に鳴いた副露 (index 0) が最も右、後の副露ほど左。
+        assert!(
+            xs[0] > xs[1],
+            "first-called meld must be right of the second"
+        );
+        assert!(
+            xs[1] > xs[2],
+            "second-called meld must be right of the third"
+        );
+        // 先頭の副露の右端は描画領域の右端を超えない。
+        assert!(xs[0] + calc_meld_width(&melds[0], tw, th) <= right_edge);
+    }
+
+    // 他家の手牌でも、そのプレイヤー視点で最初に鳴いた牌が右 (x が大きい側) に来る。
+    #[test]
+    fn other_melds_place_first_called_on_the_right() {
+        let (tw, th, gap, start_x) = (28.0, 40.0, 6.0, 100.0);
+        let melds = vec![pon(Tile::M1), pon(Tile::P2), pon(Tile::S3)];
+        let xs = other_meld_x_positions(&melds, tw, th, gap, start_x);
+
+        assert_eq!(xs.len(), 3);
+        assert!(
+            xs[0] > xs[1],
+            "first-called meld must be right of the second"
+        );
+        assert!(
+            xs[1] > xs[2],
+            "second-called meld must be right of the third"
+        );
+        // 描画領域は手牌の右隣 (start_x) から始まり、左へはみ出さない。
+        assert!(xs[2] >= start_x);
+    }
 
     #[test]
     fn player_rotations_place_turn_order_counterclockwise() {
