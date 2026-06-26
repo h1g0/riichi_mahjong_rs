@@ -885,7 +885,8 @@ fn draw_melds(state: &GameState, tile_textures: &TileTextures) {
     let meld_gap: f32 = 12.0;
     let mut x = 1220.0;
 
-    for meld in state.melds.iter().rev() {
+    // 最初に鳴いた牌を右端に、後の牌ほど左へ並べる（右→左に描画）。
+    for meld in state.melds.iter() {
         let meld_width = calc_meld_width(meld, tw, th);
         x -= meld_width;
         draw_meld_group(meld, x, meld_y, tw, th, tile_textures);
@@ -1212,7 +1213,8 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
         if !other.melds.is_empty() {
             x += meld_gap;
         }
-        for (i, meld) in other.melds.iter().enumerate() {
+        // 最初に鳴いた牌をそのプレイヤーから見て右端（x が大きい側）に置くため逆順で描画する。
+        for (i, meld) in other.melds.iter().rev().enumerate() {
             if i > 0 {
                 x += meld_gap;
             }
