@@ -147,7 +147,7 @@ impl Tile {
         matches!(self.index, Tile::Z5..=Tile::Z7)
     }
     /// 字牌か否かを返す
-    pub fn is_honor(&self) -> bool {
+    pub fn is_honour(&self) -> bool {
         self.is_wind() || self.is_dragon()
     }
 
@@ -159,8 +159,8 @@ impl Tile {
         )
     }
     /// 么九牌（老頭牌＋字牌）か否かを返す
-    pub fn is_1_9_honor(&self) -> bool {
-        self.is_1_or_9() || self.is_honor()
+    pub fn is_1_9_honour(&self) -> bool {
+        self.is_1_or_9() || self.is_honour()
     }
 
     /// 対子（同じ2枚）か否かを返す
@@ -368,7 +368,7 @@ mod tests {
             assert!(t.is_character());
             assert!(!t.is_bamboo());
             assert!(!t.is_circle());
-            assert!(!t.is_honor());
+            assert!(!t.is_honour());
             assert_eq!(t.is_1_or_9(), i == Tile::M1 || i == Tile::M9);
         }
     }
@@ -381,7 +381,7 @@ mod tests {
             assert!(!t.is_character());
             assert!(!t.is_bamboo());
             assert!(t.is_circle());
-            assert!(!t.is_honor());
+            assert!(!t.is_honour());
             assert_eq!(t.is_1_or_9(), i == Tile::P1 || i == Tile::P9);
         }
     }
@@ -393,7 +393,7 @@ mod tests {
             assert!(!t.is_character());
             assert!(t.is_bamboo());
             assert!(!t.is_circle());
-            assert!(!t.is_honor());
+            assert!(!t.is_honour());
             assert_eq!(t.is_1_or_9(), i == Tile::S1 || i == Tile::S9);
         }
     }
@@ -407,7 +407,7 @@ mod tests {
             assert!(!t.is_circle());
             assert!(t.is_wind());
             assert!(!t.is_dragon());
-            assert!(t.is_honor());
+            assert!(t.is_honour());
         }
     }
     /// 三元牌の属性テスト
@@ -420,18 +420,18 @@ mod tests {
             assert!(!t.is_circle());
             assert!(!t.is_wind());
             assert!(t.is_dragon());
-            assert!(t.is_honor());
+            assert!(t.is_honour());
         }
     }
     /// 字牌の属性テスト
     #[test]
-    fn suit_honor_test() {
+    fn suit_honour_test() {
         for i in Tile::Z1..=Tile::Z7 {
             let t = Tile::new(i);
             assert!(!t.is_character());
             assert!(!t.is_bamboo());
             assert!(!t.is_circle());
-            assert!(t.is_honor());
+            assert!(t.is_honour());
         }
     }
 
@@ -550,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn suit_rank_honor_returns_none() {
+    fn suit_rank_honour_returns_none() {
         // 字牌（風牌・三元牌）はすべて None
         for tile in Tile::Z1..=Tile::Z7 {
             assert_eq!(suit_rank(tile), None, "tile {tile} should return None");

@@ -27,10 +27,7 @@ pub fn check(
     }
 
     // 立直
-    result.insert(
-        Kind::ReadyHand,
-        check_ready_hand(analyzer, status, settings)?,
-    );
+    result.insert(Kind::Riichi, check_riichi(analyzer, status, settings)?);
     // 七対子
     result.insert(
         Kind::SevenPairs,
@@ -42,23 +39,26 @@ pub fn check(
         check_nagashi_mangan(analyzer, status, settings)?,
     );
     // 門前清自摸和
-    result.insert(Kind::SelfPick, check_self_pick(analyzer, status, settings)?);
+    result.insert(
+        Kind::FullyConcealedHand,
+        check_fully_concealed_hand(analyzer, status, settings)?,
+    );
     // 一発
-    result.insert(Kind::OneShot, check_one_shot(analyzer, status, settings)?);
+    result.insert(Kind::Unbroken, check_unbroken(analyzer, status, settings)?);
     // 海底撈月
     result.insert(
-        Kind::LastTileFromTheWall,
-        check_last_tile_from_the_wall(analyzer, status, settings)?,
+        Kind::LastTileDraw,
+        check_last_tile_draw(analyzer, status, settings)?,
     );
     // 河底撈魚
     result.insert(
-        Kind::LastDiscard,
-        check_last_discard(analyzer, status, settings)?,
+        Kind::LastTileClaim,
+        check_last_tile_claim(analyzer, status, settings)?,
     );
     // 嶺上開花
     result.insert(
-        Kind::DeadWallDraw,
-        check_dead_wall_draw(analyzer, status, settings)?,
+        Kind::AfterAQuad,
+        check_after_a_quad(analyzer, status, settings)?,
     );
     // 搶槓
     result.insert(
@@ -67,103 +67,106 @@ pub fn check(
     );
     // ダブル立直
     result.insert(
-        Kind::DoubleReady,
-        check_double_ready(analyzer, status, settings)?,
+        Kind::DoubleRiichi,
+        check_double_riichi(analyzer, status, settings)?,
     );
     // 平和
-    result.insert(
-        Kind::NoPointsHand,
-        check_no_points_hand(analyzer, hand, status, settings)?,
-    );
+    result.insert(Kind::Pinfu, check_pinfu(analyzer, hand, status, settings)?);
     // 一盃口
     result.insert(
-        Kind::OneSetOfIdenticalSequences,
-        check_one_set_of_identical_sequences(analyzer, status, settings)?,
+        Kind::TwinSequences,
+        check_twin_sequences(analyzer, status, settings)?,
     );
     // 三色同順
     result.insert(
-        Kind::ThreeColorStraight,
-        check_three_color_straight(analyzer, status, settings)?,
+        Kind::MixedSequences,
+        check_mixed_sequences(analyzer, status, settings)?,
     );
     // 一気通貫
-    result.insert(Kind::Straight, check_straight(analyzer, status, settings)?);
+    result.insert(
+        Kind::FullStraight,
+        check_full_straight(analyzer, status, settings)?,
+    );
     // 二盃口
     result.insert(
-        Kind::TwoSetsOfIdenticalSequences,
-        check_two_sets_of_identical_sequences(analyzer, status, settings)?,
+        Kind::DoubleTwinSequences,
+        check_double_twin_sequences(analyzer, status, settings)?,
     );
     // 対々和
     result.insert(
-        Kind::AllTripletHand,
-        check_all_triplet_hand(analyzer, status, settings)?,
+        Kind::AllTriplets,
+        check_all_triplets(analyzer, status, settings)?,
     );
     // 三暗刻
     result.insert(
-        Kind::ThreeClosedTriplets,
-        check_three_closed_triplets(analyzer, hand, status, settings)?,
+        Kind::ThreeConcealedTriplets,
+        check_three_concealed_triplets(analyzer, hand, status, settings)?,
     );
     // 三色同刻
     result.insert(
-        Kind::ThreeColorTriplets,
-        check_three_color_triplets(analyzer, status, settings)?,
+        Kind::MixedTriplets,
+        check_mixed_triplets(analyzer, status, settings)?,
     );
     // 断么九
     result.insert(
-        Kind::AllSimples,
-        check_all_simples(analyzer, status, settings)?,
+        Kind::AllInside,
+        check_all_inside(analyzer, status, settings)?,
     );
     // 役牌（自風牌）
     result.insert(
-        Kind::HonorTilesPlayersWind,
-        check_honor_tiles_players_wind(analyzer, status, settings)?,
+        Kind::ValueHonourSeatWind,
+        check_value_honour_seat_wind(analyzer, status, settings)?,
     );
     // 役牌（場風牌）
     result.insert(
-        Kind::HonorTilesPrevailingWind,
-        check_honor_tiles_prevailing_wind(analyzer, status, settings)?,
+        Kind::ValueHonourRoundWind,
+        check_value_honour_round_wind(analyzer, status, settings)?,
     );
     // 役牌（白）
     result.insert(
-        Kind::HonorTilesWhiteDragon,
-        check_honor_tiles_white_dragon(analyzer, status, settings)?,
+        Kind::ValueHonourWhiteDragon,
+        check_value_honour_white_dragon(analyzer, status, settings)?,
     );
     // 役牌（發）
     result.insert(
-        Kind::HonorTilesGreenDragon,
-        check_honor_tiles_green_dragon(analyzer, status, settings)?,
+        Kind::ValueHonourGreenDragon,
+        check_value_honour_green_dragon(analyzer, status, settings)?,
     );
     // 役牌（中）
     result.insert(
-        Kind::HonorTilesRedDragon,
-        check_honor_tiles_red_dragon(analyzer, status, settings)?,
+        Kind::ValueHonourRedDragon,
+        check_value_honour_red_dragon(analyzer, status, settings)?,
     );
     // 混全帯么九
     result.insert(
-        Kind::TerminalOrHonorInEachSet,
-        check_terminal_or_honor_in_each_set(analyzer, status, settings)?,
+        Kind::CommonEnds,
+        check_common_ends(analyzer, status, settings)?,
     );
     // 純全帯么九
     result.insert(
-        Kind::TerminalInEachSet,
-        check_terminal_in_each_set(analyzer, status, settings)?,
+        Kind::PerfectEnds,
+        check_perfect_ends(analyzer, status, settings)?,
     );
     // 混老頭
     result.insert(
-        Kind::AllTerminalsAndHonors,
-        check_all_terminals_and_honors(analyzer, status, settings)?,
+        Kind::CommonTerminals,
+        check_common_terminals(analyzer, status, settings)?,
     );
     // 小三元
     result.insert(
-        Kind::LittleThreeDragons,
-        check_little_three_dragons(analyzer, status, settings)?,
+        Kind::LittleDragons,
+        check_little_dragons(analyzer, status, settings)?,
     );
     // 混一色
     result.insert(
-        Kind::HalfFlush,
-        check_half_flush(analyzer, status, settings)?,
+        Kind::CommonFlush,
+        check_common_flush(analyzer, status, settings)?,
     );
     // 清一色
-    result.insert(Kind::Flush, check_flush(analyzer, status, settings)?);
+    result.insert(
+        Kind::PerfectFlush,
+        check_perfect_flush(analyzer, status, settings)?,
+    );
     // 国士無双
     result.insert(
         Kind::ThirteenOrphans,
@@ -171,8 +174,8 @@ pub fn check(
     );
     // 四暗刻単騎待ち
     result.insert(
-        Kind::FourConcealedTripletsSingleWait,
-        check_four_concealed_triplets_single_wait(analyzer, hand, status, settings)?,
+        Kind::FourConcealedTripletsPairWait,
+        check_four_concealed_triplets_pair_wait(analyzer, hand, status, settings)?,
     );
     // 四暗刻
     result.insert(
@@ -181,28 +184,25 @@ pub fn check(
     );
     // 大三元
     result.insert(
-        Kind::BigThreeDragons,
-        check_big_three_dragons(analyzer, status, settings)?,
+        Kind::BigDragons,
+        check_big_dragons(analyzer, status, settings)?,
     );
     // 小四喜
     result.insert(
-        Kind::LittleFourWinds,
-        check_little_four_winds(analyzer, status, settings)?,
+        Kind::LittleWinds,
+        check_little_winds(analyzer, status, settings)?,
     );
     // 大四喜
-    result.insert(
-        Kind::BigFourWinds,
-        check_big_four_winds(analyzer, status, settings)?,
-    );
+    result.insert(Kind::BigWinds, check_big_winds(analyzer, status, settings)?);
     // 字一色
     result.insert(
-        Kind::AllHonors,
-        check_all_honors(analyzer, status, settings)?,
+        Kind::AllHonours,
+        check_all_honours(analyzer, status, settings)?,
     );
     // 清老頭
     result.insert(
-        Kind::AllTerminals,
-        check_all_terminals(analyzer, status, settings)?,
+        Kind::PerfectTerminals,
+        check_perfect_terminals(analyzer, status, settings)?,
     );
     // 緑一色
     result.insert(Kind::AllGreen, check_all_green(analyzer, status, settings)?);
@@ -212,16 +212,19 @@ pub fn check(
         check_nine_gates(analyzer, status, settings)?,
     );
     // 四槓子
-    result.insert(Kind::FourKans, check_four_kans(analyzer, status, settings)?);
+    result.insert(
+        Kind::FourQuads,
+        check_four_quads(analyzer, status, settings)?,
+    );
     // 天和
     result.insert(
-        Kind::HeavenlyHand,
-        check_heavenly_hand(analyzer, status, settings)?,
+        Kind::BlessingOfHeaven,
+        check_blessing_of_heaven(analyzer, status, settings)?,
     );
     // 地和
     result.insert(
-        Kind::HandOfEarth,
-        check_hand_of_earth(analyzer, status, settings)?,
+        Kind::BlessingOfEarth,
+        check_blessing_of_earth(analyzer, status, settings)?,
     );
 
     Ok(result)

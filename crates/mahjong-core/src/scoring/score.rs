@@ -375,10 +375,10 @@ mod tests {
         let hand = Hand::from("123456m234p6799s 5s");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.has_claimed_ready = true;
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.has_claimed_riichi = true;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let settings = Settings::new();
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()
@@ -395,9 +395,9 @@ mod tests {
         let hand = Hand::from("123456m234p6799s 5s");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = true;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = true;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let settings = Settings::new();
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()
@@ -417,10 +417,10 @@ mod tests {
         let hand = Hand::from("123456m234p789s3z 3z");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
+        status.is_self_drawn = false;
         status.has_claimed_open = true;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let settings = Settings::new();
         let result = calculate_score(&analyzer, &hand, &status, &settings).unwrap();
         assert!(result.is_none());
@@ -432,9 +432,9 @@ mod tests {
         let hand = Hand::from("19m19p19s1234567z 1m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let settings = Settings::new();
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()
@@ -482,9 +482,9 @@ mod tests {
         let hand = Hand::from("2244668m224466p 8m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let settings = Settings::new();
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()
@@ -494,17 +494,17 @@ mod tests {
         assert_eq!(result.yaku_list[1], ("七対子", 2));
     }
 
-    /// 同翻の役はKind列挙型の定義順に並ぶ: 立直(ReadyHand)が平和(NoPointsHand)より先
+    /// 同翻の役はKind列挙型の定義順に並ぶ: 立直(Riichi)が平和(Pinfu)より先
     #[test]
     fn test_yaku_list_order_same_han_uses_kind_order() {
-        // 立直(1翻) + 平和(1翻): Kind定義順でReadyHand < NoPointsHand
+        // 立直(1翻) + 平和(1翻): Kind定義順でRiichi < Pinfu
         let hand = Hand::from("123456m234p6799s 5s");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.has_claimed_ready = true;
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.has_claimed_riichi = true;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let settings = Settings::new();
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()

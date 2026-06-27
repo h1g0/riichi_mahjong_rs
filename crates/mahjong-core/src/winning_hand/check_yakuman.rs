@@ -28,7 +28,7 @@ pub fn check_thirteen_orphans(
         Ok((name, false, 0))
     }
 }
-fn is_four_concealed_triplets_single_wait(hand_analyzer: &HandAnalyzer, hand: &Hand) -> bool {
+fn is_four_concealed_triplets_pair_wait(hand_analyzer: &HandAnalyzer, hand: &Hand) -> bool {
     hand.drawn().is_some_and(|winning_tile| {
         hand_analyzer
             .same2
@@ -54,12 +54,12 @@ pub fn check_four_concealed_triplets(
     }
     if status.has_claimed_open
         || hand_analyzer.same3.len() != 4
-        || is_four_concealed_triplets_single_wait(hand_analyzer, hand)
+        || is_four_concealed_triplets_pair_wait(hand_analyzer, hand)
     {
         return Ok((name, false, 0));
     }
 
-    if status.is_self_picked {
+    if status.is_self_drawn {
         Ok((name, true, 13))
     } else {
         Ok((name, false, 0))
@@ -67,14 +67,14 @@ pub fn check_four_concealed_triplets(
 }
 
 /// 四暗刻単騎待ち
-pub fn check_four_concealed_triplets_single_wait(
+pub fn check_four_concealed_triplets_pair_wait(
     hand_analyzer: &HandAnalyzer,
     hand: &Hand,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::FourConcealedTripletsSingleWait,
+        Kind::FourConcealedTripletsPairWait,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -85,20 +85,20 @@ pub fn check_four_concealed_triplets_single_wait(
         return Ok((name, false, 0));
     }
 
-    if is_four_concealed_triplets_single_wait(hand_analyzer, hand) {
+    if is_four_concealed_triplets_pair_wait(hand_analyzer, hand) {
         Ok((name, true, 13))
     } else {
         Ok((name, false, 0))
     }
 }
 /// 大三元
-pub fn check_big_three_dragons(
+pub fn check_big_dragons(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::BigThreeDragons,
+        Kind::BigDragons,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -122,13 +122,13 @@ pub fn check_big_three_dragons(
     }
 }
 /// 小四喜
-pub fn check_little_four_winds(
+pub fn check_little_winds(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::LittleFourWinds,
+        Kind::LittleWinds,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -163,13 +163,13 @@ pub fn check_little_four_winds(
     }
 }
 /// 大四喜
-pub fn check_big_four_winds(
+pub fn check_big_winds(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::BigFourWinds,
+        Kind::BigWinds,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -194,13 +194,13 @@ pub fn check_big_four_winds(
     }
 }
 /// 字一色
-pub fn check_all_honors(
+pub fn check_all_honours(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::AllHonors,
+        Kind::AllHonours,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -209,12 +209,12 @@ pub fn check_all_honors(
     }
     // 字一色: すべての牌が字牌で構成される
     for same in &hand_analyzer.same3 {
-        if !same.has_honor()? {
+        if !same.has_honour()? {
             return Ok((name, false, 0));
         }
     }
     for head in &hand_analyzer.same2 {
-        if !head.has_honor()? {
+        if !head.has_honour()? {
             return Ok((name, false, 0));
         }
     }
@@ -225,7 +225,7 @@ pub fn check_all_honors(
     // 七対子形の場合もチェック（same2が7つの場合）
     if hand_analyzer.form == Form::SevenPairs {
         for head in &hand_analyzer.same2 {
-            if !head.has_honor()? {
+            if !head.has_honour()? {
                 return Ok((name, false, 0));
             }
         }
@@ -233,13 +233,13 @@ pub fn check_all_honors(
     Ok((name, true, 13))
 }
 /// 清老頭
-pub fn check_all_terminals(
+pub fn check_perfect_terminals(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::AllTerminals,
+        Kind::PerfectTerminals,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -251,12 +251,12 @@ pub fn check_all_terminals(
         return Ok((name, false, 0));
     }
     for same in &hand_analyzer.same3 {
-        if !same.has_1_or_9()? || same.has_honor()? {
+        if !same.has_1_or_9()? || same.has_honour()? {
             return Ok((name, false, 0));
         }
     }
     for head in &hand_analyzer.same2 {
-        if !head.has_1_or_9()? || head.has_honor()? {
+        if !head.has_1_or_9()? || head.has_honour()? {
             return Ok((name, false, 0));
         }
     }
@@ -325,7 +325,7 @@ pub fn check_nine_gates(
     let mut has_character = false;
     let mut has_circle = false;
     let mut has_bamboo = false;
-    let mut has_honor = false;
+    let mut has_honour = false;
 
     for same in &hand_analyzer.same3 {
         if same.is_character()? {
@@ -337,8 +337,8 @@ pub fn check_nine_gates(
         if same.is_bamboo()? {
             has_bamboo = true;
         }
-        if same.has_honor()? {
-            has_honor = true;
+        if same.has_honour()? {
+            has_honour = true;
         }
     }
     for seq in &hand_analyzer.sequential3 {
@@ -362,12 +362,12 @@ pub fn check_nine_gates(
         if head.is_bamboo()? {
             has_bamboo = true;
         }
-        if head.has_honor()? {
-            has_honor = true;
+        if head.has_honour()? {
+            has_honour = true;
         }
     }
 
-    if has_honor {
+    if has_honour {
         return Ok((name, false, 0));
     }
     let suit_count = [has_character, has_circle, has_bamboo]
@@ -427,13 +427,13 @@ pub fn check_nine_gates(
     Ok((name, false, 0))
 }
 /// 四槓子
-pub fn check_four_kans(
+pub fn check_four_quads(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::FourKans,
+        Kind::FourQuads,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -448,13 +448,13 @@ pub fn check_four_kans(
     }
 }
 /// 天和
-pub fn check_heavenly_hand(
+pub fn check_blessing_of_heaven(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::HeavenlyHand,
+        Kind::BlessingOfHeaven,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -462,7 +462,7 @@ pub fn check_heavenly_hand(
         return Ok((name, false, 0));
     }
     // 天和: 親の配牌時点で和了している（第一ツモ・親・自摸）
-    if status.is_dealer && status.is_first_turn && status.is_self_picked && !status.has_claimed_open
+    if status.is_dealer && status.is_first_turn && status.is_self_drawn && !status.has_claimed_open
     {
         Ok((name, true, 13))
     } else {
@@ -470,13 +470,13 @@ pub fn check_heavenly_hand(
     }
 }
 /// 地和
-pub fn check_hand_of_earth(
+pub fn check_blessing_of_earth(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::HandOfEarth,
+        Kind::BlessingOfEarth,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -484,10 +484,7 @@ pub fn check_hand_of_earth(
         return Ok((name, false, 0));
     }
     // 地和: 子の第一ツモで和了している（第一ツモ・子・自摸）
-    if !status.is_dealer
-        && status.is_first_turn
-        && status.is_self_picked
-        && !status.has_claimed_open
+    if !status.is_dealer && status.is_first_turn && status.is_self_drawn && !status.has_claimed_open
     {
         Ok((name, true, 13))
     } else {
@@ -525,7 +522,7 @@ mod tests {
     /// 四暗刻と四暗刻単騎待ちの振り分けを確認する
     fn test_four_concealed_triplets(
         #[case] test_str: &str,
-        #[case] is_self_picked: bool,
+        #[case] is_self_drawn: bool,
         #[case] expected_single_wait: (&'static str, bool, u32),
         #[case] expected_four_concealed_triplets: (&'static str, bool, u32),
         #[case] has_claimed_open: bool,
@@ -534,11 +531,11 @@ mod tests {
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
-        status.is_self_picked = is_self_picked;
+        status.is_self_drawn = is_self_drawn;
         status.has_claimed_open = has_claimed_open;
         assert!(test_analyzer.shanten.has_won());
         assert_eq!(
-            check_four_concealed_triplets_single_wait(&test_analyzer, &test, &status, &settings)
+            check_four_concealed_triplets_pair_wait(&test_analyzer, &test, &status, &settings)
                 .unwrap(),
             expected_single_wait
         );
@@ -549,66 +546,66 @@ mod tests {
     }
     #[test]
     /// 大三元で和了った
-    fn test_win_by_big_three_dragons() {
+    fn test_win_by_big_dragons() {
         let test_str = "555666777z234m1p 1p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_big_three_dragons(&test_analyzer, &status, &settings).unwrap(),
+            check_big_dragons(&test_analyzer, &status, &settings).unwrap(),
             ("大三元", true, 13)
         );
     }
     #[test]
     /// 小四喜で和了った
-    fn test_win_by_little_four_winds() {
+    fn test_win_by_little_winds() {
         let test_str = "11122233344z23m 4m";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_little_four_winds(&test_analyzer, &status, &settings).unwrap(),
+            check_little_winds(&test_analyzer, &status, &settings).unwrap(),
             ("小四喜", true, 13)
         );
     }
     #[test]
     /// 大四喜で和了った
-    fn test_win_by_big_four_winds() {
+    fn test_win_by_big_winds() {
         let test_str = "5m 111z 222z 333z 444z 5m";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_big_four_winds(&test_analyzer, &status, &settings).unwrap(),
+            check_big_winds(&test_analyzer, &status, &settings).unwrap(),
             ("大四喜", true, 13)
         );
     }
     #[test]
     /// 字一色で和了った
-    fn test_win_by_all_honors() {
+    fn test_win_by_all_honours() {
         let test_str = "111222333z5z 777z 5z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_all_honors(&test_analyzer, &status, &settings).unwrap(),
+            check_all_honours(&test_analyzer, &status, &settings).unwrap(),
             ("字一色", true, 13)
         );
     }
     #[test]
     /// 清老頭で和了った
-    fn test_win_by_all_terminals() {
+    fn test_win_by_perfect_terminals() {
         let test_str = "111999m1p 111s 999p 1p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_all_terminals(&test_analyzer, &status, &settings).unwrap(),
+            check_perfect_terminals(&test_analyzer, &status, &settings).unwrap(),
             ("清老頭", true, 13)
         );
     }
@@ -641,22 +638,22 @@ mod tests {
     }
     #[test]
     /// 四槓子で和了った
-    fn test_win_by_four_kans() {
+    fn test_win_by_four_quads() {
         let test_str = "111333m444s1777z 1z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
         status.kan_count = 4;
-        status.is_self_picked = true;
+        status.is_self_drawn = true;
         assert_eq!(
-            check_four_kans(&test_analyzer, &status, &settings).unwrap(),
+            check_four_quads(&test_analyzer, &status, &settings).unwrap(),
             ("四槓子", true, 13)
         );
     }
     #[test]
     /// 天和で和了った
-    fn test_win_by_heavenly_hand() {
+    fn test_win_by_blessing_of_heaven() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -664,15 +661,15 @@ mod tests {
         let settings = Settings::new();
         status.is_dealer = true;
         status.is_first_turn = true;
-        status.is_self_picked = true;
+        status.is_self_drawn = true;
         assert_eq!(
-            check_heavenly_hand(&test_analyzer, &status, &settings).unwrap(),
+            check_blessing_of_heaven(&test_analyzer, &status, &settings).unwrap(),
             ("天和", true, 13)
         );
     }
     #[test]
     /// 天和は子では成立しない（地和になる）
-    fn test_not_win_by_heavenly_hand_if_not_dealer() {
+    fn test_not_win_by_blessing_of_heaven_if_not_dealer() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -680,15 +677,15 @@ mod tests {
         let settings = Settings::new();
         status.is_dealer = false;
         status.is_first_turn = true;
-        status.is_self_picked = true;
+        status.is_self_drawn = true;
         assert_eq!(
-            check_heavenly_hand(&test_analyzer, &status, &settings).unwrap(),
+            check_blessing_of_heaven(&test_analyzer, &status, &settings).unwrap(),
             ("天和", false, 0)
         );
     }
     #[test]
     /// 地和で和了った
-    fn test_win_by_hand_of_earth() {
+    fn test_win_by_blessing_of_earth() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -696,15 +693,15 @@ mod tests {
         let settings = Settings::new();
         status.is_dealer = false;
         status.is_first_turn = true;
-        status.is_self_picked = true;
+        status.is_self_drawn = true;
         assert_eq!(
-            check_hand_of_earth(&test_analyzer, &status, &settings).unwrap(),
+            check_blessing_of_earth(&test_analyzer, &status, &settings).unwrap(),
             ("地和", true, 13)
         );
     }
     #[test]
     /// 地和は親では成立しない（天和になる）
-    fn test_not_win_by_hand_of_earth_if_dealer() {
+    fn test_not_win_by_blessing_of_earth_if_dealer() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -712,9 +709,9 @@ mod tests {
         let settings = Settings::new();
         status.is_dealer = true;
         status.is_first_turn = true;
-        status.is_self_picked = true;
+        status.is_self_drawn = true;
         assert_eq!(
-            check_hand_of_earth(&test_analyzer, &status, &settings).unwrap(),
+            check_blessing_of_earth(&test_analyzer, &status, &settings).unwrap(),
             ("地和", false, 0)
         );
     }

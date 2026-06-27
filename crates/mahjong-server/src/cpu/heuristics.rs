@@ -54,7 +54,7 @@ pub struct DiscardHeuristic {
 pub const DISCARD_HEURISTICS: &[DiscardHeuristic] = &[
     // #147: 孤立字牌・孤立么九牌から優先して切る（弱以上）
     DiscardHeuristic {
-        name: "isolated-honor-terminal-first",
+        name: "isolated-honour-terminal-first",
         min_level: CpuLevel::Weak,
         apply: isolated_tile_bonus,
     },
@@ -151,7 +151,7 @@ fn isolated_tile_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
 
     if tt >= 27 {
         // 字牌: 役牌は対子になれば役があるため、1・9牌よりさらに残す
-        if is_yakuhai(tt, ctx.state.my_seat_wind, ctx.state.prevailing_wind) {
+        if is_yakuhai(tt, ctx.state.my_seat_wind, ctx.state.round_wind) {
             8.0
         } else {
             16.0
@@ -841,7 +841,7 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
             &hand_after,
             &melds_after,
             ctx.state.my_seat_wind,
-            ctx.state.prevailing_wind,
+            ctx.state.round_wind,
             ctx.config.level >= CpuLevel::Normal,
         ) {
             return CallJudgement::Forbid;
@@ -864,7 +864,7 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
     if is_yakuhai(
         called_tile.get(),
         ctx.state.my_seat_wind,
-        ctx.state.prevailing_wind,
+        ctx.state.round_wind,
     ) {
         return CallJudgement::Encourage;
     }
@@ -898,7 +898,7 @@ pub fn judge_chi(ctx: &CallContext, called_tile: Tile, hand_tiles: [Tile; 2]) ->
             &hand_after,
             &melds_after,
             ctx.state.my_seat_wind,
-            ctx.state.prevailing_wind,
+            ctx.state.round_wind,
             ctx.config.level >= CpuLevel::Normal,
         ) {
             return CallJudgement::Forbid;
@@ -1253,9 +1253,9 @@ fn estimate_ron_han(
     }
 
     let mut status = Status::new();
-    status.is_self_picked = false;
-    status.player_wind = state.my_seat_wind;
-    status.prevailing_wind = state.prevailing_wind;
+    status.is_self_drawn = false;
+    status.seat_wind = state.my_seat_wind;
+    status.round_wind = state.round_wind;
     status.has_claimed_open = melds.iter().any(|m| m.from != MeldFrom::Myself);
     status.is_dealer = state.my_seat_wind == Wind::East;
     status.kan_count = melds
@@ -1387,7 +1387,7 @@ fn is_cheap_distant_call(
     }
 
     // 打点要素: 役牌対子以上
-    for yh in get_yakuhai_types(state.my_seat_wind, state.prevailing_wind) {
+    for yh in get_yakuhai_types(state.my_seat_wind, state.round_wind) {
         if counts[yh as usize] >= 2 {
             return false;
         }
@@ -1482,7 +1482,7 @@ pub fn has_yaku_prospect(
     hand_tiles: &[Tile],
     melds: &[Meld],
     seat_wind: Wind,
-    prevailing_wind: Wind,
+    round_wind: Wind,
     strict: bool,
 ) -> bool {
     // 手牌 + 副露の牌種ごとの枚数
@@ -1497,7 +1497,7 @@ pub fn has_yaku_prospect(
     }
 
     // 役牌: 対子以上があれば刻子にできる見込みがある
-    for yh in get_yakuhai_types(seat_wind, prevailing_wind) {
+    for yh in get_yakuhai_types(seat_wind, round_wind) {
         if counts[yh as usize] >= 2 {
             return true;
         }
@@ -1506,17 +1506,17 @@ pub fn has_yaku_prospect(
     // 断么九: 副露が全て中張牌で、手牌の么九牌が少ない
     let melds_all_simple = melds
         .iter()
-        .all(|m| m.tiles.iter().all(|t| !t.is_1_9_honor()));
+        .all(|m| m.tiles.iter().all(|t| !t.is_1_9_honour()));
     if melds_all_simple {
-        let terminal_honor_count = hand_tiles.iter().filter(|t| t.is_1_9_honor()).count();
+        let terminal_honour_count = hand_tiles.iter().filter(|t| t.is_1_9_honour()).count();
         if strict {
             // #164（中以上）: 么九牌が多い手から無理に喰いタンへ向かわない。
             // 么九牌2枚以下、かつタンヤオ圏内の牌で複数ブロックが
             // 構成できる場合のみ見込みとする。
-            if terminal_honor_count <= 2 {
+            if terminal_honour_count <= 2 {
                 let mut simple_counts = [0u8; 34];
                 for t in hand_tiles {
-                    if !t.is_1_9_honor() {
+                    if !t.is_1_9_honour() {
                         simple_counts[t.get() as usize] += 1;
                     }
                 }
@@ -1524,7 +1524,7 @@ pub fn has_yaku_prospect(
                     return true;
                 }
             }
-        } else if terminal_honor_count <= 3 {
+        } else if terminal_honour_count <= 3 {
             return true;
         }
     }

@@ -7,13 +7,13 @@ use crate::settings::*;
 use crate::winning_hand::name::*;
 
 /// 二盃口
-pub fn check_two_sets_of_identical_sequences(
+pub fn check_double_twin_sequences(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::TwoSetsOfIdenticalSequences,
+        Kind::DoubleTwinSequences,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -54,13 +54,13 @@ pub fn check_two_sets_of_identical_sequences(
     }
 }
 /// 純全帯么九
-pub fn check_terminal_in_each_set(
+pub fn check_perfect_ends(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::TerminalInEachSet,
+        Kind::PerfectEnds,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -105,27 +105,27 @@ pub fn check_terminal_in_each_set(
     }
 }
 /// 混一色
-pub fn check_half_flush(
+pub fn check_common_flush(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::HalfFlush,
+        Kind::CommonFlush,
         status.has_claimed_open,
         settings.display_lang,
     );
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    let mut has_honor = false;
+    let mut has_honour = false;
     let mut has_character = false;
     let mut has_circle = false;
     let mut has_bamboo = false;
 
     for same in &hand_analyzer.same3 {
-        if same.has_honor()? {
-            has_honor = true;
+        if same.has_honour()? {
+            has_honour = true;
         }
         if same.is_character()? {
             has_character = true;
@@ -149,8 +149,8 @@ pub fn check_half_flush(
         }
     }
     for head in &hand_analyzer.same2 {
-        if head.has_honor()? {
-            has_honor = true;
+        if head.has_honour()? {
+            has_honour = true;
         }
         if head.is_character()? {
             has_character = true;
@@ -163,7 +163,7 @@ pub fn check_half_flush(
         }
     }
 
-    if !has_honor {
+    if !has_honour {
         return Ok((name, false, 0));
     }
     let suit_count = [has_character, has_circle, has_bamboo]
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     /// 純全帯么九で和了った
-    fn test_terminal_in_each_set() {
+    fn test_perfect_ends() {
         let test_str = "123999m11p11179s 8s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -197,13 +197,13 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_terminal_in_each_set(&test_analyzer, &status, &settings).unwrap(),
+            check_perfect_ends(&test_analyzer, &status, &settings).unwrap(),
             ("純全帯么九", true, 3)
         );
     }
     #[test]
     /// 純全帯么九で和了った（食い下がり2翻）
-    fn test_terminal_in_each_set_open() {
+    fn test_perfect_ends_open() {
         let test_str = "123m111p7999s 789m 8s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -211,14 +211,14 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = true;
         assert_eq!(
-            check_terminal_in_each_set(&test_analyzer, &status, &settings).unwrap(),
+            check_perfect_ends(&test_analyzer, &status, &settings).unwrap(),
             ("純全帯么九（鳴）", true, 2)
         );
     }
 
     #[test]
     /// 混全帯么九は純全帯么九と複合しない
-    fn test_terminal_or_honor_in_each_set_does_not_combined_with_terminal_in_each_set() {
+    fn test_common_ends_does_not_combined_with_perfect_ends() {
         let test_str = "111789m111p99s11z 1z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -226,19 +226,19 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert!(
-            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings)
+            check_common_ends(&test_analyzer, &status, &settings)
                 .unwrap()
                 .1
         );
         assert!(
-            !check_terminal_in_each_set(&test_analyzer, &status, &settings)
+            !check_perfect_ends(&test_analyzer, &status, &settings)
                 .unwrap()
                 .1
         );
     }
     #[test]
     /// 純全帯么九は混全帯么九と複合しない
-    fn test_terminal_in_each_set_does_not_combined_with_terminal_or_honor_in_each_set() {
+    fn test_perfect_ends_does_not_combined_with_common_ends() {
         let test_str = "111789m111p1199s 9s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -246,19 +246,19 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert!(
-            !check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings)
+            !check_common_ends(&test_analyzer, &status, &settings)
                 .unwrap()
                 .1
         );
         assert!(
-            check_terminal_in_each_set(&test_analyzer, &status, &settings)
+            check_perfect_ends(&test_analyzer, &status, &settings)
                 .unwrap()
                 .1
         );
     }
     #[test]
     /// 二盃口で和了った（高点法により七対子より二盃口が優先される）
-    fn test_two_sets_of_identical_sequences() {
+    fn test_double_twin_sequences() {
         let test_str = "112233m456456p7z 7z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -267,13 +267,13 @@ mod tests {
         status.has_claimed_open = false;
         assert_eq!(test_analyzer.form, Form::Normal);
         assert_eq!(
-            check_two_sets_of_identical_sequences(&test_analyzer, &status, &settings).unwrap(),
+            check_double_twin_sequences(&test_analyzer, &status, &settings).unwrap(),
             ("二盃口", true, 3)
         );
     }
     #[test]
     /// 混一色で和了った（食い下がり2翻）
-    fn test_half_flush() {
+    fn test_common_flush() {
         let test_str = "123456m2z 789m 111z 2z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -281,13 +281,13 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = true;
         assert_eq!(
-            check_half_flush(&test_analyzer, &status, &settings).unwrap(),
+            check_common_flush(&test_analyzer, &status, &settings).unwrap(),
             ("混一色（鳴）", true, 2)
         );
     }
     #[test]
     /// 混一色で和了った
-    fn test_half_flush_closed() {
+    fn test_common_flush_closed() {
         let test_str = "11112345699m11z 9m";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -295,7 +295,7 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_half_flush(&test_analyzer, &status, &settings).unwrap(),
+            check_common_flush(&test_analyzer, &status, &settings).unwrap(),
             ("混一色", true, 3)
         );
     }

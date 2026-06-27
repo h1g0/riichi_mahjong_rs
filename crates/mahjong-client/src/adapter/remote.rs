@@ -600,7 +600,7 @@ mod tests {
             seat_wind: Wind::East,
             hand: vec![Tile::new(Tile::M1); 13],
             scores: [25000; 4],
-            prevailing_wind: Wind::East,
+            round_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::P5)],
             round_number: 0,
             total_rounds: 4,

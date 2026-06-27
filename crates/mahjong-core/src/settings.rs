@@ -15,7 +15,7 @@ pub struct Settings {
     /// 表示言語（デフォルトは日本語）
     pub display_lang: Lang,
     /// 喰いタンありかなしか（デフォルトはあり）
-    pub opened_all_simples: bool,
+    pub opened_all_inside: bool,
     /// 四槓散了ありかなしか（デフォルトはあり）
     /// ありの場合: 2人以上で合計4回カンしたら流局
     /// なしの場合: 流局にはならないが、場全体で4回カン後は追加のカン不可
@@ -49,7 +49,7 @@ impl Settings {
     pub fn new() -> Settings {
         Settings {
             display_lang: Lang::Ja,
-            opened_all_simples: true,
+            opened_all_inside: true,
             four_kans_draw: true,
             four_winds_draw: true,
             four_riichi_draw: false,

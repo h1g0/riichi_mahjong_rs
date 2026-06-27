@@ -43,7 +43,7 @@ pub struct CpuGameState {
     /// ドラ表示牌
     pub dora_indicators: Vec<Tile>,
     /// 場風
-    pub prevailing_wind: Wind,
+    pub round_wind: Wind,
     /// 山の残り枚数
     pub remaining_tiles: usize,
     /// 局番号（東1局=0, 東2局=1, ...）
@@ -85,7 +85,7 @@ impl CpuGameState {
             player_riichi: [false; 4],
             player_melds: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             dora_indicators: Vec::new(),
-            prevailing_wind: Wind::East,
+            round_wind: Wind::East,
             remaining_tiles: 0,
             round_number: 0,
             total_rounds: 0,
@@ -115,7 +115,7 @@ impl CpuGameState {
                 seat_wind,
                 hand,
                 scores,
-                prevailing_wind,
+                round_wind,
                 dora_indicators,
                 round_number,
                 total_rounds,
@@ -137,7 +137,7 @@ impl CpuGameState {
                 self.player_riichi = [false; 4];
                 self.player_melds = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
                 self.dora_indicators = dora_indicators.clone();
-                self.prevailing_wind = *prevailing_wind;
+                self.round_wind = *round_wind;
                 self.remaining_tiles = 70; // 136 - 14(王牌) - 13*4(配牌) = 70
                 self.round_number = *round_number;
                 self.total_rounds = *total_rounds;
@@ -454,7 +454,7 @@ mod tests {
             seat_wind: Wind::South,
             hand: hand.clone(),
             scores: [25000; 4],
-            prevailing_wind: Wind::East,
+            round_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::M5)],
             round_number: 0,
             total_rounds: 0,
@@ -465,7 +465,7 @@ mod tests {
         assert_eq!(state.my_seat_wind, Wind::South);
         assert_eq!(state.my_hand, hand);
         assert_eq!(state.scores, [25000; 4]);
-        assert_eq!(state.prevailing_wind, Wind::East);
+        assert_eq!(state.round_wind, Wind::East);
         assert_eq!(state.dora_indicators.len(), 1);
         assert_eq!(state.round_number, 0);
     }
@@ -491,7 +491,7 @@ mod tests {
             called_tile: Some(Tile::new(Tile::S1)),
         });
         state.dora_indicators = vec![Tile::new(Tile::P9)];
-        state.prevailing_wind = Wind::South;
+        state.round_wind = Wind::South;
         state.remaining_tiles = 12;
         state.round_number = 9;
         state.honba = 3;
@@ -506,7 +506,7 @@ mod tests {
             seat_wind: Wind::North,
             hand: hand.clone(),
             scores: [25000; 4],
-            prevailing_wind: Wind::East,
+            round_wind: Wind::East,
             dora_indicators: vec![Tile::new(Tile::Z1)],
             round_number: 4,
             total_rounds: 4,
@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(state.player_riichi, [false; 4]);
         assert!(state.player_melds.iter().all(Vec::is_empty));
         assert_eq!(state.dora_indicators, vec![Tile::new(Tile::Z1)]);
-        assert_eq!(state.prevailing_wind, Wind::East);
+        assert_eq!(state.round_wind, Wind::East);
         assert_eq!(state.remaining_tiles, 70);
         assert_eq!(state.round_number, 4);
         assert_eq!(state.honba, 1);

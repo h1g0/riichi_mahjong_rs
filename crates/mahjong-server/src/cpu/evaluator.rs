@@ -143,7 +143,7 @@ pub(crate) fn estimate_hand_value(hand_tiles: &[Tile], state: &CpuGameState) -> 
     value += red_count as f64 * 2.0;
 
     // 役牌（自風・場風・三元牌）の刻子候補
-    let yakuhai_types = get_yakuhai_types(state.my_seat_wind, state.prevailing_wind);
+    let yakuhai_types = get_yakuhai_types(state.my_seat_wind, state.round_wind);
     for &yh in &yakuhai_types {
         let count = hand_tiles.iter().filter(|t| t.get() == yh).count();
         if count >= 2 {
@@ -152,7 +152,7 @@ pub(crate) fn estimate_hand_value(hand_tiles: &[Tile], state: &CpuGameState) -> 
     }
 
     // タンヤオ可能性（中張牌のみ）
-    let all_tanyao = hand_tiles.iter().all(|t| !t.is_1_9_honor());
+    let all_tanyao = hand_tiles.iter().all(|t| !t.is_1_9_honour());
     if all_tanyao {
         value += 1.5;
     }
@@ -171,12 +171,12 @@ fn count_dora_in_hand(hand_tiles: &[Tile], dora_indicators: &[Tile]) -> u32 {
 }
 
 /// 役牌となる牌種のリストを返す
-pub(crate) fn get_yakuhai_types(seat_wind: Wind, prevailing_wind: Wind) -> Vec<TileType> {
+pub(crate) fn get_yakuhai_types(seat_wind: Wind, round_wind: Wind) -> Vec<TileType> {
     use mahjong_core::tile::Tile as T;
     // 白發中 + 場風 + 自風（Wind の判別値は対応する牌種と一致する）
     let mut types = vec![T::Z5, T::Z6, T::Z7];
-    types.push(prevailing_wind as TileType);
-    if seat_wind != prevailing_wind {
+    types.push(round_wind as TileType);
+    if seat_wind != round_wind {
         types.push(seat_wind as TileType);
     }
     types
@@ -442,7 +442,7 @@ mod tests {
     fn test_estimate_hand_value_yakuhai_pair() {
         let mut state = CpuGameState::new();
         state.my_seat_wind = Wind::East;
-        state.prevailing_wind = Wind::East;
+        state.round_wind = Wind::East;
         // 東が2枚（役牌候補）
         let hand = vec![Tile::new(Tile::Z1), Tile::new(Tile::Z1)];
         let value = estimate_hand_value(&hand, &state);

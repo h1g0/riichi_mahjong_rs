@@ -25,7 +25,7 @@ impl Round {
         let analyzer = HandAnalyzer::new(&player.hand);
         let win_result = scoring::check_win_with_settings(
             player,
-            self.prevailing_wind,
+            self.round_wind,
             true,
             self.wall.is_empty(),
             self.last_draw_was_dead_wall,
