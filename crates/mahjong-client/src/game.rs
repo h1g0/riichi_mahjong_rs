@@ -157,7 +157,7 @@ pub struct GameState {
     /// 各プレイヤーの点数
     pub scores: [i32; 4],
     /// 場風
-    pub prevailing_wind: Option<Wind>,
+    pub round_wind: Option<Wind>,
     /// ドラ表示牌
     pub dora_indicators: Vec<Tile>,
     /// 裏ドラ表示牌（リーチ和了時のみ公開）
@@ -379,7 +379,7 @@ impl GameState {
             drawn: None,
             discards: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             scores: [25000; 4],
-            prevailing_wind: None,
+            round_wind: None,
             dora_indicators: Vec::new(),
             uradora_indicators: Vec::new(),
             win_hand: Vec::new(),
@@ -469,7 +469,7 @@ impl GameState {
                 seat_wind,
                 hand,
                 scores,
-                prevailing_wind,
+                round_wind,
                 dora_indicators,
                 round_number,
                 total_rounds: _,
@@ -481,7 +481,7 @@ impl GameState {
                 self.hand.sort();
                 self.drawn = None;
                 self.scores = scores;
-                self.prevailing_wind = Some(prevailing_wind);
+                self.round_wind = Some(round_wind);
                 self.dora_indicators = dora_indicators;
                 self.uradora_indicators = Vec::new();
                 self.discards = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];

@@ -212,7 +212,7 @@ impl Player {
     /// 各要素は [TileType; 2] で、手牌から使う2枚の牌の種類を表す。
     /// 字牌はチー不可。
     pub fn chi_options(&self, tile: Tile) -> Vec<[Tile; 2]> {
-        if tile.is_honor() {
+        if tile.is_honour() {
             return vec![];
         }
 

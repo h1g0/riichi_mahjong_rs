@@ -37,7 +37,7 @@ pub struct Table {
     /// 現在の局
     pub round: Option<Round>,
     /// 場風
-    pub prevailing_wind: Wind,
+    pub round_wind: Wind,
     /// 局番号（0-based: 東1局=0, 東2局=1, ...）
     pub round_number: usize,
     /// 本場数
@@ -59,7 +59,7 @@ impl Table {
         Table {
             settings,
             round: None,
-            prevailing_wind: Wind::East,
+            round_wind: Wind::East,
             round_number: 0,
             honba: 0,
             riichi_sticks: 0,
@@ -77,7 +77,7 @@ impl Table {
     /// 新しい局を開始する
     pub fn start_round(&mut self) {
         let round = Round::new(
-            self.prevailing_wind,
+            self.round_wind,
             self.dealer,
             self.scores,
             self.honba,
@@ -95,7 +95,7 @@ impl Table {
     pub fn start_round_with_seed(&mut self, seed: u64) {
         let round = Round::new_with_seed(
             seed,
-            self.prevailing_wind,
+            self.round_wind,
             self.dealer,
             self.scores,
             self.honba,
@@ -273,7 +273,7 @@ impl Table {
         }
 
         // 場風を更新
-        self.prevailing_wind = Wind::from_index(self.round_number / 4);
+        self.round_wind = Wind::from_index(self.round_number / 4);
     }
 }
 
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn test_table_new() {
         let table = Table::new(GameSettings::default());
-        assert_eq!(table.prevailing_wind, Wind::East);
+        assert_eq!(table.round_wind, Wind::East);
         assert_eq!(table.dealer, 0);
         assert_eq!(table.scores, [25000; 4]);
         assert_eq!(table.riichi_sticks, 0);
@@ -299,7 +299,7 @@ mod tests {
         assert!(table.round.is_some());
 
         let round = table.current_round().unwrap();
-        assert_eq!(round.prevailing_wind, Wind::East);
+        assert_eq!(round.round_wind, Wind::East);
         assert_eq!(round.current_player, 0);
     }
 
@@ -620,7 +620,7 @@ mod tests {
 
         assert!(!table.is_game_over);
         assert_eq!(table.round_number, 4);
-        assert_eq!(table.prevailing_wind, Wind::South);
+        assert_eq!(table.round_wind, Wind::South);
         assert_eq!(table.dealer, 0);
     }
 

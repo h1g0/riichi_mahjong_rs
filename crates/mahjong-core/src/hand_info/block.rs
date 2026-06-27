@@ -9,7 +9,7 @@ pub trait BlockProperty {
     /// 么九牌が含まれているか
     fn has_1_or_9(&self) -> Result<bool>;
     /// 字牌が含まれているか
-    fn has_honor(&self) -> Result<bool>;
+    fn has_honour(&self) -> Result<bool>;
     /// 特定の風牌が含まれているか
     fn has_wind(&self, wind: Wind) -> Result<bool>;
     /// 特定の三元牌が含まれているか
@@ -40,7 +40,7 @@ fn has_1_or_9(t: TileType) -> Result<bool> {
     }
 }
 
-fn has_honor(t: TileType) -> Result<bool> {
+fn has_honour(t: TileType) -> Result<bool> {
     is_proper_tile(t)?;
     match t {
         Tile::Z1..=Tile::Z7 => Ok(true),
@@ -125,8 +125,8 @@ impl BlockProperty for Same2 {
     fn has_1_or_9(&self) -> Result<bool> {
         has_1_or_9(self.tiles[0])
     }
-    fn has_honor(&self) -> Result<bool> {
-        has_honor(self.tiles[0])
+    fn has_honour(&self) -> Result<bool> {
+        has_honour(self.tiles[0])
     }
     fn has_wind(&self, wind: Wind) -> Result<bool> {
         has_wind(self.tiles[0], wind)
@@ -190,8 +190,8 @@ impl BlockProperty for Same3 {
     fn has_1_or_9(&self) -> Result<bool> {
         has_1_or_9(self.tiles[0])
     }
-    fn has_honor(&self) -> Result<bool> {
-        has_honor(self.tiles[0])
+    fn has_honour(&self) -> Result<bool> {
+        has_honour(self.tiles[0])
     }
     fn has_wind(&self, wind: Wind) -> Result<bool> {
         has_wind(self.tiles[0], wind)
@@ -241,7 +241,7 @@ impl Sequential2 {
                 tile2
             ));
         }
-        if has_honor(tile1)? || has_honor(tile2)? {
+        if has_honour(tile1)? || has_honour(tile2)? {
             return Err(anyhow!(
                 "Cannot assign Honor tiles to `Sequential2`: {}, {} !",
                 tile1,
@@ -267,7 +267,7 @@ impl BlockProperty for Sequential2 {
     fn has_1_or_9(&self) -> Result<bool> {
         Ok(has_1_or_9(self.tiles[0])? || has_1_or_9(self.tiles[1])?)
     }
-    fn has_honor(&self) -> Result<bool> {
+    fn has_honour(&self) -> Result<bool> {
         Ok(false)
     }
     fn has_wind(&self, _: Wind) -> Result<bool> {
@@ -323,7 +323,7 @@ impl Sequential3 {
                 tile3
             ));
         }
-        if has_honor(tile1)? || has_honor(tile2)? || has_honor(tile3)? {
+        if has_honour(tile1)? || has_honour(tile2)? || has_honour(tile3)? {
             return Err(anyhow!(
                 "Cannot assign Honor tiles to `Sequential3`: {}, {}, {} !",
                 tile1,
@@ -364,7 +364,7 @@ impl BlockProperty for Sequential3 {
     fn has_1_or_9(&self) -> Result<bool> {
         Ok(has_1_or_9(self.tiles[0])? || has_1_or_9(self.tiles[2])?)
     }
-    fn has_honor(&self) -> Result<bool> {
+    fn has_honour(&self) -> Result<bool> {
         Ok(false)
     }
     fn has_wind(&self, _: Wind) -> Result<bool> {
@@ -477,7 +477,7 @@ mod tests {
         assert!(Sequential2::new(Tile::P3, Tile::P1).is_err());
     }
     #[test]
-    fn test_sequential2_errors_when_honor() {
+    fn test_sequential2_errors_when_honour() {
         assert!(Sequential2::new(Tile::Z1, Tile::Z2).is_err());
     }
     #[test]
@@ -523,7 +523,7 @@ mod tests {
         assert!(Sequential3::new(Tile::M3, Tile::M2, Tile::M1).is_err());
     }
     #[test]
-    fn test_sequential3_errors_when_honor() {
+    fn test_sequential3_errors_when_honour() {
         assert!(Sequential3::new(Tile::Z1, Tile::Z2, Tile::Z3).is_err());
     }
     #[test]
@@ -655,11 +655,31 @@ mod tests {
     }
 
     #[test]
-    fn test_same2_has_honor() {
-        assert!(Same2::new(Tile::Z1, Tile::Z1).unwrap().has_honor().unwrap());
-        assert!(Same2::new(Tile::Z7, Tile::Z7).unwrap().has_honor().unwrap());
-        assert!(!Same2::new(Tile::M1, Tile::M1).unwrap().has_honor().unwrap());
-        assert!(!Same2::new(Tile::P5, Tile::P5).unwrap().has_honor().unwrap());
+    fn test_same2_has_honour() {
+        assert!(
+            Same2::new(Tile::Z1, Tile::Z1)
+                .unwrap()
+                .has_honour()
+                .unwrap()
+        );
+        assert!(
+            Same2::new(Tile::Z7, Tile::Z7)
+                .unwrap()
+                .has_honour()
+                .unwrap()
+        );
+        assert!(
+            !Same2::new(Tile::M1, Tile::M1)
+                .unwrap()
+                .has_honour()
+                .unwrap()
+        );
+        assert!(
+            !Same2::new(Tile::P5, Tile::P5)
+                .unwrap()
+                .has_honour()
+                .unwrap()
+        );
     }
 
     #[test]
@@ -825,17 +845,17 @@ mod tests {
     }
 
     #[test]
-    fn test_same3_has_honor() {
+    fn test_same3_has_honour() {
         assert!(
             Same3::new(Tile::Z1, Tile::Z1, Tile::Z1)
                 .unwrap()
-                .has_honor()
+                .has_honour()
                 .unwrap()
         );
         assert!(
             !Same3::new(Tile::M5, Tile::M5, Tile::M5)
                 .unwrap()
-                .has_honor()
+                .has_honour()
                 .unwrap()
         );
     }
@@ -1041,12 +1061,12 @@ mod tests {
     }
 
     #[test]
-    fn test_sequential2_has_honor() {
+    fn test_sequential2_has_honour() {
         // 字牌は塔子にならないので常に false
         assert!(
             !Sequential2::new(Tile::M2, Tile::M3)
                 .unwrap()
-                .has_honor()
+                .has_honour()
                 .unwrap()
         );
     }
@@ -1199,9 +1219,9 @@ mod tests {
     }
 
     #[test]
-    fn test_sequential3_has_honor() {
+    fn test_sequential3_has_honour() {
         // 字牌は順子にならないので常に false
-        assert!(!seq3(Tile::M2, Tile::M3, Tile::M4).has_honor().unwrap());
+        assert!(!seq3(Tile::M2, Tile::M3, Tile::M4).has_honour().unwrap());
     }
 
     #[test]

@@ -31,13 +31,13 @@ pub fn check_seven_pairs(
 }
 
 /// 三色同順
-pub fn check_three_color_straight(
+pub fn check_mixed_sequences(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::ThreeColorStraight,
+        Kind::MixedSequences,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -82,13 +82,13 @@ pub fn check_three_color_straight(
     Ok((name, false, 0))
 }
 /// 一気通貫
-pub fn check_straight(
+pub fn check_full_straight(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::Straight,
+        Kind::FullStraight,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -125,13 +125,13 @@ pub fn check_straight(
     Ok((name, false, 0))
 }
 /// 対々和
-pub fn check_all_triplet_hand(
+pub fn check_all_triplets(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::AllTripletHand,
+        Kind::AllTriplets,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -144,14 +144,14 @@ pub fn check_all_triplet_hand(
     Ok((name, false, 0))
 }
 /// 三暗刻
-pub fn check_three_closed_triplets(
+pub fn check_three_concealed_triplets(
     hand_analyzer: &HandAnalyzer,
     hand: &Hand,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::ThreeClosedTriplets,
+        Kind::ThreeConcealedTriplets,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -169,7 +169,7 @@ pub fn check_three_closed_triplets(
         }
     }
 
-    if !status.is_self_picked
+    if !status.is_self_drawn
         && let Some(winning_tile) = hand.drawn()
     {
         let winning_tile_type = winning_tile.get();
@@ -195,13 +195,13 @@ pub fn check_three_closed_triplets(
     }
 }
 /// 三色同刻
-pub fn check_three_color_triplets(
+pub fn check_mixed_triplets(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::ThreeColorTriplets,
+        Kind::MixedTriplets,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -240,13 +240,13 @@ pub fn check_three_color_triplets(
     Ok((name, false, 0))
 }
 /// 混全帯么九
-pub fn check_terminal_or_honor_in_each_set(
+pub fn check_common_ends(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::TerminalOrHonorInEachSet,
+        Kind::CommonEnds,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -259,40 +259,40 @@ pub fn check_terminal_or_honor_in_each_set(
         return Ok((name, false, 0));
     }
 
-    let mut no_1_9_honor = false;
+    let mut no_1_9_honour = false;
     // 純全帯么九とは複合しないため、必ず三元牌が含まれる
-    let mut has_honor = false;
+    let mut has_honour = false;
 
     // 面子
 
     // 刻子
     for same in &hand_analyzer.same3 {
-        if !same.has_1_or_9()? && !same.has_honor()? {
-            no_1_9_honor = true;
+        if !same.has_1_or_9()? && !same.has_honour()? {
+            no_1_9_honour = true;
         }
 
-        if same.has_honor()? {
-            has_honor = true;
+        if same.has_honour()? {
+            has_honour = true;
         }
     }
     // 順子
     for seq in &hand_analyzer.sequential3 {
         if !seq.has_1_or_9()? {
-            no_1_9_honor = true;
+            no_1_9_honour = true;
         }
     }
 
     // 雀頭
     for head in &hand_analyzer.same2 {
-        if !head.has_1_or_9()? && !head.has_honor()? {
-            no_1_9_honor = true;
+        if !head.has_1_or_9()? && !head.has_honour()? {
+            no_1_9_honour = true;
         }
-        if head.has_honor()? {
-            has_honor = true;
+        if head.has_honour()? {
+            has_honour = true;
         }
     }
 
-    if no_1_9_honor || !has_honor {
+    if no_1_9_honour || !has_honour {
         return Ok((name, false, 0));
     }
     if status.has_claimed_open {
@@ -301,13 +301,13 @@ pub fn check_terminal_or_honor_in_each_set(
     Ok((name, true, 2))
 }
 /// 混老頭
-pub fn check_all_terminals_and_honors(
+pub fn check_common_terminals(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::AllTerminalsAndHonors,
+        Kind::CommonTerminals,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -320,13 +320,13 @@ pub fn check_all_terminals_and_honors(
         return Ok((name, false, 0));
     }
     // 字牌が含まれていなければ清老頭であり混老頭にはならない
-    let mut has_honor = false;
+    let mut has_honour = false;
     // 数牌（1,9）が含まれていなければ字一色であり混老頭にはならない
     let mut has_terminal = false;
 
     for same in &hand_analyzer.same3 {
-        if same.has_honor()? {
-            has_honor = true;
+        if same.has_honour()? {
+            has_honour = true;
         } else if same.has_1_or_9()? {
             has_terminal = true;
         } else {
@@ -334,28 +334,28 @@ pub fn check_all_terminals_and_honors(
         }
     }
     for head in &hand_analyzer.same2 {
-        if head.has_honor()? {
-            has_honor = true;
+        if head.has_honour()? {
+            has_honour = true;
         } else if head.has_1_or_9()? {
             has_terminal = true;
         } else {
             return Ok((name, false, 0));
         }
     }
-    if has_honor && has_terminal {
+    if has_honour && has_terminal {
         Ok((name, true, 2))
     } else {
         Ok((name, false, 0))
     }
 }
 /// 小三元
-pub fn check_little_three_dragons(
+pub fn check_little_dragons(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
     let name = get(
-        Kind::LittleThreeDragons,
+        Kind::LittleDragons,
         status.has_claimed_open,
         settings.display_lang,
     );
@@ -409,7 +409,7 @@ mod tests {
     }
     #[test]
     /// 混全帯么九で和了った
-    fn test_terminal_or_honor_in_each_set() {
+    fn test_common_ends() {
         let test_str = "123999m111p79s44z 8s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -417,13 +417,13 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings).unwrap(),
+            check_common_ends(&test_analyzer, &status, &settings).unwrap(),
             ("混全帯么九", true, 2)
         );
     }
     #[test]
     /// 混全帯么九で和了った（食い下がり1翻）
-    fn test_terminal_or_honor_in_each_set_open() {
+    fn test_common_ends_open() {
         let test_str = "123m111p79s44z 789m 8s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -431,27 +431,27 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = true;
         assert_eq!(
-            check_terminal_or_honor_in_each_set(&test_analyzer, &status, &settings).unwrap(),
+            check_common_ends(&test_analyzer, &status, &settings).unwrap(),
             ("混全帯么九（鳴）", true, 1)
         );
     }
     #[test]
     /// 対々和で和了った
-    fn test_all_triplet_hand() {
+    fn test_all_triplets() {
         let test_str = "777m333p22z 555m 999s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_all_triplet_hand(&test_analyzer, &status, &settings).unwrap(),
+            check_all_triplets(&test_analyzer, &status, &settings).unwrap(),
             ("対々和", true, 2)
         );
     }
 
     #[test]
     /// 一気通貫で和了った
-    fn test_straight() {
+    fn test_full_straight() {
         let test_str = "123456789m78p22z 9p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -459,14 +459,14 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_straight(&test_analyzer, &status, &settings).unwrap(),
+            check_full_straight(&test_analyzer, &status, &settings).unwrap(),
             ("一気通貫", true, 2)
         );
     }
 
     #[test]
     /// 一気通貫で和了った（食い下がり1翻）
-    fn test_straight_open() {
+    fn test_full_straight_open() {
         let test_str = "123m1p123s 456s 789s 1p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -474,13 +474,13 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = true;
         assert_eq!(
-            check_straight(&test_analyzer, &status, &settings).unwrap(),
+            check_full_straight(&test_analyzer, &status, &settings).unwrap(),
             ("一気通貫（鳴）", true, 1)
         );
     }
     #[test]
     /// 三色同順で和了った
-    fn test_three_color_straight() {
+    fn test_mixed_sequences() {
         let test_str = "123m123p123s789m1z 1z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -488,13 +488,13 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_three_color_straight(&test_analyzer, &status, &settings).unwrap(),
+            check_mixed_sequences(&test_analyzer, &status, &settings).unwrap(),
             ("三色同順", true, 2)
         );
     }
     #[test]
     /// 三色同順で和了った（食い下がり1翻）
-    fn test_three_color_straight_open() {
+    fn test_mixed_sequences_open() {
         let test_str = "123m123p1z 123s 789m 1z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
@@ -502,7 +502,7 @@ mod tests {
         let settings = Settings::new();
         status.has_claimed_open = true;
         assert_eq!(
-            check_three_color_straight(&test_analyzer, &status, &settings).unwrap(),
+            check_mixed_sequences(&test_analyzer, &status, &settings).unwrap(),
             ("三色同順（鳴）", true, 1)
         );
     }
@@ -516,9 +516,9 @@ mod tests {
     #[case::open_sequence_tsumo("111m333p999s1z 456s 1z", true, true, ("三暗刻", true, 2))]
     #[case::open_sequence_ron("111m333p999s1z 456s 1z", false, true, ("三暗刻", true, 2))]
     #[case::open_triplet_tsumo("111m333p1z789s 999s 1z", true, true, ("三暗刻", false, 0))]
-    fn test_three_closed_triplets(
+    fn test_three_concealed_triplets(
         #[case] test_str: &str,
-        #[case] is_self_picked: bool,
+        #[case] is_self_drawn: bool,
         #[case] has_claimed_open: bool,
         #[case] expected: (&'static str, bool, u32),
     ) {
@@ -526,51 +526,51 @@ mod tests {
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
-        status.is_self_picked = is_self_picked;
+        status.is_self_drawn = is_self_drawn;
         status.has_claimed_open = has_claimed_open;
         assert!(test_analyzer.shanten.has_won());
         assert_eq!(
-            check_three_closed_triplets(&test_analyzer, &test, &status, &settings).unwrap(),
+            check_three_concealed_triplets(&test_analyzer, &test, &status, &settings).unwrap(),
             expected
         );
     }
 
     #[test]
     /// 三色同刻で和了った
-    fn test_three_color_triplets() {
+    fn test_mixed_triplets() {
         let test_str = "111m111p111s789p5z 5z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_three_color_triplets(&test_analyzer, &status, &settings).unwrap(),
+            check_mixed_triplets(&test_analyzer, &status, &settings).unwrap(),
             ("三色同刻", true, 2)
         );
     }
     #[test]
     /// 混老頭で和了った
-    fn test_all_terminals_and_honors() {
+    fn test_common_terminals() {
         let test_str = "111m999p1z 111z 999s 1z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_all_terminals_and_honors(&test_analyzer, &status, &settings).unwrap(),
+            check_common_terminals(&test_analyzer, &status, &settings).unwrap(),
             ("混老頭", true, 2)
         );
     }
     #[test]
     /// 小三元で和了った
-    fn test_little_three_dragons() {
+    fn test_little_dragons() {
         let test_str = "555666z77z234m78p 9p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_little_three_dragons(&test_analyzer, &status, &settings).unwrap(),
+            check_little_dragons(&test_analyzer, &status, &settings).unwrap(),
             ("小三元", true, 2)
         );
     }

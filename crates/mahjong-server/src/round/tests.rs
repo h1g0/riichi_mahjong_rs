@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn test_round_new() {
     let round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
-    assert_eq!(round.prevailing_wind, Wind::East);
+    assert_eq!(round.round_wind, Wind::East);
     assert_eq!(round.current_player, 0);
     assert_eq!(round.phase, TurnPhase::Draw);
     assert!(round.result.is_none());
@@ -180,12 +180,12 @@ fn test_round_events_on_start() {
                 seat_wind,
                 hand,
                 scores,
-                prevailing_wind,
+                round_wind,
                 ..
             } => {
                 assert_eq!(hand.len(), 13);
                 assert_eq!(*scores, [25000; 4]);
-                assert_eq!(*prevailing_wind, Wind::East);
+                assert_eq!(*round_wind, Wind::East);
                 assert_eq!(*seat_wind, round.players[i].seat_wind);
             }
             _ => panic!("Expected GameStarted event"),
@@ -274,7 +274,7 @@ fn open_tanyao_player(seat_wind: Wind, with_drawn: bool) -> Player {
 #[test]
 fn test_open_tanyao_disabled_blocks_tsumo() {
     let mut settings = Settings::new();
-    settings.opened_all_simples = false;
+    settings.opened_all_inside = false;
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
 
     let seat_wind = round.players[0].seat_wind;
@@ -290,7 +290,7 @@ fn test_open_tanyao_disabled_blocks_tsumo() {
 #[test]
 fn test_open_tanyao_disabled_does_not_offer_ron() {
     let mut settings = Settings::new();
-    settings.opened_all_simples = false;
+    settings.opened_all_inside = false;
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
 
     let seat_wind = round.players[1].seat_wind;

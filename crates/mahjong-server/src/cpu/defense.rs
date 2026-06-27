@@ -139,7 +139,11 @@ pub(crate) fn assess_threat(
     if config.level >= CpuLevel::Normal && melds.is_empty() {
         let discards = &state.all_discards[idx];
         if discards.len() >= 5 {
-            let early_orphans = discards.iter().take(6).filter(|t| t.is_1_9_honor()).count();
+            let early_orphans = discards
+                .iter()
+                .take(6)
+                .filter(|t| t.is_1_9_honour())
+                .count();
             let some_orphan_dead = ORPHAN_TYPES
                 .iter()
                 .any(|&t| publicly_visible(state, t) >= 4);
@@ -239,7 +243,7 @@ fn evaluate_safety_against_threat(
 
     // 国士無双気配（#182拡張）: 么九牌・字牌は重みによらず危険として扱う
     // （国士は么九牌13種のどれでも待ちになりうる。生牌は特に危険）
-    if threat.kokushi_alert && tile.is_1_9_honor() {
+    if threat.kokushi_alert && tile.is_1_9_honour() {
         return if publicly_visible(state, tt) == 0 {
             0.08
         } else {
@@ -263,7 +267,7 @@ fn evaluate_safety_against_threat(
 
         // #177（中以上）: 生牌の役牌は危険度を上げる
         if strict
-            && is_yakuhai(tt, state.my_seat_wind, state.prevailing_wind)
+            && is_yakuhai(tt, state.my_seat_wind, state.round_wind)
             && publicly_visible(state, tt) == 0
         {
             base = base.min(0.22);
@@ -545,7 +549,7 @@ mod tests {
     }
 
     #[test]
-    fn test_honor_tile_safety() {
+    fn test_honour_tile_safety() {
         let state = CpuGameState::new();
         let discards: Vec<Tile> = Vec::new();
         // 字牌で見えていない → 低い安全度
@@ -701,13 +705,13 @@ mod tests {
         let config = test_config();
 
         let terminal = evaluate_safety(Tile::new(Tile::M1), &state, &config);
-        let honor = evaluate_safety(Tile::new(Tile::Z1), &state, &config);
+        let honour = evaluate_safety(Tile::new(Tile::Z1), &state, &config);
         let middle = evaluate_safety(Tile::new(Tile::S2), &state, &config);
 
         assert!(terminal <= 0.1, "生牌の么九牌は最危険: {terminal}");
-        assert!(honor <= 0.1, "生牌の字牌は最危険: {honor}");
+        assert!(honour <= 0.1, "生牌の字牌は最危険: {honour}");
         assert!(
-            middle > terminal && middle > honor,
+            middle > terminal && middle > honour,
             "中張牌は么九牌より安全: {middle}"
         );
 
@@ -737,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn test_flush_suit_and_honors_are_dangerous() {
+    fn test_flush_suit_and_honours_are_dangerous() {
         // #181: 染め手気配の色と字牌は他の色より危険
         let mut state = CpuGameState::new();
         state.my_seat_wind = Wind::East;
@@ -746,13 +750,13 @@ mod tests {
 
         let in_suit = evaluate_safety(Tile::new(Tile::P5), &state, &config);
         let off_suit = evaluate_safety(Tile::new(Tile::S5), &state, &config);
-        let honor = evaluate_safety(Tile::new(Tile::Z3), &state, &config);
+        let honour = evaluate_safety(Tile::new(Tile::Z3), &state, &config);
 
         assert!(
             in_suit < off_suit,
             "染め色は他色より危険: {in_suit} vs {off_suit}"
         );
-        assert!(honor < 1.0, "染め手相手の字牌も警戒する");
+        assert!(honour < 1.0, "染め手相手の字牌も警戒する");
     }
 
     #[test]
@@ -780,7 +784,7 @@ mod tests {
         // #177: 生牌の役牌（白）は中以上では客風より危険
         let mut state = CpuGameState::new();
         state.my_seat_wind = Wind::East;
-        state.prevailing_wind = Wind::East;
+        state.round_wind = Wind::East;
         state.player_riichi[1] = true;
 
         let config = test_config(); // Normal → strict
@@ -930,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn test_suji_honor_tile_returns_false() {
+    fn test_suji_honour_tile_returns_false() {
         // 字牌に筋はない
         let discards = vec![Tile::new(Tile::M4)];
         assert!(!is_suji(Tile::Z1, &discards));
@@ -1031,7 +1035,7 @@ mod tests {
     }
 
     #[test]
-    fn test_honor_tile_visible_counts() {
+    fn test_honour_tile_visible_counts() {
         // 字牌の見え枚数に応じた安全度
         let discards: Vec<Tile> = vec![];
         {
@@ -1150,7 +1154,7 @@ mod tests {
     }
 
     #[test]
-    fn test_kabe_honor_tile_returns_false() {
+    fn test_kabe_honour_tile_returns_false() {
         // 字牌に壁はない
         let mut counts = [0u8; 34];
         counts[Tile::Z1 as usize] = 4;

@@ -121,7 +121,7 @@ fn test_isolated_tile_bonus_ordering() {
     // 孤立牌の切りやすさ: 客風 > 1/9 > 役牌 > 2/8 > 中張牌
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::East;
-    state.prevailing_wind = Wind::East;
+    state.round_wind = Wind::East;
     // Z3=客風(西), Z5=白(役牌), M1=孤立1, S8=孤立8, M5=孤立中張, P7P7=対子
     state.my_hand = tiles(&[
         Tile::Z3,
@@ -1999,7 +1999,7 @@ fn test_judge_ankan_forbids_kan_during_opponent_riichi_without_tenpai() {
 fn test_heuristic_can_reference_candidate_and_context() {
     // 候補とコンテキストの両方を参照する定石が書けることを確認する
     let heuristics = [fixed_bonus_heuristic(
-        "honor-in-defense",
+        "honour-in-defense",
         CpuLevel::Weak,
         |ctx, c| {
             if !ctx.attacking && c.tile.get() >= 27 {
@@ -2012,7 +2012,7 @@ fn test_heuristic_can_reference_candidate_and_context() {
     let state = CpuGameState::new();
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
 
-    let honor = make_candidate(Tile::Z1);
+    let honour = make_candidate(Tile::Z1);
     let number = make_candidate(Tile::M5);
 
     let defending = DiscardContext {
@@ -2021,7 +2021,7 @@ fn test_heuristic_can_reference_candidate_and_context() {
         attacking: false,
     };
     assert_eq!(
-        discard_adjustment_with(&heuristics, &defending, &honor),
+        discard_adjustment_with(&heuristics, &defending, &honour),
         50.0
     );
     assert_eq!(
@@ -2035,7 +2035,7 @@ fn test_heuristic_can_reference_candidate_and_context() {
         attacking: true,
     };
     assert_eq!(
-        discard_adjustment_with(&heuristics, &attacking, &honor),
+        discard_adjustment_with(&heuristics, &attacking, &honour),
         0.0
     );
 }

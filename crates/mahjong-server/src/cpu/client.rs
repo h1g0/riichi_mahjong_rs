@@ -592,7 +592,7 @@ impl CpuClient {
         let tt = called_tile.get();
 
         // 役牌のポンは積極的に
-        if is_yakuhai(tt, self.state.my_seat_wind, self.state.prevailing_wind) {
+        if is_yakuhai(tt, self.state.my_seat_wind, self.state.round_wind) {
             return true;
         }
 
@@ -726,12 +726,12 @@ impl CpuClient {
 pub(crate) fn is_yakuhai(
     tile_type: u32,
     seat_wind: mahjong_core::tile::Wind,
-    prevailing_wind: mahjong_core::tile::Wind,
+    round_wind: mahjong_core::tile::Wind,
 ) -> bool {
     use mahjong_core::tile::Tile as T;
     // 三元牌、または場風・自風（Wind の判別値は対応する牌種と一致する）
     matches!(tile_type, T::Z5..=T::Z7)
-        || tile_type == prevailing_wind as u32
+        || tile_type == round_wind as u32
         || tile_type == seat_wind as u32
 }
 

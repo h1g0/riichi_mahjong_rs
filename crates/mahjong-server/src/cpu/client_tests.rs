@@ -8,7 +8,7 @@ fn game_started_event(seat_wind: Wind, hand: Vec<Tile>) -> ServerEvent {
         seat_wind,
         hand,
         scores: [25000; 4],
-        prevailing_wind: Wind::East,
+        round_wind: Wind::East,
         dora_indicators: vec![],
         round_number: 0,
         total_rounds: 4,
@@ -505,7 +505,7 @@ fn test_dora_float_kept_over_plain_float() {
         seat_wind: Wind::South,
         hand: hand.clone(),
         scores: [25000; 4],
-        prevailing_wind: Wind::East,
+        round_wind: Wind::East,
         dora_indicators: vec![Tile::new(Tile::P8)], // ドラは P9
         round_number: 0,
         total_rounds: 4,
@@ -527,7 +527,7 @@ fn test_dora_float_kept_over_plain_float() {
         seat_wind: Wind::South,
         hand,
         scores: [25000; 4],
-        prevailing_wind: Wind::East,
+        round_wind: Wind::East,
         dora_indicators: vec![Tile::new(Tile::P8)],
         round_number: 0,
         total_rounds: 4,
@@ -701,7 +701,7 @@ fn test_damaten_with_confirmed_mangan() {
         seat_wind: Wind::South,
         hand,
         scores: [25000; 4],
-        prevailing_wind: Wind::East,
+        round_wind: Wind::East,
         dora_indicators: vec![Tile::new(Tile::S7), Tile::new(Tile::M3)], // ドラ S8×2 + M4
         round_number: 0,
         total_rounds: 4,
@@ -946,7 +946,7 @@ fn nine_terminals_action(
         seat_wind: Wind::East,
         hand,
         scores,
-        prevailing_wind: Wind::East,
+        round_wind: Wind::East,
         dora_indicators: vec![],
         round_number: 0,
         total_rounds: 4,
@@ -977,7 +977,7 @@ fn test_kokushi_hand_keeps_orphans() {
     // ツモ切り（P6）か手牌の中張牌切りなら正しい
     if let Some(t) = tile {
         assert!(
-            !t.is_1_9_honor(),
+            !t.is_1_9_honour(),
             "国士無双ルートでは么九牌を切らない, got {t:?}"
         );
     }
@@ -1356,7 +1356,7 @@ fn test_cheap_distant_chi_suppressed() {
         seat_wind: Wind::South,
         hand: hand.clone(),
         scores: [25000; 4],
-        prevailing_wind: Wind::East,
+        round_wind: Wind::East,
         dora_indicators: vec![Tile::new(Tile::Z5)], // ドラ(發)は手牌にない
         round_number: 0,
         total_rounds: 4,
@@ -1373,7 +1373,7 @@ fn test_cheap_distant_chi_suppressed() {
         seat_wind: Wind::South,
         hand,
         scores: [25000; 4],
-        prevailing_wind: Wind::East,
+        round_wind: Wind::East,
         dora_indicators: vec![Tile::new(Tile::P6)], // ドラは P7（手牌に2枚...P7,P8のP7）
         round_number: 0,
         total_rounds: 4,

@@ -1038,7 +1038,7 @@ mod tests {
 
     #[test]
     /// 自風牌で和了った
-    fn win_by_honor_tiles_players_wind() {
+    fn win_by_honour_tiles_players_wind() {
         let test_str = "333m456p1789s 333z 1s";
         let test = Hand::from(test_str);
         assert!(
@@ -1051,7 +1051,7 @@ mod tests {
 
     #[test]
     /// 場風で和了った
-    fn win_by_honor_tiles_prevailing_wind() {
+    fn win_by_honour_tiles_prevailing_wind() {
         let test_str = "234567m6789s 111z 6s";
         let test = Hand::from(test_str);
         assert!(
@@ -1063,7 +1063,7 @@ mod tests {
     }
     #[test]
     /// 三元牌で和了った
-    fn win_by_honor_tiles_dragons() {
+    fn win_by_honour_tiles_dragons() {
         let test_str = "5m123456p888s 777z 5m";
         let test = Hand::from(test_str);
         assert!(
@@ -1162,7 +1162,7 @@ mod tests {
     #[case::normal_win_nine_gates("1112345678999m 5m", -1)]
     #[case::seven_pairs_win("1122m3344p5566s7z 7z", -1)]
     #[case::thirteen_orphans_win("19m19p19s1234567z 1m", -1)]
-    #[case::normal_13_tiles_with_isolated_honors("123m456p789s1234z", 2)]
+    #[case::normal_13_tiles_with_isolated_honours("123m456p789s1234z", 2)]
     #[case::far_from_ready("147m258p369s1234z", 6)]
     #[case::with_open_melds("333m456p1789s 333z 1s", -1)]
     #[case::leftover_tatsu_at_lower_index("23444p22334567s", 0)]

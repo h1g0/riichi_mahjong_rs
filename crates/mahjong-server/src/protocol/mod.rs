@@ -87,7 +87,7 @@ pub enum ServerEvent {
         /// 各プレイヤーの初期点数
         scores: [i32; 4],
         /// 場風
-        prevailing_wind: Wind,
+        round_wind: Wind,
         /// ドラ表示牌
         dora_indicators: Vec<Tile>,
         /// 局番号（0-based: 東1局=0, 東2局=1, ...）

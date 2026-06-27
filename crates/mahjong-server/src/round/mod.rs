@@ -99,7 +99,7 @@ pub struct Round {
     /// 4人のプレイヤー
     pub players: [Player; 4],
     /// 場風
-    pub prevailing_wind: Wind,
+    pub round_wind: Wind,
     /// 親のプレイヤーインデックス（0-3）
     pub dealer: usize,
     /// 現在の手番プレイヤー（0-3）
@@ -125,12 +125,12 @@ pub struct Round {
 impl Round {
     /// 新しい局を開始する
     ///
-    /// - `prevailing_wind`: 場風（東場なら East）
+    /// - `round_wind`: 場風（東場なら East）
     /// - `dealer`: 親のプレイヤーインデックス（0-3）
     /// - `initial_scores`: 各プレイヤーの初期点数
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        prevailing_wind: Wind,
+        round_wind: Wind,
         dealer: usize,
         initial_scores: [i32; 4],
         honba: usize,
@@ -141,7 +141,7 @@ impl Round {
     ) -> Self {
         Self::with_wall(
             Wall::new(),
-            prevailing_wind,
+            round_wind,
             dealer,
             initial_scores,
             honba,
@@ -158,7 +158,7 @@ impl Round {
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_seed(
         seed: u64,
-        prevailing_wind: Wind,
+        round_wind: Wind,
         dealer: usize,
         initial_scores: [i32; 4],
         honba: usize,
@@ -169,7 +169,7 @@ impl Round {
     ) -> Self {
         Self::with_wall(
             Wall::new_with_seed(seed),
-            prevailing_wind,
+            round_wind,
             dealer,
             initial_scores,
             honba,
@@ -184,7 +184,7 @@ impl Round {
     #[allow(clippy::too_many_arguments)]
     fn with_wall(
         mut wall: Wall,
-        prevailing_wind: Wind,
+        round_wind: Wind,
         dealer: usize,
         initial_scores: [i32; 4],
         honba: usize,
@@ -221,7 +221,7 @@ impl Round {
                     seat_wind: player.seat_wind,
                     hand: player.hand.tiles().to_vec(),
                     scores: initial_scores,
-                    prevailing_wind,
+                    round_wind,
                     dora_indicators: dora_indicators.clone(),
                     round_number,
                     total_rounds,
@@ -234,7 +234,7 @@ impl Round {
         Round {
             wall,
             players,
-            prevailing_wind,
+            round_wind,
             dealer,
             current_player: dealer,
             honba,
@@ -433,7 +433,7 @@ impl Round {
                 let win_result = scoring::check_ron_with_settings(
                     player,
                     discarded_tile,
-                    self.prevailing_wind,
+                    self.round_wind,
                     is_last_tile,
                     &self.settings,
                 );
@@ -702,7 +702,7 @@ impl Round {
             let win_result = scoring::check_ron_with_flags_and_settings(
                 &self.players[winner],
                 winning_tile,
-                self.prevailing_wind,
+                self.round_wind,
                 is_last_tile,
                 is_robbing_a_quad,
                 &self.settings,
@@ -1023,7 +1023,7 @@ impl Round {
                 let win_result = scoring::check_ron_with_flags_and_settings(
                     player,
                     called_tile,
-                    self.prevailing_wind,
+                    self.round_wind,
                     is_last_tile,
                     true,
                     &self.settings,
@@ -1357,13 +1357,13 @@ impl Round {
         }
 
         // 全プレイヤーにリーチ通知
-        let player_wind = self.players[player_idx].seat_wind;
+        let seat_wind = self.players[player_idx].seat_wind;
         let scores = self.get_scores();
         for i in 0..4 {
             self.events.push((
                 i,
                 ServerEvent::PlayerRiichi {
-                    player: player_wind,
+                    player: seat_wind,
                     scores,
                     riichi_sticks: self.riichi_sticks,
                 },
@@ -1384,7 +1384,7 @@ impl Round {
         let is_last_tile = self.wall.is_empty();
         let result = scoring::check_win_with_settings(
             player,
-            self.prevailing_wind,
+            self.round_wind,
             true,
             is_last_tile,
             self.last_draw_was_dead_wall,
@@ -1404,7 +1404,7 @@ impl Round {
         let is_last_tile = self.wall.is_empty();
         let win_result = scoring::check_win_with_settings(
             player,
-            self.prevailing_wind,
+            self.round_wind,
             true,
             is_last_tile,
             self.last_draw_was_dead_wall,
@@ -1644,12 +1644,12 @@ impl Round {
         }
         let mut tile_types = std::collections::HashSet::new();
         for tile in player.hand.tiles() {
-            if tile.is_1_9_honor() {
+            if tile.is_1_9_honour() {
                 tile_types.insert(tile.get());
             }
         }
         if let Some(tile) = player.hand.drawn()
-            && tile.is_1_9_honor()
+            && tile.is_1_9_honour()
         {
             tile_types.insert(tile.get());
         }

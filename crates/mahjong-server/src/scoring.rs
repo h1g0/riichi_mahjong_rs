@@ -30,18 +30,18 @@ pub struct WinCheckResult {
 /// ロン和了の場合: `is_tsumo = false`
 pub fn check_win(
     player: &Player,
-    prevailing_wind: Wind,
+    round_wind: Wind,
     is_tsumo: bool,
     is_last_tile: bool,
-    is_dead_wall_draw: bool,
+    is_after_a_quad: bool,
 ) -> WinCheckResult {
     let settings = Settings::new();
     check_win_with_settings(
         player,
-        prevailing_wind,
+        round_wind,
         is_tsumo,
         is_last_tile,
-        is_dead_wall_draw,
+        is_after_a_quad,
         &settings,
     )
 }
@@ -49,10 +49,10 @@ pub fn check_win(
 /// プレイヤーの手牌が和了しているか、指定ルールで判定する
 pub fn check_win_with_settings(
     player: &Player,
-    prevailing_wind: Wind,
+    round_wind: Wind,
     is_tsumo: bool,
     is_last_tile: bool,
-    is_dead_wall_draw: bool,
+    is_after_a_quad: bool,
     settings: &Settings,
 ) -> WinCheckResult {
     let hand = &player.hand;
@@ -78,18 +78,18 @@ pub fn check_win_with_settings(
 
     // Status を構築
     let mut status = Status::new();
-    status.is_self_picked = is_tsumo;
-    status.player_wind = player.seat_wind;
-    status.prevailing_wind = prevailing_wind;
-    status.has_claimed_ready = player.is_riichi;
-    status.is_double_ready = player.is_double_riichi;
-    status.is_one_shot = player.is_ippatsu;
+    status.is_self_drawn = is_tsumo;
+    status.seat_wind = player.seat_wind;
+    status.round_wind = round_wind;
+    status.has_claimed_riichi = player.is_riichi;
+    status.is_double_riichi = player.is_double_riichi;
+    status.is_unbroken = player.is_ippatsu;
     status.has_claimed_open = !player.is_menzen();
     status.is_dealer = player.is_dealer();
     status.is_first_turn = player.is_first_turn;
-    status.is_last_tile_from_the_wall = is_last_tile && is_tsumo;
-    status.is_last_discard = is_last_tile && !is_tsumo;
-    status.is_dead_wall_draw = is_dead_wall_draw;
+    status.is_last_tile_draw = is_last_tile && is_tsumo;
+    status.is_last_tile_claim = is_last_tile && !is_tsumo;
+    status.is_after_a_quad = is_after_a_quad;
     status.kan_count = player.kan_count() as u32;
 
     match calculate_score(&analyzer, hand, &status, settings) {
@@ -111,14 +111,14 @@ pub fn check_win_with_settings(
 pub fn check_ron(
     player: &Player,
     discarded_tile: Tile,
-    prevailing_wind: Wind,
+    round_wind: Wind,
     is_last_tile: bool,
 ) -> WinCheckResult {
     let settings = Settings::new();
     check_ron_with_flags_and_settings(
         player,
         discarded_tile,
-        prevailing_wind,
+        round_wind,
         is_last_tile,
         false,
         &settings,
@@ -129,14 +129,14 @@ pub fn check_ron(
 pub fn check_ron_with_settings(
     player: &Player,
     discarded_tile: Tile,
-    prevailing_wind: Wind,
+    round_wind: Wind,
     is_last_tile: bool,
     settings: &Settings,
 ) -> WinCheckResult {
     check_ron_with_flags_and_settings(
         player,
         discarded_tile,
-        prevailing_wind,
+        round_wind,
         is_last_tile,
         false,
         settings,
@@ -147,7 +147,7 @@ pub fn check_ron_with_settings(
 pub fn check_ron_with_flags_and_settings(
     player: &Player,
     discarded_tile: Tile,
-    prevailing_wind: Wind,
+    round_wind: Wind,
     is_last_tile: bool,
     is_robbing_a_quad: bool,
     settings: &Settings,
@@ -173,19 +173,19 @@ pub fn check_ron_with_flags_and_settings(
         };
     }
 
-    // Status を構築（ロンなので is_self_picked = false）
+    // Status を構築（ロンなので is_self_drawn = false）
     let mut status = Status::new();
-    status.is_self_picked = false;
-    status.player_wind = player.seat_wind;
-    status.prevailing_wind = prevailing_wind;
-    status.has_claimed_ready = player.is_riichi;
-    status.is_double_ready = player.is_double_riichi;
-    status.is_one_shot = player.is_ippatsu;
+    status.is_self_drawn = false;
+    status.seat_wind = player.seat_wind;
+    status.round_wind = round_wind;
+    status.has_claimed_riichi = player.is_riichi;
+    status.is_double_riichi = player.is_double_riichi;
+    status.is_unbroken = player.is_ippatsu;
     status.has_claimed_open = !player.is_menzen();
     status.is_dealer = player.is_dealer();
     status.is_first_turn = player.is_first_turn;
-    status.is_last_tile_from_the_wall = false;
-    status.is_last_discard = is_last_tile && !is_robbing_a_quad;
+    status.is_last_tile_draw = false;
+    status.is_last_tile_claim = is_last_tile && !is_robbing_a_quad;
     status.is_robbing_a_quad = is_robbing_a_quad;
     status.kan_count = player.kan_count() as u32;
 
@@ -621,7 +621,7 @@ mod tests {
         }
 
         let mut settings = Settings::new();
-        settings.opened_all_simples = false;
+        settings.opened_all_inside = false;
 
         let result = check_win_with_settings(&player, Wind::East, true, false, false, &settings);
         assert!(!result.is_win, "open tanyao must be rejected when disabled");

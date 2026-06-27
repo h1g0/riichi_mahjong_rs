@@ -83,7 +83,7 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
     let raw_total: u32 = details.iter().map(|d| d.fu).sum();
 
     // 平和ツモは20符固定
-    if is_pinfu(analyzer, hand, status) && status.is_self_picked {
+    if is_pinfu(analyzer, hand, status) && status.is_self_drawn {
         return Ok(FuResult {
             total: 20,
             details: vec![FuDetail {
@@ -94,7 +94,7 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
     }
 
     // 鳴き平和形（副底のみ）のロンは30符
-    let total = if raw_total == 20 && !status.is_self_picked && status.has_claimed_open {
+    let total = if raw_total == 20 && !status.is_self_drawn && status.has_claimed_open {
         30
     } else {
         // 10符単位に切り上げ
@@ -146,11 +146,11 @@ fn is_yakuhai_tile(tile: TileType, status: &Status) -> bool {
         return true;
     }
     // 自風牌
-    if Wind::is_tile_type(tile) == Some(status.player_wind) {
+    if Wind::is_tile_type(tile) == Some(status.seat_wind) {
         return true;
     }
     // 場風牌
-    if Wind::is_tile_type(tile) == Some(status.prevailing_wind) {
+    if Wind::is_tile_type(tile) == Some(status.round_wind) {
         return true;
     }
     false
@@ -180,10 +180,10 @@ fn calculate_mentsu_fu(
             continue;
         }
 
-        let is_terminal_or_honor = Tile::new(tile).is_1_9_honor();
+        let is_terminal_or_honour = Tile::new(tile).is_1_9_honour();
 
         // 和了牌を含む刻子がロン和了の場合は明刻扱い
-        let is_concealed = if !status.is_self_picked {
+        let is_concealed = if !status.is_self_drawn {
             if let Some(drawn) = hand.drawn() {
                 drawn.get() != tile
             } else {
@@ -194,19 +194,19 @@ fn calculate_mentsu_fu(
         };
 
         let fu = if is_concealed {
-            if is_terminal_or_honor { 8 } else { 4 }
+            if is_terminal_or_honour { 8 } else { 4 }
         } else {
-            if is_terminal_or_honor { 4 } else { 2 }
+            if is_terminal_or_honour { 4 } else { 2 }
         };
 
         let name = if is_concealed {
-            if is_terminal_or_honor {
+            if is_terminal_or_honour {
                 "么九牌暗刻"
             } else {
                 "中張牌暗刻"
             }
         } else {
-            if is_terminal_or_honor {
+            if is_terminal_or_honour {
                 "么九牌明刻"
             } else {
                 "中張牌明刻"
@@ -220,9 +220,9 @@ fn calculate_mentsu_fu(
     for open in hand.melds() {
         match open.category {
             MeldType::Pon => {
-                let is_terminal_or_honor = open.tiles[0].is_1_9_honor();
-                let fu = if is_terminal_or_honor { 4 } else { 2 };
-                let name = if is_terminal_or_honor {
+                let is_terminal_or_honour = open.tiles[0].is_1_9_honour();
+                let fu = if is_terminal_or_honour { 4 } else { 2 };
+                let name = if is_terminal_or_honour {
                     "么九牌明刻"
                 } else {
                     "中張牌明刻"
@@ -230,21 +230,21 @@ fn calculate_mentsu_fu(
                 details.push(FuDetail { name, fu });
             }
             MeldType::Kan | MeldType::Kakan => {
-                let is_terminal_or_honor = open.tiles[0].is_1_9_honor();
+                let is_terminal_or_honour = open.tiles[0].is_1_9_honour();
                 let is_concealed = open.from == MeldFrom::Myself;
                 let fu = if is_concealed {
-                    if is_terminal_or_honor { 32 } else { 16 }
+                    if is_terminal_or_honour { 32 } else { 16 }
                 } else {
-                    if is_terminal_or_honor { 16 } else { 8 }
+                    if is_terminal_or_honour { 16 } else { 8 }
                 };
                 let name = if is_concealed {
-                    if is_terminal_or_honor {
+                    if is_terminal_or_honour {
                         "么九牌暗槓"
                     } else {
                         "中張牌暗槓"
                     }
                 } else {
-                    if is_terminal_or_honor {
+                    if is_terminal_or_honour {
                         "么九牌明槓"
                     } else {
                         "中張牌明槓"
@@ -279,7 +279,7 @@ fn calculate_jantou_fu(
         }
 
         // 自風牌の雀頭：2符
-        if Wind::is_tile_type(tile) == Some(status.player_wind) {
+        if Wind::is_tile_type(tile) == Some(status.seat_wind) {
             details.push(FuDetail {
                 name: "自風牌雀頭",
                 fu: 2,
@@ -287,7 +287,7 @@ fn calculate_jantou_fu(
         }
 
         // 場風牌の雀頭：2符
-        if Wind::is_tile_type(tile) == Some(status.prevailing_wind) {
+        if Wind::is_tile_type(tile) == Some(status.round_wind) {
             details.push(FuDetail {
                 name: "場風牌雀頭",
                 fu: 2,
@@ -359,7 +359,7 @@ fn calculate_tsumo_fu(
     details: &mut Vec<FuDetail>,
 ) -> Result<()> {
     // ツモ和了は2符（ただし平和ツモの場合は別途処理するため、ここでは常に加算）
-    if status.is_self_picked {
+    if status.is_self_drawn {
         details.push(FuDetail {
             name: "自摸",
             fu: 2,
@@ -372,7 +372,7 @@ fn calculate_tsumo_fu(
 /// 門前ロンの加符を計算する
 fn calculate_menzen_ron_fu(status: &Status, details: &mut Vec<FuDetail>) -> Result<()> {
     // 門前でロン和了した場合は10符加算
-    if !status.has_claimed_open && !status.is_self_picked {
+    if !status.has_claimed_open && !status.is_self_drawn {
         details.push(FuDetail {
             name: "門前加符",
             fu: 10,
@@ -396,9 +396,9 @@ mod tests {
         let hand = Hand::from("123456m234p6799s 5s");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = true;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = true;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         assert_eq!(result.total, 20);
     }
@@ -409,9 +409,9 @@ mod tests {
         let hand = Hand::from("123456m234p6799s 5s");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 門前加符10 = 30
         assert_eq!(result.total, 30);
@@ -435,9 +435,9 @@ mod tests {
         let hand = Hand::from("222m123p456789s3m 3m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = true;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = true;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 中張牌暗刻4(222m) + 単騎待ち2(3m) + ツモ2 = 28 -> 30
         assert_eq!(result.total, 30);
@@ -450,9 +450,9 @@ mod tests {
         let hand = Hand::from("111m456p789s2345m 5m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 門前加符10 + 么九牌暗刻8(111m) + 単騎待ち2 = 40
         assert_eq!(result.total, 40);
@@ -466,9 +466,9 @@ mod tests {
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
         status.has_claimed_open = true;
-        status.is_self_picked = true;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = true;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 中張牌明刻2(222m) + 単騎待ち2(3m) + ツモ2 = 26 -> 30
         assert_eq!(result.total, 30);
@@ -482,9 +482,9 @@ mod tests {
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
         status.has_claimed_open = true;
-        status.is_self_picked = true;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = true;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 么九牌明刻4(111m) + 単騎待ち2(3m) + ツモ2 = 28 -> 30
         assert_eq!(result.total, 30);
@@ -498,9 +498,9 @@ mod tests {
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
         status.has_claimed_open = true;
-        status.is_self_picked = true;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = true;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // from=Unknownなので明槓扱い
         // 副底20 + 中張牌明槓8 + 単騎待ち2(3m) + ツモ2 = 32 -> 40
@@ -513,9 +513,9 @@ mod tests {
         let hand = Hand::from("123456m234p789s5z 5z");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 門前加符10 + 三元牌雀頭2 + 単騎待ち2 = 34 -> 40
         assert_eq!(result.total, 40);
@@ -527,9 +527,9 @@ mod tests {
         let hand = Hand::from("123456m234p789s1z 1z");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::East;
-        status.prevailing_wind = Wind::South;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::East;
+        status.round_wind = Wind::South;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 門前加符10 + 自風牌雀頭2 + 単騎待ち2 = 34 -> 40
         assert_eq!(result.total, 40);
@@ -541,9 +541,9 @@ mod tests {
         let hand = Hand::from("123456m234p789s1z 1z");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 門前加符10 + 場風牌雀頭2 + 単騎待ち2 = 34 -> 40
         assert_eq!(result.total, 40);
@@ -555,9 +555,9 @@ mod tests {
         let hand = Hand::from("123456m234p789s1z 1z");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::East;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::East;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 門前加符10 + 自風牌雀頭2 + 場風牌雀頭2 + 単騎待ち2 = 36 -> 40
         assert_eq!(result.total, 40);
@@ -569,9 +569,9 @@ mod tests {
         let hand = Hand::from("123456m234p79s11z 8s");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::South;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::South;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 門前加符10 + 嵌張待ち2 = 32 -> 40
         assert_eq!(result.total, 40);
@@ -583,9 +583,9 @@ mod tests {
         let hand = Hand::from("12m456m234p789s1z 3m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::South;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::South;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 門前加符10 + 辺張待ち2 + 場風牌雀頭2(南=2z? いや1z=東) = 32 -> 40
         // 1z=東、場風南なので雀頭加符なし
@@ -599,9 +599,9 @@ mod tests {
         let hand = Hand::from("123m456m234p89s1z 7s");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::South;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::South;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         // 副底20 + 門前加符10 + 辺張待ち2 = 32 -> 40
         assert_eq!(result.total, 40);
@@ -626,9 +626,9 @@ mod tests {
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
         status.has_claimed_open = true;
-        status.is_self_picked = false;
-        status.player_wind = Wind::South;
-        status.prevailing_wind = Wind::East;
+        status.is_self_drawn = false;
+        status.seat_wind = Wind::South;
+        status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
         assert_eq!(result.total, 30);
     }
