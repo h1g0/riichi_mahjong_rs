@@ -452,7 +452,9 @@ impl GameState {
                 },
             ],
             my_seat: 0,
-            lang: Lang::Ja,
+            // 保存された表示言語を読み込む（未保存なら日本語）。
+            // 「もう一度」などで new() が再生成されても選択を保つ。
+            lang: crate::persistence::load_lang().unwrap_or(Lang::Ja),
         }
     }
 

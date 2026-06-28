@@ -1905,6 +1905,7 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
     for (idx, lang) in [Lang::Ja, Lang::En].into_iter().enumerate() {
         if setup_lang_button_rect(idx).contains(mx, my) {
             state.lang = lang;
+            crate::persistence::save_lang(lang);
             return None;
         }
     }

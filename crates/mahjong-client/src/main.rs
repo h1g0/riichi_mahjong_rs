@@ -9,6 +9,7 @@ use macroquad::prelude::*;
 mod adapter;
 mod game;
 mod i18n;
+mod persistence;
 mod renderer;
 mod transport;
 
