@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use strum_macros::{EnumCount as EnumCountMacro, EnumIter};
 
 use crate::settings::Lang;
@@ -17,7 +18,20 @@ pub enum Form {
 ///
 /// 英語名は WRC Rules 2025 に準拠する（docs/glossary.md を参照）
 /// ここでの定義順で同翻役のリザルト画面の役の表示順も決定する
-#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, EnumCountMacro, EnumIter)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    EnumCountMacro,
+    EnumIter,
+    Serialize,
+    Deserialize,
+)]
 pub enum Kind {
     /// 立直
     Riichi,
