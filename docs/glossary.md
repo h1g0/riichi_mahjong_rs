@@ -70,7 +70,7 @@ A Japanese-language edition of this document is maintained in parallel at
 | 明（〜） / 副露 | min- / fūro | melded / open | [`Meld`](../crates/mahjong-core/src/hand_info/meld.rs) | Formed by calling a discarded tile. |
 | チー | chī | chii (melded sequence) | `MeldType::Chi` | Call a sequence from the player on your left. |
 | ポン | pon | pon (melded triplet) | `MeldType::Pon` | Call a triplet from any player. |
-| カン | kan | quad call | `MeldType::Kan` | Make a quad. |
+| カン | kan | kan | `MeldType::Kan` | Make a quad. The call keeps the borrowed name *kan*, like *pon* and *chii*; the resulting meld is a *quad*. |
 | 暗槓 | ankan | concealed quad | `MeldType::Kan` + `MeldFrom::Myself` | Quad from four self-drawn tiles. |
 | 大明槓 | daiminkan | called quad | `MeldType::Kan` | Quad completed by calling a discard. |
 | 加槓 | kakan | promoted quad | `MeldType::Kakan` | Add a self-drawn tile to a melded triplet. |

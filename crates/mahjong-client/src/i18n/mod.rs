@@ -244,11 +244,11 @@ impl Translator {
         }
     }
 
-    /// 自分の手牌からの暗カン／加カンボタン（例: 日「{tile}カン」/ 英「{tile} Quad」）。
+    /// 自分の手牌からの暗カン／加カンボタン（例: 日「{tile}カン」/ 英「{tile} Kan」）。
     pub fn kan_with_tile(&self, tile: &str) -> String {
         match self.lang {
             Lang::Ja => format!("{tile}カン"),
-            Lang::En => format!("{tile} Quad"),
+            Lang::En => format!("{tile} Kan"),
         }
     }
 
@@ -498,8 +498,8 @@ impl Key {
             },
             Key::Kan => match lang {
                 Lang::Ja => "カン",
-                // 用語集（docs/glossary.md）に合わせ WRC の "quad" を用いる
-                Lang::En => "Quad",
+                // 用語集（docs/glossary.md）に合わせ呼称「kan」を用いる
+                Lang::En => "Kan",
             },
             Key::Chi => match lang {
                 Lang::Ja => "チー",

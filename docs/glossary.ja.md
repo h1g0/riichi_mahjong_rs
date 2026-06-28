@@ -69,7 +69,7 @@
 | 明（〜） / 副露 | min- / fūro | melded / open | [`Meld`](../crates/mahjong-core/src/hand_info/meld.rs) | 捨て牌を鳴いて構成。 |
 | チー | chī | chii (melded sequence) | `MeldType::Chi` | 上家の捨て牌で順子を作る。 |
 | ポン | pon | pon (melded triplet) | `MeldType::Pon` | 任意の他家の捨て牌で刻子を作る。 |
-| カン | kan | quad call | `MeldType::Kan` | 槓子を作る。 |
+| カン | kan | kan | `MeldType::Kan` | 槓子を作る。鳴きの呼称はポン・チーと同様に借用語「kan」を用い、できる面子は「quad」と呼ぶ。 |
 | 暗槓 | ankan | concealed quad | `MeldType::Kan` + `MeldFrom::Myself` | 自摸 4 枚による槓。 |
 | 大明槓 | daiminkan | called quad | `MeldType::Kan` | 捨て牌を鳴いて完成させる槓。 |
 | 加槓 | kakan | promoted quad | `MeldType::Kakan` | ポンに自摸牌を 1 枚加える。 |
