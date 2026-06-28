@@ -425,6 +425,7 @@ mod tests {
     use super::*;
     use crate::protocol::{DrawReason, ServerEvent};
     use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+    use mahjong_core::scoring::score::ScoreRank;
     use mahjong_core::tile::{Tile, Wind};
 
     #[test]
@@ -818,7 +819,8 @@ mod tests {
             han: 1,
             fu: 30,
             score_points: 1000,
-            rank_name: String::new(),
+            rank: ScoreRank::Normal,
+            has_opened: false,
             uradora_indicators: Vec::new(),
             riichi_sticks: 0,
             player_hands: Vec::new(),

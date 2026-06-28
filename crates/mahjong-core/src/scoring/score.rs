@@ -30,10 +30,37 @@ pub struct ScoreResult {
     pub non_dealer_tsumo_dealer: u32,
     /// 子の場合のツモ和了点（子の支払い）
     pub non_dealer_tsumo_non_dealer: u32,
-    /// 成立した役の一覧
-    pub yaku_list: Vec<(&'static str, u32)>,
+    /// 成立した役・ドラの一覧（各項目, 翻数）
+    pub yaku_list: Vec<(ScoreItem, u32)>,
+    /// 副露しているか（役名の喰い下がり表記を再構築するために保持する）
+    pub has_opened: bool,
     /// 符の内訳
     pub fu_result: FuResult,
+}
+
+/// リザルトに表示する得点内訳の項目（役またはドラ）
+///
+/// 役名やドラ名を整形済み文字列で持つのではなく、種別を表す値として保持する。
+/// これにより表示側（クライアント）が任意の言語へローカライズできる。
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize)]
+pub enum ScoreItem {
+    /// 役
+    Yaku(Kind),
+    /// ドラ（通常・赤・裏）
+    Dora(DoraLabel),
+}
+
+impl ScoreItem {
+    /// 項目の表示名を返す
+    ///
+    /// * `has_opened` - 副露しているか（役の喰い下がり表記に用いる。ドラでは無視される）
+    /// * `lang` - 言語
+    pub fn name(&self, has_opened: bool, lang: Lang) -> &'static str {
+        match self {
+            ScoreItem::Yaku(kind) => crate::winning_hand::name::get(*kind, has_opened, lang),
+            ScoreItem::Dora(label) => label.name(lang),
+        }
+    }
 }
 
 /// 点数の等級
@@ -171,6 +198,7 @@ pub fn calculate_score(
         non_dealer_tsumo_dealer,
         non_dealer_tsumo_non_dealer,
         yaku_list,
+        has_opened: status.has_claimed_open,
         fu_result,
     }))
 }
@@ -178,8 +206,8 @@ pub fn calculate_score(
 /// 役判定結果から成立した役のリストを抽出する
 fn extract_yaku_list(
     yaku_result: &HashMap<Kind, (&'static str, bool, u32)>,
-) -> Vec<(&'static str, u32)> {
-    let mut list: Vec<(&Kind, &'static str, u32)> = Vec::new();
+) -> Vec<(ScoreItem, u32)> {
+    let mut list: Vec<(&Kind, u32)> = Vec::new();
     let mut has_yakuman = false;
 
     // まず役満があるか確認
@@ -190,19 +218,21 @@ fn extract_yaku_list(
         }
     }
 
-    for (kind, (name, is_valid, han)) in yaku_result {
+    for (kind, (_name, is_valid, han)) in yaku_result {
         if *is_valid && *han > 0 {
             // 役満がある場合は通常役を除外
             if has_yakuman && *han < 13 {
                 continue;
             }
-            list.push((kind, name, *han));
+            list.push((kind, *han));
         }
     }
 
     // 翻数の昇順でソートし、同じ翻数の場合はKind列挙型の定義順でソート
-    list.sort_by(|a, b| a.2.cmp(&b.2).then(a.0.cmp(b.0)));
-    list.into_iter().map(|(_, name, han)| (name, han)).collect()
+    list.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(b.0)));
+    list.into_iter()
+        .map(|(kind, han)| (ScoreItem::Yaku(*kind), han))
+        .collect()
 }
 
 /// 等級を決定する
@@ -550,8 +580,8 @@ mod tests {
             .unwrap()
             .unwrap();
         // 翻数昇順: 断么九(1翻) → 七対子(2翻)
-        assert_eq!(result.yaku_list[0], ("断么九", 1));
-        assert_eq!(result.yaku_list[1], ("七対子", 2));
+        assert_eq!(result.yaku_list[0], (ScoreItem::Yaku(Kind::AllInside), 1));
+        assert_eq!(result.yaku_list[1], (ScoreItem::Yaku(Kind::SevenPairs), 2));
     }
 
     /// 同翻の役はKind列挙型の定義順に並ぶ: 立直(Riichi)が平和(Pinfu)より先
@@ -569,9 +599,15 @@ mod tests {
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()
             .unwrap();
-        let names: Vec<&str> = result.yaku_list.iter().map(|(n, _)| *n).collect();
-        let riichi_pos = names.iter().position(|&n| n == "立直").unwrap();
-        let pinfu_pos = names.iter().position(|&n| n == "平和").unwrap();
+        let items: Vec<ScoreItem> = result.yaku_list.iter().map(|(item, _)| *item).collect();
+        let riichi_pos = items
+            .iter()
+            .position(|&i| i == ScoreItem::Yaku(Kind::Riichi))
+            .unwrap();
+        let pinfu_pos = items
+            .iter()
+            .position(|&i| i == ScoreItem::Yaku(Kind::Pinfu))
+            .unwrap();
         assert!(riichi_pos < pinfu_pos, "立直はKind定義順で平和より先に来る");
     }
 

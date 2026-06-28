@@ -3,6 +3,7 @@
 //! `#[cfg(debug_assertions)]` でのみ有効なログ出力機能。
 
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
+use mahjong_core::settings::Lang;
 
 use crate::scoring;
 
@@ -52,7 +53,9 @@ impl Round {
                         score
                             .yaku_list
                             .iter()
-                            .map(|(name, han)| format!("{}:{}", name, han))
+                            .map(|(item, han)| {
+                                format!("{}:{}", item.name(score.has_opened, Lang::Ja), han)
+                            })
                             .collect::<Vec<_>>()
                             .join(",")
                     })

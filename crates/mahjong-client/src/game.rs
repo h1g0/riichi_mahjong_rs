@@ -6,6 +6,7 @@ use macroquad::prelude::*;
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+use mahjong_core::settings::Lang;
 use mahjong_core::tile::{Tile, TileType, Wind};
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 use mahjong_server::protocol::net::CpuSpec;
@@ -796,7 +797,8 @@ impl GameState {
                 han,
                 fu,
                 score_points,
-                rank_name,
+                rank,
+                has_opened,
                 uradora_indicators,
                 riichi_sticks,
                 player_hands,
@@ -841,8 +843,17 @@ impl GameState {
                     String::new()
                 };
 
+                // 構造化された役・ドラ・等級を表示言語へ解決する。
+                // 表示言語の切り替えは後続フェーズで対応予定（現状は日本語固定）。
+                let lang = Lang::Ja;
+                let yaku: Vec<(String, u32)> = yaku_list
+                    .iter()
+                    .map(|(item, y_han)| (item.name(has_opened, lang).to_string(), *y_han))
+                    .collect();
+                let rank_name = rank.name(lang).to_string();
+
                 let mut yaku_text = String::new();
-                for (name, y_han) in &yaku_list {
+                for (name, y_han) in &yaku {
                     if !yaku_text.is_empty() {
                         yaku_text.push_str("  ");
                     }
@@ -881,11 +892,11 @@ impl GameState {
                     result_message: msg,
                     winner_name,
                     loser_name,
-                    yaku: yaku_list.clone(),
+                    yaku,
                     han,
                     fu,
                     score_points,
-                    rank_name: rank_name.clone(),
+                    rank_name,
                     riichi_sticks,
                 });
 
