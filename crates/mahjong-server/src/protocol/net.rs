@@ -383,4 +383,36 @@ mod tests {
         assert!(ClientMessage::from_json("not json").is_err());
         assert!(ServerMessage::from_json("{\"Unknown\":{}}").is_err());
     }
+
+    /// RoundWon が構造化された役・ドラ・等級を保ったまま JSON ラウンドトリップできること
+    /// （i18n のため整形済み文字列ではなく enum を送る #242 の回帰テスト）
+    #[test]
+    fn test_round_won_structured_roundtrip() {
+        use mahjong_core::scoring::score::{DoraLabel, ScoreItem, ScoreRank};
+        use mahjong_core::winning_hand::name::Kind;
+
+        let msg = ServerMessage::Event(ServerEvent::RoundWon {
+            winner: Wind::East,
+            loser: Some(Wind::South),
+            winning_tile: Tile::new(Tile::M1),
+            scores: [35000, 15000, 25000, 25000],
+            yaku_list: vec![
+                (ScoreItem::Yaku(Kind::Riichi), 1),
+                (ScoreItem::Yaku(Kind::AllInside), 1),
+                (ScoreItem::Dora(DoraLabel::Dora), 2),
+                (ScoreItem::Dora(DoraLabel::RedDora), 1),
+            ],
+            han: 5,
+            fu: 40,
+            score_points: 8000,
+            rank: ScoreRank::Mangan,
+            has_opened: true,
+            uradora_indicators: vec![Tile::new(Tile::P3)],
+            riichi_sticks: 1,
+            player_hands: Vec::new(),
+        });
+
+        let decoded = roundtrip_server(msg.clone());
+        assert_eq!(format!("{:?}", decoded), format!("{:?}", msg));
+    }
 }

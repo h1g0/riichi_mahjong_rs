@@ -8,7 +8,8 @@ use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
 use mahjong_core::hand_info::status::Status;
 use mahjong_core::scoring::score::{
-    ScoreRank, ScoreResult, calculate_base_points, calculate_score, determine_rank, round_up_to_100,
+    DoraLabel, ScoreItem, ScoreResult, calculate_base_points, calculate_score, determine_rank,
+    round_up_to_100,
 };
 use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
@@ -271,18 +272,6 @@ pub fn calculate_tsumo_score_deltas(
     deltas
 }
 
-/// 点数等級を日本語文字列に変換する
-pub fn rank_to_string(rank: &ScoreRank) -> &'static str {
-    match rank {
-        ScoreRank::Normal => "",
-        ScoreRank::Mangan => "満貫",
-        ScoreRank::Haneman => "跳満",
-        ScoreRank::Baiman => "倍満",
-        ScoreRank::Sanbaiman => "三倍満",
-        ScoreRank::Yakuman => "役満",
-    }
-}
-
 /// 和了結果にドラ・赤ドラ・裏ドラの翻を加算する
 ///
 /// 役判定後の点数計算結果にドラ関連の翻を追加し、
@@ -354,13 +343,19 @@ pub fn add_dora_to_score(
 
     // ドラ・赤ドラ・裏ドラをこの順で末尾に追加
     if dora_count > 0 {
-        score_result.yaku_list.push(("ドラ", dora_count));
+        score_result
+            .yaku_list
+            .push((ScoreItem::Dora(DoraLabel::Dora), dora_count));
     }
     if red_dora_count > 0 {
-        score_result.yaku_list.push(("赤ドラ", red_dora_count));
+        score_result
+            .yaku_list
+            .push((ScoreItem::Dora(DoraLabel::RedDora), red_dora_count));
     }
     if uradora_count > 0 {
-        score_result.yaku_list.push(("裏ドラ", uradora_count));
+        score_result
+            .yaku_list
+            .push((ScoreItem::Dora(DoraLabel::UraDora), uradora_count));
     }
 }
 
@@ -406,8 +401,9 @@ mod tests {
     use mahjong_core::hand::Hand;
     use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
     use mahjong_core::scoring::fu::{FuDetail, FuResult};
-    use mahjong_core::scoring::score::ScoreRank;
+    use mahjong_core::scoring::score::{DoraLabel, ScoreItem, ScoreRank};
     use mahjong_core::tile::Tile;
+    use mahjong_core::winning_hand::name::Kind;
 
     fn make_mangan_score() -> ScoreResult {
         ScoreResult {
@@ -420,6 +416,7 @@ mod tests {
             non_dealer_tsumo_dealer: 4000,
             non_dealer_tsumo_non_dealer: 2000,
             yaku_list: vec![],
+            has_opened: false,
             fu_result: FuResult {
                 total: 30,
                 details: vec![FuDetail {
@@ -669,7 +666,8 @@ mod tests {
             non_dealer_ron: 1000,
             non_dealer_tsumo_dealer: 500,
             non_dealer_tsumo_non_dealer: 300,
-            yaku_list: vec![("断么九", 1)],
+            yaku_list: vec![(ScoreItem::Yaku(Kind::AllInside), 1)],
+            has_opened: false,
             fu_result,
         };
 
@@ -707,10 +705,10 @@ mod tests {
         );
 
         assert_eq!(score.yaku_list.len(), 4);
-        assert_eq!(score.yaku_list[0], ("断么九", 1));
-        assert_eq!(score.yaku_list[1], ("ドラ", 1));
-        assert_eq!(score.yaku_list[2], ("赤ドラ", 1));
-        assert_eq!(score.yaku_list[3], ("裏ドラ", 1));
+        assert_eq!(score.yaku_list[0], (ScoreItem::Yaku(Kind::AllInside), 1));
+        assert_eq!(score.yaku_list[1], (ScoreItem::Dora(DoraLabel::Dora), 1));
+        assert_eq!(score.yaku_list[2], (ScoreItem::Dora(DoraLabel::RedDora), 1));
+        assert_eq!(score.yaku_list[3], (ScoreItem::Dora(DoraLabel::UraDora), 1));
     }
 
     #[test]
@@ -731,7 +729,8 @@ mod tests {
             non_dealer_ron: 1000,
             non_dealer_tsumo_dealer: 500,
             non_dealer_tsumo_non_dealer: 300,
-            yaku_list: vec![("立直", 1)],
+            yaku_list: vec![(ScoreItem::Yaku(Kind::Riichi), 1)],
+            has_opened: false,
             fu_result,
         };
         let hand = Hand::new_with_melds(
@@ -747,7 +746,10 @@ mod tests {
 
         add_dora_to_score(&mut score, &hand, None, &[], &[]);
 
-        assert_eq!(score.yaku_list.last(), Some(&("赤ドラ", 1)));
+        assert_eq!(
+            score.yaku_list.last(),
+            Some(&(ScoreItem::Dora(DoraLabel::RedDora), 1))
+        );
         assert_eq!(score.han, 2);
     }
 
@@ -769,7 +771,8 @@ mod tests {
             non_dealer_ron: 1000,
             non_dealer_tsumo_dealer: 500,
             non_dealer_tsumo_non_dealer: 300,
-            yaku_list: vec![("立直", 1)],
+            yaku_list: vec![(ScoreItem::Yaku(Kind::Riichi), 1)],
+            has_opened: false,
             fu_result,
         };
         let hand = Hand::new_with_melds(
@@ -789,7 +792,10 @@ mod tests {
 
         add_dora_to_score(&mut score, &hand, None, &[], &[]);
 
-        assert_eq!(score.yaku_list.last(), Some(&("赤ドラ", 1)));
+        assert_eq!(
+            score.yaku_list.last(),
+            Some(&(ScoreItem::Dora(DoraLabel::RedDora), 1))
+        );
         assert_eq!(score.han, 2);
     }
 }

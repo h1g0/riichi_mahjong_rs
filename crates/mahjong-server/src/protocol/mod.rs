@@ -5,6 +5,7 @@
 
 pub mod net;
 
+use mahjong_core::scoring::score::{ScoreItem, ScoreRank};
 use mahjong_core::tile::{Tile, Wind};
 use serde::{Deserialize, Serialize};
 
@@ -186,16 +187,18 @@ pub enum ServerEvent {
         winning_tile: Tile,
         /// 点数移動後の各プレイヤーの点数
         scores: [i32; 4],
-        /// 成立した役の一覧（役名, 翻数）
-        yaku_list: Vec<(String, u32)>,
+        /// 成立した役・ドラの一覧（項目, 翻数）。表示名はクライアントがローカライズする
+        yaku_list: Vec<(ScoreItem, u32)>,
         /// 翻数
         han: u32,
         /// 符
         fu: u32,
         /// 和了者が得た点数
         score_points: i32,
-        /// 点数等級名（満貫、跳満など。通常は空文字列）
-        rank_name: String,
+        /// 点数等級（満貫、跳満など。通常は `ScoreRank::Normal`）
+        rank: ScoreRank,
+        /// 和了手が副露していたか（役名の喰い下がり表記の再構築に用いる）
+        has_opened: bool,
         /// 裏ドラ表示牌（リーチ和了時のみ公開）
         uradora_indicators: Vec<Tile>,
         /// 和了前に場に出ていた供託リーチ棒の本数

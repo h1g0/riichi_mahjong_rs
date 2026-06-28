@@ -786,13 +786,9 @@ impl Round {
         // 各和了者にRoundWonイベントを送信
         for (idx, wd) in winner_data.iter().enumerate() {
             let winner_wind = self.players[wd.winner].seat_wind;
-            let yaku_list: Vec<(String, u32)> = wd
-                .score_result
-                .yaku_list
-                .iter()
-                .map(|(name, han)| (name.to_string(), *han))
-                .collect();
-            let rank_name = scoring::rank_to_string(&wd.score_result.rank).to_string();
+            let yaku_list = wd.score_result.yaku_list.clone();
+            let rank = wd.score_result.rank;
+            let has_opened = wd.score_result.has_opened;
             let event_riichi_sticks = if idx == 0 { riichi_sticks } else { 0 };
 
             for i in 0..4 {
@@ -807,7 +803,8 @@ impl Round {
                         han: wd.score_result.han,
                         fu: wd.score_result.fu,
                         score_points: wd.score_points,
-                        rank_name: rank_name.clone(),
+                        rank,
+                        has_opened,
                         uradora_indicators: wd.uradora_indicators.clone(),
                         riichi_sticks: event_riichi_sticks,
                         player_hands: player_hands.clone(),
@@ -1462,12 +1459,9 @@ impl Round {
         let winner_wind = self.players[winner].seat_wind;
 
         // 役情報を構築
-        let yaku_list: Vec<(String, u32)> = score_result
-            .yaku_list
-            .iter()
-            .map(|(name, han)| (name.to_string(), *han))
-            .collect();
-        let rank_name = scoring::rank_to_string(&score_result.rank).to_string();
+        let yaku_list = score_result.yaku_list.clone();
+        let rank = score_result.rank;
+        let has_opened = score_result.has_opened;
         let player_hands = self.build_player_hands();
 
         // 全プレイヤーに和了イベントを送信
@@ -1483,7 +1477,8 @@ impl Round {
                     han: score_result.han,
                     fu: score_result.fu,
                     score_points: deltas[winner] + (riichi_sticks as i32) * RIICHI_STICK_VALUE,
-                    rank_name: rank_name.clone(),
+                    rank,
+                    has_opened,
                     uradora_indicators: uradora_indicators.clone(),
                     riichi_sticks,
                     player_hands: player_hands.clone(),
