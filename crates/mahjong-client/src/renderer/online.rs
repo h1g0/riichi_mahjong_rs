@@ -7,6 +7,7 @@ use macroquad::prelude::*;
 
 use super::{DESIGN_W, draw_jp_text, theme};
 use crate::game::GameState;
+use crate::i18n::Key;
 
 /// パネルのレイアウト（設定画面と揃える）
 const PANEL_X: f32 = 150.0;
@@ -212,12 +213,13 @@ fn draw_status_line(state: &GameState, font: Option<&Font>, y: f32) {
 /// オンラインメニュー画面を描画する
 pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
     let online = &state.online_state;
+    let tr = state.tr();
 
-    draw_online_panel(font, "オンライン対戦");
+    draw_online_panel(font, tr.get(Key::OnlinePlay));
 
     draw_jp_text(
         font,
-        "名前",
+        tr.get(Key::NameLabel),
         NAME_BOX.x,
         NAME_BOX.y - 9.0,
         11,
@@ -227,7 +229,7 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
 
     draw_jp_text(
         font,
-        "ルームコード（参加する場合）",
+        tr.get(Key::RoomCodeJoinLabel),
         CODE_BOX.x,
         CODE_BOX.y - 9.0,
         11,
@@ -235,9 +237,9 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
     );
     draw_input_box(font, &CODE_BOX, &online.code_input, online.code_focused);
 
-    draw_button(font, &CREATE_BTN, "ルームを作成", true);
-    draw_button(font, &JOIN_BTN, "ルームに参加", true);
-    draw_button(font, &BACK_BTN, "戻る", false);
+    draw_button(font, &CREATE_BTN, tr.get(Key::CreateRoom), true);
+    draw_button(font, &JOIN_BTN, tr.get(Key::JoinRoom), true);
+    draw_button(font, &BACK_BTN, tr.get(Key::Back), false);
 
     draw_status_line(state, font, BACK_BTN.y + BACK_BTN.h + 30.0);
 }
@@ -304,12 +306,13 @@ pub fn handle_online_menu_input(state: &mut GameState) -> Option<OnlineMenuActio
 /// ロビー画面を描画する
 pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     let online = &state.online_state;
+    let tr = state.tr();
     let cx = DESIGN_W / 2.0;
 
-    draw_online_panel(font, "ロビー");
+    draw_online_panel(font, tr.get(Key::Lobby));
 
     let Some(room) = &online.room else {
-        theme::draw_text_centered(font, "ルーム情報を取得中...", cx, 300.0, 18, theme::TEXT);
+        theme::draw_text_centered(font, tr.get(Key::LoadingRoom), cx, 300.0, 18, theme::TEXT);
         draw_status_line(state, font, 340.0);
         return;
     };
@@ -317,7 +320,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     // ルームコード（友人に共有する）
     theme::draw_text_centered(
         font,
-        &format!("ルームコード  {}", room.code),
+        &tr.room_code(&room.code),
         cx,
         210.0,
         28,
@@ -325,7 +328,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     );
     theme::draw_text_centered(
         font,
-        "このコードを参加プレイヤーに共有してください",
+        tr.get(Key::ShareCodeHint),
         cx,
         236.0,
         12,
@@ -337,7 +340,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     let row_w = 400.0;
     for (i, label) in room.seat_labels.iter().enumerate() {
         let y = 282.0 + i as f32 * 46.0;
-        let is_me = label.contains("（あなた）");
+        let is_me = label.contains(tr.get(Key::MarkerYou));
         let (fill, border) = if is_me {
             (theme::rgba(0xc8a227, 0.07), theme::rgba(0xc8a227, 0.20))
         } else {
@@ -349,10 +352,10 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     }
 
     if room.is_host {
-        draw_button(font, &START_BTN, "対局開始", true);
+        draw_button(font, &START_BTN, tr.get(Key::StartGame), true);
         theme::draw_text_centered(
             font,
-            "空席はCPUが入ります",
+            tr.get(Key::EmptySeatsCpu),
             cx,
             START_BTN.y - 8.0,
             12,
@@ -361,14 +364,14 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     } else {
         theme::draw_text_centered(
             font,
-            "ホストの開始を待っています...",
+            tr.get(Key::WaitingHost),
             cx,
             START_BTN.y + 34.0,
             16,
             theme::TEXT_DIM,
         );
     }
-    draw_button(font, &LEAVE_BTN, "退出", false);
+    draw_button(font, &LEAVE_BTN, tr.get(Key::Leave), false);
 
     draw_status_line(state, font, LEAVE_BTN.y + LEAVE_BTN.h + 28.0);
 }
@@ -434,7 +437,7 @@ pub fn draw_turn_timer(state: &GameState, font: Option<&Font>) {
     theme::draw_rounded_rect_lines(x, y, w, h, 6.0, 1.0, border);
     theme::draw_text_centered(
         font,
-        &format!("残り {remaining} 秒"),
+        &state.tr().seconds_left(remaining),
         x + w / 2.0,
         y + h / 2.0 + 6.0,
         16,

@@ -70,7 +70,7 @@ A Japanese-language edition of this document is maintained in parallel at
 | 明（〜） / 副露 | min- / fūro | melded / open | [`Meld`](../crates/mahjong-core/src/hand_info/meld.rs) | Formed by calling a discarded tile. |
 | チー | chī | chii (melded sequence) | `MeldType::Chi` | Call a sequence from the player on your left. |
 | ポン | pon | pon (melded triplet) | `MeldType::Pon` | Call a triplet from any player. |
-| カン | kan | quad call | `MeldType::Kan` | Make a quad. |
+| カン | kan | kan | `MeldType::Kan` | Make a quad. The call keeps the borrowed name *kan*, like *pon* and *chii*; the resulting meld is a *quad*. |
 | 暗槓 | ankan | concealed quad | `MeldType::Kan` + `MeldFrom::Myself` | Quad from four self-drawn tiles. |
 | 大明槓 | daiminkan | called quad | `MeldType::Kan` | Quad completed by calling a discard. |
 | 加槓 | kakan | promoted quad | `MeldType::Kakan` | Add a self-drawn tile to a melded triplet. |
@@ -109,12 +109,16 @@ A Japanese-language edition of this document is maintained in parallel at
 | 場 | ba | round | — | A division of four+ hands named after a wind (East, South). |
 | 半荘 | hanchan | hanchan / game | — | The East and South rounds together. |
 | 巡（目） | jun | turn | — | From drawing/calling to discarding. |
+| 下家 | shimocha | right player | — | The player to your right; draws immediately after you. |
+| 対面 | toimen | across player | — | The player seated opposite you. |
+| 上家 | kamicha | left player | — | The player to your left; draws immediately before you. The only player you can call chii from. |
 | 牌山 | haiyama | wall | — | The 136 tiles arranged as the drawing pile. |
 | 王牌 | wanpai | dead wall | — | The last 14 tiles; dora indicators + replacement tiles. |
 | 河 / 捨て牌 | ho / sutehai | discard pool | — | The tiles a player has discarded. |
 | 自摸 | tsumo | self-draw | `Status::is_self_drawn` | Drawing a tile from the wall. |
 | 立直 | riichi | riichi | `Status::has_claimed_riichi` | Closed-hand ready declaration; 1,000-point deposit. |
 | ロン | ron | win by calling a tile / ron | — | Completing the hand on a discard. |
+| 放銃 | hōjū | deal-in | — | Discarding the tile another player wins on by ron. |
 | ツモ（和了） | tsumo | win by self-draw / tsumo | — | Completing the hand on a self-draw. |
 | 流局 | ryūkyoku | exhaustive draw | — | The live wall is exhausted with no winner. |
 | 本場 | honba | continuance counter | — | Adds 300 points to the next win. Tracked server-side. |

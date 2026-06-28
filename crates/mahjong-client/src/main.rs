@@ -8,6 +8,8 @@ use macroquad::prelude::*;
 
 mod adapter;
 mod game;
+mod i18n;
+mod persistence;
 mod renderer;
 mod transport;
 
@@ -17,6 +19,7 @@ mod wasm_rng;
 
 use adapter::{ConnStatus, GameAdapter, LocalAdapter, RemoteAdapter, RoomView, error_code_message};
 use game::{GamePhase, GameState, PlayerLabel, RoomViewUi};
+use mahjong_core::settings::Lang;
 use mahjong_server::protocol::net::SeatInfo;
 use renderer::{OnlineLobbyAction, OnlineMenuAction, SetupAction, TileTextures};
 
@@ -33,7 +36,7 @@ fn window_conf() -> Conf {
 fn display_name(state: &GameState) -> String {
     let name = state.online_state.name_input.trim();
     if name.is_empty() {
-        "プレイヤー".to_string()
+        state.tr().get(i18n::Key::DefaultPlayerName).to_string()
     } else {
         name.to_string()
     }
@@ -46,34 +49,28 @@ fn set_status(state: &mut GameState, message: &str, is_error: bool) {
 }
 
 /// ロビー画面用の座席表示文言を組み立てる
-fn build_seat_labels(room: &RoomView) -> [String; 4] {
-    let winds = ["東", "南", "西", "北"];
+fn build_seat_labels(room: &RoomView, lang: Lang) -> [String; 4] {
+    let tr = i18n::Translator::new(lang);
     std::array::from_fn(|i| {
         let who = match &room.seats[i] {
-            SeatInfo::Empty => "空席".to_string(),
-            SeatInfo::Cpu { level, personality } => {
-                format!(
-                    "CPU ({}・{})",
-                    level.display_name(),
-                    personality.display_name()
-                )
-            }
+            SeatInfo::Empty => tr.get(i18n::Key::EmptySeat).to_string(),
+            SeatInfo::Cpu { level, personality } => tr.cpu_seat_label(*level, *personality),
             SeatInfo::Human { name, connected } => {
                 if *connected {
                     name.clone()
                 } else {
-                    format!("{name}（切断中）")
+                    tr.disconnected_name(name)
                 }
             }
         };
         let mut marks = String::new();
         if i == room.your_seat {
-            marks.push_str("（あなた）");
+            marks.push_str(tr.get(i18n::Key::MarkerYou));
         }
         if i == room.host_seat {
-            marks.push_str("（ホスト）");
+            marks.push_str(tr.get(i18n::Key::MarkerHost));
         }
-        format!("{}: {}{}", winds[i], who, marks)
+        tr.seat_row(mahjong_core::tile::Wind::from_index(i), &who, &marks)
     })
 }
 
@@ -89,7 +86,7 @@ fn build_online_player_labels(room: &RoomView) -> [PlayerLabel; 4] {
                     level: level.display_name().to_string(),
                     personality: personality.display_name().to_string(),
                 },
-                SeatInfo::Empty => PlayerLabel::Human("空席".to_string()),
+                SeatInfo::Empty => PlayerLabel::Human("—".to_string()),
             }
         }
     })
@@ -97,15 +94,16 @@ fn build_online_player_labels(room: &RoomView) -> [PlayerLabel; 4] {
 
 /// リモートアダプターの状態をUI表示用にコピーする
 fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
+    let lang = state.lang;
     state.online_state.room = remote.room().map(|room| RoomViewUi {
         code: room.code.clone(),
-        seat_labels: build_seat_labels(room),
+        seat_labels: build_seat_labels(room, lang),
         is_host: room.is_host(),
     });
 
     if let Some(err) = remote.take_error() {
         let message = match err.code {
-            Some(code) => error_code_message(code).to_string(),
+            Some(code) => error_code_message(code, lang).to_string(),
             None => err.message,
         };
         set_status(state, &message, true);
@@ -118,11 +116,17 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
     }
 
     match remote.status() {
-        ConnStatus::Connecting => set_status(state, "サーバに接続中...", false),
+        ConnStatus::Connecting => {
+            let msg = i18n::Key::Connecting.text(lang);
+            set_status(state, msg, false);
+        }
         ConnStatus::Connected => {
             state.online_state.status_line = None;
         }
-        ConnStatus::Disconnected => set_status(state, "サーバとの接続が切れました", true),
+        ConnStatus::Disconnected => {
+            let msg = i18n::Key::Disconnected.text(lang);
+            set_status(state, msg, true);
+        }
     }
 }
 
@@ -183,7 +187,7 @@ async fn main() {
                 game_state.handle_event(event);
             }
             // 対局中の接続バナー（ローカル対戦では常に None）
-            game_state.online_state.status_line = adp.status_text();
+            game_state.online_state.status_line = adp.status_text(game_state.lang);
             game_state.online_state.status_is_error = true;
             // 手番の残り時間（オンラインのみ）
             game_state.online_state.turn_remaining = adp.turn_remaining_secs();
@@ -222,21 +226,20 @@ async fn main() {
                             let url = transport::default_server_url();
                             let name = display_name(&game_state);
                             online = Some(RemoteAdapter::create_room(&url, &name, 1));
-                            set_status(&mut game_state, "サーバに接続中...", false);
+                            let msg = i18n::Key::Connecting.text(game_state.lang);
+                            set_status(&mut game_state, msg, false);
                         }
                         OnlineMenuAction::JoinRoom => {
                             let code = game_state.online_state.code_input.clone();
                             if code.chars().count() != 6 {
-                                set_status(
-                                    &mut game_state,
-                                    "ルームコードを6文字で入力してください",
-                                    true,
-                                );
+                                let msg = i18n::Key::RoomCodeLengthError.text(game_state.lang);
+                                set_status(&mut game_state, msg, true);
                             } else {
                                 let url = transport::default_server_url();
                                 let name = display_name(&game_state);
                                 online = Some(RemoteAdapter::join_room(&url, &name, &code));
-                                set_status(&mut game_state, "サーバに接続中...", false);
+                                let msg = i18n::Key::Connecting.text(game_state.lang);
+                                set_status(&mut game_state, msg, false);
                             }
                         }
                         OnlineMenuAction::Back => {

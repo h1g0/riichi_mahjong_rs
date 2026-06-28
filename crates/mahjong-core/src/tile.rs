@@ -379,9 +379,9 @@ impl Dragon {
     pub fn name(&self, lang: Lang) -> &'static str {
         match lang {
             Lang::En => match self {
-                Dragon::White => "White",
-                Dragon::Green => "Green",
-                Dragon::Red => "Red",
+                Dragon::White => "White dragon",
+                Dragon::Green => "Green dragon",
+                Dragon::Red => "Red dragon",
             },
             Lang::Ja => match self {
                 Dragon::White => "白",
@@ -565,9 +565,9 @@ mod tests {
         assert_eq!(Dragon::White.name(Lang::Ja), "白");
         assert_eq!(Dragon::Green.name(Lang::Ja), "發");
         assert_eq!(Dragon::Red.name(Lang::Ja), "中");
-        assert_eq!(Dragon::White.name(Lang::En), "White");
-        assert_eq!(Dragon::Green.name(Lang::En), "Green");
-        assert_eq!(Dragon::Red.name(Lang::En), "Red");
+        assert_eq!(Dragon::White.name(Lang::En), "White dragon");
+        assert_eq!(Dragon::Green.name(Lang::En), "Green dragon");
+        assert_eq!(Dragon::Red.name(Lang::En), "Red dragon");
     }
 
     #[test]
