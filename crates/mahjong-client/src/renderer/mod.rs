@@ -11,12 +11,14 @@ pub use online::{
 pub use overlay::OverlayClick;
 
 use macroquad::prelude::*;
-use mahjong_core::tile::Tile;
+use mahjong_core::settings::Lang;
+use mahjong_core::tile::{Tile, Wind};
 use mahjong_server::cpu::client::CpuConfig;
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 
 use crate::game::{GamePhase, GameState, SetupState};
+use crate::i18n::Key;
 
 const RIICHI_DISABLED_TINT: Color = Color::new(0.45, 0.45, 0.42, 1.0);
 
@@ -1641,11 +1643,25 @@ const SETUP_CARD_H: f32 = 348.0;
 const SETUP_OPT_H: f32 = 28.0;
 const SETUP_OPT_STEP: f32 = 32.0;
 
-// CPU カードの表示ラベル
-const SETUP_WINDS: [&str; 3] = ["南", "西", "北"];
-const SETUP_CPU_JP: [&str; 3] = ["下家", "対面", "上家"];
-const STRENGTH_LABELS: [&str; 3] = ["弱い", "普通", "強い"];
-const PERSONALITY_LABELS: [&str; 4] = ["バランス", "スピード", "高得点", "守備的"];
+/// 設定画面の CPU カードに表示する風（下家=南, 対面=西, 上家=北）。
+fn setup_card_wind(cpu_idx: usize) -> Wind {
+    Wind::from_index(cpu_idx + 1)
+}
+
+/// 言語切替トグルのボタン矩形（パネル右上）。idx 0=日本語, 1=English。
+fn setup_lang_button_rect(idx: usize) -> SetupButton {
+    const W: f32 = 84.0;
+    const H: f32 = 28.0;
+    const GAP: f32 = 6.0;
+    let right = setup_panel_x() + SETUP_PANEL_W - SETUP_CARD_PAD;
+    let y = SETUP_PANEL_Y + 24.0;
+    // 右詰めで [日本語][English] を並べる
+    let x = right - (2.0 - idx as f32) * W - (1.0 - idx as f32) * GAP;
+    SetupButton { x, y, w: W, h: H }
+}
+
+/// 言語切替トグルに表示する固有名（言語非依存の自称表記）。
+const SETUP_LANG_LABELS: [&str; 2] = ["日本語", "English"];
 
 fn setup_panel_x() -> f32 {
     (DESIGN_W - SETUP_PANEL_W) / 2.0
@@ -1712,6 +1728,7 @@ fn draw_setup_option(font: Option<&Font>, btn: &SetupButton, label: &str, select
 fn draw_setup(state: &GameState, font: Option<&Font>) {
     draw_setup_background();
     let setup = &state.setup_state;
+    let tr = state.tr();
     let panel_x = setup_panel_x();
 
     // パネル背景
@@ -1729,12 +1746,22 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
     let cx = DESIGN_W / 2.0;
     theme::draw_text_centered(
         font,
-        "対局設定",
+        tr.get(Key::SetupTitle),
         cx,
         SETUP_PANEL_Y + 52.0,
         26,
         theme::TEXT_BR,
     );
+
+    // 言語切替トグル（日本語 / English）
+    let active_lang = match state.lang {
+        Lang::Ja => 0,
+        Lang::En => 1,
+    };
+    for (idx, &label) in SETUP_LANG_LABELS.iter().enumerate() {
+        let btn = setup_lang_button_rect(idx);
+        draw_setup_option(font, &btn, label, idx == active_lang);
+    }
 
     // CPU カード
     let card_w = setup_card_w();
@@ -1765,7 +1792,7 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         draw_circle_lines(ring_cx, ring_cy, 18.0, 1.5, theme::GOLD_DK);
         theme::draw_text_centered(
             font,
-            SETUP_WINDS[cpu_idx],
+            setup_card_wind(cpu_idx).name(state.lang),
             ring_cx,
             ring_cy + 6.0,
             16,
@@ -1773,7 +1800,7 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         );
         draw_jp_text(
             font,
-            SETUP_CPU_JP[cpu_idx],
+            tr.seat_relative(cpu_idx),
             card_x + 56.0,
             SETUP_CARD_Y + 39.0,
             15,
@@ -1783,32 +1810,37 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         // 強さ
         draw_jp_text(
             font,
-            "強さ",
+            tr.get(Key::CpuStrengthLabel),
             card_x + 14.0,
             SETUP_CARD_Y + 76.0,
             10,
             theme::TEXT_DIM,
         );
-        for (level_idx, &label) in STRENGTH_LABELS.iter().enumerate() {
+        for level_idx in 0..SetupState::level_count() {
             let btn = setup_opt_rect(cpu_idx, SETUP_STR_OFFSET, level_idx);
-            draw_setup_option(font, &btn, label, setup.cpu_levels[cpu_idx] == level_idx);
+            draw_setup_option(
+                font,
+                &btn,
+                tr.strength_label(level_idx),
+                setup.cpu_levels[cpu_idx] == level_idx,
+            );
         }
 
         // 性格
         draw_jp_text(
             font,
-            "性格",
+            tr.get(Key::CpuPersonalityLabel),
             card_x + 14.0,
             SETUP_CARD_Y + 202.0,
             10,
             theme::TEXT_DIM,
         );
-        for (pers_idx, &label) in PERSONALITY_LABELS.iter().enumerate() {
+        for pers_idx in 0..SetupState::personality_count() {
             let btn = setup_opt_rect(cpu_idx, SETUP_PERS_OFFSET, pers_idx);
             draw_setup_option(
                 font,
                 &btn,
-                label,
+                tr.personality_label(pers_idx),
                 setup.cpu_personalities[cpu_idx] == pers_idx,
             );
         }
@@ -1827,13 +1859,27 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         theme::GOLD,
         2.0,
     );
-    theme::draw_text_centered(font, "対局開始", cx, s.y + 34.0, 20, theme::GOLD_LT);
+    theme::draw_text_centered(
+        font,
+        tr.get(Key::StartGame),
+        cx,
+        s.y + 34.0,
+        20,
+        theme::GOLD_LT,
+    );
 
     // オンライン対戦ボタン
     let o = setup_online_rect();
     theme::draw_rounded_rect(o.x, o.y, o.w, o.h, 6.0, theme::rgba(0xffffff, 0.05));
     theme::draw_rounded_rect_lines(o.x, o.y, o.w, o.h, 6.0, 1.0, theme::rgba(0xc8a227, 0.3));
-    theme::draw_text_centered(font, "オンライン対戦", cx, o.y + 24.0, 14, theme::TEXT);
+    theme::draw_text_centered(
+        font,
+        tr.get(Key::OnlinePlay),
+        cx,
+        o.y + 24.0,
+        14,
+        theme::TEXT,
+    );
 }
 
 /// 設定画面での操作
@@ -1851,6 +1897,15 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
     }
 
     let (mx, my) = mouse_position_design();
+
+    // 言語切替トグル（日本語 / English）
+    for (idx, lang) in [Lang::Ja, Lang::En].into_iter().enumerate() {
+        if setup_lang_button_rect(idx).contains(mx, my) {
+            state.lang = lang;
+            return None;
+        }
+    }
+
     let setup = &mut state.setup_state;
 
     for cpu_idx in 0..3 {

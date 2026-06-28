@@ -243,6 +243,8 @@ pub struct GameState {
     pub player_labels: [PlayerLabel; 4],
     /// 自分の座席インデックス（ローカルは常に0、オンラインは your_seat）
     pub my_seat: usize,
+    /// 表示言語
+    pub lang: Lang,
 }
 
 /// オンライン対戦UI（メニュー・ロビー）の状態
@@ -441,7 +443,13 @@ impl GameState {
                 },
             ],
             my_seat: 0,
+            lang: Lang::Ja,
         }
+    }
+
+    /// 現在の表示言語の [`Translator`](crate::i18n::Translator) を返す。
+    pub fn tr(&self) -> crate::i18n::Translator {
+        crate::i18n::Translator::new(self.lang)
     }
 
     /// ローカル対局のプレイヤー種別を設定する（自分=座席0, CPU=座席1〜3）
