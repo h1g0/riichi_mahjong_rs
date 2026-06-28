@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 use crate::hand::Hand;
 use crate::hand_info::hand_analyzer::HandAnalyzer;
 use crate::hand_info::status::Status;
 use crate::scoring::fu::{FuResult, calculate_fu};
-use crate::settings::Settings;
+use crate::settings::{Lang, Settings};
 use crate::winning_hand::checker;
 use crate::winning_hand::name::Kind;
 
@@ -36,7 +37,7 @@ pub struct ScoreResult {
 }
 
 /// 点数の等級
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum ScoreRank {
     /// 通常（満貫未満）
     Normal,
@@ -50,6 +51,65 @@ pub enum ScoreRank {
     Sanbaiman,
     /// 役満（13翻以上）
     Yakuman,
+}
+
+impl ScoreRank {
+    /// 点数等級の表示名を返す（`Normal` は空文字列）
+    ///
+    /// 英語名は WRC Rules 2025 準拠（docs/glossary.md を参照）。
+    pub fn name(&self, lang: Lang) -> &'static str {
+        match lang {
+            Lang::En => match self {
+                ScoreRank::Normal => "",
+                ScoreRank::Mangan => "Mangan",
+                ScoreRank::Haneman => "Haneman",
+                ScoreRank::Baiman => "Baiman",
+                ScoreRank::Sanbaiman => "Sanbaiman",
+                ScoreRank::Yakuman => "Yakuman",
+            },
+            Lang::Ja => match self {
+                ScoreRank::Normal => "",
+                ScoreRank::Mangan => "満貫",
+                ScoreRank::Haneman => "跳満",
+                ScoreRank::Baiman => "倍満",
+                ScoreRank::Sanbaiman => "三倍満",
+                ScoreRank::Yakuman => "役満",
+            },
+        }
+    }
+}
+
+/// ドラの種別（リザルト画面で役と並べて翻数を表示するために用いる）
+///
+/// 翻数を生む通常の役ではないが、和了結果の内訳として役と同様に扱う。
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize)]
+pub enum DoraLabel {
+    /// ドラ
+    Dora,
+    /// 赤ドラ
+    RedDora,
+    /// 裏ドラ
+    UraDora,
+}
+
+impl DoraLabel {
+    /// ドラ種別の表示名を返す
+    ///
+    /// 英語名は WRC Rules 2025 準拠（docs/glossary.md を参照）。
+    pub fn name(&self, lang: Lang) -> &'static str {
+        match lang {
+            Lang::En => match self {
+                DoraLabel::Dora => "Dora",
+                DoraLabel::RedDora => "Red Five",
+                DoraLabel::UraDora => "Ura Dora",
+            },
+            Lang::Ja => match self {
+                DoraLabel::Dora => "ドラ",
+                DoraLabel::RedDora => "赤ドラ",
+                DoraLabel::UraDora => "裏ドラ",
+            },
+        }
+    }
 }
 
 /// 点数を計算する
@@ -513,5 +573,43 @@ mod tests {
         let riichi_pos = names.iter().position(|&n| n == "立直").unwrap();
         let pinfu_pos = names.iter().position(|&n| n == "平和").unwrap();
         assert!(riichi_pos < pinfu_pos, "立直はKind定義順で平和より先に来る");
+    }
+
+    /// 点数等級名（日本語）
+    #[test]
+    fn rank_name_ja() {
+        assert_eq!(ScoreRank::Normal.name(Lang::Ja), "");
+        assert_eq!(ScoreRank::Mangan.name(Lang::Ja), "満貫");
+        assert_eq!(ScoreRank::Haneman.name(Lang::Ja), "跳満");
+        assert_eq!(ScoreRank::Baiman.name(Lang::Ja), "倍満");
+        assert_eq!(ScoreRank::Sanbaiman.name(Lang::Ja), "三倍満");
+        assert_eq!(ScoreRank::Yakuman.name(Lang::Ja), "役満");
+    }
+
+    /// 点数等級名（英語、WRC 準拠）
+    #[test]
+    fn rank_name_en() {
+        assert_eq!(ScoreRank::Normal.name(Lang::En), "");
+        assert_eq!(ScoreRank::Mangan.name(Lang::En), "Mangan");
+        assert_eq!(ScoreRank::Haneman.name(Lang::En), "Haneman");
+        assert_eq!(ScoreRank::Baiman.name(Lang::En), "Baiman");
+        assert_eq!(ScoreRank::Sanbaiman.name(Lang::En), "Sanbaiman");
+        assert_eq!(ScoreRank::Yakuman.name(Lang::En), "Yakuman");
+    }
+
+    /// ドラ種別名（日本語）
+    #[test]
+    fn dora_label_name_ja() {
+        assert_eq!(DoraLabel::Dora.name(Lang::Ja), "ドラ");
+        assert_eq!(DoraLabel::RedDora.name(Lang::Ja), "赤ドラ");
+        assert_eq!(DoraLabel::UraDora.name(Lang::Ja), "裏ドラ");
+    }
+
+    /// ドラ種別名（英語）
+    #[test]
+    fn dora_label_name_en() {
+        assert_eq!(DoraLabel::Dora.name(Lang::En), "Dora");
+        assert_eq!(DoraLabel::RedDora.name(Lang::En), "Red Five");
+        assert_eq!(DoraLabel::UraDora.name(Lang::En), "Ura Dora");
     }
 }

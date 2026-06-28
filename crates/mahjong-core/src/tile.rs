@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::settings::Lang;
+
 /// 牌の種類を示す型
 pub type TileType = u32;
 
@@ -329,6 +331,24 @@ impl Wind {
             _ => unreachable!(),
         }
     }
+
+    /// 風の表示名を返す（英語名は WRC Rules 2025 準拠、docs/glossary.md を参照）
+    pub fn name(&self, lang: Lang) -> &'static str {
+        match lang {
+            Lang::En => match self {
+                Wind::East => "East",
+                Wind::South => "South",
+                Wind::West => "West",
+                Wind::North => "North",
+            },
+            Lang::Ja => match self {
+                Wind::East => "東",
+                Wind::South => "南",
+                Wind::West => "西",
+                Wind::North => "北",
+            },
+        }
+    }
 }
 
 /// 三元牌
@@ -353,6 +373,22 @@ impl Dragon {
     }
     pub fn is_tile(tile: &Tile) -> Option<Dragon> {
         Dragon::is_tile_type(tile.get())
+    }
+
+    /// 三元牌の表示名を返す（英語名は WRC Rules 2025 準拠、docs/glossary.md を参照）
+    pub fn name(&self, lang: Lang) -> &'static str {
+        match lang {
+            Lang::En => match self {
+                Dragon::White => "White",
+                Dragon::Green => "Green",
+                Dragon::Red => "Red",
+            },
+            Lang::Ja => match self {
+                Dragon::White => "白",
+                Dragon::Green => "發",
+                Dragon::Red => "中",
+            },
+        }
     }
 }
 
@@ -508,6 +544,30 @@ mod tests {
         assert_eq!(Wind::East.to_index(), 0);
         assert_eq!(Wind::from_index(2), Wind::West);
         assert_eq!(Wind::from_index(4), Wind::East);
+    }
+
+    /// 風の表示名
+    #[test]
+    fn wind_name_test() {
+        assert_eq!(Wind::East.name(Lang::Ja), "東");
+        assert_eq!(Wind::South.name(Lang::Ja), "南");
+        assert_eq!(Wind::West.name(Lang::Ja), "西");
+        assert_eq!(Wind::North.name(Lang::Ja), "北");
+        assert_eq!(Wind::East.name(Lang::En), "East");
+        assert_eq!(Wind::South.name(Lang::En), "South");
+        assert_eq!(Wind::West.name(Lang::En), "West");
+        assert_eq!(Wind::North.name(Lang::En), "North");
+    }
+
+    /// 三元牌の表示名
+    #[test]
+    fn dragon_name_test() {
+        assert_eq!(Dragon::White.name(Lang::Ja), "白");
+        assert_eq!(Dragon::Green.name(Lang::Ja), "發");
+        assert_eq!(Dragon::Red.name(Lang::Ja), "中");
+        assert_eq!(Dragon::White.name(Lang::En), "White");
+        assert_eq!(Dragon::Green.name(Lang::En), "Green");
+        assert_eq!(Dragon::Red.name(Lang::En), "Red");
     }
 
     #[test]
