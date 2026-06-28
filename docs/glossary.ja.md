@@ -108,12 +108,16 @@
 | 場 | ba | round | — | 風名を冠する 4 局以上の区切り（東・南）。 |
 | 半荘 | hanchan | hanchan / game | — | 東場と南場を合わせたもの。 |
 | 巡（目） | jun | turn | — | ツモ/鳴きから打牌まで。 |
+| 下家 | shimocha | right player | — | 自分の右隣（自分の次に打つ）プレイヤー。 |
+| 対面 | toimen | across player | — | 自分の正面のプレイヤー。 |
+| 上家 | kamicha | left player | — | 自分の左隣（自分の前に打つ）プレイヤー。チーできる唯一の相手。 |
 | 牌山 | haiyama | wall | — | 136 枚を山に積んだもの。 |
 | 王牌 | wanpai | dead wall | — | 末尾 14 枚。ドラ表示牌＋嶺上牌。 |
 | 河 / 捨て牌 | ho / sutehai | discard pool | — | プレイヤーが捨てた牌。 |
 | 自摸 | tsumo | self-draw | `Status::is_self_drawn` | 山から牌を引くこと。 |
 | 立直 | riichi | riichi | `Status::has_claimed_riichi` | 門前聴牌の宣言。1,000 点の供託。 |
 | ロン | ron | win by calling a tile / ron | — | 捨て牌で和了すること。 |
+| 放銃 | hōjū | deal-in | — | 他家のロン和了牌を捨てること。 |
 | ツモ（和了） | tsumo | win by self-draw / tsumo | — | 自摸で和了すること。 |
 | 流局 | ryūkyoku | exhaustive draw | — | 和了者なしで生牌が尽きること。 |
 | 本場 | honba | continuance counter | — | 次局の和了に 300 点加算。サーバ側で管理。 |
