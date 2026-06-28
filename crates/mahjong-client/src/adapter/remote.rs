@@ -10,6 +10,7 @@
 //! 4. `RoomState` で入室完了（`room()` が Some になる）
 //! 5. ホストが `start_game` → `Event(GameStarted)` で対局開始
 
+use mahjong_core::settings::Lang;
 use mahjong_server::protocol::net::{
     ClientMessage, CpuSpec, ErrorCode, PROTOCOL_VERSION, SeatInfo, ServerMessage,
 };
@@ -449,16 +450,17 @@ impl GameAdapter for RemoteAdapter {
         self.game_over
     }
 
-    fn status_text(&self) -> Option<String> {
+    fn status_text(&self, lang: Lang) -> Option<String> {
+        use crate::i18n::Key;
         if self.reconnecting {
-            return Some("再接続中...".to_string());
+            return Some(Key::Reconnecting.text(lang).to_string());
         }
         match self.status {
-            ConnStatus::Disconnected => Some("サーバとの接続が切れました".to_string()),
-            ConnStatus::Connecting => Some("接続中...".to_string()),
+            ConnStatus::Disconnected => Some(Key::Disconnected.text(lang).to_string()),
+            ConnStatus::Connecting => Some(Key::Connecting.text(lang).to_string()),
             ConnStatus::Connected => {
                 if self.any_peer_disconnected() {
-                    Some("他のプレイヤーが切断中（CPUが代打ち）".to_string())
+                    Some(Key::PeerDisconnected.text(lang).to_string())
                 } else {
                     None
                 }
@@ -477,18 +479,31 @@ fn default_clock() -> Clock {
     Box::new(macroquad::time::get_time)
 }
 
-/// エラーコードを表示用の日本語文言に変換する
-pub fn error_code_message(code: ErrorCode) -> &'static str {
-    match code {
-        ErrorCode::VersionMismatch => "クライアントのバージョンがサーバと一致しません",
-        ErrorCode::RoomNotFound => "ルームが見つかりません",
-        ErrorCode::RoomFull => "ルームが満席です",
-        ErrorCode::NotHost => "ホストのみ操作できます",
-        ErrorCode::NotInRoom => "ルームに参加していません",
-        ErrorCode::GameInProgress => "対局中のため参加できません",
-        ErrorCode::InvalidAction => "無効な操作です",
-        ErrorCode::BadMessage => "不正なメッセージです",
-        ErrorCode::RateLimited => "操作が頻繁すぎます。しばらく待ってください",
+/// エラーコードを表示用の文言に変換する
+pub fn error_code_message(code: ErrorCode, lang: Lang) -> &'static str {
+    match lang {
+        Lang::Ja => match code {
+            ErrorCode::VersionMismatch => "クライアントのバージョンがサーバと一致しません",
+            ErrorCode::RoomNotFound => "ルームが見つかりません",
+            ErrorCode::RoomFull => "ルームが満席です",
+            ErrorCode::NotHost => "ホストのみ操作できます",
+            ErrorCode::NotInRoom => "ルームに参加していません",
+            ErrorCode::GameInProgress => "対局中のため参加できません",
+            ErrorCode::InvalidAction => "無効な操作です",
+            ErrorCode::BadMessage => "不正なメッセージです",
+            ErrorCode::RateLimited => "操作が頻繁すぎます。しばらく待ってください",
+        },
+        Lang::En => match code {
+            ErrorCode::VersionMismatch => "Client version does not match the server",
+            ErrorCode::RoomNotFound => "Room not found",
+            ErrorCode::RoomFull => "Room is full",
+            ErrorCode::NotHost => "Only the host can do that",
+            ErrorCode::NotInRoom => "You are not in a room",
+            ErrorCode::GameInProgress => "Cannot join: a game is in progress",
+            ErrorCode::InvalidAction => "Invalid action",
+            ErrorCode::BadMessage => "Malformed message",
+            ErrorCode::RateLimited => "Too many actions; please wait a moment",
+        },
     }
 }
 
@@ -715,7 +730,7 @@ mod tests {
 
         assert_eq!(adapter.status(), ConnStatus::Disconnected);
         assert!(adapter.take_error().is_some());
-        assert!(adapter.status_text().is_some());
+        assert!(adapter.status_text(Lang::Ja).is_some());
     }
 
     #[test]
@@ -900,7 +915,7 @@ mod tests {
         assert!(adapter.game_started());
         // 再接続が完了して通常状態へ戻る
         assert_eq!(adapter.status(), ConnStatus::Connected);
-        assert!(adapter.status_text().is_none());
+        assert!(adapter.status_text(Lang::Ja).is_none());
     }
 
     /// 連続するモックを払い出すコネクタを作る
@@ -941,7 +956,10 @@ mod tests {
         // 対局中に切断: 再接続モードに入り、エラーは表に出さない
         h1.push(WsEvent::Closed);
         adapter.tick();
-        assert_eq!(adapter.status_text().as_deref(), Some("再接続中..."));
+        assert_eq!(
+            adapter.status_text(Lang::Ja).as_deref(),
+            Some("再接続中...")
+        );
         assert!(adapter.take_error().is_none());
 
         // バックオフ前は再接続しない
@@ -983,7 +1001,7 @@ mod tests {
                 .any(|e| matches!(e, ServerEvent::GameStarted { .. }))
         );
         assert_eq!(adapter.status(), ConnStatus::Connected);
-        assert!(adapter.status_text().is_none());
+        assert!(adapter.status_text(Lang::Ja).is_none());
     }
 
     #[test]
@@ -1025,7 +1043,7 @@ mod tests {
         // 再接続を断念し、エラーと切断状態を表に出す
         assert_eq!(adapter.status(), ConnStatus::Disconnected);
         assert_eq!(
-            adapter.status_text().as_deref(),
+            adapter.status_text(Lang::Ja).as_deref(),
             Some("サーバとの接続が切れました")
         );
         let err = adapter.take_error().expect("エラーが記録されていない");
@@ -1041,7 +1059,7 @@ mod tests {
         handle.push_msg(&room_state(1));
         handle.push_msg(&ServerMessage::Event(game_started_event()));
         adapter.tick();
-        assert!(adapter.status_text().is_none());
+        assert!(adapter.status_text(Lang::Ja).is_none());
 
         // 座席0が切断 → 状態表示が出る
         handle.push_msg(&ServerMessage::PlayerConnectionChanged {
@@ -1050,7 +1068,7 @@ mod tests {
         });
         adapter.tick();
         assert_eq!(
-            adapter.status_text().as_deref(),
+            adapter.status_text(Lang::Ja).as_deref(),
             Some("他のプレイヤーが切断中（CPUが代打ち）")
         );
 
@@ -1060,7 +1078,7 @@ mod tests {
             connected: true,
         });
         adapter.tick();
-        assert!(adapter.status_text().is_none());
+        assert!(adapter.status_text(Lang::Ja).is_none());
     }
 
     #[test]
@@ -1123,7 +1141,7 @@ mod tests {
 
         assert_eq!(adapter.status(), ConnStatus::Disconnected);
         assert_eq!(
-            adapter.status_text().as_deref(),
+            adapter.status_text(Lang::Ja).as_deref(),
             Some("サーバとの接続が切れました")
         );
     }

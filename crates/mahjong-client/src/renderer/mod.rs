@@ -11,6 +11,7 @@ pub use online::{
 pub use overlay::OverlayClick;
 
 use macroquad::prelude::*;
+use mahjong_core::scoring::score::DoraLabel;
 use mahjong_core::settings::Lang;
 use mahjong_core::tile::{Tile, Wind};
 use mahjong_server::cpu::client::CpuConfig;
@@ -295,7 +296,7 @@ pub fn draw_game(
             draw_setup_background();
             theme::draw_text_centered(
                 font,
-                "ゲーム開始中...",
+                state.tr().get(Key::GameStarting),
                 DESIGN_W / 2.0,
                 400.0,
                 28,
@@ -400,7 +401,7 @@ fn draw_dora_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileT
     // 「ドラ」ラベル
     draw_jp_text(
         font,
-        "ドラ",
+        DoraLabel::Dora.name(state.lang),
         panel_x + 10.0,
         panel_y + 21.0,
         11,
@@ -461,15 +462,9 @@ fn draw_dora_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileT
 
 /// 上部バー中央：局表示と残り枚数。
 fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f32) {
-    let round_wind = match state.round_number / 4 {
-        0 => "東",
-        1 => "南",
-        2 => "西",
-        _ => "北",
-    };
-    let round_num = (state.round_number % 4) + 1;
-    let round_text = format!("{}{}局", round_wind, round_num);
-    let remain_text = format!("{}枚", state.remaining_tiles);
+    let tr = state.tr();
+    let round_text = tr.round_label(state.round_number);
+    let remain_text = tr.wall_count(state.remaining_tiles);
 
     let baseline = bar_h / 2.0 + 6.0;
     let rdims = theme::measure_scaled(font, &round_text, 16);
@@ -515,7 +510,7 @@ fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f32) {
         theme::draw_rounded_rect(x, chip_y, CHIP_W, CHIP_H, 4.0, fill);
         theme::draw_rounded_rect_lines(x, chip_y, CHIP_W, CHIP_H, 4.0, 1.0, border);
 
-        let name = short_player_name(&state.player_labels[seat], rel);
+        let name = short_player_name(&state.player_labels[seat], rel, state.lang);
         theme::draw_text_centered(
             font,
             &name,
@@ -531,10 +526,10 @@ fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f32) {
 }
 
 /// 得点チップ用の短いプレイヤー名。
-fn short_player_name(label: &crate::game::PlayerLabel, rel: usize) -> String {
+fn short_player_name(label: &crate::game::PlayerLabel, rel: usize, lang: Lang) -> String {
     use crate::game::PlayerLabel;
     match label {
-        PlayerLabel::Me => "あなた".to_string(),
+        PlayerLabel::Me => Key::You.text(lang).to_string(),
         PlayerLabel::Human(name) => {
             let mut s: String = name.chars().take(5).collect();
             if name.chars().count() > 5 {
@@ -600,7 +595,7 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         // 風（ゴールド）＋得点（千点単位）を中心の各方向に描画
         theme::draw_text_centered(
             font,
-            wind_to_str(display_wind),
+            display_wind.name(state.lang),
             BOARD_CENTER_X,
             BOARD_CENTER_Y + label_dist,
             14,
@@ -618,7 +613,7 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
 
         // CPU の強さ・性格（または相手の名前）を風・得点の下に表示する。
         // player_idx は自分からの相対位置で、得点チップの CPU 番号と一致する。
-        if let Some(detail) = state.player_labels[seat].detail(player_idx) {
+        if let Some(detail) = state.player_labels[seat].detail(player_idx, state.lang) {
             theme::draw_text_centered(
                 font,
                 &detail,
@@ -633,16 +628,8 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
     }
 
     // 局情報（プレイヤー＝自分に読める方向で描画）
-    let round_wind = match state.round_number / 4 {
-        0 => "東",
-        1 => "南",
-        2 => "西",
-        _ => "北",
-    };
-    let round_num = (state.round_number % 4) + 1;
-
-    let round_text = format!("{}{}局", round_wind, round_num);
-    let remaining_text = format!("残{}枚", state.remaining_tiles);
+    let round_text = state.tr().round_label(state.round_number);
+    let remaining_text = state.tr().wall_remaining(state.remaining_tiles);
 
     // 局表示は小さく、残数表示を大きく強調する
     theme::draw_text_centered(
@@ -772,6 +759,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
     let hand_y = HAND_Y;
 
     // 状態バッジ（フリテン・リーチ中・リーチ打牌選択中）
+    let tr = state.tr();
     let badge_y = hand_y - 26.0;
     let mut bx = hand_start_x;
     if state.is_furiten {
@@ -779,7 +767,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             font,
             bx,
             badge_y,
-            "振聴",
+            tr.get(Key::Furiten),
             theme::rgba(0xcc2828, 0.18),
             theme::RED,
             theme::RED_LT,
@@ -790,7 +778,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             font,
             bx,
             badge_y,
-            "リーチ中",
+            tr.get(Key::RiichiActive),
             theme::rgba(0xcc2828, 0.12),
             theme::rgba(0xcc2828, 0.35),
             theme::RED,
@@ -801,7 +789,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             font,
             bx,
             badge_y,
-            "打牌を選択",
+            tr.get(Key::SelectDiscard),
             theme::rgba(0xc8a227, 0.12),
             theme::rgba(0xc8a227, 0.35),
             theme::GOLD_LT,
@@ -813,7 +801,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             font,
             bx,
             badge_y,
-            "振聴になります！",
+            tr.get(Key::WillBeFuriten),
             theme::rgba(0xcc6411, 0.18),
             theme::rgba(0xe88a1a, 0.6),
             Color::new(1.0, 0.7, 0.3, 1.0),
@@ -843,7 +831,7 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
         // 「ツモ」ラベル
         theme::draw_text_centered(
             font,
-            "ツモ",
+            tr.get(Key::Tsumo),
             drawn_x + TILE_W / 2.0,
             hand_y + y_offset - 8.0,
             11,
@@ -1298,9 +1286,9 @@ fn draw_result_next_button(state: &GameState, font: Option<&Font>, cx: f32, y: f
     theme::draw_rounded_rect(x, y, w, h, 6.0, theme::rgba(0xc8a227, 0.10));
     theme::draw_rounded_rect_lines(x, y, w, h, 6.0, 1.0, theme::GOLD_DK);
     let label = if state.win_result_index + 1 < state.win_results.len() {
-        "次の和了へ →"
+        state.tr().get(Key::NextWin)
     } else {
-        "次へ →"
+        state.tr().get(Key::Next)
     };
     theme::draw_text_centered(font, label, cx, y + 25.0, 14, theme::GOLD_LT);
 }
@@ -1328,6 +1316,7 @@ fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTe
         Some(w) => w,
         None => return,
     };
+    let tr = state.tr();
     let yaku_count = wr.yaku.len().max(1);
     let panel_w = 700.0;
     let panel_h = 326.0 + yaku_count as f32 * 22.0;
@@ -1338,7 +1327,11 @@ fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTe
     let mut y = panel_y + 28.0;
 
     // 種別（ツモ / ロン）
-    let type_label = if wr.win_is_tsumo { "ツモ" } else { "ロン" };
+    let type_label = if wr.win_is_tsumo {
+        tr.get(Key::Tsumo)
+    } else {
+        tr.get(Key::Ron)
+    };
     theme::draw_text_centered(font, type_label, cx, y, 12, theme::GOLD);
     y += 22.0;
 
@@ -1397,24 +1390,26 @@ fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTe
     // ドラ・裏ドラ
     let dw = 20.0;
     let dh = 28.0;
-    let dora_label_w = theme::measure_scaled(font, "ドラ", 11).width;
+    let dora_text = DoraLabel::Dora.name(state.lang);
+    let ura_text = DoraLabel::UraDora.name(state.lang);
+    let dora_label_w = theme::measure_scaled(font, dora_text, 11).width;
     let dora_tiles_w = state.dora_indicators.len() as f32 * (dw + 2.0);
     let ura_block_w = if state.uradora_indicators.is_empty() {
         0.0
     } else {
-        24.0 + theme::measure_scaled(font, "裏ドラ", 11).width
+        24.0 + theme::measure_scaled(font, ura_text, 11).width
             + 6.0
             + state.uradora_indicators.len() as f32 * (dw + 2.0)
     };
     let total_w = dora_label_w + 6.0 + dora_tiles_w + ura_block_w;
     let mut dx = cx - total_w / 2.0;
-    draw_jp_text(font, "ドラ", dx, y + dh / 2.0 + 4.0, 11, theme::TEXT_DIM);
+    draw_jp_text(font, dora_text, dx, y + dh / 2.0 + 4.0, 11, theme::TEXT_DIM);
     dx += dora_label_w + 6.0;
     dx = draw_indicator_row(&state.dora_indicators, dx, y, dw, dh, tile_textures);
     if !state.uradora_indicators.is_empty() {
         dx += 18.0;
-        draw_jp_text(font, "裏ドラ", dx, y + dh / 2.0 + 4.0, 11, theme::TEXT_DIM);
-        dx += theme::measure_scaled(font, "裏ドラ", 11).width + 6.0;
+        draw_jp_text(font, ura_text, dx, y + dh / 2.0 + 4.0, 11, theme::TEXT_DIM);
+        dx += theme::measure_scaled(font, ura_text, 11).width + 6.0;
         draw_indicator_row(&state.uradora_indicators, dx, y, dw, dh, tile_textures);
     }
     y += dh + 16.0;
@@ -1424,7 +1419,7 @@ fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTe
     y += 8.0;
     for (name, han) in &wr.yaku {
         draw_jp_text(font, name, content_l, y + 14.0, 14, theme::TEXT);
-        let han_text = format!("{}飜", han);
+        let han_text = tr.han(*han);
         let hw = theme::measure_scaled(font, &han_text, 14).width;
         draw_jp_text(
             font,
@@ -1449,14 +1444,15 @@ fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTe
     y += 8.0;
 
     // 合計（左に飜符の小さな表示、右に等級名＋大きな点数）
-    let mut hanfu = format!("{}飜 {}符", wr.han, wr.fu);
+    let mut hanfu = tr.han_fu(wr.han, wr.fu);
     if wr.riichi_sticks > 0 {
-        hanfu.push_str(&format!("  供託 {}本", wr.riichi_sticks));
+        hanfu.push_str("  ");
+        hanfu.push_str(&tr.riichi_deposit(wr.riichi_sticks));
     }
     draw_jp_text(font, &hanfu, content_l, y + 24.0, 13, theme::TEXT_DIM);
 
     // 大きな点数（右寄せ）
-    let pts = format!("{}点", format_score(wr.score_points));
+    let pts = tr.points(&format_score(wr.score_points));
     let pw = theme::measure_scaled(font, &pts, 28).width;
     let pts_x = content_r - pw;
     draw_jp_text(font, &pts, pts_x, y + 28.0, 28, theme::GOLD_LT);
@@ -1480,10 +1476,11 @@ fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTe
 
 /// 流局パネル。
 fn draw_draw_panel(state: &GameState, font: Option<&Font>) {
+    let tr = state.tr();
     let lines: Vec<&str> = state
         .result_message
         .as_deref()
-        .unwrap_or("流局")
+        .unwrap_or_else(|| tr.get(Key::RoundDraw))
         .lines()
         .collect();
     let panel_w = 560.0;
@@ -1492,7 +1489,7 @@ fn draw_draw_panel(state: &GameState, font: Option<&Font>) {
     let cx = panel_x + panel_w / 2.0;
     let mut y = panel_y + 40.0;
 
-    theme::draw_text_centered(font, "流局", cx, y, 12, theme::GOLD);
+    theme::draw_text_centered(font, tr.get(Key::RoundDraw), cx, y, 12, theme::GOLD);
     y += 30.0;
     for (i, line) in lines.iter().enumerate() {
         let (size, color) = if i == 0 {
@@ -1524,8 +1521,16 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         theme::PANEL_BORDER,
     );
     let cx = panel_x + panel_w / 2.0;
+    let tr = state.tr();
 
-    theme::draw_text_centered(font, "ゲーム終了", cx, panel_y + 52.0, 26, theme::TEXT_BR);
+    theme::draw_text_centered(
+        font,
+        tr.get(Key::GameOver),
+        cx,
+        panel_y + 52.0,
+        26,
+        theme::TEXT_BR,
+    );
 
     let mut rankings: Vec<(usize, i32)> = state
         .scores
@@ -1573,15 +1578,15 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
             24,
             rc,
         );
-        draw_jp_text(font, "位", row_x + 34.0, ry + 32.0, 11, rc);
+        draw_jp_text(font, tr.place_suffix(rank), row_x + 34.0, ry + 32.0, 11, rc);
 
         // 名前（CPU 番号は得点チップと同じ自分からの相対位置）
         let cpu_number = (*player_idx + 4 - state.my_seat) % 4;
-        let name = state.player_labels[*player_idx].name(cpu_number);
+        let name = state.player_labels[*player_idx].name(cpu_number, state.lang);
         draw_jp_text(font, &name, row_x + 64.0, ry + 30.0, 14, theme::TEXT);
 
         // 得点
-        let pts = format!("{}点", format_score(*score));
+        let pts = tr.points(&format_score(*score));
         let pw = theme::measure_scaled(font, &pts, 17).width;
         draw_jp_text(font, &pts, row_x + row_w - pw - 8.0, ry + 32.0, 17, rc);
 
@@ -1604,16 +1609,14 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         theme::GOLD,
         2.0,
     );
-    theme::draw_text_centered(font, "もう一度", cx, btn_y + 31.0, 16, theme::GOLD_LT);
-}
-
-fn wind_to_str(wind: mahjong_core::tile::Wind) -> &'static str {
-    match wind {
-        mahjong_core::tile::Wind::East => "東",
-        mahjong_core::tile::Wind::South => "南",
-        mahjong_core::tile::Wind::West => "西",
-        mahjong_core::tile::Wind::North => "北",
-    }
+    theme::draw_text_centered(
+        font,
+        tr.get(Key::PlayAgain),
+        cx,
+        btn_y + 31.0,
+        16,
+        theme::GOLD_LT,
+    );
 }
 
 // ========== 設定画面 ==========

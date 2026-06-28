@@ -8,10 +8,12 @@ use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::settings::Lang;
 use mahjong_core::tile::{Tile, TileType, Wind};
+
+use crate::i18n::{Key, Translator};
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 use mahjong_server::protocol::net::CpuSpec;
 use mahjong_server::protocol::{
-    AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent,
+    AvailableCall, CallType, ClientAction, PlayerHandInfo, ServerEvent,
 };
 
 /// 1人分の和了結果（結果画面の1ページ分）
@@ -87,53 +89,59 @@ pub enum PlayerLabel {
     Cpu { level: String, personality: String },
 }
 
-/// CPU の強さ（英語の表示名）を日本語へ変換する。
-fn localize_cpu_level(level: &str) -> &'static str {
-    match level {
-        "Weak" => "弱い",
-        "Strong" => "強い",
-        _ => "普通",
-    }
+/// CPU の強さ（英語の内部名）を表示言語へ変換する。
+fn localize_cpu_level(level: &str, lang: Lang) -> &'static str {
+    let idx = match level {
+        "Weak" => 0,
+        "Strong" => 2,
+        _ => 1,
+    };
+    Translator::new(lang).strength_label(idx)
 }
 
-/// CPU の性格（英語の表示名）を日本語へ変換する。
-fn localize_cpu_personality(personality: &str) -> &'static str {
-    match personality {
-        "Speedy" => "スピード",
-        "HighValue" => "高得点",
-        "Defensive" => "守備的",
-        _ => "バランス",
-    }
+/// CPU の性格（英語の内部名）を表示言語へ変換する。
+fn localize_cpu_personality(personality: &str, lang: Lang) -> &'static str {
+    let idx = match personality {
+        "Speedy" => 1,
+        "HighValue" => 2,
+        "Defensive" => 3,
+        _ => 0,
+    };
+    Translator::new(lang).personality_label(idx)
 }
 
 impl PlayerLabel {
     /// 風・得点の下に表示する補助テキスト（自分は非表示）。
     /// CPU は「CPU{n}（強さ・性格）」、人間プレイヤーは名前を返す。
-    pub fn detail(&self, cpu_number: usize) -> Option<String> {
+    pub fn detail(&self, cpu_number: usize, lang: Lang) -> Option<String> {
         match self {
             PlayerLabel::Me => None,
             PlayerLabel::Human(name) => Some(name.clone()),
-            PlayerLabel::Cpu { level, personality } => Some(format!(
-                "CPU{}（{}・{}）",
-                cpu_number,
-                localize_cpu_level(level),
-                localize_cpu_personality(personality),
-            )),
+            PlayerLabel::Cpu { level, personality } => {
+                Some(cpu_display(cpu_number, level, personality, lang))
+            }
         }
     }
 
     /// 順位表などで使う表示名。CPU は「CPU{n}（強さ・性格）」。
-    pub fn name(&self, cpu_number: usize) -> String {
+    pub fn name(&self, cpu_number: usize, lang: Lang) -> String {
         match self {
-            PlayerLabel::Me => "あなた".to_string(),
+            PlayerLabel::Me => Key::You.text(lang).to_string(),
             PlayerLabel::Human(name) => name.clone(),
-            PlayerLabel::Cpu { level, personality } => format!(
-                "CPU{}（{}・{}）",
-                cpu_number,
-                localize_cpu_level(level),
-                localize_cpu_personality(personality),
-            ),
+            PlayerLabel::Cpu { level, personality } => {
+                cpu_display(cpu_number, level, personality, lang)
+            }
         }
+    }
+}
+
+/// CPU の表示名（例: 日「CPU1（普通・バランス）」/ 英「CPU1 (Normal, Balanced)」）。
+fn cpu_display(cpu_number: usize, level: &str, personality: &str, lang: Lang) -> String {
+    let lv = localize_cpu_level(level, lang);
+    let ps = localize_cpu_personality(personality, lang);
+    match lang {
+        Lang::Ja => format!("CPU{cpu_number}（{lv}・{ps}）"),
+        Lang::En => format!("CPU{cpu_number} ({lv}, {ps})"),
     }
 }
 
@@ -269,7 +277,8 @@ pub struct OnlineUiState {
 impl OnlineUiState {
     pub fn new() -> Self {
         OnlineUiState {
-            name_input: "プレイヤー".to_string(),
+            // 既定の表示名は送信時に display_name() が言語に応じて補う
+            name_input: String::new(),
             code_input: String::new(),
             code_focused: false,
             status_line: None,
@@ -831,29 +840,33 @@ impl GameState {
 
                 self.update_other_player_hands_on_win(&player_hands, winner);
 
+                let lang = self.lang;
+                let tr = Translator::new(lang);
                 let winner_is_me = self.relative_player_index(winner) == 0;
                 let winner_name = if winner_is_me {
-                    "あなた".to_string()
+                    Key::You.text(lang).to_string()
                 } else {
-                    self.wind_to_name(winner).to_string()
+                    self.wind_to_name(winner)
                 };
                 let loser_name = loser.map(|l| {
                     if self.relative_player_index(l) == 0 {
-                        "あなた".to_string()
+                        Key::You.text(lang).to_string()
                     } else {
-                        self.wind_to_name(l).to_string()
+                        self.wind_to_name(l)
                     }
                 });
-                let win_type = if loser.is_some() { "ロン" } else { "ツモ" };
+                let win_type = if loser.is_some() {
+                    tr.get(Key::Ron)
+                } else {
+                    tr.get(Key::Tsumo)
+                };
                 let loser_text = if let Some(l) = loser {
-                    format!("（{}が放銃）", self.wind_to_name(l))
+                    tr.dealt_in_by(&self.wind_to_name(l))
                 } else {
                     String::new()
                 };
 
                 // 構造化された役・ドラ・等級を表示言語へ解決する。
-                // 表示言語の切り替えは後続フェーズで対応予定（現状は日本語固定）。
-                let lang = Lang::Ja;
                 let yaku: Vec<(String, u32)> = yaku_list
                     .iter()
                     .map(|(item, y_han)| (item.name(has_opened, lang).to_string(), *y_han))
@@ -865,30 +878,29 @@ impl GameState {
                     if !yaku_text.is_empty() {
                         yaku_text.push_str("  ");
                     }
-                    yaku_text.push_str(&format!("{} {}翻", name, y_han));
+                    yaku_text.push_str(&format!("{} {}", name, tr.han(*y_han)));
                 }
 
                 let rank_display = if rank_name.is_empty() {
-                    format!("{}符{}翻", fu, han)
+                    tr.han_fu(han, fu)
                 } else {
-                    format!("{}符{}翻 {}", fu, han, rank_name)
+                    format!("{} {}", tr.han_fu(han, fu), rank_name)
                 };
 
                 let riichi_sticks_text = if riichi_sticks == 0 {
                     String::new()
                 } else {
-                    format!("\n供託: {}本", riichi_sticks)
+                    format!("\n{}", tr.deposit_line(riichi_sticks))
                 };
 
                 let msg = format!(
-                    "{}が{}和了！{}{}\n{}\n{} → {}点",
-                    winner_name,
-                    win_type,
+                    "{}{}{}\n{}\n{} → {}",
+                    tr.win_headline(&winner_name, win_type),
                     loser_text,
                     riichi_sticks_text,
                     yaku_text,
                     rank_display,
-                    score_points
+                    tr.points(&score_points.to_string())
                 );
 
                 self.win_results.push(WinResult {
@@ -931,23 +943,18 @@ impl GameState {
                 self.scores = scores;
                 self.riichi_sticks = riichi_sticks;
                 self.update_other_player_hands_on_draw(&player_hands, &tenpai, declarer);
-                let reason_text = match reason {
-                    DrawReason::Exhaustive => "荒牌流局",
-                    DrawReason::FourWinds => "四風連打",
-                    DrawReason::FourRiichi => "四家立直",
-                    DrawReason::NineTerminals => "九種九牌",
-                    DrawReason::FourKans => "四槓散了",
-                    DrawReason::TripleRon => "三家和",
-                };
-                let mut msg = format!("流局（{}）", reason_text);
+                let tr = Translator::new(self.lang);
+                let mut msg = tr.draw_headline(reason);
 
                 if !tenpai.is_empty() {
-                    let tenpai_names: Vec<&str> =
+                    let tenpai_names: Vec<String> =
                         tenpai.iter().map(|w| self.wind_to_name(*w)).collect();
-                    msg.push_str(&format!("\nテンパイ: {}", tenpai_names.join(", ")));
+                    msg.push('\n');
+                    msg.push_str(&tr.tenpai_list(&tenpai_names.join(", ")));
                 }
                 if riichi_sticks > 0 {
-                    msg.push_str(&format!("\n供託: {}本", riichi_sticks));
+                    msg.push('\n');
+                    msg.push_str(&tr.deposit_line(riichi_sticks));
                 }
 
                 self.win_hand.clear();
@@ -1459,13 +1466,11 @@ impl GameState {
         }
     }
 
-    /// 風牌を日本語の名前に変換
-    fn wind_to_name(&self, wind: Wind) -> &'static str {
-        match wind {
-            Wind::East => "東家",
-            Wind::South => "南家",
-            Wind::West => "西家",
-            Wind::North => "北家",
+    /// 和了者・放銃者などに使う席名（日本語は「東家」、英語は「East」）。
+    fn wind_to_name(&self, wind: Wind) -> String {
+        match self.lang {
+            Lang::Ja => format!("{}家", wind.name(Lang::Ja)),
+            Lang::En => wind.name(Lang::En).to_string(),
         }
     }
 }
@@ -1486,14 +1491,18 @@ mod tests {
 
         assert_eq!(state.my_seat, 0);
         assert!(matches!(state.player_labels[0], PlayerLabel::Me));
-        assert_eq!(state.player_labels[0].detail(0), None);
+        assert_eq!(state.player_labels[0].detail(0, Lang::Ja), None);
         assert_eq!(
-            state.player_labels[1].detail(1),
+            state.player_labels[1].detail(1, Lang::Ja),
             Some("CPU1（弱い・守備的）".to_string())
         );
         assert_eq!(
-            state.player_labels[2].name(2),
+            state.player_labels[2].name(2, Lang::Ja),
             "CPU2（強い・高得点）".to_string()
+        );
+        assert_eq!(
+            state.player_labels[2].name(2, Lang::En),
+            "CPU2 (Strong, High Value)".to_string()
         );
     }
 
@@ -1516,9 +1525,12 @@ mod tests {
 
         assert_eq!(state.my_seat, 1);
         assert!(matches!(state.player_labels[1], PlayerLabel::Me));
-        assert_eq!(state.player_labels[0].detail(3), Some("ホスト".to_string()));
         assert_eq!(
-            state.player_labels[2].detail(1),
+            state.player_labels[0].detail(3, Lang::Ja),
+            Some("ホスト".to_string())
+        );
+        assert_eq!(
+            state.player_labels[2].detail(1, Lang::Ja),
             Some("CPU1（普通・スピード）".to_string())
         );
     }

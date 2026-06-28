@@ -3,6 +3,7 @@
 //! 各関数が描画とクリック判定を同時に行い、クリックされた場合に `Some(OverlayClick)` を返す。
 
 use macroquad::prelude::*;
+use mahjong_core::settings::Lang;
 use mahjong_core::tile::Tile;
 use mahjong_server::protocol::{AvailableCall, ClientAction};
 
@@ -11,6 +12,7 @@ use super::{
     theme,
 };
 use crate::game::GameState;
+use crate::i18n::Key;
 
 /// 手牌の下に表示する状態ヒントの Y 座標（中央の捨て牌と重ならないよう手牌より下）。
 const HINT_Y: f32 = 772.0;
@@ -136,10 +138,11 @@ pub(super) fn draw_action_buttons(
 ) -> Option<OverlayClick> {
     let clicked = is_mouse_button_pressed(MouseButton::Left);
     let (mx, my) = super::mouse_position_design();
+    let tr = state.tr();
 
     // 九種九牌選択オーバーレイ
     if state.nine_terminals_pending {
-        return draw_nine_terminals_overlay(font, clicked, mx, my);
+        return draw_nine_terminals_overlay(font, state.lang, clicked, mx, my);
     }
 
     // 選択オーバーレイ表示中は call_overlay の代わりに選択UIを右下に表示
@@ -156,7 +159,7 @@ pub(super) fn draw_action_buttons(
     if !state.is_my_turn {
         theme::draw_text_centered(
             font,
-            "他のプレイヤーの手番です...",
+            tr.get(Key::WaitingOtherPlayer),
             DESIGN_W / 2.0,
             HINT_Y,
             FONT_SIZE,
@@ -168,7 +171,7 @@ pub(super) fn draw_action_buttons(
     if state.riichi_selection_mode {
         theme::draw_text_centered(
             font,
-            "【リーチ】聴牌になる牌を選んで打牌",
+            tr.get(Key::RiichiSelectHint),
             DESIGN_W / 2.0,
             HINT_Y,
             FONT_SIZE,
@@ -177,7 +180,7 @@ pub(super) fn draw_action_buttons(
     } else if state.is_riichi {
         theme::draw_text_centered(
             font,
-            "【リーチ中】自動ツモ切り",
+            tr.get(Key::RiichiAutoDiscard),
             DESIGN_W / 2.0,
             HINT_Y,
             FONT_SIZE,
@@ -191,7 +194,7 @@ pub(super) fn draw_action_buttons(
 
     // 和了ボタン（ツモ）
     if state.can_tsumo {
-        draw_agari_button(font, AGARI_BTN_X, AGARI_BTN_Y);
+        draw_agari_button(font, AGARI_BTN_X, AGARI_BTN_Y, tr.get(Key::Win));
         if clicked
             && result.is_none()
             && hit_rect(mx, my, AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_W, AGARI_BTN_H)
@@ -236,7 +239,7 @@ pub(super) fn draw_action_buttons(
         );
         theme::draw_text_centered(
             font,
-            "リーチ",
+            tr.get(Key::Riichi),
             AGARI_BTN_X + RIICHI_BTN_W / 2.0,
             riichi_y + RIICHI_BTN_H / 2.0 + 6.0,
             SMALL_FONT,
@@ -269,7 +272,7 @@ pub(super) fn draw_action_buttons(
         );
         theme::draw_text_centered(
             font,
-            &format!("{tile}カン"),
+            &tr.kan_with_tile(&tile.to_string()),
             x + KAN_BTN_W / 2.0,
             KAN_BTN_Y + KAN_BTN_H / 2.0 + 6.0,
             SMALL_FONT,
@@ -285,7 +288,7 @@ pub(super) fn draw_action_buttons(
     if !state.riichi_selection_mode && !state.is_riichi {
         theme::draw_text_centered(
             font,
-            "牌をクリックで選択、もう一度クリックで打牌",
+            tr.get(Key::NormalPlayHint),
             DESIGN_W / 2.0,
             HINT_Y,
             SMALL_FONT,
@@ -299,7 +302,7 @@ pub(super) fn draw_action_buttons(
 // ─── 和了ボタン ───────────────────────────────────────────────────────────────
 
 /// 和了ボタンを描画する（ロン・ツモ共通）。x/y は左上座標。
-fn draw_agari_button(font: Option<&Font>, x: f32, y: f32) {
+fn draw_agari_button(font: Option<&Font>, x: f32, y: f32, label: &str) {
     theme::draw_gradient_button(
         x,
         y,
@@ -313,7 +316,7 @@ fn draw_agari_button(font: Option<&Font>, x: f32, y: f32) {
     );
     theme::draw_text_centered(
         font,
-        "和了",
+        label,
         x + AGARI_BTN_W / 2.0,
         y + 40.0,
         AGARI_FONT,
@@ -331,6 +334,7 @@ fn draw_call_overlay(
     mx: f32,
     my: f32,
 ) -> Option<OverlayClick> {
+    let tr = state.tr();
     let has_ron = state
         .available_calls
         .iter()
@@ -343,7 +347,7 @@ fn draw_call_overlay(
     if !has_non_ron {
         // ロンのみ：和了ボタンを右下に単独表示
         if has_ron {
-            draw_agari_button(font, AGARI_BTN_X, AGARI_BTN_Y);
+            draw_agari_button(font, AGARI_BTN_X, AGARI_BTN_Y, tr.get(Key::Win));
             if clicked && hit_rect(mx, my, AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_W, AGARI_BTN_H) {
                 return Some(OverlayClick::Action(ClientAction::Ron));
             }
@@ -380,7 +384,7 @@ fn draw_call_overlay(
     // ロン＋鳴き同時：和了ボタンをパネルの上に表示
     if has_ron {
         let agari_y = panel_y - AGARI_BTN_GAP - AGARI_BTN_H;
-        draw_agari_button(font, AGARI_BTN_X, agari_y);
+        draw_agari_button(font, AGARI_BTN_X, agari_y, tr.get(Key::Win));
         if clicked && hit_rect(mx, my, AGARI_BTN_X, agari_y, AGARI_BTN_W, AGARI_BTN_H) {
             result = Some(OverlayClick::Action(ClientAction::Ron));
         }
@@ -399,7 +403,7 @@ fn draw_call_overlay(
 
     draw_jp_text(
         font,
-        "鳴きますか？",
+        tr.get(Key::CallPrompt),
         panel_x + pad,
         panel_y + 30.0,
         FONT_SIZE,
@@ -430,7 +434,15 @@ fn draw_call_overlay(
         match call {
             AvailableCall::Ron => unreachable!(),
             AvailableCall::Pon { options } => {
-                draw_call_button(font, x, base_y, btn_w, btn_h, "ポン", CallBtnKind::Pon);
+                draw_call_button(
+                    font,
+                    x,
+                    base_y,
+                    btn_w,
+                    btn_h,
+                    tr.get(Key::Pon),
+                    CallBtnKind::Pon,
+                );
                 if clicked && result.is_none() && hit_rect(mx, my, x, base_y, btn_w, btn_h) {
                     result = if options.len() == 1 {
                         Some(OverlayClick::Action(ClientAction::Pon {
@@ -446,7 +458,15 @@ fn draw_call_overlay(
                 }
             }
             AvailableCall::Daiminkan => {
-                draw_call_button(font, x, base_y, btn_w, btn_h, "カン", CallBtnKind::Kan);
+                draw_call_button(
+                    font,
+                    x,
+                    base_y,
+                    btn_w,
+                    btn_h,
+                    tr.get(Key::Kan),
+                    CallBtnKind::Kan,
+                );
                 if clicked
                     && result.is_none()
                     && hit_rect(mx, my, x, base_y, btn_w, btn_h)
@@ -458,7 +478,15 @@ fn draw_call_overlay(
                 }
             }
             AvailableCall::Chi { options } => {
-                draw_call_button(font, x, base_y, btn_w, btn_h, "チー", CallBtnKind::Chi);
+                draw_call_button(
+                    font,
+                    x,
+                    base_y,
+                    btn_w,
+                    btn_h,
+                    tr.get(Key::Chi),
+                    CallBtnKind::Chi,
+                );
                 if clicked && result.is_none() && hit_rect(mx, my, x, base_y, btn_w, btn_h) {
                     result = if options.len() == 1 {
                         Some(OverlayClick::Action(ClientAction::Chi {
@@ -485,7 +513,7 @@ fn draw_call_overlay(
         base_y,
         btn_w,
         btn_h,
-        "パス",
+        tr.get(Key::Pass),
         CallBtnKind::Pass,
     );
     if clicked && result.is_none() && hit_rect(mx, my, pass_x, base_y, btn_w, btn_h) {
@@ -506,11 +534,13 @@ fn draw_chi_selection_overlay(
     my: f32,
 ) -> Option<OverlayClick> {
     let called_tile = state.call_target_tile?;
+    let tr = state.tr();
     draw_meld_selection_overlay(
         MeldSelectionOverlay {
             font,
             tile_textures,
-            title: "チーの組み合わせを選択",
+            title: tr.get(Key::ChiSelectTitle),
+            cancel_label: tr.get(Key::Cancel),
             called_tile,
             options: &state.chi_pending_options,
             click: ClickState { clicked, mx, my },
@@ -528,11 +558,13 @@ fn draw_pon_selection_overlay(
     my: f32,
 ) -> Option<OverlayClick> {
     let called_tile = state.call_target_tile?;
+    let tr = state.tr();
     draw_meld_selection_overlay(
         MeldSelectionOverlay {
             font,
             tile_textures,
-            title: "ポンの組み合わせを選択",
+            title: tr.get(Key::PonSelectTitle),
+            cancel_label: tr.get(Key::Cancel),
             called_tile,
             options: &state.pon_pending_options,
             click: ClickState { clicked, mx, my },
@@ -552,6 +584,7 @@ struct MeldSelectionOverlay<'a> {
     font: Option<&'a Font>,
     tile_textures: &'a TileTextures,
     title: &'a str,
+    cancel_label: &'a str,
     called_tile: Tile,
     options: &'a [[Tile; 2]],
     click: ClickState,
@@ -565,6 +598,7 @@ fn draw_meld_selection_overlay(
         font,
         tile_textures,
         title,
+        cancel_label,
         called_tile,
         options,
         click,
@@ -675,7 +709,7 @@ fn draw_meld_selection_overlay(
     draw_rectangle_lines(cancel_x, cancel_y, cancel_w, cancel_h, 2.0, WHITE);
     draw_jp_text(
         font,
-        "キャンセル",
+        cancel_label,
         cancel_x + 10.0,
         cancel_y + 24.0,
         FONT_SIZE,
@@ -693,10 +727,12 @@ fn draw_meld_selection_overlay(
 
 fn draw_nine_terminals_overlay(
     font: Option<&Font>,
+    lang: Lang,
     clicked: bool,
     mx: f32,
     my: f32,
 ) -> Option<OverlayClick> {
+    let tr = crate::i18n::Translator::new(lang);
     const PANEL_W: f32 = 360.0;
     const PANEL_H: f32 = 140.0;
     const PANEL_X: f32 = CALL_PANEL_RIGHT_X_NO_RON - PANEL_W;
@@ -720,7 +756,7 @@ fn draw_nine_terminals_overlay(
 
     draw_jp_text(
         font,
-        "九種九牌",
+        tr.get(Key::NineTerminals),
         PANEL_X + 16.0,
         PANEL_Y + 30.0,
         FONT_SIZE,
@@ -728,7 +764,7 @@ fn draw_nine_terminals_overlay(
     );
     draw_jp_text(
         font,
-        "流局しますか？",
+        tr.get(Key::DeclareDrawPrompt),
         PANEL_X + 16.0,
         PANEL_Y + 54.0,
         FONT_SIZE,
@@ -752,7 +788,7 @@ fn draw_nine_terminals_overlay(
     draw_rectangle_lines(declare_x, BTN_Y, BTN_W, BTN_H, 2.0, WHITE);
     draw_jp_text(
         font,
-        "流局する",
+        tr.get(Key::DeclareDraw),
         declare_x + 22.0,
         BTN_Y + 26.0,
         FONT_SIZE,
@@ -769,7 +805,7 @@ fn draw_nine_terminals_overlay(
     draw_rectangle_lines(pass_x, BTN_Y, BTN_W, BTN_H, 2.0, WHITE);
     draw_jp_text(
         font,
-        "続ける",
+        tr.get(Key::Continue),
         pass_x + 26.0,
         BTN_Y + 26.0,
         FONT_SIZE,
