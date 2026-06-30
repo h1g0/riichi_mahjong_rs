@@ -37,6 +37,10 @@ pub struct Settings {
     /// なしの場合: 打順が最も早い1人のみ和了を認める（上家取り）
     /// ※ triple_ron_draw=true かつ 3人ロンの場合は、こちらより三家和流局が優先される
     pub multiple_ron: bool,
+    /// 喰い替え禁止ありかなしか（デフォルトはあり＝禁止する）
+    /// ありの場合: チー・ポン直後の打牌で、鳴いた牌と同種（現物喰い替え）や
+    /// チーで作った順子の反対端の牌（スジ喰い替え）を捨てられない
+    pub forbid_swap_calling: bool,
 }
 
 impl Default for Settings {
@@ -56,6 +60,7 @@ impl Settings {
             nine_terminals_draw: true,
             triple_ron_draw: false,
             multiple_ron: true,
+            forbid_swap_calling: true,
         }
     }
 }

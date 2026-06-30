@@ -757,9 +757,61 @@ fn draw_badge(
 fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
     let hand_start_x = player_hand_start_x(state.hand.len());
     let hand_y = HAND_Y;
-
-    // 状態バッジ（フリテン・リーチ中・リーチ打牌選択中）
     let tr = state.tr();
+
+    // 先に手牌を描画する（バッジは牌に隠れないよう後で描画する）。
+    for (i, tile) in state.hand.iter().enumerate() {
+        let x = hand_start_x + i as f32 * TILE_W;
+        let selected = state.selected_tile == Some(i);
+        let riichi_selectable =
+            state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);
+        let y_offset = if selected { -14.0 } else { 0.0 };
+        let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
+        // 喰い替え禁止牌は打牌できないので無効表示する
+        let swap_forbidden = state.forbidden_discards.contains(&tile.get());
+        if selected {
+            draw_tile_highlight(x, hand_y + y_offset);
+        }
+        draw_tile(
+            x,
+            hand_y + y_offset,
+            tile,
+            riichi_disabled || swap_forbidden,
+            tile_textures,
+        );
+    }
+
+    if let Some(drawn) = &state.drawn {
+        let drawn_x = hand_start_x + state.hand.len() as f32 * TILE_W + DRAWN_GAP;
+        let selected = state.selected_drawn;
+        let riichi_selectable = state.riichi_selection_mode && state.riichi_selectable_drawn;
+        let y_offset = if selected { -14.0 } else { 0.0 };
+        let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
+
+        // 「ツモ」ラベル
+        theme::draw_text_centered(
+            font,
+            tr.get(Key::Tsumo),
+            drawn_x + TILE_W / 2.0,
+            hand_y + y_offset - 8.0,
+            11,
+            theme::GOLD_LT,
+        );
+
+        if selected {
+            draw_tile_highlight(drawn_x, hand_y + y_offset);
+        }
+        draw_tile(
+            drawn_x,
+            hand_y + y_offset,
+            drawn,
+            riichi_disabled,
+            tile_textures,
+        );
+    }
+
+    // 状態バッジ（フリテン・リーチ中・リーチ打牌選択中・喰い替え警告）は
+    // 牌に隠れないよう、手牌を描画したあとに重ねて描く。
     let badge_y = hand_y - 26.0;
     let mut bx = hand_start_x;
     if state.is_furiten {
@@ -795,6 +847,17 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             theme::GOLD_LT,
         );
     }
+    if state.selected_forbidden_swap {
+        bx = draw_badge(
+            font,
+            bx,
+            badge_y,
+            tr.get(Key::IsSwapCalling),
+            theme::rgba(0xcc2828, 0.18),
+            theme::RED,
+            theme::RED_LT,
+        );
+    }
     if state.selected_would_cause_furiten && (state.selected_tile.is_some() || state.selected_drawn)
     {
         draw_badge(
@@ -805,48 +868,6 @@ fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTexture
             theme::rgba(0xcc6411, 0.18),
             theme::rgba(0xe88a1a, 0.6),
             Color::new(1.0, 0.7, 0.3, 1.0),
-        );
-    }
-
-    for (i, tile) in state.hand.iter().enumerate() {
-        let x = hand_start_x + i as f32 * TILE_W;
-        let selected = state.selected_tile == Some(i);
-        let riichi_selectable =
-            state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);
-        let y_offset = if selected { -14.0 } else { 0.0 };
-        let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
-        if selected {
-            draw_tile_highlight(x, hand_y + y_offset);
-        }
-        draw_tile(x, hand_y + y_offset, tile, riichi_disabled, tile_textures);
-    }
-
-    if let Some(drawn) = &state.drawn {
-        let drawn_x = hand_start_x + state.hand.len() as f32 * TILE_W + DRAWN_GAP;
-        let selected = state.selected_drawn;
-        let riichi_selectable = state.riichi_selection_mode && state.riichi_selectable_drawn;
-        let y_offset = if selected { -14.0 } else { 0.0 };
-        let riichi_disabled = state.riichi_selection_mode && !riichi_selectable;
-
-        // 「ツモ」ラベル
-        theme::draw_text_centered(
-            font,
-            tr.get(Key::Tsumo),
-            drawn_x + TILE_W / 2.0,
-            hand_y + y_offset - 8.0,
-            11,
-            theme::GOLD_LT,
-        );
-
-        if selected {
-            draw_tile_highlight(drawn_x, hand_y + y_offset);
-        }
-        draw_tile(
-            drawn_x,
-            hand_y + y_offset,
-            drawn,
-            riichi_disabled,
-            tile_textures,
         );
     }
 }

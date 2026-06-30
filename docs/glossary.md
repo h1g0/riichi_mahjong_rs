@@ -124,7 +124,7 @@ A Japanese-language edition of this document is maintained in parallel at
 | 本場 | honba | continuance counter | — | Adds 300 points to the next win. Tracked server-side. |
 | 供託 / リーチ棒 | kyōtaku / riichi-bō | riichi deposit | — | The 1,000-point fee paid on riichi; taken by the next winner. |
 | 包 / 責任払い | pao / sekinin-barai | liability payment | — | A feeder pays the full value of Big Dragons / Big Winds / Four Quads. |
-| 喰い替え | kuikae | swap-calling | — | Calling then discarding the same/equivalent tile. Not yet implemented. |
+| 喰い替え | kuikae | swap-calling | `Settings::forbid_swap_calling` | Calling then discarding the same/equivalent tile; forbidden by default. |
 | 喰いタン | kuitan | Open Tan'yao | `Settings::opened_all_inside` | Whether All Inside (Tan'yao) is allowed on an open hand. |
 | 四槓散了 | sūkan sanra | four-quads abortive draw | `Settings::four_kans_draw` | Optional rule. |
 | 四風連打 | sūfon renda | four-winds abortive draw | `Settings::four_winds_draw` | Optional rule. |

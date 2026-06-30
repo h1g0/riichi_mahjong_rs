@@ -868,7 +868,8 @@ impl Round {
             },
         ));
 
-        // ポンしたプレイヤーの打牌待ちへ
+        // 喰い替え禁止牌を設定し、ポンしたプレイヤーの打牌待ちへ
+        self.apply_swap_call_restriction(caller);
         self.current_player = caller;
         self.phase = TurnPhase::WaitForDiscard;
     }
@@ -955,9 +956,24 @@ impl Round {
             },
         ));
 
-        // チーしたプレイヤーの打牌待ちへ
+        // 喰い替え禁止牌を設定し、チーしたプレイヤーの打牌待ちへ
+        self.apply_swap_call_restriction(caller);
         self.current_player = caller;
         self.phase = TurnPhase::WaitForDiscard;
+    }
+
+    /// チー・ポン直後の喰い替え禁止牌を、設定が有効なら当該プレイヤーに設定する
+    fn apply_swap_call_restriction(&mut self, caller: usize) {
+        if !self.settings.forbid_swap_calling {
+            return;
+        }
+        let forbidden = self.players[caller]
+            .hand
+            .melds()
+            .last()
+            .map(|meld| meld.forbidden_swap_tiles())
+            .unwrap_or_default();
+        self.players[caller].set_forbidden_discards(forbidden);
     }
 
     fn execute_kakan(&mut self, caller: usize, tile_type: TileType) {

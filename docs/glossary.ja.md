@@ -123,7 +123,7 @@
 | 本場 | honba | continuance counter | — | 次局の和了に 300 点加算。サーバ側で管理。 |
 | 供託 / リーチ棒 | kyōtaku / riichi-bō | riichi deposit | — | リーチ時に払う 1,000 点。次の和了者が取得。 |
 | 包 / 責任払い | pao / sekinin-barai | liability payment | — | 大三元・大四喜・四槓子で確定牌を放銃した者が全額払い。 |
-| 喰い替え | kuikae | swap-calling | — | 鳴いた牌と同/同等の牌を即捨てすること。未実装。 |
+| 喰い替え | kuikae | swap-calling | `Settings::forbid_swap_calling` | 鳴いた牌と同/同等の牌を即捨てすること。デフォルトで禁止。 |
 | 喰いタン | kuitan | Open Tan'yao | `Settings::opened_all_inside` | 副露した手で断么九（All Inside）を認めるか否か。 |
 | 四槓散了 | sūkan sanra | four-quads abortive draw | `Settings::four_kans_draw` | オプション。 |
 | 四風連打 | sūfon renda | four-winds abortive draw | `Settings::four_winds_draw` | オプション。 |

@@ -199,6 +199,11 @@ pub struct GameState {
     pub riichi_selectable_tiles: Vec<usize>,
     /// ツモ牌切りでリーチ可能か
     pub riichi_selectable_drawn: bool,
+    /// 喰い替え禁止により、鳴き直後の打牌で捨てられない牌種
+    /// （チー・ポン直後にのみ設定され、打牌・ツモで解除される）
+    pub forbidden_discards: Vec<TileType>,
+    /// 喰い替え禁止牌を選択しようとしたか（「喰い替えです！」警告の表示用）
+    pub selected_forbidden_swap: bool,
     /// 局の結果メッセージ
     pub result_message: Option<String>,
     /// 和了結果一覧（ダブロン・トリロン時は複数）
@@ -408,6 +413,8 @@ impl GameState {
             riichi_selection_mode: false,
             riichi_selectable_tiles: Vec::new(),
             riichi_selectable_drawn: false,
+            forbidden_discards: Vec::new(),
+            selected_forbidden_swap: false,
             result_message: None,
             win_results: Vec::new(),
             win_result_index: 0,
@@ -555,6 +562,9 @@ impl GameState {
                 self.available_calls.clear();
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
+                // ツモ後は喰い替え制限が解除される
+                self.forbidden_discards.clear();
+                self.selected_forbidden_swap = false;
             }
 
             ServerEvent::NineTerminalsAvailable => {
@@ -609,6 +619,9 @@ impl GameState {
                     self.selected_drawn = false;
                     self.clear_riichi_selection();
                     self.self_kan_options.clear();
+                    // 打牌が完了したので喰い替え制限を解除する
+                    self.forbidden_discards.clear();
+                    self.selected_forbidden_swap = false;
                 }
             }
 
@@ -740,6 +753,16 @@ impl GameState {
                             self.drawn = None;
                             self.clear_riichi_selection();
                             self.self_kan_options.clear();
+                            // チー・ポン直後の打牌では喰い替え牌を捨てられない。
+                            // （大明槓は嶺上ツモになるため対象外）
+                            self.forbidden_discards = match call_type {
+                                CallType::Pon | CallType::Chi => self
+                                    .melds
+                                    .last()
+                                    .map(|meld| meld.forbidden_swap_tiles())
+                                    .unwrap_or_default(),
+                                _ => Vec::new(),
+                            };
                         }
                         CallType::Ankan => {
                             self.melds.push(Meld {
@@ -1390,6 +1413,16 @@ impl GameState {
                     return None;
                 }
 
+                // 喰い替え禁止牌は打牌できない。選択された見た目（少し上に表示）に
+                // しつつ「喰い替えです！」警告を出し、打牌アクションは発行しない。
+                if self.forbidden_discards.contains(&self.hand[i].get()) {
+                    self.selected_tile = Some(i);
+                    self.selected_drawn = false;
+                    self.selected_would_cause_furiten = false;
+                    self.selected_forbidden_swap = true;
+                    return None;
+                }
+
                 if self.selected_tile == Some(i) {
                     let discarded_tile = self.apply_local_discard_from_hand(i);
                     if self.riichi_selection_mode {
@@ -1405,6 +1438,7 @@ impl GameState {
 
                 self.selected_tile = Some(i);
                 self.selected_drawn = false;
+                self.selected_forbidden_swap = false;
                 self.selected_would_cause_furiten =
                     self.would_discard_cause_furiten(Some(self.hand[i]));
                 return None;
@@ -1430,6 +1464,7 @@ impl GameState {
 
                 self.selected_drawn = true;
                 self.selected_tile = None;
+                self.selected_forbidden_swap = false;
                 self.selected_would_cause_furiten = self.would_discard_cause_furiten(None);
                 return None;
             }
@@ -1584,6 +1619,69 @@ mod tests {
             tiles: vec![Tile::new(Tile::S6), Tile::new(Tile::S7)],
         });
         assert!(state.discards[1][0].is_called);
+    }
+
+    #[test]
+    fn test_self_chi_sets_forbidden_swap_discards_and_clears_on_discard() {
+        let mut state = GameState::new();
+        state.seat_wind = Some(Wind::East);
+        state.last_discarder = Some(Wind::North);
+
+        // 上家が捨てた 3m を 4m,5m でチー（順子 3-4-5）
+        state.handle_event(ServerEvent::PlayerCalled {
+            player: Wind::East,
+            call_type: CallType::Chi,
+            called_tile: Tile::new(Tile::M3),
+            tiles: vec![
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M4),
+                Tile::new(Tile::M5),
+            ],
+        });
+
+        // 現物(3m)とスジ(6m)が打牌禁止になる
+        assert!(state.forbidden_discards.contains(&Tile::M3));
+        assert!(state.forbidden_discards.contains(&Tile::M6));
+
+        // 打牌が完了すると制限が解除される
+        state.handle_event(ServerEvent::TileDiscarded {
+            player: Wind::East,
+            tile: Tile::new(Tile::P1),
+            is_tsumogiri: false,
+        });
+        assert!(state.forbidden_discards.is_empty());
+    }
+
+    #[test]
+    fn test_self_pon_forbids_only_called_tile() {
+        let mut state = GameState::new();
+        state.seat_wind = Some(Wind::East);
+        state.last_discarder = Some(Wind::North);
+
+        state.handle_event(ServerEvent::PlayerCalled {
+            player: Wind::East,
+            call_type: CallType::Pon,
+            called_tile: Tile::new(Tile::S1),
+            tiles: vec![Tile::new(Tile::S1); 3],
+        });
+
+        assert_eq!(state.forbidden_discards, vec![Tile::S1]);
+    }
+
+    #[test]
+    fn test_self_daiminkan_has_no_forbidden_discards() {
+        let mut state = GameState::new();
+        state.seat_wind = Some(Wind::East);
+        state.last_discarder = Some(Wind::North);
+
+        state.handle_event(ServerEvent::PlayerCalled {
+            player: Wind::East,
+            call_type: CallType::Daiminkan,
+            called_tile: Tile::new(Tile::S1),
+            tiles: vec![Tile::new(Tile::S1); 4],
+        });
+
+        assert!(state.forbidden_discards.is_empty());
     }
 
     #[test]

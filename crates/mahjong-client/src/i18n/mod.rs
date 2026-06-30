@@ -294,6 +294,8 @@ pub enum Key {
     SelectDiscard,
     /// 選択牌で振聴になる警告バッジ
     WillBeFuriten,
+    /// 禁止牌を選択したときの「喰い替えです！」警告バッジ
+    IsSwapCalling,
     /// ツモ（自摸和了／ツモ牌ラベル）
     Tsumo,
     /// ロン（出和了）
@@ -435,6 +437,10 @@ impl Key {
             Key::WillBeFuriten => match lang {
                 Lang::Ja => "振聴になります！",
                 Lang::En => "Will cause furiten!",
+            },
+            Key::IsSwapCalling => match lang {
+                Lang::Ja => "喰い替えです！",
+                Lang::En => "That's swap-calling!",
             },
             Key::Tsumo => match lang {
                 Lang::Ja => "ツモ",

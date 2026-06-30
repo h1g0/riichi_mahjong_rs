@@ -1239,3 +1239,86 @@ fn test_auto_pass_cpu_skips_human_player() {
     );
     assert_eq!(round.phase, TurnPhase::WaitForCalls);
 }
+
+// ===== 喰い替え禁止（#247） =====
+
+use mahjong_core::hand::Hand;
+
+#[test]
+fn test_swap_calling_forbids_genbutsu_after_chi() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    // 3m4m5m を含む手牌。捨てられた 3m を [4m,5m] でチーすると 3m が手牌に残る。
+    round.players[1].hand = Hand::from("345m234567p678s1z");
+
+    round.execute_chi(
+        1,
+        0,
+        Tile::new(Tile::M3),
+        [Tile::new(Tile::M4), Tile::new(Tile::M5)],
+    );
+
+    assert_eq!(round.current_player, 1);
+    assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+    // 現物喰い替え（鳴いた 3m と同種）の打牌は拒否される
+    assert!(!round.do_discard(Some(Tile::new(Tile::M3))));
+    // 喰い替えにならない打牌は許可される
+    assert!(round.do_discard(Some(Tile::new(Tile::P2))));
+}
+
+#[test]
+fn test_swap_calling_forbids_suji_after_chi() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    // 4m5m6m を含む手牌。捨てられた 3m を [4m,5m] でチーすると 6m が手牌に残る。
+    round.players[1].hand = Hand::from("456m234567p678s1z");
+
+    round.execute_chi(
+        1,
+        0,
+        Tile::new(Tile::M3),
+        [Tile::new(Tile::M4), Tile::new(Tile::M5)],
+    );
+
+    // スジ喰い替え（順子 3-4-5 の反対端 6m）の打牌は拒否される
+    assert!(!round.do_discard(Some(Tile::new(Tile::M6))));
+    // 喰い替えにならない打牌は許可される
+    assert!(round.do_discard(Some(Tile::new(Tile::P2))));
+}
+
+#[test]
+fn test_swap_calling_forbids_genbutsu_after_pon() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    // 1s を3枚含む手牌。2枚を使ってポンすると 1s が手牌に残る。
+    round.players[1].hand = Hand::from("111s234567p678m1z");
+
+    round.execute_pon(
+        1,
+        0,
+        Tile::new(Tile::S1),
+        [Tile::new(Tile::S1), Tile::new(Tile::S1)],
+    );
+
+    // 現物喰い替え（鳴いた 1s と同種）の打牌は拒否される
+    assert!(!round.do_discard(Some(Tile::new(Tile::S1))));
+    // 喰い替えにならない打牌は許可される
+    assert!(round.do_discard(Some(Tile::new(Tile::P2))));
+}
+
+#[test]
+fn test_swap_calling_disabled_allows_genbutsu_discard() {
+    let settings = Settings {
+        forbid_swap_calling: false,
+        ..Settings::new()
+    };
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
+    round.players[1].hand = Hand::from("456m234567p678s1z");
+
+    round.execute_chi(
+        1,
+        0,
+        Tile::new(Tile::M3),
+        [Tile::new(Tile::M4), Tile::new(Tile::M5)],
+    );
+
+    // 設定で喰い替え禁止を無効化している場合は、スジ牌でも打牌できる
+    assert!(round.do_discard(Some(Tile::new(Tile::M6))));
+}
