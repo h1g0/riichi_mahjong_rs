@@ -33,6 +33,9 @@ pub struct Player {
     pub is_riichi_furiten: bool,
     /// 同巡フリテン（ロン見逃し → 自分のツモ番で解除）
     pub is_temporary_furiten: bool,
+    /// 喰い替え禁止により、直後の打牌で捨てられない牌種
+    /// （チー・ポン直後にのみ設定され、打牌またはツモで解除される）
+    forbidden_discards: Vec<TileType>,
 }
 
 /// 捨て牌1枚の情報
@@ -64,18 +67,38 @@ impl Player {
             first_turn_interrupted: false,
             is_riichi_furiten: false,
             is_temporary_furiten: false,
+            forbidden_discards: Vec::new(),
         }
     }
 
     /// ツモ牌をセットする
     pub fn draw(&mut self, tile: Tile) {
         self.hand.set_drawn(Some(tile));
+        // ツモ後は喰い替え制限が解除される（鳴き直後の打牌のみが対象のため）
+        self.forbidden_discards.clear();
+    }
+
+    /// 喰い替え禁止で次の打牌に限り捨てられない牌種を設定する
+    pub fn set_forbidden_discards(&mut self, tile_types: Vec<TileType>) {
+        self.forbidden_discards = tile_types;
+    }
+
+    /// 指定牌が喰い替え禁止により打牌できないかを返す
+    pub fn is_swap_call_forbidden(&self, tile: Tile) -> bool {
+        self.forbidden_discards.contains(&tile.get())
     }
 
     /// 手牌から指定牌を捨てる
     /// tile が Some(牌) なら手牌からその牌を探して捨てる（手出し）
     /// tile が None ならツモ切り
     pub fn try_discard(&mut self, tile: Option<Tile>) -> Option<Tile> {
+        // 喰い替え禁止: 鳴き直後に禁止された牌種は捨てられない
+        if let Some(target) = tile
+            && self.is_swap_call_forbidden(target)
+        {
+            return None;
+        }
+
         let drawn = self.hand.drawn();
 
         let (discarded, is_tsumogiri) = match tile {
@@ -112,6 +135,8 @@ impl Player {
 
         self.is_ippatsu = false;
         self.is_first_turn = false;
+        // 鳴き直後の打牌が完了したので喰い替え制限を解除する
+        self.forbidden_discards.clear();
 
         Some(discarded)
     }
@@ -981,5 +1006,42 @@ mod tests {
     fn test_is_furiten_none() {
         let player = Player::new(Wind::East, make_test_tiles(), 25000);
         assert!(!player.is_furiten());
+    }
+
+    #[test]
+    fn test_forbidden_discard_is_rejected() {
+        let mut player = Player::new(Wind::East, make_test_tiles(), 25000);
+        // 1m を喰い替え禁止に設定
+        player.set_forbidden_discards(vec![Tile::M1]);
+
+        assert!(player.is_swap_call_forbidden(Tile::new(Tile::M1)));
+        // 禁止牌の打牌は拒否され、手牌は変化しない
+        assert!(player.try_discard(Some(Tile::new(Tile::M1))).is_none());
+        assert_eq!(player.hand.tiles().len(), 13);
+        assert!(player.discards.is_empty());
+    }
+
+    #[test]
+    fn test_non_forbidden_discard_still_allowed_then_clears() {
+        let mut player = Player::new(Wind::East, make_test_tiles(), 25000);
+        player.set_forbidden_discards(vec![Tile::M1]);
+
+        // 禁止されていない牌は通常どおり捨てられる
+        let discarded = player.try_discard(Some(Tile::new(Tile::M2)));
+        assert_eq!(discarded.map(|t| t.get()), Some(Tile::M2));
+        // 打牌完了で制限が解除され、以後は 1m も捨てられる
+        assert!(!player.is_swap_call_forbidden(Tile::new(Tile::M1)));
+        assert_eq!(player.discard(Some(Tile::new(Tile::M1))).get(), Tile::M1);
+    }
+
+    #[test]
+    fn test_draw_clears_forbidden_discards() {
+        let mut player = Player::new(Wind::East, make_test_tiles(), 25000);
+        player.set_forbidden_discards(vec![Tile::M1]);
+
+        // ツモで喰い替え制限は解除される
+        player.draw(Tile::new(Tile::Z5));
+        assert!(!player.is_swap_call_forbidden(Tile::new(Tile::M1)));
+        assert_eq!(player.discard(Some(Tile::new(Tile::M1))).get(), Tile::M1);
     }
 }

@@ -246,15 +246,32 @@ impl CpuClient {
 
     /// 鳴き後の打牌を選択する
     fn decide_discard_after_call(&self) -> ClientAction {
+        // 喰い替え禁止牌（直前の鳴きが対象）。これらは捨てるとサーバに拒否されるため除外する。
+        let forbidden = self
+            .state
+            .my_melds()
+            .last()
+            .map(|meld| meld.forbidden_swap_tiles())
+            .unwrap_or_default();
+
         // 鳴き後はツモ牌がないので、手牌から選ぶ
-        let candidates = evaluator::evaluate_discards(&self.state, &self.config);
+        let candidates: Vec<_> = evaluator::evaluate_discards(&self.state, &self.config)
+            .into_iter()
+            .filter(|c| !forbidden.contains(&c.tile.get()))
+            .collect();
         let attacking = self.should_attack();
 
         if let Some(tile) =
             evaluator::select_best_discard(&candidates, &self.config, attacking, &self.state)
         {
             ClientAction::Discard { tile: Some(tile) }
-        } else if let Some(&tile) = self.state.my_hand.last() {
+        } else if let Some(&tile) = self
+            .state
+            .my_hand
+            .iter()
+            .rev()
+            .find(|t| !forbidden.contains(&t.get()))
+        {
             ClientAction::Discard { tile: Some(tile) }
         } else {
             ClientAction::Discard { tile: None }
