@@ -207,9 +207,10 @@ async fn main() {
                 if let Some(action) = renderer::handle_setup_input(&mut game_state, font.as_ref()) {
                     match action {
                         SetupAction::StartLocal(configs) => {
-                            // ローカル対局開始
+                            // ローカル対局開始（三麻設定は setup_state から反映される）
                             game_state.set_local_players(&configs);
-                            let mut new_adapter = LocalAdapter::with_cpu_configs(configs);
+                            let settings = game_state.setup_state.build_game_settings();
+                            let mut new_adapter = LocalAdapter::with_settings(settings, configs);
                             new_adapter.start_game();
                             let events = new_adapter.poll_events();
                             for event in events {

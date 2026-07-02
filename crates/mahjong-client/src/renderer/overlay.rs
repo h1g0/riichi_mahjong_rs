@@ -285,6 +285,33 @@ pub(super) fn draw_action_buttons(
         }
     }
 
+    // 北抜きボタン（三麻+北抜きあり時のみ。暗カンボタンの並びに置く）
+    if state.can_kita {
+        let x = AGARI_BTN_X + state.self_kan_options.len() as f32 * (KAN_BTN_W + 10.0);
+        theme::draw_gradient_button(
+            x,
+            KAN_BTN_Y,
+            KAN_BTN_W,
+            KAN_BTN_H,
+            6.0,
+            theme::rgb_pub(0x1a7a3a),
+            theme::rgb_pub(0x0f4a22),
+            theme::rgb_pub(0x44cc66),
+            1.0,
+        );
+        theme::draw_text_centered(
+            font,
+            tr.get(Key::Kita),
+            x + KAN_BTN_W / 2.0,
+            KAN_BTN_Y + KAN_BTN_H / 2.0 + 6.0,
+            SMALL_FONT,
+            WHITE,
+        );
+        if clicked && result.is_none() && hit_rect(mx, my, x, KAN_BTN_Y, KAN_BTN_W, KAN_BTN_H) {
+            result = Some(OverlayClick::Action(ClientAction::Kita));
+        }
+    }
+
     if !state.riichi_selection_mode && !state.is_riichi {
         theme::draw_text_centered(
             font,

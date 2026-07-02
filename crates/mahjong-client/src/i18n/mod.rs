@@ -274,6 +274,12 @@ impl Translator {
 pub enum Key {
     /// 対局設定画面のタイトル
     SetupTitle,
+    /// 対局モード: 四人打ち
+    ModeFourPlayer,
+    /// 対局モード: 三麻（3人打ち）
+    ModeThreePlayer,
+    /// 北抜きドラトグル
+    NukiDoraToggle,
     /// CPU の強さ見出し
     CpuStrengthLabel,
     /// CPU の性格見出し
@@ -330,6 +336,8 @@ pub enum Key {
     Kan,
     /// チー
     Chi,
+    /// 北抜き（三麻の抜きドラ宣言ボタン）
+    Kita,
     /// パス
     Pass,
     /// キャンセル
@@ -399,6 +407,18 @@ impl Key {
             Key::SetupTitle => match lang {
                 Lang::Ja => "対局設定",
                 Lang::En => "Game Setup",
+            },
+            Key::ModeFourPlayer => match lang {
+                Lang::Ja => "四人打ち",
+                Lang::En => "4-Player",
+            },
+            Key::ModeThreePlayer => match lang {
+                Lang::Ja => "三麻",
+                Lang::En => "3-Player",
+            },
+            Key::NukiDoraToggle => match lang {
+                Lang::Ja => "北抜きドラ",
+                Lang::En => "Kita dora",
             },
             Key::CpuStrengthLabel => match lang {
                 Lang::Ja => "強さ",
@@ -513,6 +533,10 @@ impl Key {
                 Lang::Ja => "チー",
                 // 用語集（docs/glossary.md）に合わせ "chii" を用いる
                 Lang::En => "Chii",
+            },
+            Key::Kita => match lang {
+                Lang::Ja => "北抜き",
+                Lang::En => "Kita",
             },
             Key::Pass => match lang {
                 Lang::Ja => "パス",
