@@ -56,11 +56,24 @@ pub fn player_hand_start_x(hand_len: usize) -> f32 {
 /// Camera2D の回転角度（度）— 自分(0°)、下家(-90°)、対面(180°)、上家(90°)
 const PLAYER_ROTATIONS: [f32; 4] = [0.0, -90.0, 180.0, 90.0];
 
+/// 相対位置を回転テーブル [`PLAYER_ROTATIONS`] のインデックスへ変換する。
+///
+/// 四麻: そのまま（0=自分, 1=下家=右, 2=対面=上, 3=上家=左）。
+/// 三麻: 相対2が上家になるため、左（90°）の描画パスを再利用する
+/// （自分=下、下家=右、上家=左、上辺は空席）。
+fn rotation_index(relative_idx: usize, player_count: usize) -> usize {
+    if player_count == 3 && relative_idx == 2 {
+        3
+    } else {
+        relative_idx
+    }
+}
+
 /// 自分から見た相対位置(0=自分,1=下家,2=対面,3=上家)を固定の座席インデックスへ変換する。
 /// `scores` や `player_labels` は座席インデックス順に並ぶため、画面の各向きへ描画する際は
 /// この変換を通す（オンライン非ホストで自分の座席が0以外でも正しい席に表示される）。
-fn seat_at_relative_position(my_seat: usize, relative_idx: usize) -> usize {
-    (my_seat + relative_idx) % 4
+fn seat_at_relative_position(my_seat: usize, relative_idx: usize, player_count: usize) -> usize {
+    (my_seat + relative_idx) % player_count
 }
 
 /// 設計座標 (0,0)-(DESIGN_W,DESIGN_H) をキャンバス全体に写すカメラ。
@@ -489,13 +502,13 @@ fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f32) {
     const CHIP_W: f32 = 70.0;
     const CHIP_H: f32 = 38.0;
     const GAP: f32 = 7.0;
-    let count = 4;
+    let count = state.player_count;
     let total = count as f32 * CHIP_W + (count as f32 - 1.0) * GAP;
     let start_x = DESIGN_W - 14.0 - total;
     let chip_y = (bar_h - CHIP_H) / 2.0;
 
-    for rel in 0..4 {
-        let seat = seat_at_relative_position(state.my_seat, rel);
+    for rel in 0..state.player_count {
+        let seat = seat_at_relative_position(state.my_seat, rel, state.player_count);
         let is_me = seat == state.my_seat;
         let x = start_x + rel as f32 * (CHIP_W + GAP);
 
@@ -582,13 +595,15 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
     let my_wind_idx = state.seat_wind.map(|w| w.to_index()).unwrap_or(0);
     let label_dist: f32 = 64.0; // 中心からラベルまでの距離
 
-    for (player_idx, &rotation) in PLAYER_ROTATIONS.iter().enumerate() {
-        // player_idx は自分から見た相対位置(0=自分,1=下家,2=対面,3=上家)。
+    for rel in 0..state.player_count {
+        // rel は自分から見た相対位置(0=自分,1=下家,2=対面,3=上家)。
         // scores / player_labels は固定の座席インデックス順なので、相対位置を
         // 絶対座席へ変換してから引く(オンライン非ホストで自分の座席が0以外でもずれない)。
-        let seat = seat_at_relative_position(state.my_seat, player_idx);
-        let display_wind = mahjong_core::tile::Wind::from_index(my_wind_idx + player_idx);
+        let seat = seat_at_relative_position(state.my_seat, rel, state.player_count);
+        let display_wind =
+            mahjong_core::tile::Wind::from_index((my_wind_idx + rel) % state.player_count);
         let score = state.scores[seat];
+        let rotation = PLAYER_ROTATIONS[rotation_index(rel, state.player_count)];
 
         set_camera(&make_board_camera(rotation));
 
@@ -612,8 +627,8 @@ fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         );
 
         // CPU の強さ・性格（または相手の名前）を風・得点の下に表示する。
-        // player_idx は自分からの相対位置で、得点チップの CPU 番号と一致する。
-        if let Some(detail) = state.player_labels[seat].detail(player_idx, state.lang) {
+        // rel は自分からの相対位置で、得点チップの CPU 番号と一致する。
+        if let Some(detail) = state.player_labels[seat].detail(rel, state.lang) {
             theme::draw_text_centered(
                 font,
                 &detail,
@@ -668,10 +683,32 @@ fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
     let start_x = BOARD_CENTER_X - half_width;
     let start_y = BOARD_CENTER_Y + discard_offset;
 
-    for (player_idx, &rotation) in PLAYER_ROTATIONS.iter().enumerate() {
-        let discards = &state.discards[player_idx];
+    let my_wind_idx = state.seat_wind.map(|w| w.to_index()).unwrap_or(0);
+
+    for rel in 0..state.player_count {
+        let discards = &state.discards[rel];
+        let rotation = PLAYER_ROTATIONS[rotation_index(rel, state.player_count)];
 
         set_camera(&make_board_camera(rotation));
+
+        // 北抜き牌（三麻）: 捨て牌エリアの右横に小さく並べる
+        if state.is_three_player() {
+            let wind_idx = (my_wind_idx + rel) % state.player_count;
+            let kita = state.kita_counts[wind_idx] as usize;
+            let north = mahjong_core::tile::Tile::new(mahjong_core::tile::Tile::Z4);
+            let kw = dtw * 0.75;
+            let kh = dth * 0.75;
+            for k in 0..kita {
+                draw_tile_sprite(
+                    tile_textures.for_tile(&north),
+                    BOARD_CENTER_X + half_width + 10.0 + k as f32 * (kw * 0.6),
+                    start_y,
+                    kw,
+                    kh,
+                    WHITE,
+                );
+            }
+        }
 
         // リーチ棒描画（リーチ宣言済みの場合のみ）
         let has_riichi = discards.iter().any(|d| d.is_riichi);
@@ -1198,8 +1235,8 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
 
     let base_y = BOARD_CENTER_Y + hand_distance;
 
-    for other_idx in 0..3 {
-        let relative_idx = other_idx + 1; // 1=下家, 2=対面, 3=上家
+    for other_idx in 0..(state.player_count - 1) {
+        let relative_idx = other_idx + 1; // 1=下家, 2=対面, 3=上家（三麻では 1=下家, 2=上家）
         let other = &state.other_players[other_idx];
 
         // 手牌＋副露の合計幅を計算してセンタリング
@@ -1217,7 +1254,9 @@ fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
         let total_width = hand_count as f32 * tile_step + meld_widths + meld_gaps;
         let start_x = BOARD_CENTER_X - total_width / 2.0;
 
-        set_camera(&make_board_camera(PLAYER_ROTATIONS[relative_idx]));
+        set_camera(&make_board_camera(
+            PLAYER_ROTATIONS[rotation_index(relative_idx, state.player_count)],
+        ));
 
         // 手牌描画（左→右）
         let mut x = start_x;
@@ -1553,10 +1592,12 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         theme::TEXT_BR,
     );
 
+    // 三麻ではダミー席（シート3）を除外する
     let mut rankings: Vec<(usize, i32)> = state
         .scores
         .iter()
         .enumerate()
+        .take(state.player_count)
         .map(|(i, &s)| (i, s))
         .collect();
     rankings.sort_by_key(|r| std::cmp::Reverse(r.1));
@@ -1602,7 +1643,7 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         draw_jp_text(font, tr.place_suffix(rank), row_x + 34.0, ry + 32.0, 11, rc);
 
         // 名前（CPU 番号は得点チップと同じ自分からの相対位置）
-        let cpu_number = (*player_idx + 4 - state.my_seat) % 4;
+        let cpu_number = (*player_idx + state.player_count - state.my_seat) % state.player_count;
         let name = state.player_labels[*player_idx].name(cpu_number, state.lang);
         draw_jp_text(font, &name, row_x + 64.0, ry + 30.0, 14, theme::TEXT);
 
@@ -1686,6 +1727,32 @@ fn setup_lang_button_rect(idx: usize) -> SetupButton {
 
 /// 言語切替トグルに表示する固有名（言語非依存の自称表記）。
 const SETUP_LANG_LABELS: [&str; 2] = ["日本語", "English"];
+
+/// 対局モードトグルのボタン矩形（パネル左上）。idx 0=四人打ち, 1=三麻。
+fn setup_mode_button_rect(idx: usize) -> SetupButton {
+    const W: f32 = 84.0;
+    const H: f32 = 28.0;
+    const GAP: f32 = 6.0;
+    let left = setup_panel_x() + SETUP_CARD_PAD;
+    let y = SETUP_PANEL_Y + 24.0;
+    SetupButton {
+        x: left + idx as f32 * (W + GAP),
+        y,
+        w: W,
+        h: H,
+    }
+}
+
+/// 北抜きドラトグルのボタン矩形（三麻選択時のみ表示）。
+fn setup_nuki_button_rect() -> SetupButton {
+    let m = setup_mode_button_rect(1);
+    SetupButton {
+        x: m.x + m.w + 18.0,
+        y: m.y,
+        w: 110.0,
+        h: m.h,
+    }
+}
 
 fn setup_panel_x() -> f32 {
     (DESIGN_W - SETUP_PANEL_W) / 2.0
@@ -1787,9 +1854,22 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         draw_setup_option(font, &btn, label, idx == active_lang);
     }
 
-    // CPU カード
+    // 対局モードトグル（四人打ち / 三麻）
+    let mode_labels = [Key::ModeFourPlayer, Key::ModeThreePlayer];
+    for (idx, key) in mode_labels.into_iter().enumerate() {
+        let btn = setup_mode_button_rect(idx);
+        let selected = (idx == 1) == setup.three_player;
+        draw_setup_option(font, &btn, tr.get(key), selected);
+    }
+    // 北抜きドラトグル（三麻のみ）
+    if setup.three_player {
+        let btn = setup_nuki_button_rect();
+        draw_setup_option(font, &btn, tr.get(Key::NukiDoraToggle), setup.nuki_dora);
+    }
+
+    // CPU カード（三麻はCPU2人）
     let card_w = setup_card_w();
-    for cpu_idx in 0..3 {
+    for cpu_idx in 0..setup.cpu_count() {
         let card_x = setup_card_x(cpu_idx);
         theme::draw_rounded_rect(
             card_x,
@@ -1933,7 +2013,20 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
 
     let setup = &mut state.setup_state;
 
-    for cpu_idx in 0..3 {
+    // 対局モードトグル（四人打ち / 三麻）
+    for idx in 0..2 {
+        if setup_mode_button_rect(idx).contains(mx, my) {
+            setup.three_player = idx == 1;
+            return None;
+        }
+    }
+    // 北抜きドラトグル（三麻のみ）
+    if setup.three_player && setup_nuki_button_rect().contains(mx, my) {
+        setup.nuki_dora = !setup.nuki_dora;
+        return None;
+    }
+
+    for cpu_idx in 0..setup.cpu_count() {
         // 強さボタン
         for level_idx in 0..SetupState::level_count() {
             if setup_opt_rect(cpu_idx, SETUP_STR_OFFSET, level_idx).contains(mx, my) {
@@ -1968,8 +2061,8 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
 #[cfg(test)]
 mod tests {
     use super::{
-        PLAYER_ROTATIONS, calc_meld_width, other_meld_x_positions, seat_at_relative_position,
-        self_meld_x_positions,
+        PLAYER_ROTATIONS, calc_meld_width, other_meld_x_positions, rotation_index,
+        seat_at_relative_position, self_meld_x_positions,
     };
     use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
     use mahjong_core::tile::{Tile, TileType};
@@ -2036,7 +2129,7 @@ mod tests {
     fn seat0_relative_positions_match_seat_indices() {
         // 自分が座席0なら相対位置と座席インデックスは一致する（ローカル対局）。
         for rel in 0..4 {
-            assert_eq!(seat_at_relative_position(0, rel), rel);
+            assert_eq!(seat_at_relative_position(0, rel, 4), rel);
         }
     }
 
@@ -2044,9 +2137,32 @@ mod tests {
     fn nonzero_seat_maps_relative_positions_to_correct_seats() {
         // オンライン非ホスト: 自分の座席が0以外でも、相対位置→絶対座席へ正しく回る。
         // 自分(0)=座席2, 下家(1)=座席3, 対面(2)=座席0, 上家(3)=座席1。
-        assert_eq!(seat_at_relative_position(2, 0), 2);
-        assert_eq!(seat_at_relative_position(2, 1), 3);
-        assert_eq!(seat_at_relative_position(2, 2), 0);
-        assert_eq!(seat_at_relative_position(2, 3), 1);
+        assert_eq!(seat_at_relative_position(2, 0, 4), 2);
+        assert_eq!(seat_at_relative_position(2, 1, 4), 3);
+        assert_eq!(seat_at_relative_position(2, 2, 4), 0);
+        assert_eq!(seat_at_relative_position(2, 3, 4), 1);
+    }
+
+    #[test]
+    fn sanma_seat_mapping_wraps_at_three() {
+        // 三麻: 座席は0〜2で循環する。
+        assert_eq!(seat_at_relative_position(0, 0, 3), 0);
+        assert_eq!(seat_at_relative_position(0, 1, 3), 1);
+        assert_eq!(seat_at_relative_position(0, 2, 3), 2);
+        assert_eq!(seat_at_relative_position(1, 2, 3), 0);
+        assert_eq!(seat_at_relative_position(2, 1, 3), 0);
+    }
+
+    #[test]
+    fn sanma_rotation_maps_kamicha_to_left() {
+        // 三麻: 相対2（上家）は左（90°）の描画パスを使う。
+        assert_eq!(rotation_index(0, 3), 0);
+        assert_eq!(rotation_index(1, 3), 1);
+        assert_eq!(rotation_index(2, 3), 3);
+        assert_eq!(PLAYER_ROTATIONS[rotation_index(2, 3)], 90.0);
+        // 四麻は恒等写像。
+        for rel in 0..4 {
+            assert_eq!(rotation_index(rel, 4), rel);
+        }
     }
 }

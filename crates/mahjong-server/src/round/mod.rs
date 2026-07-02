@@ -264,10 +264,11 @@ impl Round {
     }
 
     /// 各プレイヤーの点数を返す
-    /// 全プレイヤーの手牌情報を構築する
+    /// 全プレイヤーの手牌情報を構築する（三麻ではダミー席を含めない）
     fn build_player_hands(&self) -> Vec<PlayerHandInfo> {
         self.players
             .iter()
+            .take(self.player_count)
             .map(|p| {
                 let melds: Vec<MeldTiles> = p
                     .hand

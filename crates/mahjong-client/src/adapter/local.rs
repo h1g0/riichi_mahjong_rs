@@ -24,12 +24,13 @@ pub struct LocalAdapter {
 }
 
 impl LocalAdapter {
-    /// 指定したCPU設定でアダプターを作成する
+    /// 指定したゲーム設定とCPU設定でアダプターを作成する
     ///
-    /// 人間は座席0、CPUは座席1〜3に割り当てる。
-    pub fn with_cpu_configs(cpu_configs: [CpuConfig; 3]) -> Self {
-        let mut driver = GameDriver::new(GameSettings::default());
-        for (i, config) in cpu_configs.into_iter().enumerate() {
+    /// 人間は座席0、CPUは座席1〜3（三麻では1〜2）に割り当てる。
+    pub fn with_settings(settings: GameSettings, cpu_configs: [CpuConfig; 3]) -> Self {
+        let player_count = settings.rules.player_count();
+        let mut driver = GameDriver::new(settings);
+        for (i, config) in cpu_configs.into_iter().enumerate().take(player_count - 1) {
             driver.set_cpu(HUMAN_SEAT + 1 + i, config);
         }
         driver.set_cpu_action_delay(CPU_ACTION_DELAY_SECONDS);
