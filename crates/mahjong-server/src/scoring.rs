@@ -12,7 +12,7 @@ use mahjong_core::scoring::score::{
     round_up_to_100,
 };
 use mahjong_core::settings::Settings;
-use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
+use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora_in};
 
 use crate::player::Player;
 
@@ -227,6 +227,10 @@ pub fn get_waiting_tiles(player: &Player) -> Vec<TileType> {
 /// - `winner_is_dealer`: 和了プレイヤーが親かどうか
 /// - `dealer_idx`: 親のプレイヤーインデックス (0-3)
 /// - `honba`: 本場数
+/// - `player_count`: プレイヤー人数（四麻=4、三麻=3）
+///
+/// 三麻はツモ損方式: 1人あたりの支払額は四麻と同じで、
+/// いない北家の分は和了者が受け取れない。
 ///
 /// 戻り値: 各プレイヤーの点数変動 (正=増加、負=減少)。合計は必ず0。
 pub fn calculate_tsumo_score_deltas(
@@ -235,6 +239,7 @@ pub fn calculate_tsumo_score_deltas(
     winner_is_dealer: bool,
     dealer_idx: usize,
     honba: usize,
+    player_count: usize,
 ) -> [i32; 4] {
     let mut deltas = [0i32; 4];
     let honba_bonus = honba as i32 * 100;
@@ -242,9 +247,9 @@ pub fn calculate_tsumo_score_deltas(
     if winner_is_dealer {
         // 親ツモ: 各子が dealer_tsumo_all + 本場ボーナス を支払う
         let each_pay = score_result.dealer_tsumo_all as i32 + honba_bonus;
-        for (i, delta) in deltas.iter_mut().enumerate() {
+        for (i, delta) in deltas.iter_mut().enumerate().take(player_count) {
             if i == winner {
-                *delta = each_pay * 3;
+                *delta = each_pay * (player_count as i32 - 1);
             } else {
                 *delta = -each_pay;
             }
@@ -254,7 +259,7 @@ pub fn calculate_tsumo_score_deltas(
         let dealer_pay = score_result.non_dealer_tsumo_dealer as i32 + honba_bonus;
         let non_dealer_pay = score_result.non_dealer_tsumo_non_dealer as i32 + honba_bonus;
         let mut total_gain = 0i32;
-        for (i, delta) in deltas.iter_mut().enumerate() {
+        for (i, delta) in deltas.iter_mut().enumerate().take(player_count) {
             if i == winner {
                 continue;
             }
@@ -282,12 +287,14 @@ pub fn calculate_tsumo_score_deltas(
 /// * `extra_tile` - ロン和了の場合の和了牌（手牌に含まれていないため別途指定）
 /// * `dora_indicators` - ドラ表示牌
 /// * `uradora_indicators` - 裏ドラ表示牌（リーチ時のみ非空）
+/// * `three_player` - 三麻かどうか（萬子のドラチェーンが 1m↔9m にラップする）
 pub fn add_dora_to_score(
     score_result: &mut ScoreResult,
     hand: &Hand,
     extra_tile: Option<Tile>,
     dora_indicators: &[Tile],
     uradora_indicators: &[Tile],
+    three_player: bool,
 ) {
     // 役満の場合はドラを加算しない
     if score_result.yaku_list.iter().any(|(_, h)| *h >= 13) {
@@ -309,14 +316,14 @@ pub fn add_dora_to_score(
     // ドラ表示牌からドラ牌を計算してカウント
     let mut dora_count: u32 = 0;
     for indicator in dora_indicators {
-        let dora_type = dora_indicator_to_dora(indicator.get());
+        let dora_type = dora_indicator_to_dora_in(indicator.get(), three_player);
         dora_count += all_tiles.iter().filter(|t| t.get() == dora_type).count() as u32;
     }
 
     // 裏ドラ表示牌からドラ牌を計算してカウント
     let mut uradora_count: u32 = 0;
     for indicator in uradora_indicators {
-        let dora_type = dora_indicator_to_dora(indicator.get());
+        let dora_type = dora_indicator_to_dora_in(indicator.get(), three_player);
         uradora_count += all_tiles.iter().filter(|t| t.get() == dora_type).count() as u32;
     }
 
@@ -430,7 +437,7 @@ mod tests {
     #[test]
     fn test_tsumo_dealer_mangan() {
         let score = make_mangan_score();
-        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0);
+        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0, 4);
         assert_eq!(deltas[0], 12000); // 4000 * 3
         assert_eq!(deltas[1], -4000);
         assert_eq!(deltas[2], -4000);
@@ -441,7 +448,7 @@ mod tests {
     #[test]
     fn test_tsumo_non_dealer_mangan() {
         let score = make_mangan_score();
-        let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0);
+        let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 4);
         assert_eq!(deltas[0], -4000); // 親
         assert_eq!(deltas[1], 8000); // 和了者: 4000+2000+2000
         assert_eq!(deltas[2], -2000); // 子
@@ -453,12 +460,80 @@ mod tests {
     fn test_tsumo_with_honba() {
         let score = make_mangan_score();
         // 2本場: 各プレイヤーの支払いに100*2=200点加算
-        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 2);
+        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 2, 4);
         assert_eq!(deltas[1], -4200); // 4000+200
         assert_eq!(deltas[2], -4200);
         assert_eq!(deltas[3], -4200);
         assert_eq!(deltas[0], 12600); // 4200*3
         assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn test_sanma_tsumo_dealer_mangan_tsumo_loss() {
+        let score = make_mangan_score();
+        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0, 3);
+        // ツモ損: 支払いは1人4000のまま、いない北家分は貰えない
+        assert_eq!(deltas[0], 8000); // 4000 * 2
+        assert_eq!(deltas[1], -4000);
+        assert_eq!(deltas[2], -4000);
+        assert_eq!(deltas[3], 0); // ダミー席は支払わない
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn test_sanma_tsumo_non_dealer_mangan_tsumo_loss() {
+        let score = make_mangan_score();
+        let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3);
+        assert_eq!(deltas[0], -4000); // 親
+        assert_eq!(deltas[1], 6000); // 4000 + 2000（ツモ損）
+        assert_eq!(deltas[2], -2000); // 子
+        assert_eq!(deltas[3], 0); // ダミー席は支払わない
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn test_sanma_dora_wraps_manzu_indicator() {
+        let mut score = ScoreResult {
+            han: 1,
+            fu: 30,
+            rank: ScoreRank::Normal,
+            dealer_ron: 1500,
+            dealer_tsumo_all: 500,
+            non_dealer_ron: 1000,
+            non_dealer_tsumo_dealer: 500,
+            non_dealer_tsumo_non_dealer: 300,
+            yaku_list: vec![(ScoreItem::Yaku(Kind::AllInside), 1)],
+            has_opened: false,
+            fu_result: FuResult {
+                total: 30,
+                details: vec![FuDetail {
+                    name: "副底",
+                    fu: 20,
+                }],
+            },
+        };
+        let tiles = vec![
+            Tile::new(Tile::M9),
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S6),
+        ];
+        let mut player = Player::new(Wind::South, tiles, 35000);
+        player.draw(Tile::new(Tile::S7));
+
+        // 三麻: ドラ表示牌1m → ドラは9m（1枚）
+        let dora_indicators = vec![Tile::new(Tile::M1)];
+        add_dora_to_score(&mut score, &player.hand, None, &dora_indicators, &[], true);
+
+        assert!(
+            score
+                .yaku_list
+                .contains(&(ScoreItem::Dora(DoraLabel::Dora), 1)),
+            "三麻の1m表示で9mがドラとしてカウントされない: {:?}",
+            score.yaku_list
+        );
     }
 
     #[test]
@@ -702,6 +777,7 @@ mod tests {
             None,
             &dora_indicators,
             &uradora_indicators,
+            false,
         );
 
         assert_eq!(score.yaku_list.len(), 4);
@@ -744,7 +820,7 @@ mod tests {
             None,
         );
 
-        add_dora_to_score(&mut score, &hand, None, &[], &[]);
+        add_dora_to_score(&mut score, &hand, None, &[], &[], false);
 
         assert_eq!(
             score.yaku_list.last(),
@@ -790,7 +866,7 @@ mod tests {
             None,
         );
 
-        add_dora_to_score(&mut score, &hand, None, &[], &[]);
+        add_dora_to_score(&mut score, &hand, None, &[], &[], false);
 
         assert_eq!(
             score.yaku_list.last(),

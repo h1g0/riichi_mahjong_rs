@@ -502,6 +502,8 @@ impl GameState {
                 total_rounds: _,
                 honba,
                 riichi_sticks,
+                // 三麻フラグはクライアント対応フェーズ（#257 Phase 5）で使用する
+                three_player: _,
             } => {
                 self.seat_wind = Some(seat_wind);
                 self.hand = hand;

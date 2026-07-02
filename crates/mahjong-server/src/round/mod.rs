@@ -118,6 +118,8 @@ pub struct Round {
     pub call_state: Option<CallState>,
     /// 直前のツモが嶺上牌か
     pub last_draw_was_dead_wall: bool,
+    /// プレイヤー人数（四麻=4、三麻=3。三麻ではシート3はダミー）
+    pub player_count: usize,
     /// ゲーム設定
     pub settings: Settings,
 }
@@ -140,7 +142,7 @@ impl Round {
         settings: Settings,
     ) -> Self {
         Self::with_wall(
-            Wall::new(),
+            Wall::new(settings.three_player),
             round_wind,
             dealer,
             initial_scores,
@@ -168,7 +170,7 @@ impl Round {
         settings: Settings,
     ) -> Self {
         Self::with_wall(
-            Wall::new_with_seed(seed),
+            Wall::new_with_seed(seed, settings.three_player),
             round_wind,
             dealer,
             initial_scores,
@@ -193,28 +195,33 @@ impl Round {
         total_rounds: usize,
         settings: Settings,
     ) -> Self {
-        let dealt = wall.deal();
+        let player_count = settings.player_count();
+        let dealt = wall.deal(player_count);
 
-        // 座席の風を割り当て: dealer=東, 反時計回りに南西北
-        let winds = [
-            Wind::from_index((4 - dealer) % 4),
-            Wind::from_index((1 + 4 - dealer) % 4),
-            Wind::from_index((2 + 4 - dealer) % 4),
-            Wind::from_index((3 + 4 - dealer) % 4),
-        ];
+        // 座席の風を割り当て: dealer=東, 反時計回りに南西（北）
+        // 三麻では北家は存在せず、シート3はダミー（空手牌・点数0）となる
+        let winds: [Wind; 4] = std::array::from_fn(|i| {
+            if i < player_count {
+                Wind::from_index((i + player_count - dealer) % player_count)
+            } else {
+                Wind::North
+            }
+        });
 
-        let players = [
-            Player::new(winds[0], dealt[0].clone(), initial_scores[0]),
-            Player::new(winds[1], dealt[1].clone(), initial_scores[1]),
-            Player::new(winds[2], dealt[2].clone(), initial_scores[2]),
-            Player::new(winds[3], dealt[3].clone(), initial_scores[3]),
-        ];
+        let players: [Player; 4] = std::array::from_fn(|i| {
+            if i < player_count {
+                Player::new(winds[i], dealt[i].clone(), initial_scores[i])
+            } else {
+                // ダミー席: 空手牌・点数0。テンパイ・フリテン・リーチには決してならない
+                Player::new(winds[i], Vec::new(), 0)
+            }
+        });
 
         let dora_indicators = wall.dora_indicators();
 
         // 各プレイヤーにゲーム開始イベントを送信
         let mut events = Vec::new();
-        for (i, player) in players.iter().enumerate() {
+        for (i, player) in players.iter().enumerate().take(player_count) {
             events.push((
                 i,
                 ServerEvent::GameStarted {
@@ -227,6 +234,7 @@ impl Round {
                     total_rounds,
                     honba,
                     riichi_sticks,
+                    three_player: settings.three_player,
                 },
             ));
         }
@@ -244,8 +252,14 @@ impl Round {
             events,
             call_state: None,
             last_draw_was_dead_wall: false,
+            player_count,
             settings,
         }
+    }
+
+    /// 指定プレイヤーの次の手番プレイヤーを返す（プレイヤー人数で循環）
+    fn next_seat(&self, seat: usize) -> usize {
+        (seat + 1) % self.player_count
     }
 
     /// 各プレイヤーの点数を返す
@@ -369,7 +383,7 @@ impl Round {
     ) {
         // 全プレイヤーに打牌を通知
         let discarder_wind = self.players[discarder].seat_wind;
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::TileDiscarded {
@@ -389,7 +403,7 @@ impl Round {
             self.phase = TurnPhase::WaitForCalls;
 
             // 各プレイヤーに鳴き可能通知を送信
-            for i in 0..4 {
+            for i in 0..self.player_count {
                 if !call_state.available_calls[i].is_empty() {
                     self.events.push((
                         i,
@@ -405,7 +419,7 @@ impl Round {
             self.call_state = Some(call_state);
         } else {
             // 鳴き候補がなければ次のプレイヤーへ
-            self.current_player = (discarder + 1) % 4;
+            self.current_player = self.next_seat(discarder);
             self.phase = TurnPhase::Draw;
 
             // 特殊流局チェック（四家立直チェック含む）
@@ -418,9 +432,9 @@ impl Round {
         let is_last_tile = self.wall.is_empty();
         let mut available_calls: [Vec<AvailableCall>; 4] =
             [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-        let mut responded = [true; 4]; // デフォルトは応答済み（対象外）
+        let mut responded = [true; 4]; // デフォルトは応答済み（対象外・ダミー席含む）
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             if i == discarder {
                 continue;
             }
@@ -461,9 +475,9 @@ impl Round {
                 available_calls[i].push(AvailableCall::Daiminkan);
             }
 
-            // チー判定（上家からのみ＝次のプレイヤー）
-            let next_player = (discarder + 1) % 4;
-            if i == next_player {
+            // チー判定（上家からのみ＝次のプレイヤー。三麻ではチーなし）
+            let next_player = self.next_seat(discarder);
+            if !self.settings.three_player && i == next_player {
                 let chi_opts = player.chi_options(discarded_tile);
                 if !chi_opts.is_empty() {
                     available_calls[i].push(AvailableCall::Chi { options: chi_opts });
@@ -581,7 +595,7 @@ impl Round {
 
         // ロン見逃しによるフリテン判定
         // AvailableCall::Ron があったのにロン宣言しなかったプレイヤーにフリテンを設定
-        for i in 0..4 {
+        for i in 0..self.player_count {
             let had_ron = call_state.available_calls[i]
                 .iter()
                 .any(|c| matches!(c, AvailableCall::Ron));
@@ -608,7 +622,8 @@ impl Round {
 
             // 打順優先順（下家→対面→上家）でソート
             let mut sorted_winners = call_state.ron_declared.clone();
-            sorted_winners.sort_by_key(|&p| (p + 4 - discarder) % 4);
+            sorted_winners
+                .sort_by_key(|&p| (p + self.player_count - discarder) % self.player_count);
 
             if ron_count >= 3 && self.settings.triple_ron_draw {
                 // 三家和流局（最優先）
@@ -662,7 +677,7 @@ impl Round {
         }
 
         // 5. 全員パス → 次のプレイヤーへ
-        self.current_player = (call_state.discarder + 1) % 4;
+        self.current_player = self.next_seat(call_state.discarder);
         self.phase = TurnPhase::Draw;
 
         // 特殊流局チェック
@@ -728,6 +743,7 @@ impl Round {
                 Some(winning_tile),
                 &dora_indicators,
                 &uradora_indicators,
+                self.settings.three_player,
             );
 
             let winner_is_dealer = self.players[winner].is_dealer();
@@ -758,14 +774,14 @@ impl Round {
 
         // 安全のため: 和了成立者が0人ならフェーズを進めて返す
         if winner_data.is_empty() {
-            self.current_player = (loser + 1) % 4;
+            self.current_player = self.next_seat(loser);
             self.phase = TurnPhase::Draw;
             return;
         }
 
         // 全スコアデルタを合算して適用
         for wd in &winner_data {
-            for i in 0..4 {
+            for i in 0..self.player_count {
                 self.players[i].score += wd.deltas[i];
             }
         }
@@ -791,7 +807,7 @@ impl Round {
             let has_opened = wd.score_result.has_opened;
             let event_riichi_sticks = if idx == 0 { riichi_sticks } else { 0 };
 
-            for i in 0..4 {
+            for i in 0..self.player_count {
                 self.events.push((
                     i,
                     ServerEvent::RoundWon {
@@ -829,7 +845,7 @@ impl Round {
         called_tile: Tile,
         hand_tile_types: [Tile; 2],
     ) {
-        let from = Player::meld_from_relative(caller, discarder);
+        let from = Player::meld_from_relative(caller, discarder, self.player_count);
         self.players[caller].do_pon(called_tile, hand_tile_types, from);
 
         // 捨て牌を「鳴かれた」としてマーク
@@ -848,7 +864,7 @@ impl Round {
             .tiles
             .to_vec();
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::PlayerCalled {
@@ -876,7 +892,7 @@ impl Round {
 
     /// 大明カンを実行する
     fn execute_daiminkan(&mut self, caller: usize, discarder: usize, called_tile: Tile) {
-        let from = Player::meld_from_relative(caller, discarder);
+        let from = Player::meld_from_relative(caller, discarder, self.player_count);
         self.players[caller].do_daiminkan(called_tile, from);
 
         self.mark_last_discard_as_called(discarder);
@@ -886,7 +902,7 @@ impl Round {
         let open = self.players[caller].hand.melds().last().unwrap();
         let tiles = open.expanded_tiles();
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::PlayerCalled {
@@ -936,7 +952,7 @@ impl Round {
             .tiles
             .to_vec();
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::PlayerCalled {
@@ -994,7 +1010,7 @@ impl Round {
         let tiles = open.expanded_tiles();
         let added_tile = open.kan_fourth_tile();
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::PlayerCalled {
@@ -1026,7 +1042,7 @@ impl Round {
             [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         let mut responded = [true; 4];
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             if i == caller {
                 continue;
             }
@@ -1119,7 +1135,7 @@ impl Round {
         let tiles = open.expanded_tiles();
         let called_tile = Tile::new(tile_type);
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::PlayerCalled {
@@ -1162,7 +1178,7 @@ impl Round {
     fn reveal_new_dora_indicator(&mut self) {
         self.wall.add_dora_indicator();
         let dora_indicators = self.wall.dora_indicators();
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::DoraIndicatorsUpdated {
@@ -1221,7 +1237,7 @@ impl Round {
         ));
 
         let current_wind = self.players[player_idx].seat_wind;
-        for i in 0..4 {
+        for i in 0..self.player_count {
             if i != player_idx {
                 self.events.push((
                     i,
@@ -1372,7 +1388,7 @@ impl Round {
         // 全プレイヤーにリーチ通知
         let seat_wind = self.players[player_idx].seat_wind;
         let scores = self.get_scores();
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::PlayerRiichi {
@@ -1450,15 +1466,17 @@ impl Round {
             None,
             &dora_indicators,
             &uradora_indicators,
+            self.settings.three_player,
         );
 
-        // 点数移動を計算
+        // 点数移動を計算（三麻はツモ損: いない北家分は貰えない）
         let deltas = scoring::calculate_tsumo_score_deltas(
             winner,
             &score_result,
             winner_is_dealer,
             self.dealer,
             self.honba,
+            self.player_count,
         );
         let riichi_sticks = self.riichi_sticks;
 
@@ -1481,7 +1499,7 @@ impl Round {
         let player_hands = self.build_player_hands();
 
         // 全プレイヤーに和了イベントを送信
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::RoundWon {
@@ -1543,7 +1561,7 @@ impl Round {
         let mut tenpai_players = Vec::new();
         let mut noten_players = Vec::new();
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             if scoring::is_ready(&self.players[i]) {
                 tenpai_players.push(i);
             } else {
@@ -1580,7 +1598,7 @@ impl Round {
         self.phase = TurnPhase::RoundOver;
         self.result = Some(RoundResult::ExhaustiveDraw { dealer_tenpai });
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::RoundDraw {
@@ -1614,8 +1632,9 @@ impl Round {
     /// 条件: 各プレイヤーがちょうど1枚ずつ捨てており、
     /// 全て同じ風牌で、鳴きが発生していない
     fn check_four_winds_draw(&self) -> bool {
-        // 全プレイヤーがちょうど1枚捨てていること
-        for player in &self.players {
+        // 全プレイヤー（三麻は3人）がちょうど1枚捨てていること
+        let players = &self.players[..self.player_count];
+        for player in players {
             if player.discards.len() != 1 {
                 return false;
             }
@@ -1626,21 +1645,23 @@ impl Round {
         }
 
         // 全て同じ風牌であること
-        let first_tile = self.players[0].discards[0].tile;
+        let first_tile = players[0].discards[0].tile;
         if !first_tile.is_wind() {
             return false;
         }
 
-        self.players
+        players
             .iter()
             .all(|p| p.discards[0].tile.get() == first_tile.get())
     }
 
     /// 四家立直を判定する
     ///
-    /// 条件: 全4プレイヤーがリーチ宣言済み
+    /// 条件: 全プレイヤー（三麻は3人）がリーチ宣言済み
     fn check_four_riichi_draw(&self) -> bool {
-        self.players.iter().all(|p| p.is_riichi)
+        self.players[..self.player_count]
+            .iter()
+            .all(|p| p.is_riichi)
     }
 
     /// 九種九牌の宣言条件を判定する
@@ -1731,7 +1752,7 @@ impl Round {
         self.phase = TurnPhase::RoundOver;
         self.result = Some(RoundResult::SpecialDraw);
 
-        for i in 0..4 {
+        for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::RoundDraw {

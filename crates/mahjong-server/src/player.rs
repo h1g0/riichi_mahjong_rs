@@ -573,12 +573,18 @@ impl Player {
     }
 
     /// 捨てたプレイヤーと自分の相対位置から MeldFrom を返す
-    pub fn meld_from_relative(caller: usize, discarder: usize) -> MeldFrom {
-        match (caller + 4 - discarder) % 4 {
-            1 => MeldFrom::Previous,  // 上家（カミチャ）
-            2 => MeldFrom::Opposite,  // 対面（トイメン）
-            3 => MeldFrom::Following, // 下家（シモチャ）
-            _ => unreachable!(),
+    ///
+    /// 三麻（player_count=3）では対面が存在せず、diff 1=上家・diff 2=下家となる。
+    pub fn meld_from_relative(caller: usize, discarder: usize, player_count: usize) -> MeldFrom {
+        let diff = (caller + player_count - discarder) % player_count;
+        if diff == 1 {
+            MeldFrom::Previous // 上家（カミチャ）
+        } else if diff == player_count - 1 {
+            MeldFrom::Following // 下家（シモチャ）
+        } else if diff == 2 {
+            MeldFrom::Opposite // 対面（トイメン）
+        } else {
+            unreachable!()
         }
     }
 }
@@ -981,11 +987,20 @@ mod tests {
     #[test]
     fn test_meld_from_relative() {
         // プレイヤー1から見たプレイヤー0 → 上家（Previous）
-        assert_eq!(Player::meld_from_relative(1, 0), MeldFrom::Previous);
+        assert_eq!(Player::meld_from_relative(1, 0, 4), MeldFrom::Previous);
         // プレイヤー2から見たプレイヤー0 → 対面（Opposite）
-        assert_eq!(Player::meld_from_relative(2, 0), MeldFrom::Opposite);
+        assert_eq!(Player::meld_from_relative(2, 0, 4), MeldFrom::Opposite);
         // プレイヤー3から見たプレイヤー0 → 下家（Following）
-        assert_eq!(Player::meld_from_relative(3, 0), MeldFrom::Following);
+        assert_eq!(Player::meld_from_relative(3, 0, 4), MeldFrom::Following);
+    }
+
+    #[test]
+    fn test_meld_from_relative_three_player() {
+        // 三麻: 対面は存在せず、diff 1=上家・diff 2=下家
+        assert_eq!(Player::meld_from_relative(1, 0, 3), MeldFrom::Previous);
+        assert_eq!(Player::meld_from_relative(2, 0, 3), MeldFrom::Following);
+        assert_eq!(Player::meld_from_relative(0, 2, 3), MeldFrom::Previous);
+        assert_eq!(Player::meld_from_relative(0, 1, 3), MeldFrom::Following);
     }
 
     #[test]

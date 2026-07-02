@@ -54,6 +54,8 @@ pub struct CpuGameState {
     pub honba: usize,
     /// 供託リーチ棒
     pub riichi_sticks: usize,
+    /// 三麻かどうか（牌集合・ドラチェーンの解釈に使用）
+    pub three_player: bool,
 
     // --- 鳴き関連 ---
     /// 現在利用可能な鳴きアクション
@@ -91,11 +93,17 @@ impl CpuGameState {
             total_rounds: 0,
             honba: 0,
             riichi_sticks: 0,
+            three_player: false,
             pending_calls: Vec::new(),
             pending_call_tile: None,
             need_discard_after_call: false,
             pending_kan_draw: false,
         }
+    }
+
+    /// プレイヤー人数を返す（四麻=4、三麻=3）
+    pub fn player_count(&self) -> usize {
+        if self.three_player { 3 } else { 4 }
     }
 
     /// 風からプレイヤーインデックス（0=東, 1=南, 2=西, 3=北）を取得する
@@ -121,6 +129,7 @@ impl CpuGameState {
                 total_rounds,
                 honba,
                 riichi_sticks,
+                three_player,
                 ..
             } => {
                 // 新しい局の開始: 状態をリセット
@@ -138,7 +147,10 @@ impl CpuGameState {
                 self.player_melds = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
                 self.dora_indicators = dora_indicators.clone();
                 self.round_wind = *round_wind;
-                self.remaining_tiles = 70; // 136 - 14(王牌) - 13*4(配牌) = 70
+                self.three_player = *three_player;
+                // 四麻: 136 - 14(王牌) - 13*4(配牌) = 70
+                // 三麻: 108 - 14(王牌) - 13*3(配牌) = 55
+                self.remaining_tiles = if *three_player { 55 } else { 70 };
                 self.round_number = *round_number;
                 self.total_rounds = *total_rounds;
                 self.honba = *honba;
@@ -410,6 +422,15 @@ impl CpuGameState {
             *count = count.saturating_sub(1);
         }
 
+        // 三麻ではゲームに存在しない萬子2〜8を「全て見えている」扱いにする。
+        // これにより受け入れ枚数（4 - visible）や死に牌判定（visible >= 4）が
+        // 存在しない牌を生牌としてカウントしなくなる。
+        if self.three_player {
+            for tile_type in Tile::M2..=Tile::M8 {
+                counts[tile_type as usize] = 4;
+            }
+        }
+
         counts
     }
 }
@@ -461,6 +482,7 @@ mod tests {
             total_rounds: 0,
             honba: 0,
             riichi_sticks: 0,
+            three_player: false,
         });
 
         assert_eq!(state.my_seat_wind, Wind::South);
@@ -513,6 +535,7 @@ mod tests {
             total_rounds: 4,
             honba: 1,
             riichi_sticks: 1,
+            three_player: false,
         });
 
         assert_eq!(state.my_hand, hand);

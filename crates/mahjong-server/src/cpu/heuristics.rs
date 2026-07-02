@@ -15,7 +15,7 @@ use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::hand_info::status::Status;
 use mahjong_core::scoring::score::calculate_score;
 use mahjong_core::settings::Settings;
-use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
+use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora_in};
 use mahjong_core::winning_hand::name::Form;
 
 use super::client::{CpuConfig, CpuLevel, is_yakuhai};
@@ -236,7 +236,7 @@ fn dora_protection_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
 
     let mut dora_count = u32::from(c.tile.is_red_dora());
     for indicator in &ctx.state.dora_indicators {
-        if dora_indicator_to_dora(indicator.get()) == c.tile.get() {
+        if dora_indicator_to_dora_in(indicator.get(), ctx.state.three_player) == c.tile.get() {
             dora_count += 1;
         }
     }
@@ -1278,7 +1278,7 @@ fn estimate_ron_han(
             dora += 1;
         }
         for indicator in &state.dora_indicators {
-            if dora_indicator_to_dora(indicator.get()) == t.get() {
+            if dora_indicator_to_dora_in(indicator.get(), state.three_player) == t.get() {
                 dora += 1;
             }
         }
@@ -1379,7 +1379,7 @@ fn is_cheap_distant_call(
             return false;
         }
         for indicator in &state.dora_indicators {
-            if dora_indicator_to_dora(indicator.get()) == t.get() {
+            if dora_indicator_to_dora_in(indicator.get(), state.three_player) == t.get() {
                 return false;
             }
         }
