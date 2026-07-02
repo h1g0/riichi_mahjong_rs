@@ -104,7 +104,11 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
     if let Some(err) = remote.take_error() {
         let message = match err.code {
             Some(code) => error_code_message(code, lang).to_string(),
-            None => err.message,
+            None => {
+                // 通信層のエラー: 詳細はログに残し、表示は汎用文言にする
+                macroquad::logging::warn!("network error: {}", err.message);
+                i18n::Key::NetworkError.text(lang).to_string()
+            }
         };
         set_status(state, &message, true);
         return;
@@ -188,7 +192,7 @@ async fn main() {
             }
             // 対局中の接続バナー（ローカル対戦では常に None）
             game_state.online_state.status_line = adp.status_text(game_state.lang);
-            game_state.online_state.status_is_error = true;
+            game_state.online_state.status_is_error = game_state.online_state.status_line.is_some();
             // 手番の残り時間（オンラインのみ）
             game_state.online_state.turn_remaining = adp.turn_remaining_secs();
         }

@@ -388,6 +388,8 @@ pub enum Key {
     Reconnecting,
     /// 他プレイヤー切断・CPU代打ちの表示
     PeerDisconnected,
+    /// 通信エラーの汎用表示（技術的な詳細はログに出す）
+    NetworkError,
 }
 
 impl Key {
@@ -627,6 +629,10 @@ impl Key {
             Key::PeerDisconnected => match lang {
                 Lang::Ja => "他のプレイヤーが切断中（CPUが代打ち）",
                 Lang::En => "A player disconnected (a CPU is filling in)",
+            },
+            Key::NetworkError => match lang {
+                Lang::Ja => "通信エラーが発生しました",
+                Lang::En => "A network error occurred",
             },
         }
     }

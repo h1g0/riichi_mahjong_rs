@@ -104,17 +104,24 @@ function mahjong_ws_read_msg(handle, buf_ptr) {
     new Uint8Array(wasm_memory.buffer, buf_ptr, msg.length).set(msg);
 }
 
-// 接続を閉じる
+// 接続を閉じ、保持しているリソースを解放する
+// （再接続のたびにハンドルが増えるため、古い接続の参照とキューは残さない）
 function mahjong_ws_close(handle) {
     const entry = mahjong_ws.sockets[handle];
-    if (entry && entry.ws) {
+    if (!entry) {
+        return;
+    }
+    if (entry.ws) {
         try {
             entry.ws.close();
         } catch (_err) {
             // 既に閉じている場合などは無視
         }
+        entry.ws.onopen = entry.ws.onmessage = entry.ws.onclose = entry.ws.onerror = null;
+        entry.ws = null;
     }
-    if (entry && entry.status !== MAHJONG_WS_ERROR) {
+    entry.queue = [];
+    if (entry.status !== MAHJONG_WS_ERROR) {
         entry.status = MAHJONG_WS_CLOSED;
     }
 }

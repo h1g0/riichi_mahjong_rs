@@ -19,6 +19,9 @@ pub enum WsEvent {
     /// 接続が閉じられた
     Closed,
     /// エラーが発生した（接続失敗・通信エラー）
+    ///
+    /// 文字列はログ向けの技術的な詳細。UI に表示する文言は
+    /// クライアント側でローカライズして組み立てる。
     Error(String),
 }
 
@@ -126,14 +129,14 @@ mod native {
         let (mut socket, _) = match tungstenite::connect(url) {
             Ok(ok) => ok,
             Err(e) => {
-                let _ = in_tx.send(WsEvent::Error(format!("接続に失敗しました: {e}")));
+                let _ = in_tx.send(WsEvent::Error(format!("connect failed: {e}")));
                 return;
             }
         };
 
         // 送受信を1ループで回すためノンブロッキングにする
         if let Err(e) = set_nonblocking(socket.get_mut()) {
-            let _ = in_tx.send(WsEvent::Error(format!("ソケット設定に失敗しました: {e}")));
+            let _ = in_tx.send(WsEvent::Error(format!("socket setup failed: {e}")));
             return;
         }
 
@@ -146,9 +149,16 @@ mod native {
             loop {
                 match out_rx.try_recv() {
                     Ok(text) => {
-                        if let Err(e) = socket.write(Message::text(text)) {
-                            let _ = in_tx.send(WsEvent::Error(format!("送信エラー: {e}")));
-                            return;
+                        match socket.write(Message::text(text)) {
+                            Ok(()) => {}
+                            // WouldBlock でもフレームは内部バッファに積まれて
+                            // いるため、後続の flush が再送を試みる
+                            Err(tungstenite::Error::Io(ref e))
+                                if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                            Err(e) => {
+                                let _ = in_tx.send(WsEvent::Error(format!("send failed: {e}")));
+                                return;
+                            }
                         }
                     }
                     Err(TryRecvError::Empty) => break,
@@ -171,7 +181,7 @@ mod native {
                     return;
                 }
                 Err(e) => {
-                    let _ = in_tx.send(WsEvent::Error(format!("送信エラー: {e}")));
+                    let _ = in_tx.send(WsEvent::Error(format!("flush failed: {e}")));
                     return;
                 }
             }
@@ -200,7 +210,7 @@ mod native {
                     return;
                 }
                 Err(e) => {
-                    let _ = in_tx.send(WsEvent::Error(format!("通信エラー: {e}")));
+                    let _ = in_tx.send(WsEvent::Error(format!("receive failed: {e}")));
                     return;
                 }
             }
@@ -309,9 +319,7 @@ mod wasm {
                 }
                 match String::from_utf8(buf) {
                     Ok(text) => events.push(WsEvent::Message(text)),
-                    Err(_) => events.push(WsEvent::Error(
-                        "サーバからのメッセージを解釈できません".to_string(),
-                    )),
+                    Err(_) => events.push(WsEvent::Error("invalid UTF-8 from server".to_string())),
                 }
             }
 
@@ -323,7 +331,7 @@ mod wasm {
                 }
                 STATUS_ERROR => {
                     self.terminated = true;
-                    events.push(WsEvent::Error("WebSocket接続エラー".to_string()));
+                    events.push(WsEvent::Error("WebSocket error".to_string()));
                 }
                 _ => {}
             }

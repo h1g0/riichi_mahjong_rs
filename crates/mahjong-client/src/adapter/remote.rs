@@ -55,7 +55,9 @@ impl RoomView {
 pub struct RemoteError {
     /// サーバが返したエラーコード（通信層のエラーは None）
     pub code: Option<ErrorCode>,
-    /// 説明（UI 表示用）
+    /// 技術的な詳細（ログ向け）。UI 表示用の文言は `code` から
+    /// [`error_code_message`] で、`code` が無い場合は汎用の通信エラー文言を
+    /// クライアント側でローカライズして組み立てる。
     pub message: String,
 }
 
@@ -222,7 +224,7 @@ impl RemoteAdapter {
                     Err(_) => {
                         self.last_error = Some(RemoteError {
                             code: None,
-                            message: "サーバからの応答を解釈できません".to_string(),
+                            message: "invalid server message".to_string(),
                         });
                     }
                 },
@@ -237,6 +239,8 @@ impl RemoteAdapter {
     /// 対局中は自動再接続を試みる（エラーは表に出さず「再接続中」を表示）。
     /// ロビーや対局終了後は通常の切断として扱う。
     fn handle_disconnect(&mut self, message: Option<String>) {
+        // 切断中は手番のカウントダウン表示を止める（再接続後にサーバが再送する）
+        self.turn_deadline = None;
         if self.should_auto_reconnect() {
             // 一時的な切断: 再接続モードへ（既に再接続中なら継続）
             if !self.reconnecting {
@@ -415,7 +419,7 @@ impl RemoteAdapter {
             Err(e) => {
                 self.last_error = Some(RemoteError {
                     code: None,
-                    message: format!("メッセージの作成に失敗しました: {e}"),
+                    message: format!("failed to encode message: {e}"),
                 });
             }
         }

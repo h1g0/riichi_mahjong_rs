@@ -105,6 +105,14 @@ impl GameDriver {
         match self.cpus.get_mut(seat) {
             Some(Some(cpu)) => {
                 cpu.controlled = controlled;
+                if !controlled {
+                    // 代打ち解除: 適用前のCPUアクションを破棄する
+                    // （再接続した人間の操作を代打ちが横取りしないように）
+                    for batch in &mut self.pending_cpu_batches {
+                        batch.actions.retain(|(s, _)| *s != seat);
+                    }
+                    self.pending_cpu_batches.retain(|b| !b.actions.is_empty());
+                }
                 true
             }
             _ => false,
@@ -751,6 +759,69 @@ mod tests {
         let mut driver = GameDriver::new(GameSettings::default());
         assert!(!driver.set_cpu_controlled(0, true));
         assert!(!driver.is_cpu_controlled(0));
+    }
+
+    /// 代打ち解除で適用前のCPUアクションが破棄されることを確認
+    ///
+    /// 切断→CPU代打ち中に予約された打牌が、人間の再接続後に適用されて
+    /// 操作を横取りしないための回帰テスト。
+    #[test]
+    fn test_releasing_cpu_control_discards_pending_actions() {
+        let mut driver = driver_with_three_cpus();
+        let config = default_cpu_configs()[0].clone();
+        driver.set_shadow_cpu(0, config);
+        driver.set_cpu_action_delay(1.0);
+        driver.table_mut().start_round();
+
+        {
+            let round = driver.table_mut().current_round_mut().unwrap();
+            round.current_player = 0;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.players[0].draw(Tile::new(Tile::Z7));
+            round.drain_events();
+        }
+
+        // 切断をシミュレート: 代打ちに切り替え、CPUの打牌を予約する
+        assert!(driver.set_cpu_controlled(0, true));
+        driver.schedule_cpu_actions(vec![(0, ClientAction::Discard { tile: None })], 1.0, 10.0);
+
+        // 再接続: 代打ちを解除すると予約済みアクションは破棄される
+        assert!(driver.set_cpu_controlled(0, false));
+        assert!(driver.pending_cpu_batches.is_empty());
+
+        // 予約時刻を過ぎても勝手に打牌されない（人間の入力待ちのまま）
+        driver.tick_at(20.0);
+        let round = driver.table().current_round().unwrap();
+        assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+        assert_eq!(round.current_player, 0);
+    }
+
+    /// 代打ち解除が他の座席の予約済みCPUアクションを巻き添えにしないことを確認
+    #[test]
+    fn test_releasing_cpu_control_keeps_other_seats_actions() {
+        let mut driver = driver_with_three_cpus();
+        let config = default_cpu_configs()[0].clone();
+        driver.set_shadow_cpu(0, config);
+        driver.set_cpu_action_delay(1.0);
+        driver.table_mut().start_round();
+
+        driver.set_cpu_controlled(0, true);
+        driver.schedule_cpu_actions(
+            vec![
+                (0, ClientAction::Pass),
+                (1, ClientAction::Discard { tile: None }),
+            ],
+            1.0,
+            10.0,
+        );
+
+        driver.set_cpu_controlled(0, false);
+        // 座席0のアクションだけが取り除かれ、座席1のアクションは残る
+        assert_eq!(driver.pending_cpu_batches.len(), 1);
+        assert_eq!(
+            driver.pending_cpu_batches.front().unwrap().actions,
+            vec![(1, ClientAction::Discard { tile: None })]
+        );
     }
 
     /// run_until_blocked が人間の打牌待ちで停止することを確認
