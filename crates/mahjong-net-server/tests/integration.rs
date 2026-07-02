@@ -612,6 +612,65 @@ async fn test_action_timeout_auto_acts() {
     .expect("テスト全体がタイムアウトした");
 }
 
+/// 無効なアクションの連投で手番の制限時間が延長されないことを確認する
+///
+/// かつては任意のメッセージ処理のたびに期限を張り直していたため、
+/// 制限時間より短い間隔でメッセージを送り続けると永遠にタイムアウトせず、
+/// 対局を止められた。同じ操作待ちが続く間は期限を維持する回帰テスト。
+#[tokio::test]
+async fn test_action_timeout_not_extended_by_invalid_actions() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let config = RoomConfig {
+            action_timeout: Some(Duration::from_millis(500)),
+            ..fast_config()
+        };
+        let addr = start_server(config).await;
+
+        let mut host = TestClient::connect(addr).await;
+        host.hello("ホスト").await;
+        host.create_room().await;
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
+
+        // 自分のツモ（打牌待ち）まで読み進める
+        loop {
+            if let ServerMessage::Event(ServerEvent::TileDrawn { .. }) = host.recv().await {
+                break;
+            }
+        }
+
+        // 打牌せずに、制限時間より短い間隔で無効なアクションを送り続ける。
+        // それでもタイムアウトは発火し、サーバが代行打牌（ツモ切り）する
+        let start = std::time::Instant::now();
+        loop {
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "制限時間が延長され続けてタイムアウトしなかった"
+            );
+            host.send(&ClientMessage::Action(ClientAction::Ron)).await;
+            let deadline = tokio::time::sleep(Duration::from_millis(100));
+            tokio::pin!(deadline);
+            let mut auto_discarded = false;
+            loop {
+                tokio::select! {
+                    msg = host.recv() => {
+                        if let ServerMessage::Event(ServerEvent::TileDiscarded { .. }) = msg {
+                            auto_discarded = true;
+                            break;
+                        }
+                    }
+                    _ = &mut deadline => break,
+                }
+            }
+            if auto_discarded {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("テスト全体がタイムアウトした");
+}
+
 /// 同一IPからの入室試行が多すぎると RateLimited で拒否されることを確認する
 #[tokio::test]
 async fn test_join_rate_limit() {

@@ -3,6 +3,10 @@
 //! 1ルーム = 1 tokio タスク。ルームが `GameDriver`（卓 + CPU）を所有し、
 //! 接続タスクからの `RoomMsg` を mpsc で逐次処理する。
 //! 同期的な卓の操作が await をまたがないため、ゲーム状態のロックは不要。
+//!
+//! クライアントへの送信は `try_send` で行い、決してブロックしない。
+//! 受信が追いつかない接続（バッファ満杯）は切断として扱い、
+//! 1人の遅延がルーム全体の進行を止めないようにする。
 
 use std::time::Duration;
 
@@ -127,12 +131,16 @@ struct Room {
     close_deadline: Option<Instant>,
     /// 手番の制限時間の期限
     action_deadline: Option<Instant>,
+    /// 現在の制限時間が対象とする座席（操作待ちの変化検出に使う）
+    deadline_seats: Vec<usize>,
     /// ゲーム進行の時刻基準（対局開始時刻）。CPU遅延の計測に使う
     game_clock: Option<Instant>,
     /// ルームを閉じるフラグ
     closing: bool,
     /// 次に割り当てる接続の世代番号
     next_conn_gen: u64,
+    /// 送信失敗（バッファ満杯・切断）で切断処理が必要になった座席
+    pending_departures: Vec<usize>,
     /// CPU（空席・シャドー）の強さ・性格。ホストが対局開始時に指定する
     cpu_configs: [CpuConfig; 3],
 }
@@ -166,9 +174,11 @@ pub async fn run_room(
         ready_deadline: None,
         close_deadline: Some(Instant::now() + config.lobby_timeout),
         action_deadline: None,
+        deadline_seats: Vec::new(),
         game_clock: None,
         closing: false,
         next_conn_gen: 0,
+        pending_departures: Vec::new(),
         cpu_configs: default_cpu_configs(),
     };
 
@@ -183,25 +193,28 @@ pub async fn run_room(
 
         tokio::select! {
             msg = rx.recv() => match msg {
-                Some(msg) => room.handle_msg(msg).await,
+                Some(msg) => room.handle_msg(msg),
                 None => break,
             },
             _ = game_tick.tick(), if room.needs_game_tick() => {
-                room.game_tick().await;
+                room.game_tick();
             }
             _ = tokio::time::sleep_until(ready_at), if room.ready_deadline.is_some() => {
                 tracing::debug!(code = room.code, "ready timeout; auto-advancing round");
-                room.advance_round().await;
+                room.advance_round();
             }
             _ = tokio::time::sleep_until(action_at), if room.action_deadline.is_some() => {
                 tracing::debug!(code = room.code, "action timeout; forcing default action");
-                room.on_action_timeout().await;
+                room.on_action_timeout();
             }
             _ = tokio::time::sleep_until(close_at), if room.close_deadline.is_some() => {
                 tracing::info!(code = room.code, "room expired");
                 room.closing = true;
             }
         }
+
+        // 送信に失敗した接続の切断処理をまとめて行う
+        room.process_departures();
 
         if room.closing {
             break;
@@ -224,7 +237,7 @@ impl Room {
         self.driver.is_some()
     }
 
-    async fn handle_msg(&mut self, msg: RoomMsg) {
+    fn handle_msg(&mut self, msg: RoomMsg) {
         match msg {
             RoomMsg::Join {
                 name,
@@ -235,24 +248,24 @@ impl Room {
                 Ok(outcome) => {
                     let _ = reply.send(Ok((outcome.seat, outcome.conn_gen)));
                     if outcome.reconnect {
-                        self.handle_reconnect(outcome.seat).await;
+                        self.handle_reconnect(outcome.seat);
                     } else {
-                        self.broadcast_room_state().await;
+                        self.broadcast_room_state();
                     }
                 }
                 Err(code) => {
                     let _ = reply.send(Err(code));
                 }
             },
-            RoomMsg::FromSeat { seat, msg } => self.handle_client_message(seat, msg).await,
-            RoomMsg::Leave { seat } => self.handle_departure(seat).await,
+            RoomMsg::FromSeat { seat, msg } => self.handle_client_message(seat, msg),
+            RoomMsg::Leave { seat } => self.handle_departure(seat),
             RoomMsg::Disconnected { seat, conn_gen } => {
                 // 古い接続からの遅延切断通知は無視する（再接続済みなら世代が進んでいる）
                 if self.seats[seat]
                     .as_ref()
                     .is_some_and(|s| s.conn_gen == conn_gen)
                 {
-                    self.handle_departure(seat).await;
+                    self.handle_departure(seat);
                 }
             }
         }
@@ -321,7 +334,7 @@ impl Room {
     }
 
     /// 再接続した座席へ CPU 代打ちを止め、状態を再同期する
-    async fn handle_reconnect(&mut self, seat: usize) {
+    fn handle_reconnect(&mut self, seat: usize) {
         // CPU代打ちを止めて人間の操作に戻す
         if let Some(driver) = self.driver.as_mut() {
             driver.set_cpu_controlled(seat, false);
@@ -330,30 +343,24 @@ impl Room {
         self.broadcast(ServerMessage::PlayerConnectionChanged {
             seat,
             connected: true,
-        })
-        .await;
+        });
         // 再接続した座席へ最新の RoomState と現在の局の再生を送る
-        self.send_room_state_to(seat).await;
+        self.send_room_state_to(seat);
         let history = self.seats[seat]
             .as_ref()
             .map(|s| s.history.clone())
             .unwrap_or_default();
-        if let Some(tx) = self.seats[seat].as_ref().and_then(|s| s.tx.clone()) {
-            let _ = tx.send(ServerMessage::Resync { events: history }).await;
-        }
+        self.send_to_seat(seat, ServerMessage::Resync { events: history });
         // 再接続で操作待ちの主体が変わった可能性があるため期限を張り直す
-        self.refresh_action_deadline().await;
+        self.refresh_action_deadline();
     }
 
-    async fn handle_client_message(&mut self, seat: usize, msg: ClientMessage) {
+    fn handle_client_message(&mut self, seat: usize, msg: ClientMessage) {
         match msg {
-            ClientMessage::StartGame { cpu_configs } => {
-                self.handle_start_game(seat, cpu_configs).await
-            }
+            ClientMessage::StartGame { cpu_configs } => self.handle_start_game(seat, cpu_configs),
             ClientMessage::Action(action) => {
                 if !self.game_started() || self.awaiting_ready {
-                    self.send_error(seat, ErrorCode::InvalidAction, "no action expected now")
-                        .await;
+                    self.send_error(seat, ErrorCode::InvalidAction, "no action expected now");
                     return;
                 }
                 let now = self.now_secs();
@@ -368,10 +375,9 @@ impl Room {
                         seat,
                         ErrorCode::InvalidAction,
                         &format!("action rejected: seat={seat} action={action:?} phase={phase:?}"),
-                    )
-                    .await;
+                    );
                 }
-                self.progress_game().await;
+                self.progress_game();
             }
             ClientMessage::ReadyNextRound => {
                 if !self.awaiting_ready {
@@ -381,26 +387,23 @@ impl Room {
                 }
                 self.ready[seat] = true;
                 if self.all_connected_humans_ready() {
-                    self.advance_round().await;
+                    self.advance_round();
                 }
             }
             // Hello / CreateRoom / JoinRoom / LeaveRoom は接続タスク側で処理済み
             _ => {
-                self.send_error(seat, ErrorCode::BadMessage, "unexpected message")
-                    .await;
+                self.send_error(seat, ErrorCode::BadMessage, "unexpected message");
             }
         }
     }
 
-    async fn handle_start_game(&mut self, seat: usize, cpu_configs: Option<[CpuSpec; 3]>) {
+    fn handle_start_game(&mut self, seat: usize, cpu_configs: Option<[CpuSpec; 3]>) {
         if seat != HOST_SEAT {
-            self.send_error(seat, ErrorCode::NotHost, "only the host can start")
-                .await;
+            self.send_error(seat, ErrorCode::NotHost, "only the host can start");
             return;
         }
         if self.game_started() {
-            self.send_error(seat, ErrorCode::GameInProgress, "game already started")
-                .await;
+            self.send_error(seat, ErrorCode::GameInProgress, "game already started");
             return;
         }
 
@@ -428,32 +431,32 @@ impl Room {
         self.close_deadline = None;
 
         tracing::info!(code = self.code, "game started");
-        self.broadcast_room_state().await;
-        self.progress_game().await;
+        self.broadcast_room_state();
+        self.progress_game();
     }
 
     /// 直前のアクション結果を配信し、局終了の確認・期限の再設定を行う
     ///
     /// CPUの進行は [`game_tick`](Self::game_tick) が遅延を計りながら進めるため、
     /// ここではツモまで一気に進めない（イベントの送出と状態更新のみ）。
-    async fn progress_game(&mut self) {
-        self.flush_events().await;
+    fn progress_game(&mut self) {
+        self.flush_events();
         self.check_round_end();
-        self.refresh_action_deadline().await;
+        self.refresh_action_deadline();
     }
 
     /// CPU遅延を計りながらゲームを1ティック進める
     ///
     /// 待機中のCPUアクションが期限を迎えれば適用し、ツモフェーズなら牌を引く。
     /// `needs_game_tick` が true の間だけ呼ばれる。
-    async fn game_tick(&mut self) {
+    fn game_tick(&mut self) {
         let now = self.now_secs();
         if let Some(driver) = self.driver.as_mut() {
             driver.tick_at(now);
         }
-        self.flush_events().await;
+        self.flush_events();
         self.check_round_end();
-        self.refresh_action_deadline().await;
+        self.refresh_action_deadline();
     }
 
     /// CPUの進行（ツモ・遅延待ちの打牌など）のために tick が必要か
@@ -478,15 +481,17 @@ impl Room {
 
     /// 手番の制限時間を再設定する
     ///
-    /// 接続中の人間の操作待ちなら期限を張り直し、対象座席へ残り秒数を通知する。
+    /// 接続中の人間の操作待ちなら期限を設定し、対象座席へ残り秒数を通知する。
+    /// 同じ操作待ちが続いている間は期限を維持する（他プレイヤーの無効操作
+    /// などで制限時間が延長されるのを防ぐ）。
     /// それ以外（CPU進行中・確認待ち・局終了）は期限を解除する。
-    async fn refresh_action_deadline(&mut self) {
+    fn refresh_action_deadline(&mut self) {
         let Some(timeout) = self.config.action_timeout else {
-            self.action_deadline = None;
+            self.clear_action_deadline();
             return;
         };
         if self.awaiting_ready || self.game_over_sent {
-            self.action_deadline = None;
+            self.clear_action_deadline();
             return;
         }
 
@@ -500,22 +505,32 @@ impl Room {
             .collect();
 
         if seats.is_empty() {
-            self.action_deadline = None;
+            self.clear_action_deadline();
             return;
         }
 
+        // 操作待ちの座席が変わっていなければ既存の期限を使い続ける
+        if self.action_deadline.is_some() && seats == self.deadline_seats {
+            return;
+        }
+
+        self.deadline_seats = seats.clone();
         self.action_deadline = Some(Instant::now() + timeout);
         // 端数は切り上げる（短い制限でも 0 秒表示にならないように）
         let seconds = timeout.as_secs_f64().ceil() as u32;
         for seat in seats {
-            if let Some(tx) = self.seats[seat].as_ref().and_then(|s| s.tx.clone()) {
-                let _ = tx.send(ServerMessage::TurnTimer { seconds }).await;
-            }
+            self.send_to_seat(seat, ServerMessage::TurnTimer { seconds });
         }
     }
 
+    /// 手番の制限時間を解除する
+    fn clear_action_deadline(&mut self) {
+        self.action_deadline = None;
+        self.deadline_seats.clear();
+    }
+
     /// 手番の制限時間切れ: 待っている接続中の人間に既定アクションを代行する
-    async fn on_action_timeout(&mut self) {
+    fn on_action_timeout(&mut self) {
         let now = self.now_secs();
         let seats: Vec<usize> = self
             .driver
@@ -530,15 +545,15 @@ impl Room {
                 driver.force_default_action_at(seat, now);
             }
         }
-        self.action_deadline = None;
-        self.progress_game().await;
+        self.clear_action_deadline();
+        self.progress_game();
     }
 
     /// 各座席のイベントを履歴へ記録し、接続中の座席へ送信する
     ///
     /// 履歴は局開始（GameStarted）でリセットし、現在の局のイベントだけを
     /// 保持する。切断中の座席でも履歴は記録され、再接続時の再同期に使う。
-    async fn flush_events(&mut self) {
+    fn flush_events(&mut self) {
         if self.driver.is_none() {
             return;
         }
@@ -551,28 +566,19 @@ impl Room {
         };
 
         for (seat, events) in per_seat.into_iter().enumerate() {
-            // 履歴へ記録（局開始でリセット）して送信チャネルを取り出す
-            let tx = {
-                let Some(s) = self.seats[seat].as_mut() else {
-                    continue;
-                };
-                for event in &events {
+            for event in events {
+                // 履歴へ記録する（局開始でリセット）
+                {
+                    let Some(s) = self.seats[seat].as_mut() else {
+                        break;
+                    };
                     if matches!(event, ServerEvent::GameStarted { .. }) {
                         s.history.clear();
                     }
                     s.history.push(event.clone());
                 }
-                s.tx.clone()
-            };
-
-            // 接続中の座席へ送信する
-            if let Some(tx) = tx {
-                for event in events {
-                    if tx.send(ServerMessage::Event(event)).await.is_err() {
-                        // 送信失敗は切断として扱う（Disconnected が後続で届く）
-                        break;
-                    }
-                }
+                // 接続中なら送信する（切断中は send_to_seat が何もしない）
+                self.send_to_seat(seat, ServerMessage::Event(event));
             }
         }
     }
@@ -605,7 +611,7 @@ impl Room {
     }
 
     /// 次の局へ進める（ゲーム終了なら GameOver を配信する）
-    async fn advance_round(&mut self) {
+    fn advance_round(&mut self) {
         self.awaiting_ready = false;
         self.ready_deadline = None;
 
@@ -617,27 +623,41 @@ impl Room {
 
         if driver.is_game_over() {
             let final_scores = driver.table().scores;
-            self.broadcast(ServerMessage::GameOver { final_scores })
-                .await;
+            self.broadcast(ServerMessage::GameOver { final_scores });
             self.game_over_sent = true;
-            self.action_deadline = None;
+            self.clear_action_deadline();
             // 全員が切断したら閉じる。念のため期限も設定する
             self.close_deadline = Some(Instant::now() + self.config.abandoned_timeout);
             tracing::info!(code = self.code, "game over");
         } else {
-            self.progress_game().await;
+            self.progress_game();
+        }
+    }
+
+    /// 送信失敗で切断扱いになった座席の切断処理をまとめて行う
+    ///
+    /// 切断処理中の送信（切断通知など）がさらに失敗する可能性があるため、
+    /// 空になるまで繰り返す。各座席は一度切断されると送信対象から外れるので
+    /// 必ず停止する。
+    fn process_departures(&mut self) {
+        while let Some(seat) = self.pending_departures.pop() {
+            tracing::info!(
+                code = self.code,
+                seat,
+                "send failed; treating as disconnect"
+            );
+            self.handle_departure(seat);
         }
     }
 
     /// 退出または切断を処理する
-    async fn handle_departure(&mut self, seat: usize) {
+    fn handle_departure(&mut self, seat: usize) {
         // 開始前: 座席を空ける。ホストが抜けたらルームを閉じる
         if !self.game_started() {
             self.seats[seat] = None;
             tracing::info!(code = self.code, seat, "player left");
             if seat == HOST_SEAT {
-                self.broadcast_error(ErrorCode::NotInRoom, "room closed by host")
-                    .await;
+                self.broadcast_error(ErrorCode::NotInRoom, "room closed by host");
                 self.closing = true;
                 return;
             }
@@ -645,7 +665,7 @@ impl Room {
                 self.closing = true;
                 return;
             }
-            self.broadcast_room_state().await;
+            self.broadcast_room_state();
             return;
         }
 
@@ -659,8 +679,11 @@ impl Room {
         }
 
         // 対局中: 座席は保持したまま切断扱いにし、CPUが代打ちする
-        if let Some(s) = self.seats[seat].as_mut() {
-            s.tx = None;
+        match self.seats[seat].as_mut() {
+            // 既に切断処理済みなら二重に処理しない
+            // （送信失敗とソケット切断の両方から呼ばれることがある）
+            Some(s) if s.tx.is_some() => s.tx = None,
+            _ => return,
         }
         tracing::info!(
             code = self.code,
@@ -677,13 +700,12 @@ impl Room {
         self.broadcast(ServerMessage::PlayerConnectionChanged {
             seat,
             connected: false,
-        })
-        .await;
+        });
         // 確認待ち中の切断はその座席の確認を不要にする
         if self.awaiting_ready && self.all_connected_humans_ready() {
-            self.advance_round().await;
+            self.advance_round();
         } else {
-            self.progress_game().await;
+            self.progress_game();
         }
 
         if !self.any_connected_human() {
@@ -721,60 +743,67 @@ impl Room {
     }
 
     /// 全員に RoomState を送る（your_seat は受信者ごとに変わる）
-    async fn broadcast_room_state(&self) {
+    fn broadcast_room_state(&mut self) {
         let seats_info = self.seats_info();
         for seat in 0..4 {
-            self.send_room_state_with(seat, &seats_info).await;
+            self.send_room_state_with(seat, &seats_info);
         }
     }
 
     /// 特定の座席へ RoomState を送る
-    async fn send_room_state_to(&self, seat: usize) {
+    fn send_room_state_to(&mut self, seat: usize) {
         let seats_info = self.seats_info();
-        self.send_room_state_with(seat, &seats_info).await;
+        self.send_room_state_with(seat, &seats_info);
     }
 
     /// 組み立て済みの座席情報を使って特定の座席へ RoomState を送る
-    async fn send_room_state_with(&self, seat: usize, seats_info: &[SeatInfo; 4]) {
-        let Some(tx) = self.seats[seat].as_ref().and_then(|s| s.tx.clone()) else {
-            return;
-        };
+    fn send_room_state_with(&mut self, seat: usize, seats_info: &[SeatInfo; 4]) {
         let msg = ServerMessage::RoomState {
             code: self.code.clone(),
             seats: seats_info.clone(),
             host_seat: HOST_SEAT,
             your_seat: seat,
         };
-        let _ = tx.send(msg).await;
+        self.send_to_seat(seat, msg);
     }
 
     /// 接続中の全員にメッセージを送る
-    async fn broadcast(&self, msg: ServerMessage) {
-        for seat in self.seats.iter().flatten() {
-            if let Some(tx) = &seat.tx {
-                let _ = tx.send(msg.clone()).await;
-            }
+    fn broadcast(&mut self, msg: ServerMessage) {
+        for seat in 0..4 {
+            self.send_to_seat(seat, msg.clone());
         }
     }
 
     /// 接続中の全員にエラーを送る
-    async fn broadcast_error(&self, code: ErrorCode, message: &str) {
+    fn broadcast_error(&mut self, code: ErrorCode, message: &str) {
         self.broadcast(ServerMessage::Error {
             code,
             message: message.to_string(),
-        })
-        .await;
+        });
     }
 
     /// 特定の座席にエラーを送る
-    async fn send_error(&self, seat: usize, code: ErrorCode, message: &str) {
-        if let Some(tx) = self.seats[seat].as_ref().and_then(|s| s.tx.clone()) {
-            let _ = tx
-                .send(ServerMessage::Error {
-                    code,
-                    message: message.to_string(),
-                })
-                .await;
+    fn send_error(&mut self, seat: usize, code: ErrorCode, message: &str) {
+        self.send_to_seat(
+            seat,
+            ServerMessage::Error {
+                code,
+                message: message.to_string(),
+            },
+        );
+    }
+
+    /// 特定の座席へブロックせずに送信する（切断中の座席は何もしない）
+    ///
+    /// 送信バッファが満杯（受信が長時間止まっている）か接続が閉じている
+    /// 場合は失敗として座席を切断処理の対象に積む。実際の切断処理は
+    /// [`process_departures`](Self::process_departures) がまとめて行う。
+    fn send_to_seat(&mut self, seat: usize, msg: ServerMessage) {
+        let Some(tx) = self.seats[seat].as_ref().and_then(|s| s.tx.as_ref()) else {
+            return;
+        };
+        if tx.try_send(msg).is_err() && !self.pending_departures.contains(&seat) {
+            self.pending_departures.push(seat);
         }
     }
 }

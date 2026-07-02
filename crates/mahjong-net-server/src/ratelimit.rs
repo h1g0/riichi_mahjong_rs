@@ -15,6 +15,12 @@ const MAX_ATTEMPTS: usize = 10;
 /// 時間窓の長さ
 const WINDOW: Duration = Duration::from_secs(60);
 
+/// 全体の掃除を始めるIP数のしきい値
+///
+/// 記録済みのIPがこの数を超えたら、時間窓を過ぎた古いIPの記録を
+/// まとめて捨てる（IPごとの記録が無限に増えるのを防ぐ）。
+const SWEEP_THRESHOLD: usize = 64;
+
 /// IPごとの入室試行レート制限
 #[derive(Clone, Default)]
 pub struct RateLimiter {
@@ -38,10 +44,18 @@ impl RateLimiter {
     /// 時刻を指定して試行を判定する（テスト用）
     fn check_at(&self, ip: IpAddr, now: Instant) -> bool {
         let mut map = self.attempts.lock().unwrap();
+        let cutoff = now.checked_sub(WINDOW);
+
+        // IPが増えすぎたら、時間窓内の記録が無いIPをまとめて捨てる
+        if map.len() > SWEEP_THRESHOLD
+            && let Some(cutoff) = cutoff
+        {
+            map.retain(|_, entry| entry.back().is_some_and(|&last| last >= cutoff));
+        }
+
         let entry = map.entry(ip).or_default();
 
         // 時間窓より古い記録を捨てる
-        let cutoff = now.checked_sub(WINDOW);
         while let Some(&front) = entry.front() {
             match cutoff {
                 Some(cutoff) if front < cutoff => {
@@ -56,6 +70,12 @@ impl RateLimiter {
         }
         entry.push_back(now);
         true
+    }
+
+    /// 記録されているIP数（テスト用）
+    #[cfg(test)]
+    fn tracked_ips(&self) -> usize {
+        self.attempts.lock().unwrap().len()
     }
 }
 
@@ -90,6 +110,24 @@ mod tests {
         // 時間窓を超えて経過すると再び許可される
         let later = start + WINDOW + Duration::from_secs(1);
         assert!(limiter.check_at(ip(), later));
+    }
+
+    #[test]
+    fn test_stale_ips_are_swept() {
+        let limiter = RateLimiter::new();
+        let start = Instant::now();
+
+        // しきい値を超える数のIPを記録する
+        for i in 0..=SWEEP_THRESHOLD {
+            let ip: IpAddr = format!("10.0.{}.{}", i / 256, i % 256).parse().unwrap();
+            assert!(limiter.check_at(ip, start));
+        }
+        assert!(limiter.tracked_ips() > SWEEP_THRESHOLD);
+
+        // 時間窓を過ぎた後の試行で古いIPの記録が掃除される
+        let later = start + WINDOW + Duration::from_secs(1);
+        assert!(limiter.check_at(ip(), later));
+        assert_eq!(limiter.tracked_ips(), 1, "古いIPの記録が残っている");
     }
 
     #[test]
