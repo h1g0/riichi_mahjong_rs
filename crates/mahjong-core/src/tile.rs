@@ -252,6 +252,24 @@ pub fn suit_rank(tile: TileType) -> Option<u32> {
     }
 }
 
+/// ドラ表示牌から実際のドラを返す（三麻対応版）
+///
+/// 三麻では萬子は1mと9mしか存在しないため、
+/// 萬子のドラチェーンは 1m→9m、9m→1m とラップする（天鳳準拠）。
+/// それ以外の牌は四麻と同じチェーンを使う。
+pub fn dora_indicator_to_dora_in(indicator: TileType, three_player: bool) -> TileType {
+    if three_player {
+        match indicator {
+            // 三麻の萬子: 1m→9m、9m→1m（2m〜8mは存在しない）
+            Tile::M1 => Tile::M9,
+            Tile::M9 => Tile::M1,
+            _ => dora_indicator_to_dora(indicator),
+        }
+    } else {
+        dora_indicator_to_dora(indicator)
+    }
+}
+
 /// ドラ表示牌から実際のドラを返す
 pub fn dora_indicator_to_dora(indicator: TileType) -> TileType {
     match indicator {
@@ -521,6 +539,24 @@ mod tests {
         assert_eq!(dora_indicator_to_dora(Tile::Z4), Tile::Z1);
         assert_eq!(dora_indicator_to_dora(Tile::Z5), Tile::Z6);
         assert_eq!(dora_indicator_to_dora(Tile::Z7), Tile::Z5);
+    }
+
+    /// 三麻のドラ表示牌テスト
+    #[test]
+    fn dora_indicator_three_player_test() {
+        // 三麻の萬子: 1m→9m、9m→1m にラップ（2m〜8mは存在しない）
+        assert_eq!(dora_indicator_to_dora_in(Tile::M1, true), Tile::M9);
+        assert_eq!(dora_indicator_to_dora_in(Tile::M9, true), Tile::M1);
+        // 萬子以外は四麻と同じチェーン
+        assert_eq!(dora_indicator_to_dora_in(Tile::P5, true), Tile::P6);
+        assert_eq!(dora_indicator_to_dora_in(Tile::P9, true), Tile::P1);
+        assert_eq!(dora_indicator_to_dora_in(Tile::S9, true), Tile::S1);
+        assert_eq!(dora_indicator_to_dora_in(Tile::Z1, true), Tile::Z2);
+        assert_eq!(dora_indicator_to_dora_in(Tile::Z4, true), Tile::Z1);
+        assert_eq!(dora_indicator_to_dora_in(Tile::Z7, true), Tile::Z5);
+        // 四麻フラグでは既存の挙動と一致
+        assert_eq!(dora_indicator_to_dora_in(Tile::M1, false), Tile::M2);
+        assert_eq!(dora_indicator_to_dora_in(Tile::M9, false), Tile::M1);
     }
 
     /// 赤ドラテスト
