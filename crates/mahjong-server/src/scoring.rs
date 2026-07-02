@@ -287,6 +287,8 @@ pub fn calculate_tsumo_score_deltas(
 /// * `extra_tile` - ロン和了の場合の和了牌（手牌に含まれていないため別途指定）
 /// * `dora_indicators` - ドラ表示牌
 /// * `uradora_indicators` - 裏ドラ表示牌（リーチ時のみ非空）
+/// * `kita_tiles` - 北抜きで晒した北風牌（三麻のみ。1枚につき+1翻、
+///   表示牌が北を指す場合は表示牌ドラとしても重複カウントされる）
 /// * `three_player` - 三麻かどうか（萬子のドラチェーンが 1m↔9m にラップする）
 pub fn add_dora_to_score(
     score_result: &mut ScoreResult,
@@ -294,6 +296,7 @@ pub fn add_dora_to_score(
     extra_tile: Option<Tile>,
     dora_indicators: &[Tile],
     uradora_indicators: &[Tile],
+    kita_tiles: &[Tile],
     three_player: bool,
 ) {
     // 役満の場合はドラを加算しない
@@ -301,7 +304,7 @@ pub fn add_dora_to_score(
         return;
     }
 
-    // 和了手牌の全牌を集める
+    // 和了手牌の全牌を集める（抜き北も表示牌ドラの対象になる）
     let mut all_tiles: Vec<Tile> = hand.tiles().to_vec();
     if let Some(drawn) = hand.drawn() {
         all_tiles.push(drawn);
@@ -312,6 +315,7 @@ pub fn add_dora_to_score(
     for open in hand.melds() {
         all_tiles.extend(open.expanded_tiles());
     }
+    all_tiles.extend_from_slice(kita_tiles);
 
     // ドラ表示牌からドラ牌を計算してカウント
     let mut dora_count: u32 = 0;
@@ -330,7 +334,10 @@ pub fn add_dora_to_score(
     // 赤ドラをカウント
     let red_dora_count = all_tiles.iter().filter(|t| t.is_red_dora()).count() as u32;
 
-    let extra_han = dora_count + uradora_count + red_dora_count;
+    // 北ドラ（抜き北1枚につき1翻）をカウント
+    let kita_count = kita_tiles.len() as u32;
+
+    let extra_han = dora_count + uradora_count + red_dora_count + kita_count;
     if extra_han == 0 {
         return;
     }
@@ -363,6 +370,11 @@ pub fn add_dora_to_score(
         score_result
             .yaku_list
             .push((ScoreItem::Dora(DoraLabel::UraDora), uradora_count));
+    }
+    if kita_count > 0 {
+        score_result
+            .yaku_list
+            .push((ScoreItem::Dora(DoraLabel::Kita), kita_count));
     }
 }
 
@@ -525,7 +537,15 @@ mod tests {
 
         // 三麻: ドラ表示牌1m → ドラは9m（1枚）
         let dora_indicators = vec![Tile::new(Tile::M1)];
-        add_dora_to_score(&mut score, &player.hand, None, &dora_indicators, &[], true);
+        add_dora_to_score(
+            &mut score,
+            &player.hand,
+            None,
+            &dora_indicators,
+            &[],
+            &[],
+            true,
+        );
 
         assert!(
             score
@@ -534,6 +554,70 @@ mod tests {
             "三麻の1m表示で9mがドラとしてカウントされない: {:?}",
             score.yaku_list
         );
+    }
+
+    #[test]
+    fn test_kita_dora_added_and_double_counted_with_north_indicator() {
+        let mut score = ScoreResult {
+            han: 1,
+            fu: 30,
+            rank: ScoreRank::Normal,
+            dealer_ron: 1500,
+            dealer_tsumo_all: 500,
+            non_dealer_ron: 1000,
+            non_dealer_tsumo_dealer: 500,
+            non_dealer_tsumo_non_dealer: 300,
+            yaku_list: vec![(ScoreItem::Yaku(Kind::AllInside), 1)],
+            has_opened: false,
+            fu_result: FuResult {
+                total: 30,
+                details: vec![FuDetail {
+                    name: "副底",
+                    fu: 20,
+                }],
+            },
+        };
+        let tiles = vec![
+            Tile::new(Tile::P2),
+            Tile::new(Tile::P3),
+            Tile::new(Tile::P4),
+            Tile::new(Tile::S5),
+            Tile::new(Tile::S6),
+            Tile::new(Tile::S7),
+        ];
+        let mut player = Player::new(Wind::South, tiles, 35000);
+        player.draw(Tile::new(Tile::S8));
+
+        // 抜き北2枚。表示牌が西（3z）→ ドラは北（4z）のため、
+        // 抜き北は北ドラ2翻+表示牌ドラ2翻の計4翻になる
+        let kita_tiles = vec![Tile::new(Tile::Z4), Tile::new(Tile::Z4)];
+        let dora_indicators = vec![Tile::new(Tile::Z3)];
+        add_dora_to_score(
+            &mut score,
+            &player.hand,
+            None,
+            &dora_indicators,
+            &[],
+            &kita_tiles,
+            true,
+        );
+
+        assert!(
+            score
+                .yaku_list
+                .contains(&(ScoreItem::Dora(DoraLabel::Kita), 2)),
+            "北ドラ2翻が加算されていない: {:?}",
+            score.yaku_list
+        );
+        assert!(
+            score
+                .yaku_list
+                .contains(&(ScoreItem::Dora(DoraLabel::Dora), 2)),
+            "西表示牌による北のドラ2翻が加算されていない: {:?}",
+            score.yaku_list
+        );
+        // 1（タンヤオ）+ 2（北ドラ）+ 2（表示牌ドラ）= 5翻
+        assert_eq!(score.han, 5);
     }
 
     #[test]
@@ -777,6 +861,7 @@ mod tests {
             None,
             &dora_indicators,
             &uradora_indicators,
+            &[],
             false,
         );
 
@@ -820,7 +905,7 @@ mod tests {
             None,
         );
 
-        add_dora_to_score(&mut score, &hand, None, &[], &[], false);
+        add_dora_to_score(&mut score, &hand, None, &[], &[], &[], false);
 
         assert_eq!(
             score.yaku_list.last(),
@@ -866,7 +951,7 @@ mod tests {
             None,
         );
 
-        add_dora_to_score(&mut score, &hand, None, &[], &[], false);
+        add_dora_to_score(&mut score, &hand, None, &[], &[], &[], false);
 
         assert_eq!(
             score.yaku_list.last(),

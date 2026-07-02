@@ -626,6 +626,7 @@ mod tests {
             honba: 0,
             riichi_sticks: 0,
             three_player: false,
+            nuki_dora: false,
         }
     }
 

@@ -212,6 +212,14 @@ impl Table {
                 }
             }
 
+            // === 北抜きアクション（三麻のみ） ===
+            ClientAction::Kita => {
+                if round.current_player != player_idx {
+                    return false;
+                }
+                round.do_kita()
+            }
+
             // === 九種九牌アクション ===
             ClientAction::NineTerminals { declare } => round.do_nine_terminals(player_idx, declare),
         }
