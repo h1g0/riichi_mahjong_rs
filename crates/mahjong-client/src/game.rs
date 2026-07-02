@@ -504,6 +504,7 @@ impl GameState {
                 riichi_sticks,
                 // 三麻フラグはクライアント対応フェーズ（#257 Phase 5）で使用する
                 three_player: _,
+                nuki_dora: _,
             } => {
                 self.seat_wind = Some(seat_wind);
                 self.hand = hand;
@@ -805,6 +806,10 @@ impl GameState {
 
             ServerEvent::DoraIndicatorsUpdated { dora_indicators } => {
                 self.dora_indicators = dora_indicators;
+            }
+
+            ServerEvent::KitaDeclared { .. } => {
+                // 北抜きの表示はクライアント対応フェーズ（#257 Phase 5）で実装する
             }
 
             ServerEvent::PlayerRiichi {

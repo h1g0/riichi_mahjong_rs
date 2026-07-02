@@ -1475,6 +1475,140 @@ fn test_sanma_pon_still_offered() {
     assert!(call_state.responded[3]);
 }
 
+// ===== 北抜き（#257 Phase 3） =====
+
+/// 現在の手番プレイヤーに北を持たせて北抜きできる状態を作る
+fn setup_kita_round() -> Round {
+    let mut round = sanma_round(42, 0);
+    round.drain_events();
+    round.do_draw();
+    round.drain_events();
+    // 手牌を北入りの形に差し替える（ツモ牌は do_draw のものを保持）
+    round.players[0].hand = Hand::from("19m199p1199s1234z 5z");
+    round
+}
+
+#[test]
+fn test_kita_basic_flow() {
+    let mut round = setup_kita_round();
+    let remaining_before = round.wall.remaining();
+
+    assert!(round.do_kita());
+
+    // 北が晒され、補充ツモで手牌13枚+ツモ牌1枚になる
+    assert_eq!(round.players[0].kita_tiles.len(), 1);
+    assert_eq!(round.players[0].hand.tiles().len(), 13);
+    assert!(round.players[0].hand.drawn().is_some());
+    // 補充で山が1枚減る
+    assert_eq!(round.wall.remaining(), remaining_before - 1);
+    // 手番は変わらず打牌待ちのまま
+    assert_eq!(round.current_player, 0);
+    assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+
+    // KitaDeclared が3人に配信され、枚数が正しい
+    let events = round.drain_events();
+    let kita_events: Vec<_> = events
+        .iter()
+        .filter(|(_, e)| matches!(e, ServerEvent::KitaDeclared { .. }))
+        .collect();
+    assert_eq!(kita_events.len(), 3);
+    for (_, e) in &kita_events {
+        if let ServerEvent::KitaDeclared {
+            player,
+            kita_counts,
+        } = e
+        {
+            assert_eq!(*player, Wind::East);
+            assert_eq!(*kita_counts, [1, 0, 0, 0]);
+        }
+    }
+    // 補充ツモの TileDrawn が本人に届く
+    assert!(
+        events
+            .iter()
+            .any(|(i, e)| *i == 0 && matches!(e, ServerEvent::TileDrawn { .. }))
+    );
+}
+
+#[test]
+fn test_kita_rejected_when_nuki_dora_disabled() {
+    let settings = Settings {
+        three_player: true,
+        nuki_dora: false,
+        ..Settings::new()
+    };
+    let mut round = Round::new_with_seed(
+        42,
+        Wind::East,
+        0,
+        [35000, 35000, 35000, 0],
+        0,
+        0,
+        0,
+        3,
+        settings,
+    );
+    round.drain_events();
+    round.do_draw();
+    round.players[0].hand = Hand::from("19m199p1199s1234z 5z");
+
+    assert!(!round.do_kita());
+    assert!(round.players[0].kita_tiles.is_empty());
+}
+
+#[test]
+fn test_kita_rejected_in_four_player_game() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.drain_events();
+    round.do_draw();
+    round.players[0].hand = Hand::from("19m199p1199s1234z 5z");
+
+    assert!(!round.do_kita());
+}
+
+#[test]
+fn test_kita_rejected_when_wall_empty() {
+    let mut round = setup_kita_round();
+    // 山を空にする
+    while round.wall.draw().is_some() {}
+
+    assert!(!round.do_kita());
+    assert!(round.players[0].kita_tiles.is_empty());
+}
+
+#[test]
+fn test_kita_win_adds_kita_dora() {
+    let mut round = setup_kita_round();
+    assert!(round.do_kita());
+    round.drain_events();
+
+    // 手牌をタンヤオのツモ和了形に差し替える（三麻に萬子2-8は無いため筒子・索子のみ）
+    // 既に北を1枚抜いた状態のため、和了時に北ドラ1翻が加算される
+    round.players[0].hand = Hand::from("234567p234567s8s 8s");
+    // 天和（第一ツモの役満）判定を避ける（役満はドラ加算されないため）
+    round.players[0].is_first_turn = false;
+
+    assert!(round.do_tsumo());
+
+    let events = round.drain_events();
+    let won = events
+        .iter()
+        .find(|(_, e)| matches!(e, ServerEvent::RoundWon { .. }));
+    let Some((_, ServerEvent::RoundWon { yaku_list, .. })) = won else {
+        panic!("RoundWon イベントがない");
+    };
+    assert!(
+        yaku_list.iter().any(|(item, han)| *item
+            == mahjong_core::scoring::score::ScoreItem::Dora(
+                mahjong_core::scoring::score::DoraLabel::Kita
+            )
+            && *han == 1),
+        "北ドラが加算されていない: {:?}",
+        yaku_list
+    );
+}
+
 #[test]
 fn test_sanma_three_winds_draw() {
     let mut round = sanma_round(42, 0);

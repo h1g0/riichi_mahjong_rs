@@ -36,6 +36,8 @@ pub struct Player {
     /// 喰い替え禁止により、直後の打牌で捨てられない牌種
     /// （チー・ポン直後にのみ設定され、打牌またはツモで解除される）
     forbidden_discards: Vec<TileType>,
+    /// 北抜きで晒した北風牌（三麻の抜きドラ。1枚につき和了時+1翻）
+    pub kita_tiles: Vec<Tile>,
 }
 
 /// 捨て牌1枚の情報
@@ -68,7 +70,51 @@ impl Player {
             is_riichi_furiten: false,
             is_temporary_furiten: false,
             forbidden_discards: Vec::new(),
+            kita_tiles: Vec::new(),
         }
+    }
+
+    /// 北抜き可能かを返す（手牌またはツモ牌に北風牌があるか）
+    ///
+    /// リーチ後はツモった牌が北の場合のみ抜ける（手牌は固定のため）。
+    pub fn can_kita(&self) -> bool {
+        if self.is_riichi {
+            return self.hand.drawn().is_some_and(|t| t.get() == Tile::Z4);
+        }
+        self.hand.drawn().is_some_and(|t| t.get() == Tile::Z4)
+            || self.hand.tiles().iter().any(|t| t.get() == Tile::Z4)
+    }
+
+    /// 北抜きを実行する（北風牌1枚を手牌またはツモ牌から取り除いて晒す）
+    ///
+    /// 成功したら true。ツモ牌が北ならツモ牌を優先して抜く。
+    pub fn do_kita(&mut self) -> bool {
+        if !self.can_kita() {
+            return false;
+        }
+
+        if self.hand.drawn().is_some_and(|t| t.get() == Tile::Z4) {
+            // ツモ牌の北を抜く
+            let tile = self.hand.drawn().unwrap();
+            self.hand.set_drawn(None);
+            self.kita_tiles.push(tile);
+            return true;
+        }
+
+        // 手牌の北を抜き、ツモ牌があれば手牌に組み入れる
+        let drawn = self.hand.drawn();
+        let tiles = self.hand.tiles_mut();
+        let Some(idx) = tiles.iter().position(|t| t.get() == Tile::Z4) else {
+            return false;
+        };
+        let tile = tiles.remove(idx);
+        if let Some(drawn_tile) = drawn {
+            tiles.push(drawn_tile);
+            tiles.sort();
+        }
+        self.hand.set_drawn(None);
+        self.kita_tiles.push(tile);
+        true
     }
 
     /// ツモ牌をセットする
@@ -992,6 +1038,67 @@ mod tests {
         assert_eq!(Player::meld_from_relative(2, 0, 4), MeldFrom::Opposite);
         // プレイヤー3から見たプレイヤー0 → 下家（Following）
         assert_eq!(Player::meld_from_relative(3, 0, 4), MeldFrom::Following);
+    }
+
+    #[test]
+    fn test_can_kita_and_do_kita_from_hand() {
+        let mut player = Player::new(Wind::East, make_test_tiles(), 35000);
+        // make_test_tiles は 4z（北）を1枚含む
+        assert!(player.can_kita());
+
+        player.draw(Tile::new(Tile::P1));
+        assert!(player.do_kita());
+
+        // 北が手牌から抜かれ、ツモ牌が手牌に組み込まれる（13枚のまま）
+        assert_eq!(player.kita_tiles.len(), 1);
+        assert_eq!(player.kita_tiles[0].get(), Tile::Z4);
+        assert_eq!(player.hand.tiles().len(), 13);
+        assert!(player.hand.drawn().is_none());
+        assert!(!player.hand.tiles().iter().any(|t| t.get() == Tile::Z4));
+    }
+
+    #[test]
+    fn test_do_kita_prefers_drawn_north() {
+        let mut player = Player::new(Wind::East, make_test_tiles(), 35000);
+        player.draw(Tile::new(Tile::Z4));
+        assert!(player.do_kita());
+
+        // ツモった北を優先して抜くため、手牌の北は残る
+        assert_eq!(player.kita_tiles.len(), 1);
+        assert!(player.hand.tiles().iter().any(|t| t.get() == Tile::Z4));
+        assert!(player.hand.drawn().is_none());
+    }
+
+    #[test]
+    fn test_can_kita_riichi_only_drawn_north() {
+        let mut player = Player::new(Wind::East, make_test_tiles(), 35000);
+        player.is_riichi = true;
+
+        // リーチ中は手牌の北だけでは抜けない
+        assert!(!player.can_kita());
+
+        // ツモった牌が北なら抜ける
+        player.draw(Tile::new(Tile::Z4));
+        assert!(player.can_kita());
+        assert!(player.do_kita());
+        assert_eq!(player.kita_tiles.len(), 1);
+    }
+
+    #[test]
+    fn test_can_kita_without_north() {
+        let tiles: Vec<Tile> = make_test_tiles()
+            .into_iter()
+            .map(|t| {
+                if t.get() == Tile::Z4 {
+                    Tile::new(Tile::Z5)
+                } else {
+                    t
+                }
+            })
+            .collect();
+        let mut player = Player::new(Wind::East, tiles, 35000);
+        assert!(!player.can_kita());
+        assert!(!player.do_kita());
     }
 
     #[test]

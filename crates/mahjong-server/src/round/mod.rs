@@ -235,6 +235,7 @@ impl Round {
                     honba,
                     riichi_sticks,
                     three_player: settings.three_player,
+                    nuki_dora: settings.three_player && settings.nuki_dora,
                 },
             ));
         }
@@ -294,6 +295,7 @@ impl Round {
                     wind: p.seat_wind,
                     hand: p.hand.tiles().to_vec(),
                     melds,
+                    kita: p.kita_tiles.clone(),
                 }
             })
             .collect()
@@ -743,6 +745,7 @@ impl Round {
                 Some(winning_tile),
                 &dora_indicators,
                 &uradora_indicators,
+                &self.players[winner].kita_tiles,
                 self.settings.three_player,
             );
 
@@ -1159,6 +1162,64 @@ impl Round {
         true
     }
 
+    /// 北抜きを実行する（三麻の抜きドラ）
+    ///
+    /// - 手番アクション（鳴きではない）のため、一発・第一巡フラグは中断しない
+    /// - 新しいドラ表示牌は公開されない（カンとは異なる）
+    /// - 補充は生牌山の末尾から行う（王牌は補充しない既存の簡略化に合わせる。
+    ///   `remaining()`/海底の計算は自動で整合する）
+    /// - 補充ツモでの和了は嶺上開花にならない
+    pub fn do_kita(&mut self) -> bool {
+        if !(self.settings.three_player && self.settings.nuki_dora) {
+            return false;
+        }
+        if self.phase != TurnPhase::WaitForDiscard {
+            return false;
+        }
+        // 補充する牌がない（生牌山が空）なら北抜き不可
+        if self.wall.is_empty() {
+            return false;
+        }
+
+        let player_idx = self.current_player;
+        if !self.players[player_idx].do_kita() {
+            return false;
+        }
+
+        // 全プレイヤーに北抜きを通知（各家の枚数は風のインデックス順）
+        let declarer_wind = self.players[player_idx].seat_wind;
+        let mut kita_counts = [0u8; 4];
+        for p in self.players.iter().take(self.player_count) {
+            kita_counts[p.seat_wind.to_index()] = p.kita_tiles.len() as u8;
+        }
+        for i in 0..self.player_count {
+            self.events.push((
+                i,
+                ServerEvent::KitaDeclared {
+                    player: declarer_wind,
+                    kita_counts,
+                },
+            ));
+        }
+
+        // 手牌から抜いた場合に備えて本人へ手牌同期
+        self.events.push((
+            player_idx,
+            ServerEvent::HandUpdated {
+                hand: self.players[player_idx].hand.tiles().to_vec(),
+            },
+        ));
+
+        // 生牌山の末尾から補充ツモ（is_empty チェック済みのため必ず成功する）
+        let Some(tile) = self.wall.draw_replacement_from_tail() else {
+            return false;
+        };
+        self.players[player_idx].draw(tile);
+        self.last_draw_was_dead_wall = false;
+        self.push_draw_events(player_idx, tile, "kita_draw");
+        true
+    }
+
     /// 指定プレイヤーの最後の捨て牌を「鳴かれた」としてマークする
     fn mark_last_discard_as_called(&mut self, discarder: usize) {
         if let Some(last_discard) = self.players[discarder].discards.last_mut() {
@@ -1466,6 +1527,7 @@ impl Round {
             None,
             &dora_indicators,
             &uradora_indicators,
+            &self.players[winner].kita_tiles,
             self.settings.three_player,
         );
 
