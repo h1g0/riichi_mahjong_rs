@@ -6,7 +6,7 @@
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{ShantenNumber, calc_shanten_number};
 use mahjong_core::hand_info::meld::Meld;
-use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora};
+use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora_in};
 
 use super::client::CpuConfig;
 use super::defense;
@@ -135,7 +135,7 @@ pub(crate) fn estimate_hand_value(hand_tiles: &[Tile], state: &CpuGameState) -> 
     let mut value = 0.0;
 
     // ドラ枚数
-    let dora_count = count_dora_in_hand(hand_tiles, &state.dora_indicators);
+    let dora_count = count_dora_in_hand(hand_tiles, &state.dora_indicators, state.three_player);
     value += dora_count as f64 * 2.0;
 
     // 赤ドラ
@@ -161,10 +161,10 @@ pub(crate) fn estimate_hand_value(hand_tiles: &[Tile], state: &CpuGameState) -> 
 }
 
 /// 手牌中のドラ枚数をカウント
-fn count_dora_in_hand(hand_tiles: &[Tile], dora_indicators: &[Tile]) -> u32 {
+fn count_dora_in_hand(hand_tiles: &[Tile], dora_indicators: &[Tile], three_player: bool) -> u32 {
     let mut count = 0u32;
     for indicator in dora_indicators {
-        let dora_type = dora_indicator_to_dora(indicator.get());
+        let dora_type = dora_indicator_to_dora_in(indicator.get(), three_player);
         count += hand_tiles.iter().filter(|t| t.get() == dora_type).count() as u32;
     }
     count
@@ -340,14 +340,14 @@ mod tests {
             Tile::new(Tile::M3),
         ];
         let indicators = vec![Tile::new(Tile::M1)]; // ドラ表示牌1m → ドラは2m
-        assert_eq!(count_dora_in_hand(&hand, &indicators), 2);
+        assert_eq!(count_dora_in_hand(&hand, &indicators, false), 2);
     }
 
     #[test]
     fn test_count_dora_in_hand_no_dora() {
         let hand = vec![Tile::new(Tile::M3), Tile::new(Tile::P5)];
         let indicators = vec![Tile::new(Tile::M1)]; // ドラは2m
-        assert_eq!(count_dora_in_hand(&hand, &indicators), 0);
+        assert_eq!(count_dora_in_hand(&hand, &indicators, false), 0);
     }
 
     #[test]
@@ -355,7 +355,7 @@ mod tests {
         let hand = vec![Tile::new(Tile::M2), Tile::new(Tile::P3)];
         // ドラ表示牌1m（ドラ2m）と2p（ドラ3p）
         let indicators = vec![Tile::new(Tile::M1), Tile::new(Tile::P2)];
-        assert_eq!(count_dora_in_hand(&hand, &indicators), 2);
+        assert_eq!(count_dora_in_hand(&hand, &indicators, false), 2);
     }
 
     // --- get_yakuhai_types ---

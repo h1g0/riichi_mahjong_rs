@@ -3,7 +3,7 @@
 //! 牌の安全度を評価する。現物・筋・壁・字牌・端牌の判定に加え、
 //! 他家の脅威（リーチ・副露・染め手・役満気配）を統合的に扱う。
 
-use mahjong_core::tile::{Tile, TileType, dora_indicator_to_dora};
+use mahjong_core::tile::{Tile, TileType, dora_indicator_to_dora_in};
 
 use super::client::{CpuConfig, CpuLevel, is_yakuhai};
 use super::state::CpuGameState;
@@ -317,7 +317,7 @@ fn evaluate_safety_against_threat(
 /// ドラまたはドラの隣（同色±1）か
 fn is_dora_or_neighbor(tile_type: TileType, state: &CpuGameState) -> bool {
     for indicator in &state.dora_indicators {
-        let dora = dora_indicator_to_dora(indicator.get());
+        let dora = dora_indicator_to_dora_in(indicator.get(), state.three_player);
         if dora >= 27 {
             if tile_type == dora {
                 return true;

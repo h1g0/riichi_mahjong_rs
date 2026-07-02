@@ -14,6 +14,7 @@ fn game_started_event(seat_wind: Wind, hand: Vec<Tile>) -> ServerEvent {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
     }
 }
 
@@ -511,6 +512,7 @@ fn test_dora_float_kept_over_plain_float() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
     });
     // 4面子完成 + P9(ドラ) + ツモ S9 の単騎選択。
     // ドラの P9 を残して S9 をツモ切りすべき
@@ -533,6 +535,7 @@ fn test_dora_float_kept_over_plain_float() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
     });
     let action = client.handle_event(&draw_event(Tile::S9));
     assert!(
@@ -707,6 +710,7 @@ fn test_damaten_with_confirmed_mangan() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
     };
     let draw = ServerEvent::TileDrawn {
         tile: Tile::new(Tile::Z3),
@@ -952,6 +956,7 @@ fn nine_terminals_action(
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
     });
     client.handle_event(&ServerEvent::TileDrawn {
         tile: Tile::new(Tile::S5),
@@ -1362,6 +1367,7 @@ fn test_cheap_distant_chi_suppressed() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
     });
     let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
     assert!(matches!(action, Some(ClientAction::Pass)));
@@ -1379,6 +1385,7 @@ fn test_cheap_distant_chi_suppressed() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
     });
     let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
     assert!(matches!(action, Some(ClientAction::Chi { .. })));

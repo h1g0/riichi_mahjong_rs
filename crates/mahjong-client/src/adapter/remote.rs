@@ -625,6 +625,7 @@ mod tests {
             total_rounds: 4,
             honba: 0,
             riichi_sticks: 0,
+            three_player: false,
         }
     }
 

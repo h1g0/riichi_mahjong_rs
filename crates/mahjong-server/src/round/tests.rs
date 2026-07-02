@@ -1322,3 +1322,172 @@ fn test_swap_calling_disabled_allows_genbutsu_discard() {
     // 設定で喰い替え禁止を無効化している場合は、スジ牌でも打牌できる
     assert!(round.do_discard(Some(Tile::new(Tile::M6))));
 }
+
+// ===== 三人麻雀（#257） =====
+
+/// 三麻のテスト用 Settings
+fn sanma_settings() -> Settings {
+    Settings {
+        three_player: true,
+        ..Settings::new()
+    }
+}
+
+/// 三麻のテスト用 Round を生成する
+fn sanma_round(seed: u64, dealer: usize) -> Round {
+    Round::new_with_seed(
+        seed,
+        Wind::East,
+        dealer,
+        [35000, 35000, 35000, 0],
+        0,
+        0,
+        0,
+        3,
+        sanma_settings(),
+    )
+}
+
+#[test]
+fn test_sanma_round_setup() {
+    let round = sanma_round(42, 0);
+    assert_eq!(round.player_count, 3);
+
+    // 席風は東・南・西のみ（北家は存在しない）
+    assert_eq!(round.players[0].seat_wind, Wind::East);
+    assert_eq!(round.players[1].seat_wind, Wind::South);
+    assert_eq!(round.players[2].seat_wind, Wind::West);
+
+    // シート0〜2に13枚配られ、ダミー席3は空手牌・点数0
+    for i in 0..3 {
+        assert_eq!(round.players[i].hand.tiles().len(), 13);
+    }
+    assert!(round.players[3].hand.tiles().is_empty());
+    assert_eq!(round.players[3].score, 0);
+
+    // 配牌後の山は 108 - 14(王牌) - 13*3 = 55枚
+    assert_eq!(round.wall.remaining(), 55);
+
+    // 手牌に萬子2〜8が存在しない
+    for i in 0..3 {
+        for tile in round.players[i].hand.tiles() {
+            assert!(
+                !(Tile::M2..=Tile::M8).contains(&tile.get()),
+                "三麻の手牌に萬子2〜8が含まれている: {:?}",
+                tile
+            );
+        }
+    }
+}
+
+#[test]
+fn test_sanma_wind_assignment_with_dealer_1() {
+    let round = sanma_round(42, 1);
+    assert_eq!(round.players[1].seat_wind, Wind::East);
+    assert_eq!(round.players[2].seat_wind, Wind::South);
+    assert_eq!(round.players[0].seat_wind, Wind::West);
+}
+
+#[test]
+fn test_sanma_game_started_only_for_three_seats() {
+    let mut round = sanma_round(42, 0);
+    let events = round.drain_events();
+    // GameStarted はシート0〜2にのみ送られる
+    let seats: Vec<usize> = events
+        .iter()
+        .filter(|(_, e)| matches!(e, ServerEvent::GameStarted { .. }))
+        .map(|(i, _)| *i)
+        .collect();
+    assert_eq!(seats, vec![0, 1, 2]);
+    // three_player フラグが立っている
+    for (_, e) in &events {
+        if let ServerEvent::GameStarted { three_player, .. } = e {
+            assert!(three_player);
+        }
+    }
+}
+
+#[test]
+fn test_sanma_turn_rotation_wraps_at_three() {
+    let mut round = sanma_round(42, 0);
+    round.drain_events();
+
+    // シート2の打牌後、手番はシート0に戻る（ダミー席3を飛ばす）
+    for expected_player in [0usize, 1, 2, 0] {
+        assert_eq!(round.current_player, expected_player);
+        round.do_draw();
+        if round.phase == TurnPhase::WaitForNineTerminals {
+            round.do_nine_terminals(expected_player, false);
+        }
+        round.do_discard(None);
+        if round.phase == TurnPhase::WaitForCalls {
+            for i in 0..3 {
+                if let Some(ref cs) = round.call_state
+                    && !cs.responded[i]
+                {
+                    round.respond_to_call(i, CallResponse::Pass);
+                    if round.call_state.is_none() {
+                        break;
+                    }
+                }
+            }
+        }
+        if round.phase == TurnPhase::RoundOver {
+            return; // 稀に和了・流局が発生しても正常
+        }
+    }
+}
+
+#[test]
+fn test_sanma_no_chi_offered() {
+    let mut round = sanma_round(42, 0);
+    // シート1（シート0の下家）にチー可能な手牌を持たせる
+    round.players[1].hand = Hand::from("199m45p11223399s1z");
+
+    // シート0が 3p を捨てた想定で鳴き候補を計算する
+    let call_state = round.check_available_calls(Tile::new(Tile::P3), 0);
+
+    // 三麻ではチーは提供されない
+    assert!(
+        call_state.available_calls[1]
+            .iter()
+            .all(|c| !matches!(c, AvailableCall::Chi { .. })),
+        "三麻でチーが提供された"
+    );
+}
+
+#[test]
+fn test_sanma_pon_still_offered() {
+    let mut round = sanma_round(42, 0);
+    // シート2にポン可能な手牌を持たせる
+    round.players[2].hand = Hand::from("199m455p1122339s1z");
+
+    let call_state = round.check_available_calls(Tile::new(Tile::P5), 0);
+
+    // ポンは三麻でも提供される
+    assert!(
+        call_state.available_calls[2]
+            .iter()
+            .any(|c| matches!(c, AvailableCall::Pon { .. })),
+        "三麻でポンが提供されない"
+    );
+    // ダミー席3は常に応答済み
+    assert!(call_state.responded[3]);
+}
+
+#[test]
+fn test_sanma_three_winds_draw() {
+    let mut round = sanma_round(42, 0);
+    round.drain_events();
+
+    // 3人全員が第一打で同じ風牌（東）を捨てる
+    for i in 0..3 {
+        round.players[i].discards.push(crate::player::Discard {
+            tile: Tile::new(Tile::Z1),
+            is_tsumogiri: false,
+            is_riichi_declaration: false,
+            is_called: false,
+        });
+    }
+    assert!(round.check_four_winds_draw(), "三麻の四風連打が成立しない");
+}

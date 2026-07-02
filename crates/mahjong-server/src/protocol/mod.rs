@@ -99,6 +99,9 @@ pub enum ServerEvent {
         honba: usize,
         /// 供託リーチ棒の本数
         riichi_sticks: usize,
+        /// 三麻かどうか（プレイヤー人数・牌集合・ドラチェーンの解釈に使用）
+        #[serde(default)]
+        three_player: bool,
     },
 
     /// ツモ（自分がツモった）
