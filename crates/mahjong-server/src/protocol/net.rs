@@ -12,7 +12,8 @@ use crate::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 ///
 /// 互換性のない変更を入れる際にインクリメントする。
 /// `Hello` で照合し、不一致なら `ErrorCode::VersionMismatch` で切断する。
-pub const PROTOCOL_VERSION: u32 = 2;
+/// v3: 三麻対応（CreateRoom の three_player/nuki_dora、RoomState の three_player）
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// CPUの強さ・性格の指定
 ///
@@ -40,6 +41,11 @@ impl CpuSpec {
     }
 }
 
+/// serde デフォルト用: true を返す
+fn default_true() -> bool {
+    true
+}
+
 /// クライアントからサーバへのメッセージ
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
@@ -57,6 +63,12 @@ pub enum ClientMessage {
     CreateRoom {
         /// 東風戦(1)か東南戦(2)か
         round_count: u8,
+        /// 三麻（3人打ち）ルームか
+        #[serde(default)]
+        three_player: bool,
+        /// 北抜きドラありか（三麻のみ有効）
+        #[serde(default = "default_true")]
+        nuki_dora: bool,
     },
 
     /// ルームコードを指定して参加する
@@ -97,12 +109,15 @@ pub enum ServerMessage {
     RoomState {
         /// ルームコード
         code: String,
-        /// 各座席の状態（座席インデックス順）
+        /// 各座席の状態（座席インデックス順。三麻ではシート3は常に空席）
         seats: [SeatInfo; 4],
         /// ホストの座席インデックス
         host_seat: usize,
         /// 受信者自身の座席インデックス
         your_seat: usize,
+        /// 三麻（3人打ち）ルームか
+        #[serde(default)]
+        three_player: bool,
     },
 
     /// ゲーム内イベント
@@ -242,7 +257,16 @@ mod tests {
                 session_token: None,
                 display_name: String::new(),
             },
-            ClientMessage::CreateRoom { round_count: 2 },
+            ClientMessage::CreateRoom {
+                round_count: 2,
+                three_player: false,
+                nuki_dora: true,
+            },
+            ClientMessage::CreateRoom {
+                round_count: 1,
+                three_player: true,
+                nuki_dora: false,
+            },
             ClientMessage::JoinRoom {
                 code: "ABC234".to_string(),
             },
@@ -307,6 +331,7 @@ mod tests {
                 ],
                 host_seat: 0,
                 your_seat: 1,
+                three_player: false,
             },
             ServerMessage::Event(ServerEvent::TileDrawn {
                 tile: Tile::new(Tile::P5),

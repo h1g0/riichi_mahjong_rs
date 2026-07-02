@@ -52,6 +52,10 @@ fn set_status(state: &mut GameState, message: &str, is_error: bool) {
 fn build_seat_labels(room: &RoomView, lang: Lang) -> [String; 4] {
     let tr = i18n::Translator::new(lang);
     std::array::from_fn(|i| {
+        // 三麻ルームでは使用しないシート3を表示しない
+        if i >= room.player_count() {
+            return String::new();
+        }
         let who = match &room.seats[i] {
             SeatInfo::Empty => tr.get(i18n::Key::EmptySeat).to_string(),
             SeatInfo::Cpu { level, personality } => tr.cpu_seat_label(*level, *personality),
@@ -229,7 +233,8 @@ async fn main() {
                         OnlineMenuAction::CreateRoom => {
                             let url = transport::default_server_url();
                             let name = display_name(&game_state);
-                            online = Some(RemoteAdapter::create_room(&url, &name, 1));
+                            // 三麻ルーム作成のUIはオンライン対応フェーズ（#257 Phase 6）で追加する
+                            online = Some(RemoteAdapter::create_room(&url, &name, 1, false, true));
                             let msg = i18n::Key::Connecting.text(game_state.lang);
                             set_status(&mut game_state, msg, false);
                         }

@@ -41,12 +41,19 @@ pub struct RoomView {
     pub host_seat: usize,
     /// 自分の座席
     pub your_seat: usize,
+    /// 三麻（3人打ち）ルームか
+    pub three_player: bool,
 }
 
 impl RoomView {
     /// 自分がホストか
     pub fn is_host(&self) -> bool {
         self.your_seat == self.host_seat
+    }
+
+    /// プレイヤー人数を返す（四麻=4、三麻=3）
+    pub fn player_count(&self) -> usize {
+        if self.three_player { 3 } else { 4 }
     }
 }
 
@@ -63,8 +70,14 @@ pub struct RemoteError {
 
 /// Welcome 受信後に送るロビー操作
 enum LobbyIntent {
-    Create { round_count: u8 },
-    Join { code: String },
+    Create {
+        round_count: u8,
+        three_player: bool,
+        nuki_dora: bool,
+    },
+    Join {
+        code: String,
+    },
 }
 
 /// 自動再接続のバックオフ間隔（秒）。試行回数で頭打ちにする。
@@ -140,14 +153,24 @@ impl RemoteAdapter {
     }
 
     /// サーバに接続してルームを作成する
-    pub fn create_room(url: &str, display_name: &str, round_count: u8) -> Self {
+    pub fn create_room(
+        url: &str,
+        display_name: &str,
+        round_count: u8,
+        three_player: bool,
+        nuki_dora: bool,
+    ) -> Self {
         let (transport, connector) = Self::connector_for(url);
         Self::build(
             transport,
             connector,
             default_clock(),
             display_name,
-            LobbyIntent::Create { round_count },
+            LobbyIntent::Create {
+                round_count,
+                three_player,
+                nuki_dora,
+            },
         )
     }
 
@@ -318,9 +341,15 @@ impl RemoteAdapter {
                 self.status = ConnStatus::Connected;
                 if let Some(intent) = self.pending_intent.take() {
                     let msg = match intent {
-                        LobbyIntent::Create { round_count } => {
-                            ClientMessage::CreateRoom { round_count }
-                        }
+                        LobbyIntent::Create {
+                            round_count,
+                            three_player,
+                            nuki_dora,
+                        } => ClientMessage::CreateRoom {
+                            round_count,
+                            three_player,
+                            nuki_dora,
+                        },
                         LobbyIntent::Join { code } => ClientMessage::JoinRoom { code },
                     };
                     self.send(&msg);
@@ -331,6 +360,7 @@ impl RemoteAdapter {
                 seats,
                 host_seat,
                 your_seat,
+                three_player,
             } => {
                 self.room_code = Some(code.clone());
                 // 座席情報から人間プレイヤーの接続状態を取り込む
@@ -345,6 +375,7 @@ impl RemoteAdapter {
                     seats,
                     host_seat,
                     your_seat,
+                    three_player,
                 });
             }
             ServerMessage::Event(event) => {
@@ -586,7 +617,14 @@ mod tests {
 
     fn create_adapter() -> (RemoteAdapter, MockHandle) {
         let (transport, handle) = mock_pair();
-        let adapter = build_test(transport, LobbyIntent::Create { round_count: 1 });
+        let adapter = build_test(
+            transport,
+            LobbyIntent::Create {
+                round_count: 1,
+                three_player: false,
+                nuki_dora: true,
+            },
+        );
         (adapter, handle)
     }
 
@@ -611,6 +649,7 @@ mod tests {
             ],
             host_seat: 0,
             your_seat,
+            three_player: false,
         }
     }
 
@@ -660,7 +699,11 @@ mod tests {
         assert_eq!(sent.len(), 2);
         assert!(matches!(
             sent[1],
-            ClientMessage::CreateRoom { round_count: 1 }
+            ClientMessage::CreateRoom {
+                round_count: 1,
+                three_player: false,
+                nuki_dora: true,
+            }
         ));
     }
 
@@ -805,7 +848,11 @@ mod tests {
             connector,
             Box::new(move || clock_start.elapsed().as_secs_f64()),
             "E2Eテスト",
-            LobbyIntent::Create { round_count: 1 },
+            LobbyIntent::Create {
+                round_count: 1,
+                three_player: false,
+                nuki_dora: true,
+            },
         );
 
         let start = std::time::Instant::now();
@@ -1097,7 +1144,11 @@ mod tests {
             Box::new(|| panic!("再接続なし")),
             Box::new(move || *now_clock.borrow()),
             "テスト",
-            LobbyIntent::Create { round_count: 1 },
+            LobbyIntent::Create {
+                round_count: 1,
+                three_player: false,
+                nuki_dora: true,
+            },
         );
 
         // 手番タイマー（90秒）を受信
@@ -1124,7 +1175,11 @@ mod tests {
             Box::new(|| panic!("再接続なし")),
             Box::new(move || *now_clock.borrow()),
             "テスト",
-            LobbyIntent::Create { round_count: 1 },
+            LobbyIntent::Create {
+                round_count: 1,
+                three_player: false,
+                nuki_dora: true,
+            },
         );
         handle.push_msg(&ServerMessage::TurnTimer { seconds: 5 });
         adapter.tick();
