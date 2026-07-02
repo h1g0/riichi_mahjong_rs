@@ -285,6 +285,10 @@ pub struct OnlineUiState {
     pub room: Option<RoomViewUi>,
     /// 手番の制限時間の残り秒数（オンラインで自分の手番のときのみ Some）
     pub turn_remaining: Option<u32>,
+    /// ルーム作成時に三麻（3人打ち）ルームにするか
+    pub three_player: bool,
+    /// ルーム作成時に北抜きドラありにするか（三麻のみ有効）
+    pub nuki_dora: bool,
 }
 
 impl OnlineUiState {
@@ -298,6 +302,8 @@ impl OnlineUiState {
             status_is_error: false,
             room: None,
             turn_remaining: None,
+            three_player: false,
+            nuki_dora: true,
         }
     }
 }
@@ -311,6 +317,8 @@ pub struct RoomViewUi {
     pub seat_labels: [String; 4],
     /// 自分がホストか（対局開始ボタンの表示に使う）
     pub is_host: bool,
+    /// 三麻（3人打ち）ルームか
+    pub three_player: bool,
 }
 
 /// 対局開始前の設定画面の状態

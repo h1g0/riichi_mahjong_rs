@@ -20,6 +20,10 @@ Implementation for Japanese Riichi Mahjong in Rust.
 - Online multiplayer (room-code based) is supported via `mahjong-net-server`.
   - Host creates a room, shares a 6-character code, and friends join; empty seats are filled by the CPU.
   - Disconnected players are taken over by the CPU and can rejoin to resync.
+- Three-player mahjong (sanma) is supported, both locally and online.
+  - Characters 2–8 are removed (108 tiles, red fives 5p/5s only), chii is not available, and tsumo wins use tsumo-loss payments (per-person amounts are unchanged; the missing player's share is simply not received).
+  - Kita (extracting a North tile as a bonus dora with a replacement draw) is supported and can be toggled per game; the manzu dora chain wraps 1m ↔ 9m.
+  - Games start with 35,000 points; an East-only game is East 1–3.
 - Vercel deployment using the included scripts is supported (static web client).
 
 ## Structure
@@ -30,7 +34,7 @@ This repository is currently composed of the following crates.
 
 - `mahjong-core`: core logic such as hand representation, shanten calculation, yaku evaluation, fu calculation, and score calculation
 - `mahjong-server`: progression management and rule handling used for local matches
-- `mahjong-client`: a Macroquad-based four-player Riichi Mahjong client that supports both native and browser execution
+- `mahjong-client`: a Macroquad-based Riichi Mahjong client (four-player and three-player) that supports both native and browser execution
 - `mahjong-net-server`: a single-binary WebSocket server (tokio + axum) that hosts online room-code matches
 
 ### Directory structure
