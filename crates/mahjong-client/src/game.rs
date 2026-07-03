@@ -256,6 +256,14 @@ pub struct GameState {
     pub player_labels: [PlayerLabel; 4],
     /// 自分の座席インデックス（ローカルは常に0、オンラインは your_seat）
     pub my_seat: usize,
+    /// プレイヤー人数（四麻=4、三麻=3。GameStarted で設定される）
+    pub player_count: usize,
+    /// 北抜きドラが有効か（三麻のみ true になり得る）
+    pub nuki_dora: bool,
+    /// 各プレイヤーの北抜き枚数（風のインデックス順: 東=0, 南=1, 西=2）
+    pub pei_counts: [u8; 4],
+    /// 北抜き可能か（自分の手番で手牌・ツモ牌に北がある場合）
+    pub can_pei: bool,
     /// 表示言語
     pub lang: Lang,
 }
@@ -277,6 +285,10 @@ pub struct OnlineUiState {
     pub room: Option<RoomViewUi>,
     /// 手番の制限時間の残り秒数（オンラインで自分の手番のときのみ Some）
     pub turn_remaining: Option<u32>,
+    /// ルーム作成時に三麻（3人打ち）ルームにするか
+    pub three_player: bool,
+    /// ルーム作成時に北抜きドラありにするか（三麻のみ有効）
+    pub nuki_dora: bool,
 }
 
 impl OnlineUiState {
@@ -290,6 +302,20 @@ impl OnlineUiState {
             status_is_error: false,
             room: None,
             turn_remaining: None,
+            three_player: false,
+            nuki_dora: true,
+        }
+    }
+
+    /// ルーム作成時に送るルール設定を組み立てる
+    ///
+    /// UIで選択できないルールは既定値のまま。ルール選択UIを増やす場合は
+    /// ここに反映すればサーバへそのまま伝わる。
+    pub fn build_rules(&self) -> mahjong_core::settings::Settings {
+        mahjong_core::settings::Settings {
+            three_player: self.three_player,
+            nuki_dora: self.nuki_dora,
+            ..mahjong_core::settings::Settings::new()
         }
     }
 }
@@ -303,11 +329,17 @@ pub struct RoomViewUi {
     pub seat_labels: [String; 4],
     /// 自分がホストか（対局開始ボタンの表示に使う）
     pub is_host: bool,
+    /// 三麻（3人打ち）ルームか
+    pub three_player: bool,
 }
 
 /// 対局開始前の設定画面の状態
 #[derive(Debug, Clone)]
 pub struct SetupState {
+    /// 三麻（3人打ち）モードか
+    pub three_player: bool,
+    /// 北抜きドラありか（三麻のみ有効）
+    pub nuki_dora: bool,
     /// 各CPUの強さ設定（下家, 対面, 上家）
     pub cpu_levels: [usize; 3],
     /// 各CPUの性格設定（下家, 対面, 上家）
@@ -317,9 +349,33 @@ pub struct SetupState {
 impl SetupState {
     pub fn new() -> Self {
         SetupState {
+            three_player: false,
+            nuki_dora: true,
             cpu_levels: [1, 1, 1],        // 全員 Normal
             cpu_personalities: [0, 1, 2], // Balanced, Speedy, HighValue
         }
+    }
+
+    /// このモードで設定するCPUの人数（四麻=3、三麻=2）
+    pub fn cpu_count(&self) -> usize {
+        if self.three_player { 2 } else { 3 }
+    }
+
+    /// 選択中のルール設定を組み立てる
+    ///
+    /// UIで選択できないルールは既定値のまま。ルール選択UIを増やす場合は
+    /// ここに反映すれば、ローカル・オンラインの両方に伝わる。
+    pub fn build_rules(&self) -> mahjong_core::settings::Settings {
+        mahjong_core::settings::Settings {
+            three_player: self.three_player,
+            nuki_dora: self.nuki_dora,
+            ..mahjong_core::settings::Settings::new()
+        }
+    }
+
+    /// ゲーム設定を組み立てる（持ち点はルールから決まる）
+    pub fn build_game_settings(&self) -> mahjong_server::table::GameSettings {
+        mahjong_server::table::GameSettings::with_rules(1, self.build_rules())
     }
 
     pub fn level_count() -> usize {
@@ -459,10 +515,19 @@ impl GameState {
                 },
             ],
             my_seat: 0,
+            player_count: 4,
+            nuki_dora: false,
+            pei_counts: [0; 4],
+            can_pei: false,
             // 保存された表示言語を読み込む（未保存なら日本語）。
             // 「もう一度」などで new() が再生成されても選択を保つ。
             lang: crate::persistence::load_lang().unwrap_or(Lang::Ja),
         }
+    }
+
+    /// 三麻かどうか
+    pub fn is_three_player(&self) -> bool {
+        self.player_count == 3
     }
 
     /// 現在の表示言語の [`Translator`](crate::i18n::Translator) を返す。
@@ -502,7 +567,13 @@ impl GameState {
                 total_rounds: _,
                 honba,
                 riichi_sticks,
+                three_player,
+                nuki_dora,
             } => {
+                self.player_count = if three_player { 3 } else { 4 };
+                self.nuki_dora = nuki_dora;
+                self.pei_counts = [0; 4];
+                self.can_pei = false;
                 self.seat_wind = Some(seat_wind);
                 self.hand = hand;
                 self.hand.sort();
@@ -562,6 +633,7 @@ impl GameState {
                 self.available_calls.clear();
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
+                self.refresh_can_pei();
                 // ツモ後は喰い替え制限が解除される
                 self.forbidden_discards.clear();
                 self.selected_forbidden_swap = false;
@@ -619,6 +691,7 @@ impl GameState {
                     self.selected_drawn = false;
                     self.clear_riichi_selection();
                     self.self_kan_options.clear();
+                    self.can_pei = false;
                     // 打牌が完了したので喰い替え制限を解除する
                     self.forbidden_discards.clear();
                     self.selected_forbidden_swap = false;
@@ -803,6 +876,16 @@ impl GameState {
 
             ServerEvent::DoraIndicatorsUpdated { dora_indicators } => {
                 self.dora_indicators = dora_indicators;
+            }
+
+            ServerEvent::PeiDeclared { player, pei_counts } => {
+                self.pei_counts = pei_counts;
+                // 他家の北抜きは手牌が1枚減って見える（補充ツモで戻る）
+                let relative_idx = self.relative_player_index(player);
+                if relative_idx > 0 {
+                    let other = &mut self.other_players[relative_idx - 1];
+                    other.concealed_count = other.concealed_count.saturating_sub(1);
+                }
             }
 
             ServerEvent::PlayerRiichi {
@@ -1230,6 +1313,22 @@ impl GameState {
         false
     }
 
+    /// 北抜き可能かを更新する（三麻+北抜きあり時のみ）
+    ///
+    /// リーチ中はツモった牌が北の場合のみ可能。
+    fn refresh_can_pei(&mut self) {
+        self.can_pei = false;
+        if !self.is_three_player() || !self.nuki_dora {
+            return;
+        }
+        let drawn_is_north = self.drawn.is_some_and(|t| t.get() == Tile::Z4);
+        if self.is_riichi {
+            self.can_pei = drawn_is_north;
+        } else {
+            self.can_pei = drawn_is_north || self.hand.iter().any(|t| t.get() == Tile::Z4);
+        }
+    }
+
     fn refresh_self_kan_options(&mut self) {
         self.self_kan_options.clear();
         if self.drawn.is_none() || self.is_riichi {
@@ -1476,7 +1575,8 @@ impl GameState {
     fn relative_player_index(&self, wind: Wind) -> usize {
         let my_idx = self.seat_wind.map(|w| w.to_index()).unwrap_or(0);
         let their_idx = wind.to_index();
-        (their_idx + 4 - my_idx) % 4
+        // 三麻では風インデックスは0〜2で循環する
+        (their_idx + self.player_count - my_idx) % self.player_count
     }
 
     /// CallType → MeldType 変換
@@ -1570,6 +1670,120 @@ mod tests {
             state.player_labels[2].detail(1, Lang::Ja),
             Some("CPU1（普通・スピード）".to_string())
         );
+    }
+
+    fn sanma_game_started(seat_wind: Wind) -> ServerEvent {
+        ServerEvent::GameStarted {
+            seat_wind,
+            hand: vec![Tile::new(Tile::P1); 13],
+            scores: [35000, 35000, 35000, 0],
+            round_wind: Wind::East,
+            dora_indicators: vec![Tile::new(Tile::P5)],
+            round_number: 0,
+            total_rounds: 3,
+            honba: 0,
+            riichi_sticks: 0,
+            three_player: true,
+            nuki_dora: true,
+        }
+    }
+
+    #[test]
+    fn test_sanma_game_started_sets_player_count() {
+        let mut state = GameState::new();
+        state.handle_event(sanma_game_started(Wind::East));
+
+        assert_eq!(state.player_count, 3);
+        assert!(state.is_three_player());
+        assert!(state.nuki_dora);
+        assert_eq!(state.pei_counts, [0; 4]);
+    }
+
+    #[test]
+    fn test_sanma_relative_player_index_wraps_at_three() {
+        let mut state = GameState::new();
+        // 自分が西家（インデックス2）の場合、東家は下家（相対1）になる
+        state.handle_event(sanma_game_started(Wind::West));
+
+        state.handle_event(ServerEvent::TileDiscarded {
+            player: Wind::East,
+            tile: Tile::new(Tile::P3),
+            is_tsumogiri: false,
+        });
+        assert_eq!(
+            state.discards[1].len(),
+            1,
+            "三麻で西家から見た東家は下家（相対1）のはず"
+        );
+    }
+
+    #[test]
+    fn test_sanma_pei_declared_updates_counts() {
+        let mut state = GameState::new();
+        state.handle_event(sanma_game_started(Wind::East));
+        // 他家（南家）の手牌枚数を通常の13枚にしておく
+        state.other_players[0].concealed_count = 13;
+
+        state.handle_event(ServerEvent::PeiDeclared {
+            player: Wind::South,
+            pei_counts: [0, 1, 0, 0],
+        });
+
+        assert_eq!(state.pei_counts, [0, 1, 0, 0]);
+        // 北を抜いた分、南家の伏せ牌は一時的に1枚減って見える
+        assert_eq!(state.other_players[0].concealed_count, 12);
+    }
+
+    #[test]
+    fn test_sanma_can_pei_with_north_in_hand() {
+        let mut state = GameState::new();
+        state.handle_event(sanma_game_started(Wind::East));
+        state.hand = vec![Tile::new(Tile::Z4)];
+
+        state.handle_event(ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::P2),
+            remaining_tiles: 50,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        });
+        assert!(state.can_pei, "手牌に北があるのに北抜き不可");
+
+        // リーチ中は手牌の北だけでは抜けない
+        state.is_riichi = true;
+        state.handle_event(ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::P2),
+            remaining_tiles: 49,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        });
+        assert!(!state.can_pei, "リーチ中の手牌北で北抜き可になっている");
+
+        // リーチ中でもツモった牌が北なら抜ける
+        state.handle_event(ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::Z4),
+            remaining_tiles: 48,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        });
+        assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
+    }
+
+    #[test]
+    fn test_setup_state_build_game_settings() {
+        let mut setup = SetupState::new();
+        assert!(!setup.build_game_settings().rules.three_player);
+        assert_eq!(setup.cpu_count(), 3);
+
+        setup.three_player = true;
+        setup.nuki_dora = false;
+        let settings = setup.build_game_settings();
+        assert!(settings.rules.three_player);
+        assert!(!settings.rules.nuki_dora);
+        assert_eq!(settings.initial_score, 35000);
+        assert_eq!(setup.cpu_count(), 2);
     }
 
     #[test]

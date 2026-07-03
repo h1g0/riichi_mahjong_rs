@@ -52,6 +52,7 @@ A Japanese-language edition of this document is maintained in parallel at
 | 裏ドラ | ura dora | ura dora | — | Hidden dora revealed only on a riichi win. |
 | 槓ドラ | kan dora | kan dora | — | Extra dora indicator revealed when a quad is made. |
 | 赤ドラ / 赤五 | aka dora / aka five | red five | `Tile::new_red`, `Tile::is_red_dora` | A red `5` worth +1 han. |
+| 抜きドラ / 北ドラ | nuki-dora / pei-dora | pei dora | `DoraLabel::PeiDora` | In three-player mahjong: each extracted North tile is worth +1 han. Reading follows the tile name *pei* (北). |
 
 ---
 
@@ -131,6 +132,9 @@ A Japanese-language edition of this document is maintained in parallel at
 | 四家立直 | sūcha riichi | four-riichi abortive draw | `Settings::four_riichi_draw` | Optional rule. |
 | 九種九牌 | kyūshu kyūhai | nine terminals abortive draw | `Settings::nine_terminals_draw` | Optional rule. |
 | 三家和 | sanchahō | triple-ron abortive draw | `Settings::triple_ron_draw` | Optional rule. |
+| 三人麻雀 / 三麻 | sanma | three-player mahjong | `Settings::three_player` | Characters 2–8 removed (108 tiles); no chii; tsumo loss payments. |
+| 北抜き | pei-nuki | pei (North extraction) | `Settings::nuki_dora` | Three-player only: set aside a North tile as a pei dora and draw a replacement tile. |
+| ツモ損 | tsumo-zon | tsumo loss | — | Three-player tsumo payment style: per-person amounts are unchanged and the missing player's share is simply not received. |
 
 ---
 

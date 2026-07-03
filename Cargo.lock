@@ -583,6 +583,7 @@ dependencies = [
  "rand 0.10.1",
  "rstest",
  "serde",
+ "serde_json",
  "strum",
  "strum_macros",
 ]
@@ -593,6 +594,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-util",
+ "mahjong-core",
  "mahjong-server",
  "rand 0.10.1",
  "serde",

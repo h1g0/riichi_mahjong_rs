@@ -14,6 +14,8 @@ fn game_started_event(seat_wind: Wind, hand: Vec<Tile>) -> ServerEvent {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
+        nuki_dora: false,
     }
 }
 
@@ -65,6 +67,97 @@ fn test_should_attack_counts_melds_when_tenpai() {
         client.should_attack(),
         "副露込みで聴牌している手は終盤でも攻撃を続けるはず"
     );
+}
+
+// ===== 北抜き（#257 Phase 3） =====
+
+#[test]
+fn test_consider_pei_declares_with_north_in_hand() {
+    let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+    let mut client = CpuClient::new(config);
+    client.state.three_player = true;
+    client.state.nuki_dora = true;
+    // 北入りの普通の手（国士狙いではない）
+    client.state.my_hand = vec![
+        Tile::new(Tile::P2),
+        Tile::new(Tile::P3),
+        Tile::new(Tile::P4),
+        Tile::new(Tile::P5),
+        Tile::new(Tile::P6),
+        Tile::new(Tile::P7),
+        Tile::new(Tile::S2),
+        Tile::new(Tile::S3),
+        Tile::new(Tile::S4),
+        Tile::new(Tile::S5),
+        Tile::new(Tile::S5),
+        Tile::new(Tile::S6),
+        Tile::new(Tile::Z4),
+    ];
+    client.state.my_drawn = Some(Tile::new(Tile::S7));
+
+    assert_eq!(client.consider_pei(), Some(ClientAction::Pei));
+}
+
+#[test]
+fn test_consider_pei_none_in_four_player() {
+    let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+    let mut client = CpuClient::new(config);
+    client.state.three_player = false;
+    client.state.my_hand = vec![Tile::new(Tile::Z4)];
+
+    assert_eq!(client.consider_pei(), None);
+}
+
+#[test]
+fn test_consider_pei_none_when_nuki_dora_disabled() {
+    let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+    let mut client = CpuClient::new(config);
+    client.state.three_player = true;
+    client.state.nuki_dora = false;
+    client.state.my_hand = vec![Tile::new(Tile::Z4)];
+
+    assert_eq!(client.consider_pei(), None);
+}
+
+#[test]
+fn test_consider_pei_keeps_north_for_kokushi() {
+    let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+    let mut client = CpuClient::new(config);
+    client.state.three_player = true;
+    client.state.nuki_dora = true;
+    // 国士無双1向聴（北は必要牌）
+    client.state.my_hand = vec![
+        Tile::new(Tile::M1),
+        Tile::new(Tile::M9),
+        Tile::new(Tile::P1),
+        Tile::new(Tile::P9),
+        Tile::new(Tile::S1),
+        Tile::new(Tile::S9),
+        Tile::new(Tile::Z1),
+        Tile::new(Tile::Z2),
+        Tile::new(Tile::Z3),
+        Tile::new(Tile::Z4),
+        Tile::new(Tile::Z5),
+        Tile::new(Tile::Z6),
+        Tile::new(Tile::Z7),
+    ];
+
+    assert_eq!(client.consider_pei(), None);
+}
+
+#[test]
+fn test_consider_pei_riichi_only_drawn_north() {
+    let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+    let mut client = CpuClient::new(config);
+    client.state.three_player = true;
+    client.state.nuki_dora = true;
+    client.state.is_riichi = true;
+    client.state.my_hand = vec![Tile::new(Tile::Z4)]; // リーチ中の手牌は抜けない
+
+    assert_eq!(client.consider_pei(), None);
+
+    client.state.my_drawn = Some(Tile::new(Tile::Z4));
+    assert_eq!(client.consider_pei(), Some(ClientAction::Pei));
 }
 
 #[test]
@@ -511,6 +604,8 @@ fn test_dora_float_kept_over_plain_float() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
+        nuki_dora: false,
     });
     // 4面子完成 + P9(ドラ) + ツモ S9 の単騎選択。
     // ドラの P9 を残して S9 をツモ切りすべき
@@ -533,6 +628,8 @@ fn test_dora_float_kept_over_plain_float() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
+        nuki_dora: false,
     });
     let action = client.handle_event(&draw_event(Tile::S9));
     assert!(
@@ -707,6 +804,8 @@ fn test_damaten_with_confirmed_mangan() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
+        nuki_dora: false,
     };
     let draw = ServerEvent::TileDrawn {
         tile: Tile::new(Tile::Z3),
@@ -952,6 +1051,8 @@ fn nine_terminals_action(
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
+        nuki_dora: false,
     });
     client.handle_event(&ServerEvent::TileDrawn {
         tile: Tile::new(Tile::S5),
@@ -1362,6 +1463,8 @@ fn test_cheap_distant_chi_suppressed() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
+        nuki_dora: false,
     });
     let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
     assert!(matches!(action, Some(ClientAction::Pass)));
@@ -1379,6 +1482,8 @@ fn test_cheap_distant_chi_suppressed() {
         total_rounds: 4,
         honba: 0,
         riichi_sticks: 0,
+        three_player: false,
+        nuki_dora: false,
     });
     let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
     assert!(matches!(action, Some(ClientAction::Chi { .. })));

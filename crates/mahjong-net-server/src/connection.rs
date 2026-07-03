@@ -207,7 +207,7 @@ impl Connection {
             };
 
             let room_tx = match msg {
-                ClientMessage::CreateRoom { round_count } => {
+                ClientMessage::CreateRoom { round_count, rules } => {
                     if !self.allow_room_entry() {
                         self.send_error(ErrorCode::RateLimited, "too many room attempts")
                             .await;
@@ -218,10 +218,9 @@ impl Connection {
                             .await;
                         continue;
                     }
-                    let settings = GameSettings {
-                        round_count,
-                        ..GameSettings::default()
-                    };
+                    // ルール設定はホストの指定を丸ごと採用する。
+                    // 持ち点はサーバが決める（四麻25000点・三麻35000点）。
+                    let settings = GameSettings::with_rules(round_count, rules);
                     let (_code, room_tx) = self.state.lobby.create_room(settings);
                     Some(room_tx)
                 }

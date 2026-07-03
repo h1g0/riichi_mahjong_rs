@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use mahjong_core::settings::Settings;
 use mahjong_net_server::app;
 use mahjong_net_server::room::RoomConfig;
 use mahjong_server::protocol::net::{ClientMessage, ErrorCode, PROTOCOL_VERSION, ServerMessage};
@@ -150,10 +151,35 @@ impl TestClient {
 
     /// ルームを作成し、ルームコードを返す
     async fn create_room(&mut self) -> String {
-        self.send(&ClientMessage::CreateRoom { round_count: 1 })
-            .await;
+        self.send(&ClientMessage::CreateRoom {
+            round_count: 1,
+            rules: Settings::new(),
+        })
+        .await;
         match self.recv().await {
             ServerMessage::RoomState { code, .. } => code,
+            other => panic!("RoomStateでないメッセージ: {other:?}"),
+        }
+    }
+
+    /// 三麻ルームを作成し、ルームコードを返す
+    async fn create_sanma_room(&mut self) -> String {
+        self.send(&ClientMessage::CreateRoom {
+            round_count: 1,
+            rules: Settings {
+                three_player: true,
+                ..Settings::new()
+            },
+        })
+        .await;
+        match self.recv().await {
+            ServerMessage::RoomState { code, rules, .. } => {
+                assert!(
+                    rules.three_player,
+                    "三麻ルームの RoomState に three_player が立っていない"
+                );
+                code
+            }
             other => panic!("RoomStateでないメッセージ: {other:?}"),
         }
     }
@@ -449,6 +475,91 @@ async fn test_room_full() {
         .send(&ClientMessage::JoinRoom { code: code.clone() })
         .await;
     assert_eq!(fifth.recv_error().await, ErrorCode::RoomFull);
+}
+
+/// 三麻ルームは3人で満席になる（4人目は RoomFull）
+#[tokio::test]
+async fn test_sanma_room_full_at_three() {
+    let addr = start_server(fast_config()).await;
+
+    let mut host = TestClient::connect(addr).await;
+    host.hello("ホスト").await;
+    let code = host.create_sanma_room().await;
+
+    let mut guests = Vec::new();
+    for i in 0..2 {
+        let mut guest = TestClient::connect(addr).await;
+        guest.hello(&format!("ゲスト{i}")).await;
+        guest
+            .send(&ClientMessage::JoinRoom { code: code.clone() })
+            .await;
+        match guest.recv().await {
+            ServerMessage::RoomState { your_seat, .. } => assert_eq!(your_seat, i + 1),
+            other => panic!("RoomStateでないメッセージ: {other:?}"),
+        }
+        guests.push(guest);
+    }
+
+    // 4人目はシート3が使用不可のため満席エラーになる
+    let mut fourth = TestClient::connect(addr).await;
+    fourth.hello("4人目").await;
+    fourth
+        .send(&ClientMessage::JoinRoom { code: code.clone() })
+        .await;
+    assert_eq!(fourth.recv_error().await, ErrorCode::RoomFull);
+}
+
+/// 三麻ルームで 2人の人間 + CPU1人が東風戦（東1〜3局）を打ち切れることを確認する
+#[tokio::test]
+async fn test_sanma_full_game_with_two_humans() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let addr = start_server(fast_config()).await;
+
+        let mut host = TestClient::connect(addr).await;
+        host.hello("ホスト").await;
+        let code = host.create_sanma_room().await;
+
+        let mut guest = TestClient::connect(addr).await;
+        guest.hello("ゲスト").await;
+        guest
+            .send(&ClientMessage::JoinRoom { code: code.clone() })
+            .await;
+        match guest.recv().await {
+            ServerMessage::RoomState { your_seat, .. } => assert_eq!(your_seat, 1),
+            other => panic!("RoomStateでないメッセージ: {other:?}"),
+        }
+        // ホスト側の更新 RoomState を読み捨てる
+        match host.recv().await {
+            ServerMessage::RoomState { .. } => {}
+            other => panic!("RoomStateでないメッセージ: {other:?}"),
+        }
+
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
+
+        let (host_scores, guest_scores) = tokio::join!(
+            host.play_until_game_over(true),
+            guest.play_until_game_over(true),
+        );
+
+        // 両者が同じ最終得点を観測している
+        assert_eq!(host_scores, guest_scores);
+        // ダミー席（シート3）の点数は常に0
+        assert_eq!(host_scores[3], 0, "三麻でシート3に点数が入っている");
+        // 総和は 35000×3 以下で、差は供託（1000点）単位
+        let sum: i32 = host_scores.iter().sum();
+        assert!(
+            sum <= 35000 * 3,
+            "総和が初期点数を超えている: {host_scores:?}"
+        );
+        assert_eq!(
+            (35000 * 3 - sum) % 1000,
+            0,
+            "総和の差が供託単位でない: {host_scores:?}"
+        );
+    })
+    .await
+    .expect("テスト全体がタイムアウトした");
 }
 
 /// ホスト以外の StartGame は NotHost になる

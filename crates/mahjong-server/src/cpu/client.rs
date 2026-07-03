@@ -4,9 +4,10 @@
 //! プレイヤーと全く同じプロトコルでサーバとやり取りする。
 
 use mahjong_core::hand::Hand;
-use mahjong_core::hand_info::hand_analyzer::calc_shanten_number;
+use mahjong_core::hand_info::hand_analyzer::{calc_shanten_number, calc_shanten_number_by_form};
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::Tile;
+use mahjong_core::winning_hand::name::Form;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{AvailableCall, ClientAction, ServerEvent};
@@ -178,11 +179,16 @@ impl CpuClient {
         }
     }
 
-    /// ツモ後の判断（ツモ和了/リーチ/カン/打牌）
+    /// ツモ後の判断（ツモ和了/リーチ/北抜き/カン/打牌）
     fn decide_on_draw(&self) -> ClientAction {
         // ツモ和了可能なら常に和了する
         if self.state.can_tsumo {
             return ClientAction::Tsumo;
+        }
+
+        // 北抜き検討（三麻+北抜きありのみ。リーチ中はツモった北のみ抜ける）
+        if let Some(pei_action) = self.consider_pei() {
+            return pei_action;
         }
 
         // リーチ中はツモ切りのみ
@@ -400,6 +406,42 @@ impl CpuClient {
                 Some(tile)
             }
         })
+    }
+
+    /// 北抜きを検討する（三麻+北抜きありのみ）
+    ///
+    /// 手牌・ツモ牌に北風牌があればほぼ常に抜く（1枚=確定1翻+補充ツモ）。
+    /// 例外: 国士無双を狙っている手（国士の向聴数が最良かつ3向聴以内）では北を残す。
+    /// リーチ中はツモった北のみ抜ける。
+    fn consider_pei(&self) -> Option<ClientAction> {
+        if !(self.state.three_player && self.state.nuki_dora) {
+            return None;
+        }
+
+        let drawn_is_north = self.state.my_drawn.is_some_and(|t| t.get() == Tile::Z4);
+
+        if self.state.is_riichi {
+            // リーチ中: ツモった北のみ抜ける（can_tsumo は呼び出し元で判定済み）
+            return drawn_is_north.then_some(ClientAction::Pei);
+        }
+
+        let hand_has_north = self.state.my_hand.iter().any(|t| t.get() == Tile::Z4);
+        if !drawn_is_north && !hand_has_north {
+            return None;
+        }
+
+        // 国士無双狙いなら北を温存する（門前のみ国士があり得る）
+        let melds = self.state.my_melds_for_analysis();
+        if melds.is_empty() {
+            let hand = Hand::new_with_melds(self.state.my_hand.clone(), melds, self.state.my_drawn);
+            let overall = calc_shanten_number(&hand);
+            let kokushi = calc_shanten_number_by_form(&hand, Form::ThirteenOrphans);
+            if kokushi <= overall && kokushi.as_i32() <= 3 {
+                return None;
+            }
+        }
+
+        Some(ClientAction::Pei)
     }
 
     /// 暗カンを検討する

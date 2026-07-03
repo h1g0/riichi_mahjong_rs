@@ -52,6 +52,10 @@ fn set_status(state: &mut GameState, message: &str, is_error: bool) {
 fn build_seat_labels(room: &RoomView, lang: Lang) -> [String; 4] {
     let tr = i18n::Translator::new(lang);
     std::array::from_fn(|i| {
+        // 三麻ルームでは使用しないシート3を表示しない
+        if i >= room.player_count() {
+            return String::new();
+        }
         let who = match &room.seats[i] {
             SeatInfo::Empty => tr.get(i18n::Key::EmptySeat).to_string(),
             SeatInfo::Cpu { level, personality } => tr.cpu_seat_label(*level, *personality),
@@ -99,6 +103,7 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
         code: room.code.clone(),
         seat_labels: build_seat_labels(room, lang),
         is_host: room.is_host(),
+        three_player: room.three_player(),
     });
 
     if let Some(err) = remote.take_error() {
@@ -203,9 +208,10 @@ async fn main() {
                 if let Some(action) = renderer::handle_setup_input(&mut game_state, font.as_ref()) {
                     match action {
                         SetupAction::StartLocal(configs) => {
-                            // ローカル対局開始
+                            // ローカル対局開始（三麻設定は setup_state から反映される）
                             game_state.set_local_players(&configs);
-                            let mut new_adapter = LocalAdapter::with_cpu_configs(configs);
+                            let settings = game_state.setup_state.build_game_settings();
+                            let mut new_adapter = LocalAdapter::with_settings(settings, configs);
                             new_adapter.start_game();
                             let events = new_adapter.poll_events();
                             for event in events {
@@ -229,7 +235,8 @@ async fn main() {
                         OnlineMenuAction::CreateRoom => {
                             let url = transport::default_server_url();
                             let name = display_name(&game_state);
-                            online = Some(RemoteAdapter::create_room(&url, &name, 1));
+                            let rules = game_state.online_state.build_rules();
+                            online = Some(RemoteAdapter::create_room(&url, &name, 1, rules));
                             let msg = i18n::Key::Connecting.text(game_state.lang);
                             set_status(&mut game_state, msg, false);
                         }

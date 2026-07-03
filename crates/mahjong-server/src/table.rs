@@ -30,6 +30,32 @@ impl Default for GameSettings {
     }
 }
 
+impl GameSettings {
+    /// ルール設定から標準の持ち点でゲーム設定を作る
+    ///
+    /// 持ち点はルールから決まる（四麻25000点・三麻35000点）。
+    /// ルーム作成（`CreateRoom`）やローカル対局設定からの変換に使う。
+    pub fn with_rules(round_count: u8, rules: Settings) -> Self {
+        let initial_score = if rules.three_player { 35000 } else { 25000 };
+        GameSettings {
+            initial_score,
+            round_count,
+            rules,
+        }
+    }
+
+    /// 三麻の標準設定を返す（35000点持ち・東風戦）
+    pub fn sanma_default() -> Self {
+        Self::with_rules(
+            1, // 東風戦（東1〜3局）
+            Settings {
+                three_player: true,
+                ..Settings::new()
+            },
+        )
+    }
+}
+
 /// 卓の状態
 pub struct Table {
     /// ゲーム設定
@@ -56,6 +82,9 @@ impl Table {
     /// 新しい卓を作成する
     pub fn new(settings: GameSettings) -> Self {
         let initial_score = settings.initial_score;
+        let player_count = settings.rules.player_count();
+        // 三麻ではダミー席（シート3）の点数は常に0
+        let scores = std::array::from_fn(|i| if i < player_count { initial_score } else { 0 });
         Table {
             settings,
             round: None,
@@ -64,14 +93,22 @@ impl Table {
             honba: 0,
             riichi_sticks: 0,
             dealer: 0,
-            scores: [initial_score; 4],
+            scores,
             is_game_over: false,
         }
     }
 
-    /// ゲーム全体の局数（東風戦=4, 東南戦=8）を返す
+    /// ゲーム全体の局数を返す
+    ///
+    /// 四麻: 東風戦=4, 東南戦=8
+    /// 三麻: 東風戦=3, 東南戦=6
     fn total_rounds(&self) -> usize {
-        self.settings.round_count as usize * 4
+        self.settings.round_count as usize * self.player_count()
+    }
+
+    /// プレイヤー人数を返す（四麻=4、三麻=3）
+    fn player_count(&self) -> usize {
+        self.settings.rules.player_count()
     }
 
     /// 新しい局を開始する
@@ -187,6 +224,14 @@ impl Table {
                 }
             }
 
+            // === 北抜きアクション（三麻のみ） ===
+            ClientAction::Pei => {
+                if round.current_player != player_idx {
+                    return false;
+                }
+                round.do_pei()
+            }
+
             // === 九種九牌アクション ===
             ClientAction::NineTerminals { declare } => round.do_nine_terminals(player_idx, declare),
         }
@@ -232,7 +277,7 @@ impl Table {
                     // 親がテンパイなら連荘（親交代しない、局も進めない）
                 } else {
                     // 親がノーテンなら親交代して局を進める
-                    self.dealer = (self.dealer + 1) % 4;
+                    self.dealer = (self.dealer + 1) % self.player_count();
                     self.advance_round_number();
                 }
             }
@@ -245,7 +290,7 @@ impl Table {
                     self.honba += 1;
                 } else {
                     self.honba = 0;
-                    self.dealer = (self.dealer + 1) % 4;
+                    self.dealer = (self.dealer + 1) % self.player_count();
                     self.advance_round_number();
                 }
             }
@@ -255,7 +300,7 @@ impl Table {
                     self.honba += 1;
                 } else {
                     self.honba = 0;
-                    self.dealer = (self.dealer + 1) % 4;
+                    self.dealer = (self.dealer + 1) % self.player_count();
                     self.advance_round_number();
                 }
             }
@@ -272,8 +317,8 @@ impl Table {
             self.is_game_over = true;
         }
 
-        // 場風を更新
-        self.round_wind = Wind::from_index(self.round_number / 4);
+        // 場風を更新（三麻は3局ごと、四麻は4局ごとに進む）
+        self.round_wind = Wind::from_index(self.round_number / self.player_count());
     }
 }
 
@@ -409,6 +454,81 @@ mod tests {
         }
 
         assert!(table.is_game_over);
+    }
+
+    #[test]
+    fn test_game_settings_with_rules() {
+        // ルール構造体を丸ごと引き継ぎ、持ち点はルールから決まる
+        let rules = Settings {
+            three_player: true,
+            nuki_dora: false,
+            triple_ron_draw: true,
+            ..Settings::new()
+        };
+        let settings = GameSettings::with_rules(2, rules.clone());
+        assert_eq!(settings.initial_score, 35000);
+        assert_eq!(settings.round_count, 2);
+        assert_eq!(settings.rules, rules);
+
+        let four_player = GameSettings::with_rules(1, Settings::new());
+        assert_eq!(four_player.initial_score, 25000);
+    }
+
+    #[test]
+    fn test_sanma_table_new() {
+        let table = Table::new(GameSettings::sanma_default());
+        // 35000点持ち・ダミー席3は0点
+        assert_eq!(table.scores, [35000, 35000, 35000, 0]);
+        assert_eq!(table.round_wind, Wind::East);
+        assert!(!table.is_game_over);
+    }
+
+    #[test]
+    fn test_sanma_east_wind_game_is_three_rounds() {
+        let mut table = Table::new(GameSettings::sanma_default());
+
+        // 3局連続でノーテン流局（親交代あり）させてゲーム終了を確認する
+        for i in 0..3 {
+            assert!(
+                !table.is_game_over,
+                "{}局目の前にゲームが終了している",
+                i + 1
+            );
+            table.start_round();
+            let round = table.current_round_mut().unwrap();
+            round.phase = TurnPhase::RoundOver;
+            round.result = Some(RoundResult::ExhaustiveDraw {
+                dealer_tenpai: false,
+            });
+            table.finish_round();
+        }
+
+        assert!(table.is_game_over, "三麻の東風戦が3局で終了しない");
+    }
+
+    #[test]
+    fn test_sanma_dealer_rotation_wraps_at_three() {
+        let mut table = Table::new(GameSettings {
+            round_count: 2, // 東南戦（6局）にして親が一周するのを確認
+            ..GameSettings::sanma_default()
+        });
+
+        let mut dealers = Vec::new();
+        for _ in 0..4 {
+            table.start_round();
+            dealers.push(table.dealer);
+            let round = table.current_round_mut().unwrap();
+            round.phase = TurnPhase::RoundOver;
+            round.result = Some(RoundResult::ExhaustiveDraw {
+                dealer_tenpai: false,
+            });
+            table.finish_round();
+        }
+
+        // 親は 0→1→2→0 と3人で循環する
+        assert_eq!(dealers, vec![0, 1, 2, 0]);
+        // 東1〜3局の後は南入する
+        assert_eq!(table.round_wind, Wind::South);
     }
 
     #[test]

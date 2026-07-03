@@ -207,9 +207,18 @@ pub fn run_simulation(config: &SimulationConfig) -> Result<SimulationStats, Stri
         special_draws: 0,
     };
 
+    let player_count = config.game_settings.rules.player_count();
+
     for game in 0..config.games {
-        // 席ローテーション: ゲーム g では設定 c が席 (c + g) % 4 に座る
-        let config_for_seat: [usize; 4] = std::array::from_fn(|seat| (seat + 4 - game % 4) % 4);
+        // 席ローテーション: ゲーム g では設定 c が席 (c + g) % n に座る
+        // （三麻ではダミー席3は固定で設定3のまま。イベントが来ないため実際には動かない）
+        let config_for_seat: [usize; 4] = std::array::from_fn(|seat| {
+            if seat < player_count {
+                (seat + player_count - game % player_count) % player_count
+            } else {
+                seat
+            }
+        });
 
         let mut cpus: [CpuClient; 4] = std::array::from_fn(|seat| {
             CpuClient::new(config.cpu_configs[config_for_seat[seat]].clone())
@@ -233,7 +242,7 @@ pub fn run_simulation(config: &SimulationConfig) -> Result<SimulationStats, Stri
         }
 
         // 着順集計（同点は起家に近い席が上位）
-        let mut order: Vec<usize> = (0..4).collect();
+        let mut order: Vec<usize> = (0..player_count).collect();
         order.sort_by_key(|&seat| (std::cmp::Reverse(table.scores[seat]), seat));
         for (rank, &seat) in order.iter().enumerate() {
             let cpu_stats = &mut stats.per_cpu[config_for_seat[seat]];
@@ -351,7 +360,7 @@ fn collect_round_stats(
         }
         Some(RoundResult::ExhaustiveDraw { .. }) => {
             stats.exhaustive_draws += 1;
-            for (seat, player) in round.players.iter().enumerate() {
+            for (seat, player) in round.players.iter().enumerate().take(round.player_count) {
                 if calc_shanten_number(&player.hand).is_ready_or_won() {
                     stats.per_cpu[config_for_seat[seat]].tenpai_at_draw += 1;
                 }
@@ -365,7 +374,7 @@ fn collect_round_stats(
         }
     }
 
-    for (seat, player) in round.players.iter().enumerate() {
+    for (seat, player) in round.players.iter().enumerate().take(round.player_count) {
         let cpu_stats = &mut stats.per_cpu[config_for_seat[seat]];
         if player.is_riichi {
             cpu_stats.riichi_count += 1;
@@ -393,6 +402,46 @@ mod tests {
             ],
             game_settings: GameSettings::default(),
         }
+    }
+
+    /// 三麻の高速スモークテスト用の設定
+    fn fast_sanma_config(games: usize, base_seed: u64) -> SimulationConfig {
+        SimulationConfig {
+            game_settings: GameSettings::sanma_default(),
+            ..fast_config(games, base_seed)
+        }
+    }
+
+    #[test]
+    fn test_sanma_simulation_completes_and_is_consistent() {
+        let stats =
+            run_simulation(&fast_sanma_config(2, 42)).expect("sanma simulation should complete");
+
+        assert_eq!(stats.games, 2);
+        assert!(stats.rounds >= 3 * 2, "三麻の東風戦は最低3局のはず");
+
+        // 三麻は3人なので着順は1〜3着のみ。ダミー席（設定3）に着順が付かないこと
+        for rank in 0..3 {
+            let total: u32 = stats.per_cpu.iter().map(|c| c.placements[rank]).sum();
+            assert_eq!(total, stats.games, "{}着の合計がゲーム数と不一致", rank + 1);
+        }
+        let fourth_total: u32 = stats.per_cpu.iter().map(|c| c.placements[3]).sum();
+        assert_eq!(fourth_total, 0, "三麻で4着が発生している");
+        assert_eq!(
+            stats.per_cpu[3].placements, [0; 4],
+            "ダミー席が集計されている"
+        );
+
+        // 最終持ち点の合計は ゲーム数 × 初期持ち点 × 3 以下（供託分を除く）
+        let total_score: i64 = stats.per_cpu.iter().map(|c| c.total_final_score).sum();
+        assert!(total_score <= stats.games as i64 * 35000 * 3);
+    }
+
+    #[test]
+    fn test_sanma_simulation_is_deterministic_with_same_seed() {
+        let first = run_simulation(&fast_sanma_config(1, 7)).expect("first run should complete");
+        let second = run_simulation(&fast_sanma_config(1, 7)).expect("second run should complete");
+        assert_eq!(first, second, "同一シードの三麻結果が一致しない");
     }
 
     #[test]

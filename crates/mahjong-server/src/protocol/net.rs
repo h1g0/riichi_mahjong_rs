@@ -3,6 +3,7 @@
 //! WebSocket のテキストフレームで JSON としてやり取りするエンベロープ型。
 //! ゲーム内のやり取りは既存の `ClientAction` / `ServerEvent` をそのまま包む。
 
+use mahjong_core::settings::Settings;
 use serde::{Deserialize, Serialize};
 
 use super::{ClientAction, ServerEvent};
@@ -12,7 +13,8 @@ use crate::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 ///
 /// 互換性のない変更を入れる際にインクリメントする。
 /// `Hello` で照合し、不一致なら `ErrorCode::VersionMismatch` で切断する。
-pub const PROTOCOL_VERSION: u32 = 2;
+/// v3: 三麻対応（CreateRoom / RoomState がルール設定 `Settings` を丸ごと運ぶ）
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// CPUの強さ・性格の指定
 ///
@@ -57,6 +59,13 @@ pub enum ClientMessage {
     CreateRoom {
         /// 東風戦(1)か東南戦(2)か
         round_count: u8,
+        /// ルール設定（三麻・北抜き・喰いタン・三家和などの全フラグ）
+        ///
+        /// 持ち点はサーバがルールから決める（四麻25000点・三麻35000点）。
+        /// 欠けたフィールドは既定値に補完されるため、ルールフラグを
+        /// 追加しても旧クライアントのメッセージを解釈できる。
+        #[serde(default)]
+        rules: Settings,
     },
 
     /// ルームコードを指定して参加する
@@ -97,12 +106,15 @@ pub enum ServerMessage {
     RoomState {
         /// ルームコード
         code: String,
-        /// 各座席の状態（座席インデックス順）
+        /// 各座席の状態（座席インデックス順。三麻ではシート3は常に空席）
         seats: [SeatInfo; 4],
         /// ホストの座席インデックス
         host_seat: usize,
         /// 受信者自身の座席インデックス
         your_seat: usize,
+        /// このルームのルール設定（三麻か否かの表示などに使う）
+        #[serde(default)]
+        rules: Settings,
     },
 
     /// ゲーム内イベント
@@ -242,7 +254,19 @@ mod tests {
                 session_token: None,
                 display_name: String::new(),
             },
-            ClientMessage::CreateRoom { round_count: 2 },
+            ClientMessage::CreateRoom {
+                round_count: 2,
+                rules: Settings::new(),
+            },
+            ClientMessage::CreateRoom {
+                round_count: 1,
+                rules: Settings {
+                    three_player: true,
+                    nuki_dora: false,
+                    triple_ron_draw: true,
+                    ..Settings::new()
+                },
+            },
             ClientMessage::JoinRoom {
                 code: "ABC234".to_string(),
             },
@@ -307,6 +331,7 @@ mod tests {
                 ],
                 host_seat: 0,
                 your_seat: 1,
+                rules: Settings::new(),
             },
             ServerMessage::Event(ServerEvent::TileDrawn {
                 tile: Tile::new(Tile::P5),

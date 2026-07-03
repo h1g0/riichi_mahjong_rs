@@ -237,6 +237,11 @@ impl Room {
         self.driver.is_some()
     }
 
+    /// プレイヤー人数を返す（四麻=4、三麻=3。三麻ではシート3は常に空席）
+    fn player_count(&self) -> usize {
+        self.settings.rules.player_count()
+    }
+
     fn handle_msg(&mut self, msg: RoomMsg) {
         match msg {
             RoomMsg::Join {
@@ -311,9 +316,8 @@ impl Room {
             });
         }
 
-        // 新規入室: 空席へ
-        let seat = self
-            .seats
+        // 新規入室: 空席へ（三麻ではシート0〜2のみ使用する）
+        let seat = self.seats[..self.player_count()]
             .iter()
             .position(|s| s.is_none())
             .ok_or(ErrorCode::RoomFull)?;
@@ -413,7 +417,7 @@ impl Room {
         }
 
         let mut driver = GameDriver::new(self.settings.clone());
-        for s in 0..4 {
+        for s in 0..self.player_count() {
             let config = config_for_seat(&self.cpu_configs, s);
             if self.seats[s].is_some() {
                 // 人間の座席にもシャドーCPUを常駐させ、切断時に即代打ちできるようにする
@@ -728,7 +732,7 @@ impl Room {
                 connected: seat.tx.is_some(),
             },
             None => {
-                if self.game_started() {
+                if self.game_started() && s < self.player_count() {
                     // 対局開始時の割り当てと同じ規則で強さ・性格を求める
                     let config = config_for_seat(&self.cpu_configs, s);
                     SeatInfo::Cpu {
@@ -763,6 +767,7 @@ impl Room {
             seats: seats_info.clone(),
             host_seat: HOST_SEAT,
             your_seat: seat,
+            rules: self.settings.rules.clone(),
         };
         self.send_to_seat(seat, msg);
     }

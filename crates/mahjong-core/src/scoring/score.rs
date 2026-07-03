@@ -117,6 +117,8 @@ pub enum DoraLabel {
     RedDora,
     /// 裏ドラ
     UraDora,
+    /// 北ドラ（三麻の北抜き。抜いた北風牌1枚につき1翻）
+    PeiDora,
 }
 
 impl DoraLabel {
@@ -129,11 +131,13 @@ impl DoraLabel {
                 DoraLabel::Dora => "Dora",
                 DoraLabel::RedDora => "Red Five",
                 DoraLabel::UraDora => "Ura Dora",
+                DoraLabel::PeiDora => "Pei Dora",
             },
             Lang::Ja => match self {
                 DoraLabel::Dora => "ドラ",
                 DoraLabel::RedDora => "赤ドラ",
                 DoraLabel::UraDora => "裏ドラ",
+                DoraLabel::PeiDora => "北ドラ",
             },
         }
     }
@@ -639,6 +643,7 @@ mod tests {
         assert_eq!(DoraLabel::Dora.name(Lang::Ja), "ドラ");
         assert_eq!(DoraLabel::RedDora.name(Lang::Ja), "赤ドラ");
         assert_eq!(DoraLabel::UraDora.name(Lang::Ja), "裏ドラ");
+        assert_eq!(DoraLabel::PeiDora.name(Lang::Ja), "北ドラ");
     }
 
     /// ドラ種別名（英語）
@@ -647,5 +652,6 @@ mod tests {
         assert_eq!(DoraLabel::Dora.name(Lang::En), "Dora");
         assert_eq!(DoraLabel::RedDora.name(Lang::En), "Red Five");
         assert_eq!(DoraLabel::UraDora.name(Lang::En), "Ura Dora");
+        assert_eq!(DoraLabel::PeiDora.name(Lang::En), "Pei Dora");
     }
 }

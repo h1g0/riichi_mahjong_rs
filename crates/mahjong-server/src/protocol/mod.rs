@@ -52,6 +52,9 @@ pub struct PlayerHandInfo {
     pub hand: Vec<Tile>,
     /// 副露（鳴き）一覧
     pub melds: Vec<MeldTiles>,
+    /// 北抜きで晒した北風牌（三麻のみ。四麻では常に空）
+    #[serde(default)]
+    pub pei: Vec<Tile>,
 }
 
 /// 副露の牌情報
@@ -99,6 +102,12 @@ pub enum ServerEvent {
         honba: usize,
         /// 供託リーチ棒の本数
         riichi_sticks: usize,
+        /// 三麻かどうか（プレイヤー人数・牌集合・ドラチェーンの解釈に使用）
+        #[serde(default)]
+        three_player: bool,
+        /// 北抜きドラが有効か（三麻のみ true になり得る）
+        #[serde(default)]
+        nuki_dora: bool,
     },
 
     /// ツモ（自分がツモった）
@@ -169,6 +178,14 @@ pub enum ServerEvent {
         scores: [i32; 4],
         /// 現在の供託リーチ棒の本数
         riichi_sticks: usize,
+    },
+
+    /// 北抜き宣言（三麻の抜きドラ）
+    PeiDeclared {
+        /// 北抜きしたプレイヤーの風
+        player: Wind,
+        /// 各プレイヤーの北抜き枚数（風のインデックス順: 東=0, 南=1, 西=2）
+        pei_counts: [u8; 4],
     },
 
     /// 手牌更新（鳴き後やリーチ後に自分の手牌を同期する）
@@ -265,6 +282,9 @@ pub enum ClientAction {
         /// カンする牌の種類
         tile_index: usize,
     },
+
+    /// 北抜きを宣言する（三麻の抜きドラ。手牌またはツモ牌の北を晒して補充ツモ）
+    Pei,
 
     /// パス（鳴きやロンをしない）
     Pass,
