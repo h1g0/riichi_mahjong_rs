@@ -337,7 +337,7 @@ pub enum Key {
     /// チー
     Chi,
     /// 北抜き（三麻の抜きドラ宣言ボタン）
-    Kita,
+    Pei,
     /// パス
     Pass,
     /// キャンセル
@@ -418,7 +418,7 @@ impl Key {
             },
             Key::NukiDoraToggle => match lang {
                 Lang::Ja => "北抜きドラ",
-                Lang::En => "Kita dora",
+                Lang::En => "Pei dora",
             },
             Key::CpuStrengthLabel => match lang {
                 Lang::Ja => "強さ",
@@ -534,9 +534,9 @@ impl Key {
                 // 用語集（docs/glossary.md）に合わせ "chii" を用いる
                 Lang::En => "Chii",
             },
-            Key::Kita => match lang {
+            Key::Pei => match lang {
                 Lang::Ja => "北抜き",
-                Lang::En => "Kita",
+                Lang::En => "Pei",
             },
             Key::Pass => match lang {
                 Lang::Ja => "パス",

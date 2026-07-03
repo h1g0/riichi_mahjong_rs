@@ -22,7 +22,7 @@ Implementation for Japanese Riichi Mahjong in Rust.
   - Disconnected players are taken over by the CPU and can rejoin to resync.
 - Three-player mahjong (sanma) is supported, both locally and online.
   - Characters 2–8 are removed (108 tiles, red fives 5p/5s only), chii is not available, and tsumo wins use tsumo-loss payments (per-person amounts are unchanged; the missing player's share is simply not received).
-  - Kita (extracting a North tile as a bonus dora with a replacement draw) is supported and can be toggled per game; the manzu dora chain wraps 1m ↔ 9m.
+  - Pei (extracting a North tile as a bonus dora with a replacement draw) is supported and can be toggled per game; the manzu dora chain wraps 1m ↔ 9m.
   - Games start with 35,000 points; an East-only game is East 1–3.
 - Vercel deployment using the included scripts is supported (static web client).
 

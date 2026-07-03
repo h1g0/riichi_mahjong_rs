@@ -286,7 +286,7 @@ pub(super) fn draw_action_buttons(
     }
 
     // 北抜きボタン（三麻+北抜きあり時のみ。暗カンボタンの並びに置く）
-    if state.can_kita {
+    if state.can_pei {
         let x = AGARI_BTN_X + state.self_kan_options.len() as f32 * (KAN_BTN_W + 10.0);
         theme::draw_gradient_button(
             x,
@@ -301,14 +301,14 @@ pub(super) fn draw_action_buttons(
         );
         theme::draw_text_centered(
             font,
-            tr.get(Key::Kita),
+            tr.get(Key::Pei),
             x + KAN_BTN_W / 2.0,
             KAN_BTN_Y + KAN_BTN_H / 2.0 + 6.0,
             SMALL_FONT,
             WHITE,
         );
         if clicked && result.is_none() && hit_rect(mx, my, x, KAN_BTN_Y, KAN_BTN_W, KAN_BTN_H) {
-            result = Some(OverlayClick::Action(ClientAction::Kita));
+            result = Some(OverlayClick::Action(ClientAction::Pei));
         }
     }
 

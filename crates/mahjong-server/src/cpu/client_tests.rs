@@ -72,7 +72,7 @@ fn test_should_attack_counts_melds_when_tenpai() {
 // ===== 北抜き（#257 Phase 3） =====
 
 #[test]
-fn test_consider_kita_declares_with_north_in_hand() {
+fn test_consider_pei_declares_with_north_in_hand() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.state.three_player = true;
@@ -95,32 +95,32 @@ fn test_consider_kita_declares_with_north_in_hand() {
     ];
     client.state.my_drawn = Some(Tile::new(Tile::S7));
 
-    assert_eq!(client.consider_kita(), Some(ClientAction::Kita));
+    assert_eq!(client.consider_pei(), Some(ClientAction::Pei));
 }
 
 #[test]
-fn test_consider_kita_none_in_four_player() {
+fn test_consider_pei_none_in_four_player() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.state.three_player = false;
     client.state.my_hand = vec![Tile::new(Tile::Z4)];
 
-    assert_eq!(client.consider_kita(), None);
+    assert_eq!(client.consider_pei(), None);
 }
 
 #[test]
-fn test_consider_kita_none_when_nuki_dora_disabled() {
+fn test_consider_pei_none_when_nuki_dora_disabled() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.state.three_player = true;
     client.state.nuki_dora = false;
     client.state.my_hand = vec![Tile::new(Tile::Z4)];
 
-    assert_eq!(client.consider_kita(), None);
+    assert_eq!(client.consider_pei(), None);
 }
 
 #[test]
-fn test_consider_kita_keeps_north_for_kokushi() {
+fn test_consider_pei_keeps_north_for_kokushi() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.state.three_player = true;
@@ -142,11 +142,11 @@ fn test_consider_kita_keeps_north_for_kokushi() {
         Tile::new(Tile::Z7),
     ];
 
-    assert_eq!(client.consider_kita(), None);
+    assert_eq!(client.consider_pei(), None);
 }
 
 #[test]
-fn test_consider_kita_riichi_only_drawn_north() {
+fn test_consider_pei_riichi_only_drawn_north() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.state.three_player = true;
@@ -154,10 +154,10 @@ fn test_consider_kita_riichi_only_drawn_north() {
     client.state.is_riichi = true;
     client.state.my_hand = vec![Tile::new(Tile::Z4)]; // リーチ中の手牌は抜けない
 
-    assert_eq!(client.consider_kita(), None);
+    assert_eq!(client.consider_pei(), None);
 
     client.state.my_drawn = Some(Tile::new(Tile::Z4));
-    assert_eq!(client.consider_kita(), Some(ClientAction::Kita));
+    assert_eq!(client.consider_pei(), Some(ClientAction::Pei));
 }
 
 #[test]

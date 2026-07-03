@@ -54,7 +54,7 @@ pub struct PlayerHandInfo {
     pub melds: Vec<MeldTiles>,
     /// 北抜きで晒した北風牌（三麻のみ。四麻では常に空）
     #[serde(default)]
-    pub kita: Vec<Tile>,
+    pub pei: Vec<Tile>,
 }
 
 /// 副露の牌情報
@@ -181,11 +181,11 @@ pub enum ServerEvent {
     },
 
     /// 北抜き宣言（三麻の抜きドラ）
-    KitaDeclared {
+    PeiDeclared {
         /// 北抜きしたプレイヤーの風
         player: Wind,
         /// 各プレイヤーの北抜き枚数（風のインデックス順: 東=0, 南=1, 西=2）
-        kita_counts: [u8; 4],
+        pei_counts: [u8; 4],
     },
 
     /// 手牌更新（鳴き後やリーチ後に自分の手牌を同期する）
@@ -284,7 +284,7 @@ pub enum ClientAction {
     },
 
     /// 北抜きを宣言する（三麻の抜きドラ。手牌またはツモ牌の北を晒して補充ツモ）
-    Kita,
+    Pei,
 
     /// パス（鳴きやロンをしない）
     Pass,

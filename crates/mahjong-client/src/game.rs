@@ -261,9 +261,9 @@ pub struct GameState {
     /// 北抜きドラが有効か（三麻のみ true になり得る）
     pub nuki_dora: bool,
     /// 各プレイヤーの北抜き枚数（風のインデックス順: 東=0, 南=1, 西=2）
-    pub kita_counts: [u8; 4],
+    pub pei_counts: [u8; 4],
     /// 北抜き可能か（自分の手番で手牌・ツモ牌に北がある場合）
-    pub can_kita: bool,
+    pub can_pei: bool,
     /// 表示言語
     pub lang: Lang,
 }
@@ -499,8 +499,8 @@ impl GameState {
             my_seat: 0,
             player_count: 4,
             nuki_dora: false,
-            kita_counts: [0; 4],
-            can_kita: false,
+            pei_counts: [0; 4],
+            can_pei: false,
             // 保存された表示言語を読み込む（未保存なら日本語）。
             // 「もう一度」などで new() が再生成されても選択を保つ。
             lang: crate::persistence::load_lang().unwrap_or(Lang::Ja),
@@ -554,8 +554,8 @@ impl GameState {
             } => {
                 self.player_count = if three_player { 3 } else { 4 };
                 self.nuki_dora = nuki_dora;
-                self.kita_counts = [0; 4];
-                self.can_kita = false;
+                self.pei_counts = [0; 4];
+                self.can_pei = false;
                 self.seat_wind = Some(seat_wind);
                 self.hand = hand;
                 self.hand.sort();
@@ -615,7 +615,7 @@ impl GameState {
                 self.available_calls.clear();
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
-                self.refresh_can_kita();
+                self.refresh_can_pei();
                 // ツモ後は喰い替え制限が解除される
                 self.forbidden_discards.clear();
                 self.selected_forbidden_swap = false;
@@ -673,7 +673,7 @@ impl GameState {
                     self.selected_drawn = false;
                     self.clear_riichi_selection();
                     self.self_kan_options.clear();
-                    self.can_kita = false;
+                    self.can_pei = false;
                     // 打牌が完了したので喰い替え制限を解除する
                     self.forbidden_discards.clear();
                     self.selected_forbidden_swap = false;
@@ -860,11 +860,8 @@ impl GameState {
                 self.dora_indicators = dora_indicators;
             }
 
-            ServerEvent::KitaDeclared {
-                player,
-                kita_counts,
-            } => {
-                self.kita_counts = kita_counts;
+            ServerEvent::PeiDeclared { player, pei_counts } => {
+                self.pei_counts = pei_counts;
                 // 他家の北抜きは手牌が1枚減って見える（補充ツモで戻る）
                 let relative_idx = self.relative_player_index(player);
                 if relative_idx > 0 {
@@ -1301,16 +1298,16 @@ impl GameState {
     /// 北抜き可能かを更新する（三麻+北抜きあり時のみ）
     ///
     /// リーチ中はツモった牌が北の場合のみ可能。
-    fn refresh_can_kita(&mut self) {
-        self.can_kita = false;
+    fn refresh_can_pei(&mut self) {
+        self.can_pei = false;
         if !self.is_three_player() || !self.nuki_dora {
             return;
         }
         let drawn_is_north = self.drawn.is_some_and(|t| t.get() == Tile::Z4);
         if self.is_riichi {
-            self.can_kita = drawn_is_north;
+            self.can_pei = drawn_is_north;
         } else {
-            self.can_kita = drawn_is_north || self.hand.iter().any(|t| t.get() == Tile::Z4);
+            self.can_pei = drawn_is_north || self.hand.iter().any(|t| t.get() == Tile::Z4);
         }
     }
 
@@ -1681,7 +1678,7 @@ mod tests {
         assert_eq!(state.player_count, 3);
         assert!(state.is_three_player());
         assert!(state.nuki_dora);
-        assert_eq!(state.kita_counts, [0; 4]);
+        assert_eq!(state.pei_counts, [0; 4]);
     }
 
     #[test]
@@ -1703,24 +1700,24 @@ mod tests {
     }
 
     #[test]
-    fn test_sanma_kita_declared_updates_counts() {
+    fn test_sanma_pei_declared_updates_counts() {
         let mut state = GameState::new();
         state.handle_event(sanma_game_started(Wind::East));
         // 他家（南家）の手牌枚数を通常の13枚にしておく
         state.other_players[0].concealed_count = 13;
 
-        state.handle_event(ServerEvent::KitaDeclared {
+        state.handle_event(ServerEvent::PeiDeclared {
             player: Wind::South,
-            kita_counts: [0, 1, 0, 0],
+            pei_counts: [0, 1, 0, 0],
         });
 
-        assert_eq!(state.kita_counts, [0, 1, 0, 0]);
+        assert_eq!(state.pei_counts, [0, 1, 0, 0]);
         // 北を抜いた分、南家の伏せ牌は一時的に1枚減って見える
         assert_eq!(state.other_players[0].concealed_count, 12);
     }
 
     #[test]
-    fn test_sanma_can_kita_with_north_in_hand() {
+    fn test_sanma_can_pei_with_north_in_hand() {
         let mut state = GameState::new();
         state.handle_event(sanma_game_started(Wind::East));
         state.hand = vec![Tile::new(Tile::Z4)];
@@ -1732,7 +1729,7 @@ mod tests {
             can_riichi: false,
             is_furiten: false,
         });
-        assert!(state.can_kita, "手牌に北があるのに北抜き不可");
+        assert!(state.can_pei, "手牌に北があるのに北抜き不可");
 
         // リーチ中は手牌の北だけでは抜けない
         state.is_riichi = true;
@@ -1743,7 +1740,7 @@ mod tests {
             can_riichi: false,
             is_furiten: false,
         });
-        assert!(!state.can_kita, "リーチ中の手牌北で北抜き可になっている");
+        assert!(!state.can_pei, "リーチ中の手牌北で北抜き可になっている");
 
         // リーチ中でもツモった牌が北なら抜ける
         state.handle_event(ServerEvent::TileDrawn {
@@ -1753,7 +1750,7 @@ mod tests {
             can_riichi: false,
             is_furiten: false,
         });
-        assert!(state.can_kita, "リーチ中のツモ北で北抜き不可");
+        assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
     }
 
     #[test]
