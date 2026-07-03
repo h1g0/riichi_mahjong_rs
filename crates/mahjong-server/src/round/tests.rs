@@ -1478,7 +1478,7 @@ fn test_sanma_pon_still_offered() {
 // ===== 北抜き（#257 Phase 3） =====
 
 /// 現在の手番プレイヤーに北を持たせて北抜きできる状態を作る
-fn setup_kita_round() -> Round {
+fn setup_pei_round() -> Round {
     let mut round = sanma_round(42, 0);
     round.drain_events();
     round.do_draw();
@@ -1489,14 +1489,14 @@ fn setup_kita_round() -> Round {
 }
 
 #[test]
-fn test_kita_basic_flow() {
-    let mut round = setup_kita_round();
+fn test_pei_basic_flow() {
+    let mut round = setup_pei_round();
     let remaining_before = round.wall.remaining();
 
-    assert!(round.do_kita());
+    assert!(round.do_pei());
 
     // 北が晒され、補充ツモで手牌13枚+ツモ牌1枚になる
-    assert_eq!(round.players[0].kita_tiles.len(), 1);
+    assert_eq!(round.players[0].pei_tiles.len(), 1);
     assert_eq!(round.players[0].hand.tiles().len(), 13);
     assert!(round.players[0].hand.drawn().is_some());
     // 補充で山が1枚減る
@@ -1505,21 +1505,17 @@ fn test_kita_basic_flow() {
     assert_eq!(round.current_player, 0);
     assert_eq!(round.phase, TurnPhase::WaitForDiscard);
 
-    // KitaDeclared が3人に配信され、枚数が正しい
+    // PeiDeclared が3人に配信され、枚数が正しい
     let events = round.drain_events();
-    let kita_events: Vec<_> = events
+    let pei_events: Vec<_> = events
         .iter()
-        .filter(|(_, e)| matches!(e, ServerEvent::KitaDeclared { .. }))
+        .filter(|(_, e)| matches!(e, ServerEvent::PeiDeclared { .. }))
         .collect();
-    assert_eq!(kita_events.len(), 3);
-    for (_, e) in &kita_events {
-        if let ServerEvent::KitaDeclared {
-            player,
-            kita_counts,
-        } = e
-        {
+    assert_eq!(pei_events.len(), 3);
+    for (_, e) in &pei_events {
+        if let ServerEvent::PeiDeclared { player, pei_counts } = e {
             assert_eq!(*player, Wind::East);
-            assert_eq!(*kita_counts, [1, 0, 0, 0]);
+            assert_eq!(*pei_counts, [1, 0, 0, 0]);
         }
     }
     // 補充ツモの TileDrawn が本人に届く
@@ -1531,7 +1527,7 @@ fn test_kita_basic_flow() {
 }
 
 #[test]
-fn test_kita_rejected_when_nuki_dora_disabled() {
+fn test_pei_rejected_when_nuki_dora_disabled() {
     let settings = Settings {
         three_player: true,
         nuki_dora: false,
@@ -1552,35 +1548,35 @@ fn test_kita_rejected_when_nuki_dora_disabled() {
     round.do_draw();
     round.players[0].hand = Hand::from("19m199p1199s1234z 5z");
 
-    assert!(!round.do_kita());
-    assert!(round.players[0].kita_tiles.is_empty());
+    assert!(!round.do_pei());
+    assert!(round.players[0].pei_tiles.is_empty());
 }
 
 #[test]
-fn test_kita_rejected_in_four_player_game() {
+fn test_pei_rejected_in_four_player_game() {
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     round.drain_events();
     round.do_draw();
     round.players[0].hand = Hand::from("19m199p1199s1234z 5z");
 
-    assert!(!round.do_kita());
+    assert!(!round.do_pei());
 }
 
 #[test]
-fn test_kita_rejected_when_wall_empty() {
-    let mut round = setup_kita_round();
+fn test_pei_rejected_when_wall_empty() {
+    let mut round = setup_pei_round();
     // 山を空にする
     while round.wall.draw().is_some() {}
 
-    assert!(!round.do_kita());
-    assert!(round.players[0].kita_tiles.is_empty());
+    assert!(!round.do_pei());
+    assert!(round.players[0].pei_tiles.is_empty());
 }
 
 #[test]
-fn test_kita_win_adds_kita_dora() {
-    let mut round = setup_kita_round();
-    assert!(round.do_kita());
+fn test_pei_win_adds_pei_dora() {
+    let mut round = setup_pei_round();
+    assert!(round.do_pei());
     round.drain_events();
 
     // 手牌をタンヤオのツモ和了形に差し替える（三麻に萬子2-8は無いため筒子・索子のみ）
@@ -1601,7 +1597,7 @@ fn test_kita_win_adds_kita_dora() {
     assert!(
         yaku_list.iter().any(|(item, han)| *item
             == mahjong_core::scoring::score::ScoreItem::Dora(
-                mahjong_core::scoring::score::DoraLabel::Kita
+                mahjong_core::scoring::score::DoraLabel::PeiDora
             )
             && *han == 1),
         "北ドラが加算されていない: {:?}",

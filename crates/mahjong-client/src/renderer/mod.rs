@@ -694,11 +694,11 @@ fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
         // 北抜き牌（三麻）: 捨て牌エリアの右横に小さく並べる
         if state.is_three_player() {
             let wind_idx = (my_wind_idx + rel) % state.player_count;
-            let kita = state.kita_counts[wind_idx] as usize;
+            let pei = state.pei_counts[wind_idx] as usize;
             let north = mahjong_core::tile::Tile::new(mahjong_core::tile::Tile::Z4);
             let kw = dtw * 0.75;
             let kh = dth * 0.75;
-            for k in 0..kita {
+            for k in 0..pei {
                 draw_tile_sprite(
                     tile_textures.for_tile(&north),
                     BOARD_CENTER_X + half_width + 10.0 + k as f32 * (kw * 0.6),

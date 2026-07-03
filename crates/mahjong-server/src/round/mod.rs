@@ -296,7 +296,7 @@ impl Round {
                     wind: p.seat_wind,
                     hand: p.hand.tiles().to_vec(),
                     melds,
-                    kita: p.kita_tiles.clone(),
+                    pei: p.pei_tiles.clone(),
                 }
             })
             .collect()
@@ -746,7 +746,7 @@ impl Round {
                 Some(winning_tile),
                 &dora_indicators,
                 &uradora_indicators,
-                &self.players[winner].kita_tiles,
+                &self.players[winner].pei_tiles,
                 self.settings.three_player,
             );
 
@@ -1170,7 +1170,7 @@ impl Round {
     /// - 補充は生牌山の末尾から行う（王牌は補充しない既存の簡略化に合わせる。
     ///   `remaining()`/海底の計算は自動で整合する）
     /// - 補充ツモでの和了は嶺上開花にならない
-    pub fn do_kita(&mut self) -> bool {
+    pub fn do_pei(&mut self) -> bool {
         if !(self.settings.three_player && self.settings.nuki_dora) {
             return false;
         }
@@ -1183,22 +1183,22 @@ impl Round {
         }
 
         let player_idx = self.current_player;
-        if !self.players[player_idx].do_kita() {
+        if !self.players[player_idx].do_pei() {
             return false;
         }
 
         // 全プレイヤーに北抜きを通知（各家の枚数は風のインデックス順）
         let declarer_wind = self.players[player_idx].seat_wind;
-        let mut kita_counts = [0u8; 4];
+        let mut pei_counts = [0u8; 4];
         for p in self.players.iter().take(self.player_count) {
-            kita_counts[p.seat_wind.to_index()] = p.kita_tiles.len() as u8;
+            pei_counts[p.seat_wind.to_index()] = p.pei_tiles.len() as u8;
         }
         for i in 0..self.player_count {
             self.events.push((
                 i,
-                ServerEvent::KitaDeclared {
+                ServerEvent::PeiDeclared {
                     player: declarer_wind,
-                    kita_counts,
+                    pei_counts,
                 },
             ));
         }
@@ -1217,7 +1217,7 @@ impl Round {
         };
         self.players[player_idx].draw(tile);
         self.last_draw_was_dead_wall = false;
-        self.push_draw_events(player_idx, tile, "kita_draw");
+        self.push_draw_events(player_idx, tile, "pei_draw");
         true
     }
 
@@ -1528,7 +1528,7 @@ impl Round {
             None,
             &dora_indicators,
             &uradora_indicators,
-            &self.players[winner].kita_tiles,
+            &self.players[winner].pei_tiles,
             self.settings.three_player,
         );
 

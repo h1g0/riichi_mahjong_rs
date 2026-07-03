@@ -187,8 +187,8 @@ impl CpuClient {
         }
 
         // 北抜き検討（三麻+北抜きありのみ。リーチ中はツモった北のみ抜ける）
-        if let Some(kita_action) = self.consider_kita() {
-            return kita_action;
+        if let Some(pei_action) = self.consider_pei() {
+            return pei_action;
         }
 
         // リーチ中はツモ切りのみ
@@ -413,7 +413,7 @@ impl CpuClient {
     /// 手牌・ツモ牌に北風牌があればほぼ常に抜く（1枚=確定1翻+補充ツモ）。
     /// 例外: 国士無双を狙っている手（国士の向聴数が最良かつ3向聴以内）では北を残す。
     /// リーチ中はツモった北のみ抜ける。
-    fn consider_kita(&self) -> Option<ClientAction> {
+    fn consider_pei(&self) -> Option<ClientAction> {
         if !(self.state.three_player && self.state.nuki_dora) {
             return None;
         }
@@ -422,7 +422,7 @@ impl CpuClient {
 
         if self.state.is_riichi {
             // リーチ中: ツモった北のみ抜ける（can_tsumo は呼び出し元で判定済み）
-            return drawn_is_north.then_some(ClientAction::Kita);
+            return drawn_is_north.then_some(ClientAction::Pei);
         }
 
         let hand_has_north = self.state.my_hand.iter().any(|t| t.get() == Tile::Z4);
@@ -441,7 +441,7 @@ impl CpuClient {
             }
         }
 
-        Some(ClientAction::Kita)
+        Some(ClientAction::Pei)
     }
 
     /// 暗カンを検討する

@@ -213,11 +213,11 @@ impl Table {
             }
 
             // === 北抜きアクション（三麻のみ） ===
-            ClientAction::Kita => {
+            ClientAction::Pei => {
                 if round.current_player != player_idx {
                     return false;
                 }
-                round.do_kita()
+                round.do_pei()
             }
 
             // === 九種九牌アクション ===

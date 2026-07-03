@@ -51,7 +51,7 @@
 | 裏ドラ | ura dora | ura dora | — | リーチ和了時のみ公開される裏のドラ。 |
 | 槓ドラ | kan dora | kan dora | — | カン成立時に追加で公開されるドラ表示牌。 |
 | 赤ドラ / 赤五 | aka dora / aka five | red five | `Tile::new_red`, `Tile::is_red_dora` | +1 翻の赤い `5`。 |
-| 抜きドラ / 北ドラ | nuki-dora / kita-dora | kita dora | `DoraLabel::Kita` | 三人麻雀で抜いた北風牌。1枚につき +1 翻。 |
+| 抜きドラ / 北ドラ | nuki-dora / pei-dora | pei dora | `DoraLabel::PeiDora` | 三人麻雀で抜いた北風牌。1枚につき +1 翻。読みは牌名の「ペー」（北）に従う。 |
 
 ---
 
@@ -132,7 +132,7 @@
 | 九種九牌 | kyūshu kyūhai | nine terminals abortive draw | `Settings::nine_terminals_draw` | オプション。 |
 | 三家和 | sanchahō | triple-ron abortive draw | `Settings::triple_ron_draw` | オプション。 |
 | 三人麻雀 / 三麻 | sanma | three-player mahjong | `Settings::three_player` | 萬子2〜8を除外した108枚・チーなし・ツモ損で3人で打つ。 |
-| 北抜き | kita-nuki | kita (North extraction) | `Settings::nuki_dora` | 三麻専用。北風牌を晒して抜きドラとし、牌山から1枚補充する。 |
+| 北抜き | pei-nuki | pei (North extraction) | `Settings::nuki_dora` | 三麻専用。北風牌を晒して抜きドラとし、牌山から1枚補充する。 |
 | ツモ損 | tsumo-zon | tsumo loss | — | 三麻のツモ支払い方式。1人あたりの支払額は四麻と同じで、いない北家の分は貰えない。 |
 
 ---

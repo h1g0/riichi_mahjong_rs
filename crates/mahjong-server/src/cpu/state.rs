@@ -59,7 +59,7 @@ pub struct CpuGameState {
     /// 北抜きドラが有効か（三麻のみ true になり得る）
     pub nuki_dora: bool,
     /// 各プレイヤーの北抜き枚数（風のインデックス順: 東=0, 南=1, 西=2）
-    pub kita_counts: [u8; 4],
+    pub pei_counts: [u8; 4],
 
     // --- 鳴き関連 ---
     /// 現在利用可能な鳴きアクション
@@ -99,7 +99,7 @@ impl CpuGameState {
             riichi_sticks: 0,
             three_player: false,
             nuki_dora: false,
-            kita_counts: [0; 4],
+            pei_counts: [0; 4],
             pending_calls: Vec::new(),
             pending_call_tile: None,
             need_discard_after_call: false,
@@ -156,7 +156,7 @@ impl CpuGameState {
                 self.round_wind = *round_wind;
                 self.three_player = *three_player;
                 self.nuki_dora = *nuki_dora;
-                self.kita_counts = [0; 4];
+                self.pei_counts = [0; 4];
                 // 四麻: 136 - 14(王牌) - 13*4(配牌) = 70
                 // 三麻: 108 - 14(王牌) - 13*3(配牌) = 55
                 self.remaining_tiles = if *three_player { 55 } else { 70 };
@@ -301,11 +301,8 @@ impl CpuGameState {
                 self.dora_indicators = dora_indicators.clone();
             }
 
-            ServerEvent::KitaDeclared {
-                player,
-                kita_counts,
-            } => {
-                self.kita_counts = *kita_counts;
+            ServerEvent::PeiDeclared { player, pei_counts } => {
+                self.pei_counts = *pei_counts;
                 if *player == self.my_seat_wind {
                     // 自分の北抜き: 補充ツモ（TileDrawn）が来るまで打牌不要
                     // （直後の HandUpdated で打牌判断を始めないようにする）
@@ -444,8 +441,8 @@ impl CpuGameState {
         }
 
         // 北抜きで晒された北風牌（手牌にも河にも現れないため個別に加算）
-        let total_kita: u8 = self.kita_counts.iter().sum();
-        counts[Tile::Z4 as usize] = (counts[Tile::Z4 as usize] + total_kita).min(4);
+        let total_pei: u8 = self.pei_counts.iter().sum();
+        counts[Tile::Z4 as usize] = (counts[Tile::Z4 as usize] + total_pei).min(4);
 
         // 三麻ではゲームに存在しない萬子2〜8を「全て見えている」扱いにする。
         // これにより受け入れ枚数（4 - visible）や死に牌判定（visible >= 4）が
