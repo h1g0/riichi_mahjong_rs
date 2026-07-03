@@ -29,6 +29,18 @@ const FONT_SIZE: u16 = 20;
 const SMALL_FONT: u16 = 16;
 const AGARI_FONT: u16 = 32;
 
+/// アプリ全体で実際に使われている基準フォントサイズ（`draw_text`/`draw_text_centered`
+/// 呼び出しの `base_size` 引数を網羅した一覧。新しいサイズを使う描画を追加したら
+/// ここにも追加すること）。
+///
+/// [`prewarm_fonts`] と `cache_dynamic_text` はこの一覧のサイズだけを事前キャッシュする。
+/// かつては `8..=AGARI_FONT`（25通り）を無差別に総当たりしていたが、実際に使うのは
+/// この16通りだけであり、無駄な水増しがフォントアトラスの肥大化を招いていた
+/// （下記コメント参照）。
+const USED_FONT_SIZES: [u16; 16] = [
+    9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 24, 26, 28, 32,
+];
+
 /// 設計上の基準解像度。すべての UI 座標はこの仮想キャンバス上で定義され、
 /// 実際のウィンドウ／キャンバスサイズに合わせて一様に拡大・縮小される。
 /// （HTML 側でキャンバスのアスペクト比を DESIGN_W:DESIGN_H に固定しているため歪まない）
@@ -217,13 +229,27 @@ fn draw_jp_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16,
     theme::draw_text(font, text, x, y, font_size, color);
 }
 
-/// 起動時にフォントアトラスを必要なグリフ・サイズで作り切る。
+/// 起動時にフォントアトラスを必要なグリフ・サイズで作り切る（ネイティブ専用）。
 ///
 /// ネイティブ(OpenGL)では、回転カメラ下のテキスト描画中にフォントアトラスが
 /// 拡張されると、アトラステクスチャが delete→再生成され、未フラッシュの描画
 /// バッチが壊れて文字が黒い■に化ける（対局画面はカメラを切り替えながら描く
 /// ため発症する）。描画を伴わない `measure` で事前にアトラスを最終サイズまで
 /// 構築しておけば、フレーム途中での拡張が起きず発症しない。
+///
+/// WASM では呼ばない（`#[cfg(not(target_arch = "wasm32"))]`）。一度に大量の
+/// グリフ×サイズをキャッシュしようとすると、macroquad 0.4.15 のフォント
+/// アトラスが grow を繰り返し、wasm32 では usize が 32bit のため
+/// `Image::gen_image_color` の `width as usize * height as usize * 4` が
+/// 32768×32768 でちょうど 2^32 に達してオーバーフローし、0 バイトのバッファを
+/// 確保してしまって直後の書き込みで境界チェックパニックが発生する（macroquad
+/// 側の既存バグ）。この成長は内部で `HashMap` の反復順に依存して非決定的な
+/// ため、キャッシュするグリフ数・サイズ数を減らしても確率が下がるだけで
+/// 根絶はできない。WASM では prewarm を行わず、実際に画面へ現れた文字を
+/// その都度キャッシュさせることで、一度に大量の再パッキングが必要になる
+/// 事態そのものを避ける（黒■化はネイティブ限定の問題であり、WASM で
+/// prewarm を省いても発生しないことを実機で確認済み）。
+#[cfg(not(target_arch = "wasm32"))]
 pub fn prewarm_fonts(font: Option<&Font>) {
     // UI に現れる全グリフ（生成スクリプト: scripts/extract_glyphs.py）
     let mut glyphs: String = include_str!("../../glyphs.txt").to_string();
@@ -231,8 +257,7 @@ pub fn prewarm_fonts(font: Option<&Font>) {
     for c in 0x20u8..0x7f {
         glyphs.push(c as char);
     }
-    // 使用する基準フォントサイズを総当たりで事前キャッシュする
-    for base in 8..=AGARI_FONT {
+    for &base in &USED_FONT_SIZES {
         let _ = theme::measure_scaled(font, &glyphs, base);
     }
 }
@@ -243,13 +268,16 @@ pub fn prewarm_fonts(font: Option<&Font>) {
 /// [`prewarm_fonts`] は固定 UI 文言しか網羅できないため、こうした文字は毎フレーム
 /// measure してアトラスへ載せておく。これにより、描画途中（特に対局画面のカメラ
 /// 切り替え中）にアトラスが拡張されて文字が黒い■に化けるのを防ぐ。
+///
+/// キャッシュするサイズは [`prewarm_fonts`] と同様 [`USED_FONT_SIZES`] のみに限定する
+/// （理由も同関数のコメントを参照）。
 pub fn cache_dynamic_text(font: Option<&Font>, state: &GameState) {
     use crate::game::PlayerLabel;
     let cache = |s: &str| {
         if s.is_empty() {
             return;
         }
-        for base in 8..=AGARI_FONT {
+        for &base in &USED_FONT_SIZES {
             let _ = theme::measure_scaled(font, s, base);
         }
     };
