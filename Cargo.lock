@@ -594,6 +594,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-util",
+ "mahjong-core",
  "mahjong-server",
  "rand 0.10.1",
  "serde",

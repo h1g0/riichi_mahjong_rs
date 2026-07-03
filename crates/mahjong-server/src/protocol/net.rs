@@ -3,6 +3,7 @@
 //! WebSocket のテキストフレームで JSON としてやり取りするエンベロープ型。
 //! ゲーム内のやり取りは既存の `ClientAction` / `ServerEvent` をそのまま包む。
 
+use mahjong_core::settings::Settings;
 use serde::{Deserialize, Serialize};
 
 use super::{ClientAction, ServerEvent};
@@ -12,7 +13,7 @@ use crate::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 ///
 /// 互換性のない変更を入れる際にインクリメントする。
 /// `Hello` で照合し、不一致なら `ErrorCode::VersionMismatch` で切断する。
-/// v3: 三麻対応（CreateRoom の three_player/nuki_dora、RoomState の three_player）
+/// v3: 三麻対応（CreateRoom / RoomState がルール設定 `Settings` を丸ごと運ぶ）
 pub const PROTOCOL_VERSION: u32 = 3;
 
 /// CPUの強さ・性格の指定
@@ -41,11 +42,6 @@ impl CpuSpec {
     }
 }
 
-/// serde デフォルト用: true を返す
-fn default_true() -> bool {
-    true
-}
-
 /// クライアントからサーバへのメッセージ
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
@@ -63,12 +59,13 @@ pub enum ClientMessage {
     CreateRoom {
         /// 東風戦(1)か東南戦(2)か
         round_count: u8,
-        /// 三麻（3人打ち）ルームか
+        /// ルール設定（三麻・北抜き・喰いタン・三家和などの全フラグ）
+        ///
+        /// 持ち点はサーバがルールから決める（四麻25000点・三麻35000点）。
+        /// 欠けたフィールドは既定値に補完されるため、ルールフラグを
+        /// 追加しても旧クライアントのメッセージを解釈できる。
         #[serde(default)]
-        three_player: bool,
-        /// 北抜きドラありか（三麻のみ有効）
-        #[serde(default = "default_true")]
-        nuki_dora: bool,
+        rules: Settings,
     },
 
     /// ルームコードを指定して参加する
@@ -115,9 +112,9 @@ pub enum ServerMessage {
         host_seat: usize,
         /// 受信者自身の座席インデックス
         your_seat: usize,
-        /// 三麻（3人打ち）ルームか
+        /// このルームのルール設定（三麻か否かの表示などに使う）
         #[serde(default)]
-        three_player: bool,
+        rules: Settings,
     },
 
     /// ゲーム内イベント
@@ -259,13 +256,16 @@ mod tests {
             },
             ClientMessage::CreateRoom {
                 round_count: 2,
-                three_player: false,
-                nuki_dora: true,
+                rules: Settings::new(),
             },
             ClientMessage::CreateRoom {
                 round_count: 1,
-                three_player: true,
-                nuki_dora: false,
+                rules: Settings {
+                    three_player: true,
+                    nuki_dora: false,
+                    triple_ron_draw: true,
+                    ..Settings::new()
+                },
             },
             ClientMessage::JoinRoom {
                 code: "ABC234".to_string(),
@@ -331,7 +331,7 @@ mod tests {
                 ],
                 host_seat: 0,
                 your_seat: 1,
-                three_player: false,
+                rules: Settings::new(),
             },
             ServerMessage::Event(ServerEvent::TileDrawn {
                 tile: Tile::new(Tile::P5),

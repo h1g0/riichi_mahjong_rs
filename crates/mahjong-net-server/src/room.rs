@@ -767,7 +767,7 @@ impl Room {
             seats: seats_info.clone(),
             host_seat: HOST_SEAT,
             your_seat: seat,
-            three_player: self.settings.rules.three_player,
+            rules: self.settings.rules.clone(),
         };
         self.send_to_seat(seat, msg);
     }
