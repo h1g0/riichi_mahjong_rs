@@ -151,6 +151,16 @@ async fn main() {
 
     // フォントアトラスを起動時に作り切る（ネイティブで対局画面の文字が
     // 黒い■に化けるのを防ぐ。詳細は renderer::prewarm_fonts を参照）。
+    //
+    // WASM ビルドでは呼ばない: 一度に大量のグリフ×サイズをまとめてキャッシュ
+    // すると、macroquad 0.4.15 のフォントアトラスが grow を繰り返し、
+    // wasm32 では usize が 32bit のため `Image::gen_image_color` の
+    // `width as usize * height as usize * 4` が 32768×32768 でちょうど 2^32
+    // に達してオーバーフローし、起動直後に黒画面のまま固まることがあった
+    // （macroquad 側の既存バグ）。WASM では prewarm を行わず、実際に画面へ
+    // 現れた文字だけを都度キャッシュさせることで、一度に大量の再パッキング
+    // が発生する事態を避ける。
+    #[cfg(not(target_arch = "wasm32"))]
     renderer::prewarm_fonts(font.as_ref());
 
     // 対局中のアダプター（ローカル or リモート）
