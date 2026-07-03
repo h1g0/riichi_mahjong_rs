@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 表示をどの言語にするかの列挙型
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Lang {
     /// 英語
     En,
@@ -10,7 +10,12 @@ pub enum Lang {
 }
 
 /// 設定
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// ネットワーク越しに送受信されるため（`CreateRoom` / `RoomState`）、
+/// 構造体レベルの `#[serde(default)]` で欠けたフィールドを既定値に補完する。
+/// これにより将来ルールフラグを追加しても旧クライアントの JSON を解釈できる。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// 表示言語（デフォルトは日本語）
     pub display_lang: Lang,
@@ -44,17 +49,10 @@ pub struct Settings {
     /// 三人麻雀（サンマ）かどうか（デフォルトは false = 四人麻雀）
     /// ありの場合: 萬子2〜8を除外した108枚で3人で打つ。チーは提供されない。
     /// ツモはツモ損（1人あたりの支払額は四麻と同じで、いない北家分は貰えない）。
-    #[serde(default)]
     pub three_player: bool,
     /// 北抜きドラありかなしか（三人麻雀のみ有効。デフォルトはあり）
     /// ありの場合: 手番中に北風牌を晒して1枚につきドラ1として扱い、牌山から補充する。
-    #[serde(default = "default_true")]
     pub nuki_dora: bool,
-}
-
-/// serde デフォルト用: true を返す
-fn default_true() -> bool {
-    true
 }
 
 impl Default for Settings {
@@ -120,5 +118,13 @@ mod tests {
         let settings: Settings = serde_json::from_value(value).unwrap();
         assert!(!settings.three_player);
         assert!(settings.nuki_dora);
+    }
+
+    /// 構造体レベルの serde デフォルトにより、空の JSON からでも既定値で復元できる
+    /// （将来ルールフラグを追加しても旧クライアントのメッセージを解釈できる）
+    #[test]
+    fn deserialize_from_empty_object_uses_defaults() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings, Settings::new());
     }
 }

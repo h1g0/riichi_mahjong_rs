@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use mahjong_core::settings::Settings;
 use mahjong_net_server::app;
 use mahjong_net_server::room::RoomConfig;
 use mahjong_server::protocol::net::{ClientMessage, ErrorCode, PROTOCOL_VERSION, ServerMessage};
@@ -152,8 +153,7 @@ impl TestClient {
     async fn create_room(&mut self) -> String {
         self.send(&ClientMessage::CreateRoom {
             round_count: 1,
-            three_player: false,
-            nuki_dora: true,
+            rules: Settings::new(),
         })
         .await;
         match self.recv().await {
@@ -166,16 +166,16 @@ impl TestClient {
     async fn create_sanma_room(&mut self) -> String {
         self.send(&ClientMessage::CreateRoom {
             round_count: 1,
-            three_player: true,
-            nuki_dora: true,
+            rules: Settings {
+                three_player: true,
+                ..Settings::new()
+            },
         })
         .await;
         match self.recv().await {
-            ServerMessage::RoomState {
-                code, three_player, ..
-            } => {
+            ServerMessage::RoomState { code, rules, .. } => {
                 assert!(
-                    three_player,
+                    rules.three_player,
                     "三麻ルームの RoomState に three_player が立っていない"
                 );
                 code

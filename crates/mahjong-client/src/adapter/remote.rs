@@ -10,7 +10,7 @@
 //! 4. `RoomState` で入室完了（`room()` が Some になる）
 //! 5. ホストが `start_game` → `Event(GameStarted)` で対局開始
 
-use mahjong_core::settings::Lang;
+use mahjong_core::settings::{Lang, Settings};
 use mahjong_server::protocol::net::{
     ClientMessage, CpuSpec, ErrorCode, PROTOCOL_VERSION, SeatInfo, ServerMessage,
 };
@@ -41,8 +41,8 @@ pub struct RoomView {
     pub host_seat: usize,
     /// 自分の座席
     pub your_seat: usize,
-    /// 三麻（3人打ち）ルームか
-    pub three_player: bool,
+    /// このルームのルール設定
+    pub rules: Settings,
 }
 
 impl RoomView {
@@ -51,9 +51,14 @@ impl RoomView {
         self.your_seat == self.host_seat
     }
 
+    /// 三麻（3人打ち）ルームか
+    pub fn three_player(&self) -> bool {
+        self.rules.three_player
+    }
+
     /// プレイヤー人数を返す（四麻=4、三麻=3）
     pub fn player_count(&self) -> usize {
-        if self.three_player { 3 } else { 4 }
+        self.rules.player_count()
     }
 }
 
@@ -70,14 +75,8 @@ pub struct RemoteError {
 
 /// Welcome 受信後に送るロビー操作
 enum LobbyIntent {
-    Create {
-        round_count: u8,
-        three_player: bool,
-        nuki_dora: bool,
-    },
-    Join {
-        code: String,
-    },
+    Create { round_count: u8, rules: Settings },
+    Join { code: String },
 }
 
 /// 自動再接続のバックオフ間隔（秒）。試行回数で頭打ちにする。
@@ -153,24 +152,17 @@ impl RemoteAdapter {
     }
 
     /// サーバに接続してルームを作成する
-    pub fn create_room(
-        url: &str,
-        display_name: &str,
-        round_count: u8,
-        three_player: bool,
-        nuki_dora: bool,
-    ) -> Self {
+    ///
+    /// `rules` にはルームのルール設定を丸ごと渡す（三麻・北抜きに限らず、
+    /// 将来ルール選択UIが増えてもこのシグネチャのまま拡張できる）。
+    pub fn create_room(url: &str, display_name: &str, round_count: u8, rules: Settings) -> Self {
         let (transport, connector) = Self::connector_for(url);
         Self::build(
             transport,
             connector,
             default_clock(),
             display_name,
-            LobbyIntent::Create {
-                round_count,
-                three_player,
-                nuki_dora,
-            },
+            LobbyIntent::Create { round_count, rules },
         )
     }
 
@@ -341,15 +333,9 @@ impl RemoteAdapter {
                 self.status = ConnStatus::Connected;
                 if let Some(intent) = self.pending_intent.take() {
                     let msg = match intent {
-                        LobbyIntent::Create {
-                            round_count,
-                            three_player,
-                            nuki_dora,
-                        } => ClientMessage::CreateRoom {
-                            round_count,
-                            three_player,
-                            nuki_dora,
-                        },
+                        LobbyIntent::Create { round_count, rules } => {
+                            ClientMessage::CreateRoom { round_count, rules }
+                        }
                         LobbyIntent::Join { code } => ClientMessage::JoinRoom { code },
                     };
                     self.send(&msg);
@@ -360,7 +346,7 @@ impl RemoteAdapter {
                 seats,
                 host_seat,
                 your_seat,
-                three_player,
+                rules,
             } => {
                 self.room_code = Some(code.clone());
                 // 座席情報から人間プレイヤーの接続状態を取り込む
@@ -375,7 +361,7 @@ impl RemoteAdapter {
                     seats,
                     host_seat,
                     your_seat,
-                    three_player,
+                    rules,
                 });
             }
             ServerMessage::Event(event) => {
@@ -621,8 +607,7 @@ mod tests {
             transport,
             LobbyIntent::Create {
                 round_count: 1,
-                three_player: false,
-                nuki_dora: true,
+                rules: Settings::new(),
             },
         );
         (adapter, handle)
@@ -649,7 +634,7 @@ mod tests {
             ],
             host_seat: 0,
             your_seat,
-            three_player: false,
+            rules: Settings::new(),
         }
     }
 
@@ -697,14 +682,13 @@ mod tests {
         assert_eq!(adapter.status(), ConnStatus::Connected);
         let sent = handle.sent();
         assert_eq!(sent.len(), 2);
-        assert!(matches!(
-            sent[1],
-            ClientMessage::CreateRoom {
-                round_count: 1,
-                three_player: false,
-                nuki_dora: true,
+        match &sent[1] {
+            ClientMessage::CreateRoom { round_count, rules } => {
+                assert_eq!(*round_count, 1);
+                assert_eq!(*rules, Settings::new());
             }
-        ));
+            other => panic!("CreateRoomでないメッセージ: {other:?}"),
+        }
     }
 
     #[test]
@@ -850,8 +834,7 @@ mod tests {
             "E2Eテスト",
             LobbyIntent::Create {
                 round_count: 1,
-                three_player: false,
-                nuki_dora: true,
+                rules: Settings::new(),
             },
         );
 
@@ -1146,8 +1129,7 @@ mod tests {
             "テスト",
             LobbyIntent::Create {
                 round_count: 1,
-                three_player: false,
-                nuki_dora: true,
+                rules: Settings::new(),
             },
         );
 
@@ -1177,8 +1159,7 @@ mod tests {
             "テスト",
             LobbyIntent::Create {
                 round_count: 1,
-                three_player: false,
-                nuki_dora: true,
+                rules: Settings::new(),
             },
         );
         handle.push_msg(&ServerMessage::TurnTimer { seconds: 5 });

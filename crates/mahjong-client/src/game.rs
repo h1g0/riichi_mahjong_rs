@@ -306,6 +306,18 @@ impl OnlineUiState {
             nuki_dora: true,
         }
     }
+
+    /// ルーム作成時に送るルール設定を組み立てる
+    ///
+    /// UIで選択できないルールは既定値のまま。ルール選択UIを増やす場合は
+    /// ここに反映すればサーバへそのまま伝わる。
+    pub fn build_rules(&self) -> mahjong_core::settings::Settings {
+        mahjong_core::settings::Settings {
+            three_player: self.three_player,
+            nuki_dora: self.nuki_dora,
+            ..mahjong_core::settings::Settings::new()
+        }
+    }
 }
 
 /// ロビー画面に表示するルーム情報
@@ -349,15 +361,21 @@ impl SetupState {
         if self.three_player { 2 } else { 3 }
     }
 
-    /// ゲーム設定を組み立てる
-    pub fn build_game_settings(&self) -> mahjong_server::table::GameSettings {
-        if self.three_player {
-            let mut settings = mahjong_server::table::GameSettings::sanma_default();
-            settings.rules.nuki_dora = self.nuki_dora;
-            settings
-        } else {
-            mahjong_server::table::GameSettings::default()
+    /// 選択中のルール設定を組み立てる
+    ///
+    /// UIで選択できないルールは既定値のまま。ルール選択UIを増やす場合は
+    /// ここに反映すれば、ローカル・オンラインの両方に伝わる。
+    pub fn build_rules(&self) -> mahjong_core::settings::Settings {
+        mahjong_core::settings::Settings {
+            three_player: self.three_player,
+            nuki_dora: self.nuki_dora,
+            ..mahjong_core::settings::Settings::new()
         }
+    }
+
+    /// ゲーム設定を組み立てる（持ち点はルールから決まる）
+    pub fn build_game_settings(&self) -> mahjong_server::table::GameSettings {
+        mahjong_server::table::GameSettings::with_rules(1, self.build_rules())
     }
 
     pub fn level_count() -> usize {

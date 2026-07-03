@@ -31,16 +31,28 @@ impl Default for GameSettings {
 }
 
 impl GameSettings {
+    /// ルール設定から標準の持ち点でゲーム設定を作る
+    ///
+    /// 持ち点はルールから決まる（四麻25000点・三麻35000点）。
+    /// ルーム作成（`CreateRoom`）やローカル対局設定からの変換に使う。
+    pub fn with_rules(round_count: u8, rules: Settings) -> Self {
+        let initial_score = if rules.three_player { 35000 } else { 25000 };
+        GameSettings {
+            initial_score,
+            round_count,
+            rules,
+        }
+    }
+
     /// 三麻の標準設定を返す（35000点持ち・東風戦）
     pub fn sanma_default() -> Self {
-        GameSettings {
-            initial_score: 35000,
-            round_count: 1, // 東風戦（東1〜3局）
-            rules: Settings {
+        Self::with_rules(
+            1, // 東風戦（東1〜3局）
+            Settings {
                 three_player: true,
                 ..Settings::new()
             },
-        }
+        )
     }
 }
 
@@ -442,6 +454,24 @@ mod tests {
         }
 
         assert!(table.is_game_over);
+    }
+
+    #[test]
+    fn test_game_settings_with_rules() {
+        // ルール構造体を丸ごと引き継ぎ、持ち点はルールから決まる
+        let rules = Settings {
+            three_player: true,
+            nuki_dora: false,
+            triple_ron_draw: true,
+            ..Settings::new()
+        };
+        let settings = GameSettings::with_rules(2, rules.clone());
+        assert_eq!(settings.initial_score, 35000);
+        assert_eq!(settings.round_count, 2);
+        assert_eq!(settings.rules, rules);
+
+        let four_player = GameSettings::with_rules(1, Settings::new());
+        assert_eq!(four_player.initial_score, 25000);
     }
 
     #[test]
