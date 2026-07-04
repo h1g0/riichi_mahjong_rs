@@ -416,6 +416,11 @@ impl Room {
             self.cpu_configs = specs.map(|spec| spec.to_config());
         }
 
+        // 席順ランダム化: 対局に参加するCPU分の設定をシャッフルする。
+        // 起家のランダム化は GameDriver::start_game が行う。
+        let cpu_count = self.player_count() - 1;
+        mahjong_server::cpu::client::shuffle_cpu_configs(&mut self.cpu_configs[..cpu_count]);
+
         let mut driver = GameDriver::new(self.settings.clone());
         for s in 0..self.player_count() {
             let config = config_for_seat(&self.cpu_configs, s);

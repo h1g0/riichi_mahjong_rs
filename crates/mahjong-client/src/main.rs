@@ -74,7 +74,7 @@ fn build_seat_labels(room: &RoomView, lang: Lang) -> [String; 4] {
         if i == room.host_seat {
             marks.push_str(tr.get(i18n::Key::MarkerHost));
         }
-        tr.seat_row(mahjong_core::tile::Wind::from_index(i), &who, &marks)
+        tr.seat_row(i + 1, &who, &marks)
     })
 }
 
@@ -217,10 +217,17 @@ async fn main() {
                 // 設定画面の入力処理
                 if let Some(action) = renderer::handle_setup_input(&mut game_state, font.as_ref()) {
                     match action {
-                        SetupAction::StartLocal(configs) => {
+                        SetupAction::StartLocal(mut configs) => {
                             // ローカル対局開始（三麻設定は setup_state から反映される）
-                            game_state.set_local_players(&configs);
                             let settings = game_state.setup_state.build_game_settings();
+                            // 席順ランダム化: 対局に参加するCPUの席をシャッフルする
+                            // （起家のランダム化は GameDriver::start_game が行う）。
+                            // ラベルと座席の対応を保つため set_local_players より先に行う。
+                            let cpu_count = settings.rules.player_count() - 1;
+                            mahjong_server::cpu::client::shuffle_cpu_configs(
+                                &mut configs[..cpu_count],
+                            );
+                            game_state.set_local_players(&configs);
                             let mut new_adapter = LocalAdapter::with_settings(settings, configs);
                             new_adapter.start_game();
                             let events = new_adapter.poll_events();

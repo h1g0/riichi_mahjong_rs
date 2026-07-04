@@ -142,14 +142,17 @@ impl GameDriver {
         &mut self.table
     }
 
-    /// ゲームを開始する（最初の局を開始）
+    /// ゲームを開始する（起家をランダムに選び、最初の局を開始）
     pub fn start_game(&mut self) {
         self.pending_cpu_batches.clear();
+        self.table.randomize_dealer();
         self.table.start_round();
         self.pump(None);
     }
 
     /// シード値を指定してゲームを開始する（テスト・再現用）
+    ///
+    /// 再現性を保つため起家はランダム化せず、座席0のまま開始する。
     pub fn start_game_with_seed(&mut self, seed: u64) {
         self.pending_cpu_batches.clear();
         self.table.start_round_with_seed(seed);
@@ -555,6 +558,29 @@ mod tests {
             driver.set_cpu(i + 1, config);
         }
         driver
+    }
+
+    /// start_game が起家をランダムに選ぶことを確認するテスト
+    #[test]
+    fn test_start_game_randomizes_dealer() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..64 {
+            let mut driver = driver_with_three_cpus();
+            driver.start_game();
+            let dealer = driver.table().dealer;
+            assert!(dealer < 4);
+            seen.insert(dealer);
+        }
+        // 64回全部同じ起家になる確率は (1/4)^63 で事実上ゼロ
+        assert!(seen.len() > 1, "起家がランダム化されていない");
+    }
+
+    /// シード指定の開始では再現性のため起家が座席0のままであることを確認するテスト
+    #[test]
+    fn test_start_game_with_seed_keeps_dealer_zero() {
+        let mut driver = driver_with_three_cpus();
+        driver.start_game_with_seed(42);
+        assert_eq!(driver.table().dealer, 0);
     }
 
     /// シード指定で開始した局が人間座席にイベントを届けることを確認するテスト

@@ -256,6 +256,11 @@ pub struct GameState {
     pub player_labels: [PlayerLabel; 4],
     /// 自分の座席インデックス（ローカルは常に0、オンラインは your_seat）
     pub my_seat: usize,
+    /// 起家の座席インデックス（GameStarted から逆算して更新される）
+    ///
+    /// 起家はランダムで決まるため座席0とは限らない。最終順位の
+    /// 同点判定（起家に近い席が上位）に使う。
+    pub initial_dealer_seat: usize,
     /// プレイヤー人数（四麻=4、三麻=3。GameStarted で設定される）
     pub player_count: usize,
     /// 北抜きドラが有効か（三麻のみ true になり得る）
@@ -515,6 +520,7 @@ impl GameState {
                 },
             ],
             my_seat: 0,
+            initial_dealer_seat: 0,
             player_count: 4,
             nuki_dora: false,
             pei_counts: [0; 4],
@@ -575,6 +581,11 @@ impl GameState {
                 self.pei_counts = [0; 4];
                 self.can_pei = false;
                 self.seat_wind = Some(seat_wind);
+                // 起家の座席を逆算する: 現在の親の座席（自分の風から求まる）を
+                // 局番号ぶん巻き戻す。連荘では局番号が進まないため常に一致する。
+                let n = self.player_count;
+                let dealer_seat = (self.my_seat + n - seat_wind.to_index()) % n;
+                self.initial_dealer_seat = (dealer_seat + n - round_number % n) % n;
                 self.hand = hand;
                 self.hand.sort();
                 self.drawn = None;
@@ -1572,6 +1583,28 @@ impl GameState {
         None
     }
 
+    /// 最終順位（座席インデックス, 点数）を上位から並べて返す
+    ///
+    /// 同点の場合は起家に近い席が上位になる。三麻ではダミー席（シート3）を
+    /// 除外する。
+    pub fn final_rankings(&self) -> Vec<(usize, i32)> {
+        let n = self.player_count;
+        let mut rankings: Vec<(usize, i32)> = self
+            .scores
+            .iter()
+            .enumerate()
+            .take(n)
+            .map(|(i, &s)| (i, s))
+            .collect();
+        rankings.sort_by_key(|&(seat, score)| {
+            (
+                std::cmp::Reverse(score),
+                (seat + n - self.initial_dealer_seat) % n,
+            )
+        });
+        rankings
+    }
+
     fn relative_player_index(&self, wind: Wind) -> usize {
         let my_idx = self.seat_wind.map(|w| w.to_index()).unwrap_or(0);
         let their_idx = wind.to_index();
@@ -1670,6 +1703,62 @@ mod tests {
             state.player_labels[2].detail(1, Lang::Ja),
             Some("CPU1（普通・スピード）".to_string())
         );
+    }
+
+    fn game_started_4p(seat_wind: Wind, round_number: usize) -> ServerEvent {
+        ServerEvent::GameStarted {
+            seat_wind,
+            hand: vec![Tile::new(Tile::P1); 13],
+            scores: [25000; 4],
+            round_wind: Wind::East,
+            dora_indicators: vec![Tile::new(Tile::P5)],
+            round_number,
+            total_rounds: 4,
+            honba: 0,
+            riichi_sticks: 0,
+            three_player: false,
+            nuki_dora: false,
+        }
+    }
+
+    #[test]
+    fn test_initial_dealer_seat_derived_from_game_started() {
+        // 東1局: 自分（座席0）が南家なら起家は座席3
+        let mut state = GameState::new();
+        state.handle_event(game_started_4p(Wind::South, 0));
+        assert_eq!(state.initial_dealer_seat, 3);
+
+        // 東3局（round_number=2）: 座席1の自分が西家なら現在の親は座席3、
+        // 2局巻き戻して起家は座席1
+        let mut state = GameState::new();
+        state.my_seat = 1;
+        state.handle_event(game_started_4p(Wind::West, 2));
+        assert_eq!(state.initial_dealer_seat, 1);
+    }
+
+    #[test]
+    fn test_final_rankings_tie_breaks_by_dealer_proximity() {
+        // 全員同点なら起家から反時計回りの順になる
+        let mut state = GameState::new();
+        state.handle_event(game_started_4p(Wind::West, 0)); // 起家は座席2
+        state.scores = [25000; 4];
+        let order: Vec<usize> = state.final_rankings().iter().map(|r| r.0).collect();
+        assert_eq!(order, vec![2, 3, 0, 1]);
+
+        // 点数が異なる場合は点数順が優先される
+        state.scores = [30000, 20000, 25000, 25000];
+        let order: Vec<usize> = state.final_rankings().iter().map(|r| r.0).collect();
+        assert_eq!(order, vec![0, 2, 3, 1]);
+    }
+
+    #[test]
+    fn test_final_rankings_sanma_excludes_dummy_seat() {
+        // 三麻: 起家が座席1のとき、同点ならダミー席を除いて 1, 2, 0 の順
+        let mut state = GameState::new();
+        state.handle_event(sanma_game_started(Wind::West)); // 西家=自分(座席0)なら起家は座席1
+        state.scores = [35000, 35000, 35000, 0];
+        let order: Vec<usize> = state.final_rankings().iter().map(|r| r.0).collect();
+        assert_eq!(order, vec![1, 2, 0]);
     }
 
     fn sanma_game_started(seat_wind: Wind) -> ServerEvent {
