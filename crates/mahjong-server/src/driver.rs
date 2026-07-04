@@ -182,6 +182,25 @@ impl GameDriver {
         }
     }
 
+    /// 現在時刻を渡して全座席分のイベントをまとめて取得する（オンラインサーバ向け）
+    ///
+    /// 座席ごとに [`drain_events_at`](Self::drain_events_at) を呼ぶと、後の座席を
+    /// 処理する際の `pump` が新たなイベント（例: 鳴き解決後の `CallAvailable`）を
+    /// 生成し、それが既に取り出し済みの前の座席のバッファへ追加されてしまう。
+    /// その結果、次回のイベント処理まで配信されずに残ってしまい、鳴き応答が
+    /// 必要なのに `CallAvailable` が届かず、行動タイムアウトの強制打牌まで
+    /// 進行が止まって見える不具合の原因になっていた。
+    /// 座席数ぶん `pump` を回してから全バッファを同時に取り出すことで、
+    /// 生成順に関わらず同じフラッシュで確実に配信する
+    /// （回数は旧来の座席ごとの `drain_events_at` 呼び出し回数と同じにし、
+    /// CPU遅延の演出ペースを変えない）。
+    pub fn drain_all_events_at(&mut self, now: f64) -> [Vec<ServerEvent>; 4] {
+        for _ in 0..self.event_buffers.len() {
+            self.pump(Some(now));
+        }
+        std::array::from_fn(|seat| std::mem::take(&mut self.event_buffers[seat]))
+    }
+
     /// 指定した座席のアクションを処理する
     ///
     /// 手番違いやフェーズ違いなど無効なアクションは `false` を返す。
@@ -1092,5 +1111,111 @@ mod tests {
         driver.start_game_with_seed(42);
         driver.tick();
         assert!(driver.pending_cpu_batches.is_empty());
+    }
+
+    /// 回帰テスト: 座席ごとに `drain_events_at` を呼ぶ実装では、後の座席を
+    /// 処理する際の pump が生成した `CallAvailable` が、既に取り出し済みの
+    /// 前の座席のバッファに追加されるだけで、そのフラッシュでは配信されな
+    /// かった（オンライン対戦で鳴き応答が必要なのに通知が届かず、行動
+    /// タイムアウトの強制打牌まで進行が止まって見えるバグの原因）。
+    ///
+    /// 座席2の打牌 → 座席3のポン → ポン後の打牌 → 座席0の鳴き機会、という
+    /// 連鎖を意図的に2つの待機バッチへ分けて注入し（1回の `pump` では
+    /// ポンまでしか進まないようにする）、`drain_all_events_at` 1回の
+    /// 呼び出し内で解決させる。座席0(先に処理される最小インデックス)にも
+    /// `CallAvailable` が同じフラッシュで届くことを確認する。
+    ///
+    /// CPUの実際の意思決定（どのポン/打牌を選ぶか）には依存させたくないため、
+    /// どの座席にもCPUクライアントを割り当てず、アクションはすべて手動で
+    /// 注入する。
+    #[test]
+    fn test_drain_all_events_at_delivers_chained_call_available_in_same_flush() {
+        let mut driver = GameDriver::new(GameSettings::default());
+        driver.set_cpu_action_delay(0.0);
+        driver.table_mut().start_round();
+
+        let pon_tiles = [Tile::new(Tile::M5), Tile::new(Tile::M5)];
+
+        {
+            let round = driver.table_mut().current_round_mut().unwrap();
+
+            // 座席0: 9sのポンが可能な手（13枚）
+            let seat0_wind = round.players[0].seat_wind;
+            let seat0_tiles = vec![
+                Tile::new(Tile::S9),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::M4),
+                Tile::new(Tile::M6),
+                Tile::new(Tile::M7),
+                Tile::new(Tile::P1),
+                Tile::new(Tile::P2),
+                Tile::new(Tile::P3),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P6),
+            ];
+            round.players[0] = Player::new(seat0_wind, seat0_tiles, 25000);
+
+            // 座席3: 5mのポン牌2枚と、ポン後に打牌する9sを持つ手（13枚）
+            let seat3_wind = round.players[3].seat_wind;
+            let seat3_tiles = vec![
+                Tile::new(Tile::M5),
+                Tile::new(Tile::M5),
+                Tile::new(Tile::S9),
+                Tile::new(Tile::M1),
+                Tile::new(Tile::M2),
+                Tile::new(Tile::M3),
+                Tile::new(Tile::P1),
+                Tile::new(Tile::P2),
+                Tile::new(Tile::P3),
+                Tile::new(Tile::P4),
+                Tile::new(Tile::P5),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::P7),
+            ];
+            round.players[3] = Player::new(seat3_wind, seat3_tiles, 25000);
+
+            // 座席2: 5mを打牌する
+            let seat2_wind = round.players[2].seat_wind;
+            let hand = Hand::from("1p2p3p4p6p7p8p1s2s3s4s6s 5m");
+            round.players[2] = Player::new(seat2_wind, hand.tiles().to_vec(), 25000);
+            round.players[2].draw(hand.drawn().unwrap());
+            round.current_player = 2;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.drain_events();
+        }
+        let _ = driver.drain_all_events_at(0.0);
+
+        // 座席2が5mを打牌する（ツモ牌のツモ切り）→ 座席3にポン機会が生じる
+        driver.handle_action_at(2, ClientAction::Discard { tile: None }, 0.0);
+
+        // 座席3の「ポン」と「ポン後の打牌」を別々の待機バッチとして注入する。
+        // 別バッチにすることで、1回の pump ではポンまでしか進まず、
+        // ポン後の打牌（と、それが生む座席0へのCallAvailable）は
+        // 次のpumpで初めて生成される状況を再現する。
+        driver.schedule_cpu_actions(vec![(3, ClientAction::Pon { tiles: pon_tiles })], 0.0, 0.0);
+        driver.schedule_cpu_actions(
+            vec![(
+                3,
+                ClientAction::Discard {
+                    tile: Some(Tile::new(Tile::S9)),
+                },
+            )],
+            0.0,
+            0.0,
+        );
+
+        // ポン→ポン後打牌→座席0への鳴き機会、という連鎖を1回でまとめて処理する
+        let per_seat = driver.drain_all_events_at(0.0);
+
+        assert!(
+            per_seat[0]
+                .iter()
+                .any(|e| matches!(e, ServerEvent::CallAvailable { .. })),
+            "座席0にCallAvailableが同一フラッシュで届いていない: {:?}",
+            per_seat[0]
+        );
     }
 }
