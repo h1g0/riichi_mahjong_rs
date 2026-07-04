@@ -594,11 +594,33 @@ async fn test_out_of_turn_action_rejected() {
     host.send(&ClientMessage::StartGame { cpu_configs: None })
         .await;
 
-    // 開始直後の手番はホスト（座席0=親）。ゲストの打牌は拒否される
-    guest
+    // 起家はランダムであり、CPUが起家だと打牌遅延なしで即座に手番が進んで
+    // しまうため、「開始直後はホストの手番」という決め打ちはできない。
+    // 実際に自分の TileDrawn を受け取った方が今の手番なので、それを待って
+    // から、もう一方（手番でない側）のアクションが拒否されることを確認する。
+    let host_turn;
+    loop {
+        tokio::select! {
+            msg = host.recv() => {
+                if matches!(msg, ServerMessage::Event(ServerEvent::TileDrawn { .. })) {
+                    host_turn = true;
+                    break;
+                }
+            }
+            msg = guest.recv() => {
+                if matches!(msg, ServerMessage::Event(ServerEvent::TileDrawn { .. })) {
+                    host_turn = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    let non_dealer = if host_turn { &mut guest } else { &mut host };
+    non_dealer
         .send(&ClientMessage::Action(ClientAction::Discard { tile: None }))
         .await;
-    assert_eq!(guest.recv_error().await, ErrorCode::InvalidAction);
+    assert_eq!(non_dealer.recv_error().await, ErrorCode::InvalidAction);
 }
 
 /// 対局開始後の参加は GameInProgress になる
