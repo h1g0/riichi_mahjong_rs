@@ -1,0 +1,453 @@
+//! 対局画面の盤面描画（背景・上部バー・ドラ表示・中央パネル・捨て牌）
+
+use super::*;
+
+/// 対局画面の背景（中央が明るい放射状のフェルト）。
+pub(super) fn draw_felt_background() {
+    theme::draw_radial_bg(
+        DESIGN_W,
+        DESIGN_H,
+        DESIGN_W / 2.0,
+        DESIGN_H * 0.46,
+        DESIGN_W * 0.62,
+        DESIGN_H * 0.62,
+        theme::FELT,
+        theme::FELT_EDGE,
+    );
+}
+
+/// 設定・終了画面の背景（やや明るい緑から暗緑へ）。
+pub(super) fn draw_setup_background() {
+    theme::draw_radial_bg(
+        DESIGN_W,
+        DESIGN_H,
+        DESIGN_W / 2.0,
+        DESIGN_H * 0.42,
+        DESIGN_W * 0.6,
+        DESIGN_H * 0.6,
+        theme::SETUP_BG_INNER,
+        theme::FELT_EDGE,
+    );
+}
+
+/// 画面上部のバー（ドラ表示・局/残り枚数・各家の得点チップ）を描画する。
+pub(super) fn draw_top_bar(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
+    const BAR_H: f32 = 50.0;
+    // バー背景＋下境界線
+    draw_rectangle(0.0, 0.0, DESIGN_W, BAR_H, Color::new(0.0, 0.0, 0.0, 0.48));
+    draw_rectangle(0.0, BAR_H - 1.0, DESIGN_W, 1.0, theme::BORDER);
+
+    draw_dora_panel(state, font, tile_textures);
+    draw_round_center(state, font, BAR_H);
+    draw_score_chips(state, font, BAR_H);
+}
+
+/// 上部バー左側：ドラ表示牌＋供託リーチ棒＋本場。
+pub(super) fn draw_dora_panel(
+    state: &GameState,
+    font: Option<&Font>,
+    tile_textures: &TileTextures,
+) {
+    let panel_x = 12.0;
+    let panel_y = 8.0;
+    let panel_h = 34.0;
+    let dora_w = 20.0;
+    let dora_h = 28.0;
+    let tiles_x = panel_x + 44.0;
+    let tiles_y = panel_y + 3.0;
+    let sticks_x = tiles_x + 5.0 * (dora_w + 1.0) + 12.0;
+    let panel_w = sticks_x + 64.0 - panel_x;
+
+    theme::draw_panel(
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        6.0,
+        Color::new(0.0, 0.0, 0.0, 0.5),
+        theme::rgba(0xc9a227, 0.18),
+    );
+
+    // 「ドラ」ラベル
+    draw_jp_text(
+        font,
+        DoraLabel::Dora.name(state.lang),
+        panel_x + 10.0,
+        panel_y + 21.0,
+        11,
+        theme::TEXT_DIM,
+    );
+
+    let revealed = state.dora_indicators.len();
+    for i in 0..5 {
+        let x = tiles_x + i as f32 * (dora_w + 1.0);
+        if i < revealed {
+            draw_tile_sprite(
+                tile_textures.for_tile(&state.dora_indicators[i]),
+                x,
+                tiles_y,
+                dora_w,
+                dora_h,
+                WHITE,
+            );
+        } else {
+            draw_tile_sprite(&tile_textures.back, x, tiles_y, dora_w, dora_h, WHITE);
+        }
+    }
+
+    // 供託リーチ棒（上段）／本場（下段）
+    draw_tile_sprite(
+        &tile_textures.stick1000,
+        sticks_x,
+        panel_y + 8.0,
+        34.0,
+        5.0,
+        Color::new(1.0, 1.0, 1.0, 0.75),
+    );
+    draw_jp_text(
+        font,
+        &format!("×{}", state.riichi_sticks),
+        sticks_x + 38.0,
+        panel_y + 14.0,
+        11,
+        theme::TEXT_DIM,
+    );
+    draw_tile_sprite(
+        &tile_textures.stick100,
+        sticks_x,
+        panel_y + 22.0,
+        34.0,
+        5.0,
+        Color::new(1.0, 1.0, 1.0, 0.75),
+    );
+    draw_jp_text(
+        font,
+        &format!("×{}", state.honba),
+        sticks_x + 38.0,
+        panel_y + 28.0,
+        11,
+        theme::TEXT_DIM,
+    );
+}
+
+/// 上部バー中央：局表示と残り枚数。
+pub(super) fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f32) {
+    let tr = state.tr();
+    let round_text = tr.round_label(state.round_number);
+    let remain_text = tr.wall_count(state.remaining_tiles);
+
+    let baseline = bar_h / 2.0 + 6.0;
+    let rdims = theme::measure_scaled(font, &round_text, 16);
+    let gap = 12.0;
+    let rmdims = theme::measure_scaled(font, &remain_text, 14);
+    let total_w = rdims.width + gap + rmdims.width;
+    let start_x = DESIGN_W / 2.0 - total_w / 2.0;
+
+    draw_jp_text(font, &round_text, start_x, baseline, 16, theme::GOLD_LT);
+    draw_jp_text(
+        font,
+        &remain_text,
+        start_x + rdims.width + gap,
+        baseline,
+        14,
+        theme::TEXT_DIM,
+    );
+}
+
+/// 上部バー右側：各家の得点チップ（自分を強調）。
+pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f32) {
+    const CHIP_W: f32 = 70.0;
+    const CHIP_H: f32 = 38.0;
+    const GAP: f32 = 7.0;
+    let count = state.player_count;
+    let total = count as f32 * CHIP_W + (count as f32 - 1.0) * GAP;
+    let start_x = DESIGN_W - 14.0 - total;
+    let chip_y = (bar_h - CHIP_H) / 2.0;
+
+    for rel in 0..state.player_count {
+        let seat = seat_at_relative_position(state.my_seat, rel, state.player_count);
+        let is_me = seat == state.my_seat;
+        let x = start_x + rel as f32 * (CHIP_W + GAP);
+
+        let (fill, border) = if is_me {
+            (theme::rgba(0xc8a227, 0.10), theme::rgba(0xc8a227, 0.28))
+        } else {
+            (
+                Color::new(1.0, 1.0, 1.0, 0.04),
+                Color::new(1.0, 1.0, 1.0, 0.06),
+            )
+        };
+        theme::draw_rounded_rect(x, chip_y, CHIP_W, CHIP_H, 4.0, fill);
+        theme::draw_rounded_rect_lines(x, chip_y, CHIP_W, CHIP_H, 4.0, 1.0, border);
+
+        let name = short_player_name(&state.player_labels[seat], rel, state.lang);
+        theme::draw_text_centered(
+            font,
+            &name,
+            x + CHIP_W / 2.0,
+            chip_y + 14.0,
+            9,
+            theme::TEXT_DIM,
+        );
+        let val = format_score(state.scores[seat]);
+        let val_color = if is_me { theme::GOLD_LT } else { theme::TEXT };
+        theme::draw_text_centered(font, &val, x + CHIP_W / 2.0, chip_y + 30.0, 13, val_color);
+    }
+}
+
+/// 得点チップ用の短いプレイヤー名。
+pub(super) fn short_player_name(
+    label: &crate::game::PlayerLabel,
+    rel: usize,
+    lang: Lang,
+) -> String {
+    use crate::game::PlayerLabel;
+    match label {
+        PlayerLabel::Me => Key::You.text(lang).to_string(),
+        PlayerLabel::Human(name) => {
+            let mut s: String = name.chars().take(5).collect();
+            if name.chars().count() > 5 {
+                s.push('…');
+            }
+            s
+        }
+        PlayerLabel::Cpu { .. } => format!("CPU{}", rel),
+    }
+}
+
+/// 桁区切り付きの得点表記。
+pub(super) fn format_score(score: i32) -> String {
+    let neg = score < 0;
+    let mut n = score.unsigned_abs();
+    if n == 0 {
+        return "0".to_string();
+    }
+    let mut parts = Vec::new();
+    while n > 0 {
+        parts.push(format!("{:03}", n % 1000));
+        n /= 1000;
+    }
+    parts.reverse();
+    // 先頭の余分なゼロを除去
+    let mut joined = parts.join(",");
+    joined = joined.trim_start_matches('0').to_string();
+    if joined.starts_with(',') {
+        joined = joined.trim_start_matches(',').to_string();
+    }
+    if neg { format!("-{}", joined) } else { joined }
+}
+
+/// 盤面中央の情報パネル（半透明の黒い四角＋各家の風と得点＋局情報）を描画する
+pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
+    // 捨て牌の内側に収まる角丸のゴールド枠パネル
+    let panel_size: f32 = 160.0;
+    let half = panel_size / 2.0;
+    theme::draw_panel(
+        BOARD_CENTER_X - half,
+        BOARD_CENTER_Y - half,
+        panel_size,
+        panel_size,
+        5.0,
+        theme::rgba(0x030a06, 0.92),
+        theme::PANEL_BORDER,
+    );
+
+    // 各家の風と得点をそれぞれの向きで描画
+    let my_wind_idx = state.seat_wind.map(|w| w.to_index()).unwrap_or(0);
+    let label_dist: f32 = 64.0; // 中心からラベルまでの距離
+
+    for rel in 0..state.player_count {
+        // rel は自分から見た相対位置(0=自分,1=下家,2=対面,3=上家)。
+        // scores / player_labels は固定の座席インデックス順なので、相対位置を
+        // 絶対座席へ変換してから引く(オンライン非ホストで自分の座席が0以外でもずれない)。
+        let seat = seat_at_relative_position(state.my_seat, rel, state.player_count);
+        let display_wind =
+            mahjong_core::tile::Wind::from_index((my_wind_idx + rel) % state.player_count);
+        let score = state.scores[seat];
+        let rotation = PLAYER_ROTATIONS[rotation_index(rel, state.player_count)];
+
+        set_camera(&make_board_camera(rotation));
+
+        // 風（ゴールド）＋得点（千点単位）を中心の各方向に描画
+        theme::draw_text_centered(
+            font,
+            display_wind.name(state.lang),
+            BOARD_CENTER_X,
+            BOARD_CENTER_Y + label_dist,
+            14,
+            theme::GOLD_LT,
+        );
+        let score_label = format_score(score);
+        theme::draw_text_centered(
+            font,
+            &score_label,
+            BOARD_CENTER_X,
+            BOARD_CENTER_Y + label_dist + 14.0,
+            11,
+            theme::TEXT_DIM,
+        );
+
+        // CPU の強さ・性格（または相手の名前）を風・得点の下に表示する。
+        // rel は自分からの相対位置で、得点チップの CPU 番号と一致する。
+        if let Some(detail) = state.player_labels[seat].detail(rel, state.lang) {
+            theme::draw_text_centered(
+                font,
+                &detail,
+                BOARD_CENTER_X,
+                BOARD_CENTER_Y + label_dist + 28.0,
+                11,
+                theme::rgba(0x7a9880, 0.85),
+            );
+        }
+
+        set_design_camera();
+    }
+
+    // 局情報（プレイヤー＝自分に読める方向で描画）
+    let round_text = state.tr().round_label(state.round_number);
+    let remaining_text = state.tr().wall_remaining(state.remaining_tiles);
+
+    // 局表示は小さく、残数表示を大きく強調する
+    theme::draw_text_centered(
+        font,
+        &round_text,
+        BOARD_CENTER_X,
+        BOARD_CENTER_Y - 8.0,
+        13,
+        theme::TEXT_DIM,
+    );
+    theme::draw_text_centered(
+        font,
+        &remaining_text,
+        BOARD_CENTER_X,
+        BOARD_CENTER_Y + 18.0,
+        21,
+        theme::TEXT_BR,
+    );
+}
+
+pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
+    let dtw: f32 = 32.0; // 牌の自然な幅
+    let dth: f32 = 44.0; // 牌の自然な高さ
+    let col_step: f32 = dtw; // 列方向（隙間なし）
+    let row_step: f32 = dth; // 行方向（隙間なし）
+
+    // 正規化された配置パラメータ（「自分」視点: 左→右、行は下方向）
+    let half_width = 3.0 * col_step; // 6枚分の半幅 = 108px
+    let stick_offset: f32 = 108.0; // 中心からリーチ棒までの距離
+    let discard_offset: f32 = 130.0; // 中心から捨て牌開始までの距離（リーチ棒分のスペース確保）
+
+    // リーチ棒の描画サイズ（元画像は約800×117px → 横向きで縮小）
+    let stick_w: f32 = 100.0;
+    let stick_h: f32 = 14.0;
+
+    let start_x = BOARD_CENTER_X - half_width;
+    let start_y = BOARD_CENTER_Y + discard_offset;
+
+    let my_wind_idx = state.seat_wind.map(|w| w.to_index()).unwrap_or(0);
+
+    for rel in 0..state.player_count {
+        let discards = &state.discards[rel];
+        let rotation = PLAYER_ROTATIONS[rotation_index(rel, state.player_count)];
+
+        set_camera(&make_board_camera(rotation));
+
+        // 北抜き牌（三麻）: 捨て牌エリアの右横に小さく並べる
+        if state.is_three_player() {
+            let wind_idx = (my_wind_idx + rel) % state.player_count;
+            let pei = state.pei_counts[wind_idx] as usize;
+            let north = mahjong_core::tile::Tile::new(mahjong_core::tile::Tile::Z4);
+            let kw = dtw * 0.75;
+            let kh = dth * 0.75;
+            for k in 0..pei {
+                draw_tile_sprite(
+                    tile_textures.for_tile(&north),
+                    BOARD_CENTER_X + half_width + 10.0 + k as f32 * (kw * 0.6),
+                    start_y,
+                    kw,
+                    kh,
+                    WHITE,
+                );
+            }
+        }
+
+        // リーチ棒描画（リーチ宣言済みの場合のみ）
+        let has_riichi = discards.iter().any(|d| d.is_riichi);
+        if has_riichi {
+            draw_tile_sprite(
+                &tile_textures.stick1000,
+                BOARD_CENTER_X - stick_w / 2.0,
+                BOARD_CENTER_Y + stick_offset,
+                stick_w,
+                stick_h,
+                WHITE,
+            );
+        }
+
+        // 捨て牌描画（正規化された配置: 左→右、行は下方向）
+        // カメラ回転により各家の向きに自動変換される
+        let mut col_offset: f32 = 0.0;
+        let mut current_row: usize = 0;
+
+        for (i, discard) in discards.iter().enumerate() {
+            let row = i / 6;
+            let mut tint = if discard.is_tsumogiri {
+                Color::new(0.72, 0.72, 0.72, 1.0)
+            } else {
+                WHITE
+            };
+            // 鳴かれた牌はごく薄い半透明で描く
+            if discard.is_called {
+                tint.a = 0.28;
+            }
+
+            if row != current_row {
+                col_offset = 0.0;
+                current_row = row;
+            }
+
+            if discard.is_riichi {
+                // リーチ牌: 90°回転（横倒し）
+                let x = start_x + col_offset;
+                let y = start_y + row as f32 * row_step + (dth - dtw) / 2.0;
+                draw_tile_sprite_rotated(
+                    tile_textures.for_tile(&discard.tile),
+                    x,
+                    y,
+                    dtw,
+                    dth,
+                    tint,
+                    -std::f32::consts::FRAC_PI_2,
+                );
+                col_offset += dth; // 横倒し牌の幅 = dth（隙間なし）
+            } else {
+                let x = start_x + col_offset;
+                let y = start_y + row as f32 * row_step;
+                draw_tile_sprite(tile_textures.for_tile(&discard.tile), x, y, dtw, dth, tint);
+                col_offset += col_step;
+            }
+        }
+
+        set_design_camera();
+    }
+}
+
+/// 手牌の上に表示する状態バッジ（ピル）を描画し、次のバッジの x を返す。
+pub(super) fn draw_badge(
+    font: Option<&Font>,
+    x: f32,
+    y: f32,
+    text: &str,
+    fill: Color,
+    border: Color,
+    text_color: Color,
+) -> f32 {
+    let dims = theme::measure_scaled(font, text, 11);
+    let pad = 8.0;
+    let w = dims.width + pad * 2.0;
+    let h = 18.0;
+    theme::draw_rounded_rect(x, y, w, h, 3.0, fill);
+    theme::draw_rounded_rect_lines(x, y, w, h, 3.0, 1.0, border);
+    draw_jp_text(font, text, x + pad, y + 13.0, 11, text_color);
+    x + w + 6.0
+}

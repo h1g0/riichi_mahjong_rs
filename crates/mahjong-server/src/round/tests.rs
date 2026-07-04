@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::protocol::DrawReason;
+
 #[test]
 fn test_round_new() {
     let round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
