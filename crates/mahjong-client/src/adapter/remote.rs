@@ -59,11 +59,6 @@ impl RoomView {
         self.rules.three_player
     }
 
-    /// 半荘戦ルームか（false なら東風戦）
-    pub fn hanchan(&self) -> bool {
-        self.length == GameLength::Hanchan
-    }
-
     /// プレイヤー人数を返す（四麻=4、三麻=3）
     pub fn player_count(&self) -> usize {
         self.rules.player_count()
@@ -703,7 +698,7 @@ mod tests {
     }
 
     /// 半荘設定（GameLength::Hanchan）が CreateRoom で送られ、
-    /// RoomState の length がロビー表示用の hanchan() に反映されること（#271）
+    /// RoomState の length がロビー表示用の RoomView に反映されること（#271）
     #[test]
     fn test_hanchan_length_roundtrip() {
         let (transport, handle) = mock_pair();
@@ -746,7 +741,7 @@ mod tests {
         adapter.tick();
 
         let room = adapter.room().expect("入室しているはず");
-        assert!(room.hanchan());
+        assert_eq!(room.length, GameLength::Hanchan);
         assert!(!room.three_player());
     }
 

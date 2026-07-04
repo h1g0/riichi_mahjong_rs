@@ -18,7 +18,7 @@ mod transport;
 mod wasm_rng;
 
 use adapter::{ConnStatus, GameAdapter, LocalAdapter, RemoteAdapter, RoomView, error_code_message};
-use game::{GamePhase, GameState, PlayerLabel, RoomViewUi};
+use game::{GameMode, GamePhase, GameState, PlayerLabel, RoomViewUi};
 use mahjong_core::settings::Lang;
 use mahjong_server::protocol::net::SeatInfo;
 use renderer::{OnlineLobbyAction, OnlineMenuAction, SetupAction, TileTextures};
@@ -103,8 +103,7 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
         code: room.code.clone(),
         seat_labels: build_seat_labels(room, lang),
         is_host: room.is_host(),
-        three_player: room.three_player(),
-        hanchan: room.hanchan(),
+        mode: GameMode::from_parts(room.three_player(), room.length),
     });
 
     if let Some(err) = remote.take_error() {

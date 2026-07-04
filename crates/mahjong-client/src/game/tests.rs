@@ -222,8 +222,7 @@ fn test_setup_state_build_game_settings() {
     assert_eq!(settings.length, GameLength::EastOnly, "既定は東風戦");
     assert_eq!(setup.cpu_count(), 3);
 
-    setup.three_player = true;
-    setup.hanchan = true;
+    setup.mode = GameMode::ThreeHanchan;
     setup.nuki_dora = false;
     let settings = setup.build_game_settings();
     assert!(settings.rules.three_player);
@@ -237,21 +236,21 @@ fn test_setup_state_build_game_settings() {
     assert_eq!(setup.cpu_count(), 2);
 }
 
-/// 対局モードのインデックスと三麻・半荘フラグの相互変換
+/// 対局モードと（三麻フラグ・対局の長さ）の相互変換
 #[test]
-fn test_setup_state_mode_index_roundtrip() {
-    let mut setup = SetupState::new();
+fn test_game_mode_parts_roundtrip() {
     let expected = [
-        (false, false), // 四人東風
-        (false, true),  // 四人半荘
-        (true, false),  // 三人東風
-        (true, true),   // 三人半荘
+        (GameMode::FourEast, false, GameLength::EastOnly),
+        (GameMode::FourHanchan, false, GameLength::Hanchan),
+        (GameMode::ThreeEast, true, GameLength::EastOnly),
+        (GameMode::ThreeHanchan, true, GameLength::Hanchan),
     ];
-    for (idx, &(three_player, hanchan)) in expected.iter().enumerate() {
-        setup.set_mode_index(idx);
-        assert_eq!(setup.three_player, three_player, "mode {idx}");
-        assert_eq!(setup.hanchan, hanchan, "mode {idx}");
-        assert_eq!(setup.mode_index(), idx, "mode {idx}");
+    // ALL はモードトグルの表示順と一致する
+    assert_eq!(GameMode::ALL.map(|m| m), expected.map(|(m, _, _)| m));
+    for (mode, three_player, length) in expected {
+        assert_eq!(mode.three_player(), three_player, "{mode:?}");
+        assert_eq!(mode.length(), length, "{mode:?}");
+        assert_eq!(GameMode::from_parts(three_player, length), mode);
     }
 }
 

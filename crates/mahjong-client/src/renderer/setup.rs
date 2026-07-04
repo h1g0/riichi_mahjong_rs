@@ -62,7 +62,7 @@ pub(super) fn setup_mode_button_rect(idx: usize) -> SetupButton {
 
 /// 北抜きドラトグルのボタン矩形（三麻選択時のみ表示）。
 pub(super) fn setup_nuki_button_rect() -> SetupButton {
-    let m = setup_mode_button_rect(MODE_COUNT - 1);
+    let m = setup_mode_button_rect(GameMode::ALL.len() - 1);
     SetupButton {
         x: m.x + m.w + 18.0,
         y: m.y,
@@ -177,18 +177,12 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>) {
     }
 
     // 対局モードトグル（四人東風 / 四人半荘 / 三人東風 / 三人半荘）
-    let mode_labels = [
-        Key::ModeFourEast,
-        Key::ModeFourHanchan,
-        Key::ModeThreeEast,
-        Key::ModeThreeHanchan,
-    ];
-    for (idx, key) in mode_labels.into_iter().enumerate() {
+    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
         let btn = setup_mode_button_rect(idx);
-        draw_setup_option(font, &btn, tr.get(key), idx == setup.mode_index());
+        draw_setup_option(font, &btn, tr.get(mode.label_key()), mode == setup.mode);
     }
     // 北抜きドラトグル（三麻のみ）
-    if setup.three_player {
+    if setup.mode.three_player() {
         let btn = setup_nuki_button_rect();
         draw_setup_option(font, &btn, tr.get(Key::NukiDoraToggle), setup.nuki_dora);
     }
@@ -341,14 +335,14 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
     let setup = &mut state.setup_state;
 
     // 対局モードトグル（四人東風 / 四人半荘 / 三人東風 / 三人半荘）
-    for idx in 0..MODE_COUNT {
+    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
         if setup_mode_button_rect(idx).contains(mx, my) {
-            setup.set_mode_index(idx);
+            setup.mode = mode;
             return None;
         }
     }
     // 北抜きドラトグル（三麻のみ）
-    if setup.three_player && setup_nuki_button_rect().contains(mx, my) {
+    if setup.mode.three_player() && setup_nuki_button_rect().contains(mx, my) {
         setup.nuki_dora = !setup.nuki_dora;
         return None;
     }

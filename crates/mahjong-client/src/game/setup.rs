@@ -3,6 +3,64 @@
 use super::*;
 use mahjong_server::table::GameLength;
 
+/// 対局モード（プレイヤー人数 × 対局の長さ）
+///
+/// 設定画面・オンラインメニューのモードトグルで選ぶ組み合わせ。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameMode {
+    /// 四人東風
+    FourEast,
+    /// 四人半荘
+    FourHanchan,
+    /// 三人東風
+    ThreeEast,
+    /// 三人半荘
+    ThreeHanchan,
+}
+
+impl GameMode {
+    /// 全モード（モードトグルの表示順）
+    pub const ALL: [GameMode; 4] = [
+        GameMode::FourEast,
+        GameMode::FourHanchan,
+        GameMode::ThreeEast,
+        GameMode::ThreeHanchan,
+    ];
+
+    /// 三麻フラグと対局の長さからモードを求める
+    pub fn from_parts(three_player: bool, length: GameLength) -> Self {
+        match (three_player, length) {
+            (false, GameLength::EastOnly) => GameMode::FourEast,
+            (false, GameLength::Hanchan) => GameMode::FourHanchan,
+            (true, GameLength::EastOnly) => GameMode::ThreeEast,
+            (true, GameLength::Hanchan) => GameMode::ThreeHanchan,
+        }
+    }
+
+    /// 三麻（3人打ち）か
+    pub fn three_player(self) -> bool {
+        matches!(self, GameMode::ThreeEast | GameMode::ThreeHanchan)
+    }
+
+    /// 対局の長さ（東風戦か半荘戦か）
+    pub fn length(self) -> GameLength {
+        match self {
+            GameMode::FourEast | GameMode::ThreeEast => GameLength::EastOnly,
+            GameMode::FourHanchan | GameMode::ThreeHanchan => GameLength::Hanchan,
+        }
+    }
+
+    /// モードトグル・ロビーに表示するラベルのキー
+    pub fn label_key(self) -> Key {
+        match self {
+            GameMode::FourEast => Key::ModeFourEast,
+            GameMode::FourHanchan => Key::ModeFourHanchan,
+            GameMode::ThreeEast => Key::ModeThreeEast,
+            GameMode::ThreeHanchan => Key::ModeThreeHanchan,
+        }
+    }
+}
+
 /// オンライン対戦UI（メニュー・ロビー）の状態
 #[derive(Debug, Clone)]
 pub struct OnlineUiState {
@@ -20,10 +78,8 @@ pub struct OnlineUiState {
     pub room: Option<RoomViewUi>,
     /// 手番の制限時間の残り秒数（オンラインで自分の手番のときのみ Some）
     pub turn_remaining: Option<u32>,
-    /// ルーム作成時に三麻（3人打ち）ルームにするか
-    pub three_player: bool,
-    /// ルーム作成時に半荘戦にするか（false なら東風戦）
-    pub hanchan: bool,
+    /// ルーム作成時の対局モード
+    pub mode: GameMode,
     /// ルーム作成時に北抜きドラありにするか（三麻のみ有効）
     pub nuki_dora: bool,
 }
@@ -39,8 +95,7 @@ impl OnlineUiState {
             status_is_error: false,
             room: None,
             turn_remaining: None,
-            three_player: false,
-            hanchan: false,
+            mode: GameMode::FourEast,
             nuki_dora: true,
         }
     }
@@ -51,7 +106,7 @@ impl OnlineUiState {
     /// ここに反映すればサーバへそのまま伝わる。
     pub fn build_rules(&self) -> mahjong_core::settings::Settings {
         mahjong_core::settings::Settings {
-            three_player: self.three_player,
+            three_player: self.mode.three_player(),
             nuki_dora: self.nuki_dora,
             ..mahjong_core::settings::Settings::new()
         }
@@ -59,41 +114,7 @@ impl OnlineUiState {
 
     /// ルーム作成時に送る対局の長さ（東風戦か半荘戦か）
     pub fn length(&self) -> GameLength {
-        length_from_hanchan(self.hanchan)
-    }
-
-    /// 選択中の対局モードのインデックス（[`MODE_COUNT`] 参照）
-    pub fn mode_index(&self) -> usize {
-        mode_index_from_flags(self.three_player, self.hanchan)
-    }
-
-    /// 対局モードのインデックスから三麻・半荘フラグを設定する
-    pub fn set_mode_index(&mut self, idx: usize) {
-        (self.three_player, self.hanchan) = mode_flags_from_index(idx);
-    }
-}
-
-/// 対局モード（四人東風/四人半荘/三人東風/三人半荘）の個数
-pub const MODE_COUNT: usize = 4;
-
-/// 三麻・半荘フラグから対局モードのインデックスを求める
-///
-/// 0=四人東風, 1=四人半荘, 2=三人東風, 3=三人半荘
-pub fn mode_index_from_flags(three_player: bool, hanchan: bool) -> usize {
-    (three_player as usize) * 2 + (hanchan as usize)
-}
-
-/// 対局モードのインデックスから (三麻, 半荘) フラグを求める
-pub fn mode_flags_from_index(idx: usize) -> (bool, bool) {
-    (idx >= 2, idx % 2 == 1)
-}
-
-/// 半荘フラグから対局の長さを求める
-fn length_from_hanchan(hanchan: bool) -> GameLength {
-    if hanchan {
-        GameLength::Hanchan
-    } else {
-        GameLength::EastOnly
+        self.mode.length()
     }
 }
 
@@ -106,19 +127,15 @@ pub struct RoomViewUi {
     pub seat_labels: [String; 4],
     /// 自分がホストか（対局開始ボタンの表示に使う）
     pub is_host: bool,
-    /// 三麻（3人打ち）ルームか
-    pub three_player: bool,
-    /// 半荘戦ルームか（false なら東風戦）
-    pub hanchan: bool,
+    /// このルームの対局モード
+    pub mode: GameMode,
 }
 
 /// 対局開始前の設定画面の状態
 #[derive(Debug, Clone)]
 pub struct SetupState {
-    /// 三麻（3人打ち）モードか
-    pub three_player: bool,
-    /// 半荘戦か（false なら東風戦）
-    pub hanchan: bool,
+    /// 対局モード
+    pub mode: GameMode,
     /// 北抜きドラありか（三麻のみ有効）
     pub nuki_dora: bool,
     /// 各CPUの強さ設定（下家, 対面, 上家）
@@ -130,8 +147,7 @@ pub struct SetupState {
 impl SetupState {
     pub fn new() -> Self {
         SetupState {
-            three_player: false,
-            hanchan: false,
+            mode: GameMode::FourEast,
             nuki_dora: true,
             cpu_levels: [1, 1, 1],        // 全員 Normal
             cpu_personalities: [0, 1, 2], // Balanced, Speedy, HighValue
@@ -140,7 +156,7 @@ impl SetupState {
 
     /// このモードで設定するCPUの人数（四麻=3、三麻=2）
     pub fn cpu_count(&self) -> usize {
-        if self.three_player { 2 } else { 3 }
+        if self.mode.three_player() { 2 } else { 3 }
     }
 
     /// 選択中のルール設定を組み立てる
@@ -149,7 +165,7 @@ impl SetupState {
     /// ここに反映すれば、ローカル・オンラインの両方に伝わる。
     pub fn build_rules(&self) -> mahjong_core::settings::Settings {
         mahjong_core::settings::Settings {
-            three_player: self.three_player,
+            three_player: self.mode.three_player(),
             nuki_dora: self.nuki_dora,
             ..mahjong_core::settings::Settings::new()
         }
@@ -157,22 +173,7 @@ impl SetupState {
 
     /// ゲーム設定を組み立てる（持ち点はルールから決まる）
     pub fn build_game_settings(&self) -> mahjong_server::table::GameSettings {
-        mahjong_server::table::GameSettings::with_rules(self.length(), self.build_rules())
-    }
-
-    /// 対局の長さ（東風戦か半荘戦か）
-    pub fn length(&self) -> GameLength {
-        length_from_hanchan(self.hanchan)
-    }
-
-    /// 選択中の対局モードのインデックス（[`MODE_COUNT`] 参照）
-    pub fn mode_index(&self) -> usize {
-        mode_index_from_flags(self.three_player, self.hanchan)
-    }
-
-    /// 対局モードのインデックスから三麻・半荘フラグを設定する
-    pub fn set_mode_index(&mut self, idx: usize) {
-        (self.three_player, self.hanchan) = mode_flags_from_index(idx);
+        mahjong_server::table::GameSettings::with_rules(self.mode.length(), self.build_rules())
     }
 
     pub fn level_count() -> usize {

@@ -406,16 +406,6 @@ pub enum Key {
 }
 
 impl Key {
-    /// 対局モード（三麻か・半荘か）に対応するラベルのキーを返す。
-    pub fn mode(three_player: bool, hanchan: bool) -> Key {
-        match (three_player, hanchan) {
-            (false, false) => Key::ModeFourEast,
-            (false, true) => Key::ModeFourHanchan,
-            (true, false) => Key::ModeThreeEast,
-            (true, true) => Key::ModeThreeHanchan,
-        }
-    }
-
     /// 指定言語での文言を返す。
     pub fn text(self, lang: Lang) -> &'static str {
         match self {
@@ -725,14 +715,5 @@ mod tests {
         assert_eq!(ja.round_label(2, 3), "東3局");
         assert_eq!(ja.round_label(3, 3), "南1局");
         assert_eq!(en.round_label(3, 3), "South 1");
-    }
-
-    /// 対局モードのフラグからラベルのキーを引けること
-    #[test]
-    fn mode_key_covers_all_modes() {
-        assert_eq!(Key::mode(false, false), Key::ModeFourEast);
-        assert_eq!(Key::mode(false, true), Key::ModeFourHanchan);
-        assert_eq!(Key::mode(true, false), Key::ModeThreeEast);
-        assert_eq!(Key::mode(true, true), Key::ModeThreeHanchan);
     }
 }

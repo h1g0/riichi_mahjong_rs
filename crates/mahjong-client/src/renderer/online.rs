@@ -6,7 +6,7 @@
 use macroquad::prelude::*;
 
 use super::{DESIGN_W, draw_jp_text, theme};
-use crate::game::{GameState, MODE_COUNT};
+use crate::game::{GameMode, GameState};
 use crate::i18n::Key;
 
 /// パネルのレイアウト（設定画面と揃える）
@@ -71,7 +71,7 @@ fn mode_btn_rect(idx: usize) -> Rect2 {
 /// 北抜きドラトグルのボタン矩形（三麻選択時のみ表示）。
 fn nuki_btn_rect() -> Rect2 {
     Rect2 {
-        x: NAME_BOX.x + MODE_COUNT as f32 * (MODE_BTN_W + MODE_BTN_GAP) + 10.0,
+        x: NAME_BOX.x + GameMode::ALL.len() as f32 * (MODE_BTN_W + MODE_BTN_GAP) + 10.0,
         y: MODE_Y,
         w: 130.0,
         h: MODE_BTN_H,
@@ -292,17 +292,16 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
     draw_input_box(font, &CODE_BOX, &online.code_input, online.code_focused);
 
     // 対局モードトグル（ルーム作成時に適用される）
-    let mode_labels = [
-        Key::ModeFourEast,
-        Key::ModeFourHanchan,
-        Key::ModeThreeEast,
-        Key::ModeThreeHanchan,
-    ];
-    for (idx, key) in mode_labels.into_iter().enumerate() {
-        let selected = idx == online.mode_index();
-        draw_toggle(font, &mode_btn_rect(idx), tr.get(key), selected);
+    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
+        let selected = mode == online.mode;
+        draw_toggle(
+            font,
+            &mode_btn_rect(idx),
+            tr.get(mode.label_key()),
+            selected,
+        );
     }
-    if online.three_player {
+    if online.mode.three_player() {
         draw_toggle(
             font,
             &nuki_btn_rect(),
@@ -365,13 +364,13 @@ pub fn handle_online_menu_input(state: &mut GameState) -> Option<OnlineMenuActio
         return None;
     }
     // 対局モードトグル
-    for idx in 0..MODE_COUNT {
+    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
         if mode_btn_rect(idx).contains(mx, my) {
-            online.set_mode_index(idx);
+            online.mode = mode;
             return None;
         }
     }
-    if online.three_player && nuki_btn_rect().contains(mx, my) {
+    if online.mode.three_player() && nuki_btn_rect().contains(mx, my) {
         online.nuki_dora = !online.nuki_dora;
         return None;
     }
@@ -423,7 +422,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     // 対局モード（四人東風/四人半荘/三人東風/三人半荘）を明示する
     theme::draw_text_centered(
         font,
-        tr.get(Key::mode(room.three_player, room.hanchan)),
+        tr.get(room.mode.label_key()),
         cx,
         256.0,
         13,
