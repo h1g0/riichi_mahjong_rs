@@ -21,6 +21,8 @@ pub struct OnlineUiState {
     pub turn_remaining: Option<u32>,
     /// ルーム作成時に三麻（3人打ち）ルームにするか
     pub three_player: bool,
+    /// ルーム作成時に半荘戦にするか（false なら東風戦）
+    pub hanchan: bool,
     /// ルーム作成時に北抜きドラありにするか（三麻のみ有効）
     pub nuki_dora: bool,
 }
@@ -37,6 +39,7 @@ impl OnlineUiState {
             room: None,
             turn_remaining: None,
             three_player: false,
+            hanchan: false,
             nuki_dora: true,
         }
     }
@@ -52,6 +55,41 @@ impl OnlineUiState {
             ..mahjong_core::settings::Settings::new()
         }
     }
+
+    /// ルーム作成時に送る局数（東風戦=1, 半荘戦=2）
+    pub fn round_count(&self) -> u8 {
+        round_count_from_hanchan(self.hanchan)
+    }
+
+    /// 選択中の対局モードのインデックス（[`MODE_COUNT`] 参照）
+    pub fn mode_index(&self) -> usize {
+        mode_index_from_flags(self.three_player, self.hanchan)
+    }
+
+    /// 対局モードのインデックスから三麻・半荘フラグを設定する
+    pub fn set_mode_index(&mut self, idx: usize) {
+        (self.three_player, self.hanchan) = mode_flags_from_index(idx);
+    }
+}
+
+/// 対局モード（四人東風/四人半荘/三人東風/三人半荘）の個数
+pub const MODE_COUNT: usize = 4;
+
+/// 三麻・半荘フラグから対局モードのインデックスを求める
+///
+/// 0=四人東風, 1=四人半荘, 2=三人東風, 3=三人半荘
+pub fn mode_index_from_flags(three_player: bool, hanchan: bool) -> usize {
+    (three_player as usize) * 2 + (hanchan as usize)
+}
+
+/// 対局モードのインデックスから (三麻, 半荘) フラグを求める
+pub fn mode_flags_from_index(idx: usize) -> (bool, bool) {
+    (idx >= 2, idx % 2 == 1)
+}
+
+/// 半荘フラグから局数（東風戦=1, 半荘戦=2）を求める
+fn round_count_from_hanchan(hanchan: bool) -> u8 {
+    if hanchan { 2 } else { 1 }
 }
 
 /// ロビー画面に表示するルーム情報
@@ -65,6 +103,8 @@ pub struct RoomViewUi {
     pub is_host: bool,
     /// 三麻（3人打ち）ルームか
     pub three_player: bool,
+    /// 半荘戦ルームか（false なら東風戦）
+    pub hanchan: bool,
 }
 
 /// 対局開始前の設定画面の状態
@@ -72,6 +112,8 @@ pub struct RoomViewUi {
 pub struct SetupState {
     /// 三麻（3人打ち）モードか
     pub three_player: bool,
+    /// 半荘戦か（false なら東風戦）
+    pub hanchan: bool,
     /// 北抜きドラありか（三麻のみ有効）
     pub nuki_dora: bool,
     /// 各CPUの強さ設定（下家, 対面, 上家）
@@ -84,6 +126,7 @@ impl SetupState {
     pub fn new() -> Self {
         SetupState {
             three_player: false,
+            hanchan: false,
             nuki_dora: true,
             cpu_levels: [1, 1, 1],        // 全員 Normal
             cpu_personalities: [0, 1, 2], // Balanced, Speedy, HighValue
@@ -109,7 +152,22 @@ impl SetupState {
 
     /// ゲーム設定を組み立てる（持ち点はルールから決まる）
     pub fn build_game_settings(&self) -> mahjong_server::table::GameSettings {
-        mahjong_server::table::GameSettings::with_rules(1, self.build_rules())
+        mahjong_server::table::GameSettings::with_rules(self.round_count(), self.build_rules())
+    }
+
+    /// 局数（東風戦=1, 半荘戦=2）
+    pub fn round_count(&self) -> u8 {
+        round_count_from_hanchan(self.hanchan)
+    }
+
+    /// 選択中の対局モードのインデックス（[`MODE_COUNT`] 参照）
+    pub fn mode_index(&self) -> usize {
+        mode_index_from_flags(self.three_player, self.hanchan)
+    }
+
+    /// 対局モードのインデックスから三麻・半荘フラグを設定する
+    pub fn set_mode_index(&mut self, idx: usize) {
+        (self.three_player, self.hanchan) = mode_flags_from_index(idx);
     }
 
     pub fn level_count() -> usize {

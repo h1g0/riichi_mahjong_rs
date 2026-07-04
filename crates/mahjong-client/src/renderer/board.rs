@@ -133,7 +133,7 @@ pub(super) fn draw_dora_panel(
 /// 上部バー中央：局表示と残り枚数。
 pub(super) fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f32) {
     let tr = state.tr();
-    let round_text = tr.round_label(state.round_number);
+    let round_text = tr.round_label(state.round_number, state.player_count);
     let remain_text = tr.wall_count(state.remaining_tiles);
 
     let baseline = bar_h / 2.0 + 6.0;
@@ -304,7 +304,9 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
     }
 
     // 局情報（プレイヤー＝自分に読める方向で描画）
-    let round_text = state.tr().round_label(state.round_number);
+    let round_text = state
+        .tr()
+        .round_label(state.round_number, state.player_count);
     let remaining_text = state.tr().wall_remaining(state.remaining_tiles);
 
     // 局表示は小さく、残数表示を大きく強調する

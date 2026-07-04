@@ -216,16 +216,41 @@ fn test_sanma_can_pei_with_north_in_hand() {
 #[test]
 fn test_setup_state_build_game_settings() {
     let mut setup = SetupState::new();
-    assert!(!setup.build_game_settings().rules.three_player);
+    let settings = setup.build_game_settings();
+    assert!(!settings.rules.three_player);
+    assert_eq!(settings.round_count, 1, "既定は東風戦");
     assert_eq!(setup.cpu_count(), 3);
 
     setup.three_player = true;
+    setup.hanchan = true;
     setup.nuki_dora = false;
     let settings = setup.build_game_settings();
     assert!(settings.rules.three_player);
     assert!(!settings.rules.nuki_dora);
+    assert_eq!(
+        settings.round_count, 2,
+        "半荘戦が round_count に反映されない"
+    );
     assert_eq!(settings.initial_score, 35000);
     assert_eq!(setup.cpu_count(), 2);
+}
+
+/// 対局モードのインデックスと三麻・半荘フラグの相互変換
+#[test]
+fn test_setup_state_mode_index_roundtrip() {
+    let mut setup = SetupState::new();
+    let expected = [
+        (false, false), // 四人東風
+        (false, true),  // 四人半荘
+        (true, false),  // 三人東風
+        (true, true),   // 三人半荘
+    ];
+    for (idx, &(three_player, hanchan)) in expected.iter().enumerate() {
+        setup.set_mode_index(idx);
+        assert_eq!(setup.three_player, three_player, "mode {idx}");
+        assert_eq!(setup.hanchan, hanchan, "mode {idx}");
+        assert_eq!(setup.mode_index(), idx, "mode {idx}");
+    }
 }
 
 #[test]

@@ -583,6 +583,48 @@ mod tests {
         assert_eq!(table.round_wind, Wind::South);
     }
 
+    /// 指定した設定の卓をノーテン流局で回しゲーム終了までの局数を数える
+    fn count_rounds_until_game_over(settings: GameSettings, max_rounds: usize) -> usize {
+        let mut table = Table::new(settings);
+        for i in 0..max_rounds {
+            if table.is_game_over {
+                return i;
+            }
+            table.start_round();
+            let round = table.current_round_mut().unwrap();
+            round.phase = TurnPhase::RoundOver;
+            round.result = Some(RoundResult::ExhaustiveDraw {
+                dealer_tenpai: false,
+            });
+            table.finish_round();
+        }
+        assert!(
+            table.is_game_over,
+            "{max_rounds}局回してもゲームが終了しない"
+        );
+        max_rounds
+    }
+
+    /// 四麻半荘は8局（東1〜南4）で終了する（#271）
+    #[test]
+    fn test_hanchan_game_is_eight_rounds() {
+        let settings = GameSettings {
+            round_count: 2,
+            ..Default::default()
+        };
+        assert_eq!(count_rounds_until_game_over(settings, 8), 8);
+    }
+
+    /// 三麻半荘は6局（東1〜南3）で終了する（#271）
+    #[test]
+    fn test_sanma_hanchan_game_is_six_rounds() {
+        let settings = GameSettings {
+            round_count: 2,
+            ..GameSettings::sanma_default()
+        };
+        assert_eq!(count_rounds_until_game_over(settings, 6), 6);
+    }
+
     #[test]
     fn test_table_game_over_when_score_is_negative() {
         let mut table = Table::new(GameSettings::default());

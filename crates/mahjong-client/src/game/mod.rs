@@ -24,7 +24,7 @@ mod setup;
 mod tests;
 
 pub use labels::PlayerLabel;
-pub use setup::{OnlineUiState, RoomViewUi, SetupState};
+pub use setup::{MODE_COUNT, OnlineUiState, RoomViewUi, SetupState};
 
 use labels::*;
 

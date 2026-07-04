@@ -6,7 +6,7 @@
 use macroquad::prelude::*;
 
 use super::{DESIGN_W, draw_jp_text, theme};
-use crate::game::GameState;
+use crate::game::{GameState, MODE_COUNT};
 use crate::i18n::Key;
 
 /// パネルのレイアウト（設定画面と揃える）
@@ -51,13 +51,14 @@ const CODE_BOX: Rect2 = Rect2 {
     w: 400.0,
     h: 44.0,
 };
-/// 対局モードトグル（四人打ち / 三麻）と北抜きトグルの行
-const MODE_BTN_W: f32 = 120.0;
+/// 対局モードトグル（四人東風/四人半荘/三人東風/三人半荘）と北抜きトグルの行
+const MODE_BTN_W: f32 = 100.0;
 const MODE_BTN_H: f32 = 32.0;
 const MODE_BTN_GAP: f32 = 8.0;
 const MODE_Y: f32 = 408.0;
 
-/// 対局モードトグルのボタン矩形。idx 0=四人打ち, 1=三麻。
+/// 対局モードトグルのボタン矩形。
+/// idx 0=四人東風, 1=四人半荘, 2=三人東風, 3=三人半荘。
 fn mode_btn_rect(idx: usize) -> Rect2 {
     Rect2 {
         x: NAME_BOX.x + idx as f32 * (MODE_BTN_W + MODE_BTN_GAP),
@@ -70,7 +71,7 @@ fn mode_btn_rect(idx: usize) -> Rect2 {
 /// 北抜きドラトグルのボタン矩形（三麻選択時のみ表示）。
 fn nuki_btn_rect() -> Rect2 {
     Rect2 {
-        x: NAME_BOX.x + 2.0 * (MODE_BTN_W + MODE_BTN_GAP) + 10.0,
+        x: NAME_BOX.x + MODE_COUNT as f32 * (MODE_BTN_W + MODE_BTN_GAP) + 10.0,
         y: MODE_Y,
         w: 130.0,
         h: MODE_BTN_H,
@@ -291,9 +292,14 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
     draw_input_box(font, &CODE_BOX, &online.code_input, online.code_focused);
 
     // 対局モードトグル（ルーム作成時に適用される）
-    let mode_labels = [Key::ModeFourPlayer, Key::ModeThreePlayer];
+    let mode_labels = [
+        Key::ModeFourEast,
+        Key::ModeFourHanchan,
+        Key::ModeThreeEast,
+        Key::ModeThreeHanchan,
+    ];
     for (idx, key) in mode_labels.into_iter().enumerate() {
-        let selected = (idx == 1) == online.three_player;
+        let selected = idx == online.mode_index();
         draw_toggle(font, &mode_btn_rect(idx), tr.get(key), selected);
     }
     if online.three_player {
@@ -359,9 +365,9 @@ pub fn handle_online_menu_input(state: &mut GameState) -> Option<OnlineMenuActio
         return None;
     }
     // 対局モードトグル
-    for idx in 0..2 {
+    for idx in 0..MODE_COUNT {
         if mode_btn_rect(idx).contains(mx, my) {
-            online.three_player = idx == 1;
+            online.set_mode_index(idx);
             return None;
         }
     }
@@ -414,17 +420,15 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
         12,
         theme::TEXT_DIM,
     );
-    // 三麻ルームはモードを明示する
-    if room.three_player {
-        theme::draw_text_centered(
-            font,
-            tr.get(Key::ModeThreePlayer),
-            cx,
-            256.0,
-            13,
-            theme::GOLD_LT,
-        );
-    }
+    // 対局モード（四人東風/四人半荘/三人東風/三人半荘）を明示する
+    theme::draw_text_centered(
+        font,
+        tr.get(Key::mode(room.three_player, room.hanchan)),
+        cx,
+        256.0,
+        13,
+        theme::GOLD_LT,
+    );
 
     // 座席一覧（三麻の未使用席はラベルが空なので描画しない）
     let row_x = 440.0;

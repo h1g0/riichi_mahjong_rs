@@ -104,6 +104,7 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
         seat_labels: build_seat_labels(room, lang),
         is_host: room.is_host(),
         three_player: room.three_player(),
+        hanchan: room.hanchan(),
     });
 
     if let Some(err) = remote.take_error() {
@@ -253,7 +254,9 @@ async fn main() {
                             let url = transport::default_server_url();
                             let name = display_name(&game_state);
                             let rules = game_state.online_state.build_rules();
-                            online = Some(RemoteAdapter::create_room(&url, &name, 1, rules));
+                            let round_count = game_state.online_state.round_count();
+                            online =
+                                Some(RemoteAdapter::create_room(&url, &name, round_count, rules));
                             let msg = i18n::Key::Connecting.text(game_state.lang);
                             set_status(&mut game_state, msg, false);
                         }

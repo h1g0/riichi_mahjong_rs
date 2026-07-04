@@ -43,6 +43,8 @@ pub struct RoomView {
     pub your_seat: usize,
     /// このルームのルール設定
     pub rules: Settings,
+    /// 東風戦(1)か東南戦(2)か
+    pub round_count: u8,
 }
 
 impl RoomView {
@@ -54,6 +56,11 @@ impl RoomView {
     /// 三麻（3人打ち）ルームか
     pub fn three_player(&self) -> bool {
         self.rules.three_player
+    }
+
+    /// 半荘戦ルームか（false なら東風戦）
+    pub fn hanchan(&self) -> bool {
+        self.round_count >= 2
     }
 
     /// プレイヤー人数を返す（四麻=4、三麻=3）
@@ -347,6 +354,7 @@ impl RemoteAdapter {
                 host_seat,
                 your_seat,
                 rules,
+                round_count,
             } => {
                 self.room_code = Some(code.clone());
                 // 座席情報から人間プレイヤーの接続状態を取り込む
@@ -362,6 +370,7 @@ impl RemoteAdapter {
                     host_seat,
                     your_seat,
                     rules,
+                    round_count,
                 });
             }
             ServerMessage::Event(event) => {
@@ -635,6 +644,7 @@ mod tests {
             host_seat: 0,
             your_seat,
             rules: Settings::new(),
+            round_count: 1,
         }
     }
 
@@ -689,6 +699,54 @@ mod tests {
             }
             other => panic!("CreateRoomでないメッセージ: {other:?}"),
         }
+    }
+
+    /// 半荘設定（round_count=2）が CreateRoom で送られ、
+    /// RoomState の round_count がロビー表示用の hanchan() に反映されること（#271）
+    #[test]
+    fn test_hanchan_round_count_roundtrip() {
+        let (transport, handle) = mock_pair();
+        let mut adapter = build_test(
+            transport,
+            LobbyIntent::Create {
+                round_count: 2,
+                rules: Settings::new(),
+            },
+        );
+
+        handle.push(WsEvent::Opened);
+        handle.push_msg(&welcome());
+        adapter.tick();
+
+        let sent = handle.sent();
+        match &sent[1] {
+            ClientMessage::CreateRoom { round_count, .. } => assert_eq!(*round_count, 2),
+            other => panic!("CreateRoomでないメッセージ: {other:?}"),
+        }
+
+        // サーバから round_count=2 の RoomState を受け取ると半荘ルームになる
+        let msg = ServerMessage::RoomState {
+            code: "ABC234".to_string(),
+            seats: [
+                SeatInfo::Human {
+                    name: "ホスト".to_string(),
+                    connected: true,
+                },
+                SeatInfo::Empty,
+                SeatInfo::Empty,
+                SeatInfo::Empty,
+            ],
+            host_seat: 0,
+            your_seat: 0,
+            rules: Settings::new(),
+            round_count: 2,
+        };
+        handle.push_msg(&msg);
+        adapter.tick();
+
+        let room = adapter.room().expect("入室しているはず");
+        assert!(room.hanchan());
+        assert!(!room.three_player());
     }
 
     #[test]

@@ -115,6 +115,9 @@ pub enum ServerMessage {
         /// このルームのルール設定（三麻か否かの表示などに使う）
         #[serde(default)]
         rules: Settings,
+        /// 東風戦(1)か東南戦(2)か（東風/半荘の表示に使う）
+        #[serde(default = "default_round_count")]
+        round_count: u8,
     },
 
     /// ゲーム内イベント
@@ -156,6 +159,13 @@ pub enum ServerMessage {
         /// 補足メッセージ（デバッグ用。表示文言はクライアント側で組み立てる）
         message: String,
     },
+}
+
+/// `RoomState::round_count` の既定値（東風戦）
+///
+/// このフィールドを送らない旧サーバのメッセージを解釈するために使う。
+fn default_round_count() -> u8 {
+    1
 }
 
 /// 座席の状態
@@ -332,6 +342,7 @@ mod tests {
                 host_seat: 0,
                 your_seat: 1,
                 rules: Settings::new(),
+                round_count: 2,
             },
             ServerMessage::Event(ServerEvent::TileDrawn {
                 tile: Tile::new(Tile::P5),
@@ -400,6 +411,17 @@ mod tests {
                 ServerMessage::Error { code: c, .. } => assert_eq!(c, code),
                 _ => panic!("variant changed"),
             }
+        }
+    }
+
+    /// round_count を送らない旧サーバの RoomState が東風戦(1)に補完されること
+    #[test]
+    fn test_room_state_without_round_count_defaults_to_tonpuu() {
+        let json = r#"{"RoomState":{"code":"ABC234","seats":["Empty","Empty","Empty","Empty"],"host_seat":0,"your_seat":1}}"#;
+        let decoded = ServerMessage::from_json(json).expect("decode");
+        match decoded {
+            ServerMessage::RoomState { round_count, .. } => assert_eq!(round_count, 1),
+            _ => panic!("variant changed"),
         }
     }
 
