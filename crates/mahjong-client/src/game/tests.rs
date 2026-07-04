@@ -1,6 +1,7 @@
 //! ゲーム状態のユニットテスト
 
 use super::*;
+use mahjong_server::table::GameLength;
 
 #[test]
 fn test_set_local_players_assigns_cpu_labels_to_seats_1_to_3() {
@@ -218,7 +219,7 @@ fn test_setup_state_build_game_settings() {
     let mut setup = SetupState::new();
     let settings = setup.build_game_settings();
     assert!(!settings.rules.three_player);
-    assert_eq!(settings.round_count, 1, "既定は東風戦");
+    assert_eq!(settings.length, GameLength::EastOnly, "既定は東風戦");
     assert_eq!(setup.cpu_count(), 3);
 
     setup.three_player = true;
@@ -228,8 +229,9 @@ fn test_setup_state_build_game_settings() {
     assert!(settings.rules.three_player);
     assert!(!settings.rules.nuki_dora);
     assert_eq!(
-        settings.round_count, 2,
-        "半荘戦が round_count に反映されない"
+        settings.length,
+        GameLength::Hanchan,
+        "半荘戦が length に反映されない"
     );
     assert_eq!(settings.initial_score, 35000);
     assert_eq!(setup.cpu_count(), 2);

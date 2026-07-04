@@ -254,9 +254,8 @@ async fn main() {
                             let url = transport::default_server_url();
                             let name = display_name(&game_state);
                             let rules = game_state.online_state.build_rules();
-                            let round_count = game_state.online_state.round_count();
-                            online =
-                                Some(RemoteAdapter::create_room(&url, &name, round_count, rules));
+                            let length = game_state.online_state.length();
+                            online = Some(RemoteAdapter::create_room(&url, &name, length, rules));
                             let msg = i18n::Key::Connecting.text(game_state.lang);
                             set_status(&mut game_state, msg, false);
                         }

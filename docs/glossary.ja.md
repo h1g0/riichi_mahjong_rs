@@ -107,8 +107,8 @@
 |---|---|---|---|---|
 | 局 | kyoku | hand (gameplay division) | — | 親の第一打から和了/流局までの 1 配。 |
 | 場 | ba | round | — | 風名を冠する 4 局以上の区切り（東・南）。 |
-| 半荘 | hanchan | hanchan / game | `GameSettings::round_count` (2) | 東場と南場を合わせたもの。UI 表記は「四人半荘」「三人半荘」。 |
-| 東風戦 | tonpuusen | East-only game | `GameSettings::round_count` (1) | 東場のみの対局。UI 表記は「四人東風」「三人東風」。 |
+| 半荘 | hanchan | hanchan / game | `GameLength::Hanchan` | 東場と南場を合わせたもの。UI 表記は「四人半荘」「三人半荘」。 |
+| 東風戦 | tonpuusen | East-only game | `GameLength::EastOnly` | 東場のみの対局。UI 表記は「四人東風」「三人東風」。 |
 | 巡（目） | jun | turn | — | ツモ/鳴きから打牌まで。 |
 | 下家 | shimocha | right player | — | 自分の右隣（自分の次に打つ）プレイヤー。 |
 | 対面 | toimen | across player | — | 自分の正面のプレイヤー。 |

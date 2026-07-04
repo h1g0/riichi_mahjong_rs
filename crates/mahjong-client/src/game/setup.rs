@@ -1,6 +1,7 @@
 //! 設定画面・オンラインUIの状態
 
 use super::*;
+use mahjong_server::table::GameLength;
 
 /// オンライン対戦UI（メニュー・ロビー）の状態
 #[derive(Debug, Clone)]
@@ -56,9 +57,9 @@ impl OnlineUiState {
         }
     }
 
-    /// ルーム作成時に送る局数（東風戦=1, 半荘戦=2）
-    pub fn round_count(&self) -> u8 {
-        round_count_from_hanchan(self.hanchan)
+    /// ルーム作成時に送る対局の長さ（東風戦か半荘戦か）
+    pub fn length(&self) -> GameLength {
+        length_from_hanchan(self.hanchan)
     }
 
     /// 選択中の対局モードのインデックス（[`MODE_COUNT`] 参照）
@@ -87,9 +88,13 @@ pub fn mode_flags_from_index(idx: usize) -> (bool, bool) {
     (idx >= 2, idx % 2 == 1)
 }
 
-/// 半荘フラグから局数（東風戦=1, 半荘戦=2）を求める
-fn round_count_from_hanchan(hanchan: bool) -> u8 {
-    if hanchan { 2 } else { 1 }
+/// 半荘フラグから対局の長さを求める
+fn length_from_hanchan(hanchan: bool) -> GameLength {
+    if hanchan {
+        GameLength::Hanchan
+    } else {
+        GameLength::EastOnly
+    }
 }
 
 /// ロビー画面に表示するルーム情報
@@ -152,12 +157,12 @@ impl SetupState {
 
     /// ゲーム設定を組み立てる（持ち点はルールから決まる）
     pub fn build_game_settings(&self) -> mahjong_server::table::GameSettings {
-        mahjong_server::table::GameSettings::with_rules(self.round_count(), self.build_rules())
+        mahjong_server::table::GameSettings::with_rules(self.length(), self.build_rules())
     }
 
-    /// 局数（東風戦=1, 半荘戦=2）
-    pub fn round_count(&self) -> u8 {
-        round_count_from_hanchan(self.hanchan)
+    /// 対局の長さ（東風戦か半荘戦か）
+    pub fn length(&self) -> GameLength {
+        length_from_hanchan(self.hanchan)
     }
 
     /// 選択中の対局モードのインデックス（[`MODE_COUNT`] 参照）

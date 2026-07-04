@@ -15,6 +15,7 @@ use mahjong_server::protocol::net::{
     ClientMessage, CpuSpec, ErrorCode, PROTOCOL_VERSION, SeatInfo, ServerMessage,
 };
 use mahjong_server::protocol::{ClientAction, ServerEvent};
+use mahjong_server::table::GameLength;
 
 use super::GameAdapter;
 use crate::transport::{Transport, WsEvent};
@@ -43,8 +44,8 @@ pub struct RoomView {
     pub your_seat: usize,
     /// このルームのルール設定
     pub rules: Settings,
-    /// 東風戦(1)か東南戦(2)か
-    pub round_count: u8,
+    /// 対局の長さ（東風戦か半荘戦か）
+    pub length: GameLength,
 }
 
 impl RoomView {
@@ -60,7 +61,7 @@ impl RoomView {
 
     /// 半荘戦ルームか（false なら東風戦）
     pub fn hanchan(&self) -> bool {
-        self.round_count >= 2
+        self.length == GameLength::Hanchan
     }
 
     /// プレイヤー人数を返す（四麻=4、三麻=3）
@@ -82,7 +83,7 @@ pub struct RemoteError {
 
 /// Welcome 受信後に送るロビー操作
 enum LobbyIntent {
-    Create { round_count: u8, rules: Settings },
+    Create { length: GameLength, rules: Settings },
     Join { code: String },
 }
 
@@ -162,14 +163,14 @@ impl RemoteAdapter {
     ///
     /// `rules` にはルームのルール設定を丸ごと渡す（三麻・北抜きに限らず、
     /// 将来ルール選択UIが増えてもこのシグネチャのまま拡張できる）。
-    pub fn create_room(url: &str, display_name: &str, round_count: u8, rules: Settings) -> Self {
+    pub fn create_room(url: &str, display_name: &str, length: GameLength, rules: Settings) -> Self {
         let (transport, connector) = Self::connector_for(url);
         Self::build(
             transport,
             connector,
             default_clock(),
             display_name,
-            LobbyIntent::Create { round_count, rules },
+            LobbyIntent::Create { length, rules },
         )
     }
 
@@ -340,8 +341,8 @@ impl RemoteAdapter {
                 self.status = ConnStatus::Connected;
                 if let Some(intent) = self.pending_intent.take() {
                     let msg = match intent {
-                        LobbyIntent::Create { round_count, rules } => {
-                            ClientMessage::CreateRoom { round_count, rules }
+                        LobbyIntent::Create { length, rules } => {
+                            ClientMessage::CreateRoom { length, rules }
                         }
                         LobbyIntent::Join { code } => ClientMessage::JoinRoom { code },
                     };
@@ -354,7 +355,7 @@ impl RemoteAdapter {
                 host_seat,
                 your_seat,
                 rules,
-                round_count,
+                length,
             } => {
                 self.room_code = Some(code.clone());
                 // 座席情報から人間プレイヤーの接続状態を取り込む
@@ -370,7 +371,7 @@ impl RemoteAdapter {
                     host_seat,
                     your_seat,
                     rules,
-                    round_count,
+                    length,
                 });
             }
             ServerMessage::Event(event) => {
@@ -615,7 +616,7 @@ mod tests {
         let adapter = build_test(
             transport,
             LobbyIntent::Create {
-                round_count: 1,
+                length: GameLength::EastOnly,
                 rules: Settings::new(),
             },
         );
@@ -644,7 +645,7 @@ mod tests {
             host_seat: 0,
             your_seat,
             rules: Settings::new(),
-            round_count: 1,
+            length: GameLength::EastOnly,
         }
     }
 
@@ -693,23 +694,23 @@ mod tests {
         let sent = handle.sent();
         assert_eq!(sent.len(), 2);
         match &sent[1] {
-            ClientMessage::CreateRoom { round_count, rules } => {
-                assert_eq!(*round_count, 1);
+            ClientMessage::CreateRoom { length, rules } => {
+                assert_eq!(*length, GameLength::EastOnly);
                 assert_eq!(*rules, Settings::new());
             }
             other => panic!("CreateRoomでないメッセージ: {other:?}"),
         }
     }
 
-    /// 半荘設定（round_count=2）が CreateRoom で送られ、
-    /// RoomState の round_count がロビー表示用の hanchan() に反映されること（#271）
+    /// 半荘設定（GameLength::Hanchan）が CreateRoom で送られ、
+    /// RoomState の length がロビー表示用の hanchan() に反映されること（#271）
     #[test]
-    fn test_hanchan_round_count_roundtrip() {
+    fn test_hanchan_length_roundtrip() {
         let (transport, handle) = mock_pair();
         let mut adapter = build_test(
             transport,
             LobbyIntent::Create {
-                round_count: 2,
+                length: GameLength::Hanchan,
                 rules: Settings::new(),
             },
         );
@@ -720,11 +721,11 @@ mod tests {
 
         let sent = handle.sent();
         match &sent[1] {
-            ClientMessage::CreateRoom { round_count, .. } => assert_eq!(*round_count, 2),
+            ClientMessage::CreateRoom { length, .. } => assert_eq!(*length, GameLength::Hanchan),
             other => panic!("CreateRoomでないメッセージ: {other:?}"),
         }
 
-        // サーバから round_count=2 の RoomState を受け取ると半荘ルームになる
+        // サーバから length=Hanchan の RoomState を受け取ると半荘ルームになる
         let msg = ServerMessage::RoomState {
             code: "ABC234".to_string(),
             seats: [
@@ -739,7 +740,7 @@ mod tests {
             host_seat: 0,
             your_seat: 0,
             rules: Settings::new(),
-            round_count: 2,
+            length: GameLength::Hanchan,
         };
         handle.push_msg(&msg);
         adapter.tick();
@@ -891,7 +892,7 @@ mod tests {
             Box::new(move || clock_start.elapsed().as_secs_f64()),
             "E2Eテスト",
             LobbyIntent::Create {
-                round_count: 1,
+                length: GameLength::EastOnly,
                 rules: Settings::new(),
             },
         );
@@ -1186,7 +1187,7 @@ mod tests {
             Box::new(move || *now_clock.borrow()),
             "テスト",
             LobbyIntent::Create {
-                round_count: 1,
+                length: GameLength::EastOnly,
                 rules: Settings::new(),
             },
         );
@@ -1216,7 +1217,7 @@ mod tests {
             Box::new(move || *now_clock.borrow()),
             "テスト",
             LobbyIntent::Create {
-                round_count: 1,
+                length: GameLength::EastOnly,
                 rules: Settings::new(),
             },
         );
