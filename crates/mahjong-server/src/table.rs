@@ -98,6 +98,15 @@ impl Table {
         }
     }
 
+    /// 起家（最初の親）をランダムに選ぶ
+    ///
+    /// 対局開始前（東1局を始める前）に呼ぶこと。三麻ではダミー席（シート3）が
+    /// 親にならないよう、実プレイヤー数の範囲から選ぶ。
+    pub fn randomize_dealer(&mut self) {
+        use rand::RngExt;
+        self.dealer = rand::rng().random_range(0..self.player_count());
+    }
+
     /// ゲーム全体の局数を返す
     ///
     /// 四麻: 東風戦=4, 東南戦=8
@@ -335,6 +344,49 @@ mod tests {
         assert_eq!(table.riichi_sticks, 0);
         assert!(!table.is_game_over);
         assert!(table.round.is_none());
+    }
+
+    #[test]
+    fn test_randomize_dealer_stays_in_player_range() {
+        // 四麻: 起家は座席0〜3の範囲
+        let mut table = Table::new(GameSettings::default());
+        for _ in 0..50 {
+            table.randomize_dealer();
+            assert!(table.dealer < 4);
+        }
+
+        // 三麻: ダミー席（シート3）は起家にならない
+        let mut table = Table::new(GameSettings::sanma_default());
+        for _ in 0..50 {
+            table.randomize_dealer();
+            assert!(table.dealer < 3);
+        }
+    }
+
+    #[test]
+    fn test_randomize_dealer_varies() {
+        // 100回試行して起家が1種類しか出ない確率は (1/4)^99 で事実上ゼロ
+        let mut table = Table::new(GameSettings::default());
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..100 {
+            table.randomize_dealer();
+            seen.insert(table.dealer);
+        }
+        assert!(seen.len() > 1);
+    }
+
+    #[test]
+    fn test_start_round_with_random_dealer() {
+        // ランダムに選ばれた起家が局に正しく反映される
+        let mut table = Table::new(GameSettings::default());
+        table.randomize_dealer();
+        let dealer = table.dealer;
+        table.start_round();
+
+        let round = table.current_round().unwrap();
+        assert_eq!(round.dealer, dealer);
+        assert_eq!(round.current_player, dealer);
+        assert_eq!(round.players[dealer].seat_wind, Wind::East);
     }
 
     #[test]

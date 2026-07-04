@@ -55,15 +55,11 @@ impl Translator {
         .unwrap_or("")
     }
 
-    /// 自分から見た相対座席名（0=下家, 1=対面, 2=上家）。
-    pub fn seat_relative(&self, idx: usize) -> &'static str {
-        match self.lang {
-            Lang::Ja => ["下家", "対面", "上家"],
-            Lang::En => ["Right", "Across", "Left"],
-        }
-        .get(idx)
-        .copied()
-        .unwrap_or("")
+    /// 設定画面の CPU カード名（例: 「CPU 1」）。
+    ///
+    /// 席順は対局開始時にランダムで決まるため、相対位置ではなく番号で表す。
+    pub fn cpu_slot(&self, idx: usize) -> String {
+        format!("CPU {}", idx + 1)
     }
 
     /// 局表示（例: 日「東1局」/ 英「East 1」）。`round_number` は 0 始まり。
@@ -163,9 +159,12 @@ impl Translator {
         }
     }
 
-    /// ロビーの座席行（例: 日「東: {who}{marks}」/ 英「East: {who}{marks}」）。
-    pub fn seat_row(&self, wind: Wind, who: &str, marks: &str) -> String {
-        format!("{}: {who}{marks}", wind.name(self.lang))
+    /// ロビーの参加者行（例: 日「1: {who}{marks}」/ 英「1: {who}{marks}」）。
+    ///
+    /// 席順（風）は対局開始時にランダムで決まるため、風ではなく
+    /// 参加順の番号（1始まり）で表示する。
+    pub fn seat_row(&self, number: usize, who: &str, marks: &str) -> String {
+        format!("{number}: {who}{marks}")
     }
 
     /// 切断中プレイヤーの席表記（例: 日「{name}（切断中）」/ 英「{name} (offline)」）。
@@ -680,8 +679,8 @@ mod tests {
         assert_eq!(en.strength_label(2), "Strong");
         assert_eq!(ja.personality_label(3), "守備的");
         assert_eq!(en.personality_label(0), "Balanced");
-        assert_eq!(ja.seat_relative(1), "対面");
-        assert_eq!(en.seat_relative(2), "Left");
+        assert_eq!(ja.cpu_slot(1), "CPU 2");
+        assert_eq!(en.cpu_slot(2), "CPU 3");
     }
 
     #[test]

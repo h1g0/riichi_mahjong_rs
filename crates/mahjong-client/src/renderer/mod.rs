@@ -13,7 +13,7 @@ pub use overlay::OverlayClick;
 use macroquad::prelude::*;
 use mahjong_core::scoring::score::DoraLabel;
 use mahjong_core::settings::Lang;
-use mahjong_core::tile::{Tile, Wind};
+use mahjong_core::tile::Tile;
 use mahjong_server::cpu::client::CpuConfig;
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
@@ -1620,15 +1620,8 @@ fn draw_game_over(state: &GameState, font: Option<&Font>) {
         theme::TEXT_BR,
     );
 
-    // 三麻ではダミー席（シート3）を除外する
-    let mut rankings: Vec<(usize, i32)> = state
-        .scores
-        .iter()
-        .enumerate()
-        .take(state.player_count)
-        .map(|(i, &s)| (i, s))
-        .collect();
-    rankings.sort_by_key(|r| std::cmp::Reverse(r.1));
+    // 最終順位（同点は起家に近い席が上位。三麻はダミー席を除外）
+    let rankings = state.final_rankings();
 
     // 順位の色（金・銀・銅・その他）
     let rank_colors = [
@@ -1735,11 +1728,6 @@ const SETUP_CARD_Y: f32 = 142.0;
 const SETUP_CARD_H: f32 = 348.0;
 const SETUP_OPT_H: f32 = 28.0;
 const SETUP_OPT_STEP: f32 = 32.0;
-
-/// 設定画面の CPU カードに表示する風（下家=南, 対面=西, 上家=北）。
-fn setup_card_wind(cpu_idx: usize) -> Wind {
-    Wind::from_index(cpu_idx + 1)
-}
 
 /// 言語切替トグルのボタン矩形（パネル右上）。idx 0=日本語, 1=English。
 fn setup_lang_button_rect(idx: usize) -> SetupButton {
@@ -1917,14 +1905,15 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
             theme::BORDER,
         );
 
-        // ヘッダー：風リング＋名前
+        // ヘッダー：番号リング＋名前（席順は対局開始時にランダムで決まるため、
+        // 風・相対位置ではなく CPU 番号で表示する）
         let ring_cx = card_x + 16.0 + 18.0;
         let ring_cy = SETUP_CARD_Y + 16.0 + 18.0;
         draw_circle(ring_cx, ring_cy, 18.0, theme::rgba(0x9a7a1a, 0.30));
         draw_circle_lines(ring_cx, ring_cy, 18.0, 1.5, theme::GOLD_DK);
         theme::draw_text_centered(
             font,
-            setup_card_wind(cpu_idx).name(state.lang),
+            &format!("{}", cpu_idx + 1),
             ring_cx,
             ring_cy + 6.0,
             16,
@@ -1932,7 +1921,7 @@ fn draw_setup(state: &GameState, font: Option<&Font>) {
         );
         draw_jp_text(
             font,
-            tr.seat_relative(cpu_idx),
+            &tr.cpu_slot(cpu_idx),
             card_x + 56.0,
             SETUP_CARD_Y + 39.0,
             15,

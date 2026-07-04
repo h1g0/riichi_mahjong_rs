@@ -379,28 +379,21 @@ async fn test_host_chosen_cpu_configs_apply() {
 
         // 座席0 はホスト（人間）
         assert!(matches!(seats[0], SeatInfo::Human { .. }));
-        // 座席1〜3（下家・対面・上家）にホストの configs[0..3] が順に対応する
-        assert_eq!(
-            seats[1],
-            SeatInfo::Cpu {
-                level: CpuLevel::Strong,
-                personality: CpuPersonality::Defensive,
-            }
-        );
-        assert_eq!(
-            seats[2],
-            SeatInfo::Cpu {
-                level: CpuLevel::Weak,
-                personality: CpuPersonality::Speedy,
-            }
-        );
-        assert_eq!(
-            seats[3],
-            SeatInfo::Cpu {
-                level: CpuLevel::Normal,
-                personality: CpuPersonality::HighValue,
-            }
-        );
+        // 座席1〜3にホストの指定した3構成が入る（席順はランダムなので
+        // どの席にどれが座るかは問わず、過不足がないことを確認する）
+        for spec in &specs {
+            let count = seats[1..]
+                .iter()
+                .filter(|s| {
+                    matches!(s, SeatInfo::Cpu { level, personality }
+                        if *level == spec.level && *personality == spec.personality)
+                })
+                .count();
+            assert_eq!(
+                count, 1,
+                "指定したCPU構成 {spec:?} がCPU席にちょうど1つ存在するべき"
+            );
+        }
     })
     .await
     .expect("テスト全体がタイムアウトした");
@@ -601,11 +594,33 @@ async fn test_out_of_turn_action_rejected() {
     host.send(&ClientMessage::StartGame { cpu_configs: None })
         .await;
 
-    // 開始直後の手番はホスト（座席0=親）。ゲストの打牌は拒否される
-    guest
+    // 起家はランダムであり、CPUが起家だと打牌遅延なしで即座に手番が進んで
+    // しまうため、「開始直後はホストの手番」という決め打ちはできない。
+    // 実際に自分の TileDrawn を受け取った方が今の手番なので、それを待って
+    // から、もう一方（手番でない側）のアクションが拒否されることを確認する。
+    let host_turn;
+    loop {
+        tokio::select! {
+            msg = host.recv() => {
+                if matches!(msg, ServerMessage::Event(ServerEvent::TileDrawn { .. })) {
+                    host_turn = true;
+                    break;
+                }
+            }
+            msg = guest.recv() => {
+                if matches!(msg, ServerMessage::Event(ServerEvent::TileDrawn { .. })) {
+                    host_turn = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    let non_dealer = if host_turn { &mut guest } else { &mut host };
+    non_dealer
         .send(&ClientMessage::Action(ClientAction::Discard { tile: None }))
         .await;
-    assert_eq!(guest.recv_error().await, ErrorCode::InvalidAction);
+    assert_eq!(non_dealer.recv_error().await, ErrorCode::InvalidAction);
 }
 
 /// 対局開始後の参加は GameInProgress になる

@@ -136,6 +136,15 @@ impl CpuConfig {
     }
 }
 
+/// CPU設定の並び（＝CPUの席順）をランダムに入れ替える
+///
+/// 席順ランダム化用。実際に対局へ参加するCPU分だけをスライスで渡すこと
+/// （三麻では先頭2つのみ、など）。
+pub fn shuffle_cpu_configs(configs: &mut [CpuConfig]) {
+    use rand::seq::SliceRandom;
+    configs.shuffle(&mut rand::rng());
+}
+
 /// CPUクライアント: ServerEvent を処理して ClientAction を返す
 pub struct CpuClient {
     /// CPU設定

@@ -1704,3 +1704,42 @@ fn test_pass_when_daiminkan_only_non_strong_high_value() {
 
     assert!(matches!(action, Some(ClientAction::Pass)));
 }
+
+/// shuffle_cpu_configs が要素の中身を保ったまま並びだけを変えることを確認する
+#[test]
+fn test_shuffle_cpu_configs_preserves_configs() {
+    let original = [
+        CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced),
+        CpuConfig::new(CpuLevel::Normal, CpuPersonality::Speedy),
+        CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue),
+    ];
+
+    let mut configs = original.clone();
+    shuffle_cpu_configs(&mut configs);
+
+    // 並びは変わっても構成の集合は同じ
+    for c in &original {
+        assert!(
+            configs
+                .iter()
+                .any(|s| s.level == c.level && s.personality == c.personality),
+            "シャッフルで設定が失われた"
+        );
+    }
+}
+
+/// スライス範囲外（対局に参加しないCPU）はシャッフルの影響を受けないことを確認する
+#[test]
+fn test_shuffle_cpu_configs_respects_slice_bounds() {
+    for _ in 0..20 {
+        let mut configs = [
+            CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced),
+            CpuConfig::new(CpuLevel::Normal, CpuPersonality::Speedy),
+            CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue),
+        ];
+        // 三麻相当: 先頭2つだけシャッフル
+        shuffle_cpu_configs(&mut configs[..2]);
+        assert_eq!(configs[2].level, CpuLevel::Strong);
+        assert_eq!(configs[2].personality, CpuPersonality::HighValue);
+    }
+}

@@ -416,6 +416,11 @@ impl Room {
             self.cpu_configs = specs.map(|spec| spec.to_config());
         }
 
+        // 席順ランダム化: 対局に参加するCPU分の設定をシャッフルする。
+        // 起家のランダム化は GameDriver::start_game が行う。
+        let cpu_count = self.player_count() - 1;
+        mahjong_server::cpu::client::shuffle_cpu_configs(&mut self.cpu_configs[..cpu_count]);
+
         let mut driver = GameDriver::new(self.settings.clone());
         for s in 0..self.player_count() {
             let config = config_for_seat(&self.cpu_configs, s);
@@ -562,11 +567,17 @@ impl Room {
             return;
         }
         // 先に全座席のイベントを取り出す（driver の借用をここで手放す）。
-        // drain_events_at は CPU遅延を計りながらイベントを処理する。
+        // drain_all_events_at は CPU遅延を計りながらイベントを処理する。
+        //
+        // 座席ごとに drain_events_at を呼ぶ実装だと、後の座席を処理する際の
+        // pump が新たなイベント（鳴き解決後の CallAvailable など）を生成し、
+        // それが既に取り出し済みの前の座席のバッファへ追加されて次回まで
+        // 配信されずに残ることがあった。全座席分をまとめて取り出すことで
+        // 生成順に関わらず同じフラッシュで確実に配信する。
         let now = self.now_secs();
         let per_seat: [Vec<ServerEvent>; 4] = {
             let driver = self.driver.as_mut().expect("checked above");
-            std::array::from_fn(|seat| driver.drain_events_at(seat, now))
+            driver.drain_all_events_at(now)
         };
 
         for (seat, events) in per_seat.into_iter().enumerate() {
