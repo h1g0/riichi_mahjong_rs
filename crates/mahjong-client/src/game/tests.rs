@@ -1,6 +1,7 @@
 //! ゲーム状態のユニットテスト
 
 use super::*;
+use mahjong_server::table::GameLength;
 
 #[test]
 fn test_set_local_players_assigns_cpu_labels_to_seats_1_to_3() {
@@ -216,16 +217,41 @@ fn test_sanma_can_pei_with_north_in_hand() {
 #[test]
 fn test_setup_state_build_game_settings() {
     let mut setup = SetupState::new();
-    assert!(!setup.build_game_settings().rules.three_player);
+    let settings = setup.build_game_settings();
+    assert!(!settings.rules.three_player);
+    assert_eq!(settings.length, GameLength::EastOnly, "既定は東風戦");
     assert_eq!(setup.cpu_count(), 3);
 
-    setup.three_player = true;
+    setup.mode = GameMode::ThreeHanchan;
     setup.nuki_dora = false;
     let settings = setup.build_game_settings();
     assert!(settings.rules.three_player);
     assert!(!settings.rules.nuki_dora);
+    assert_eq!(
+        settings.length,
+        GameLength::Hanchan,
+        "半荘戦が length に反映されない"
+    );
     assert_eq!(settings.initial_score, 35000);
     assert_eq!(setup.cpu_count(), 2);
+}
+
+/// 対局モードと（三麻フラグ・対局の長さ）の相互変換
+#[test]
+fn test_game_mode_parts_roundtrip() {
+    let expected = [
+        (GameMode::FourEast, false, GameLength::EastOnly),
+        (GameMode::FourHanchan, false, GameLength::Hanchan),
+        (GameMode::ThreeEast, true, GameLength::EastOnly),
+        (GameMode::ThreeHanchan, true, GameLength::Hanchan),
+    ];
+    // ALL はモードトグルの表示順と一致する
+    assert_eq!(GameMode::ALL.map(|m| m), expected.map(|(m, _, _)| m));
+    for (mode, three_player, length) in expected {
+        assert_eq!(mode.three_player(), three_player, "{mode:?}");
+        assert_eq!(mode.length(), length, "{mode:?}");
+        assert_eq!(GameMode::from_parts(three_player, length), mode);
+    }
 }
 
 #[test]

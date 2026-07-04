@@ -12,6 +12,7 @@ use mahjong_net_server::app;
 use mahjong_net_server::room::RoomConfig;
 use mahjong_server::protocol::net::{ClientMessage, ErrorCode, PROTOCOL_VERSION, ServerMessage};
 use mahjong_server::protocol::{ClientAction, ServerEvent};
+use mahjong_server::table::GameLength;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
@@ -152,7 +153,7 @@ impl TestClient {
     /// ルームを作成し、ルームコードを返す
     async fn create_room(&mut self) -> String {
         self.send(&ClientMessage::CreateRoom {
-            round_count: 1,
+            length: GameLength::EastOnly,
             rules: Settings::new(),
         })
         .await;
@@ -165,7 +166,7 @@ impl TestClient {
     /// 三麻ルームを作成し、ルームコードを返す
     async fn create_sanma_room(&mut self) -> String {
         self.send(&ClientMessage::CreateRoom {
-            round_count: 1,
+            length: GameLength::EastOnly,
             rules: Settings {
                 three_player: true,
                 ..Settings::new()

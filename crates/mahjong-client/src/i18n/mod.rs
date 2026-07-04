@@ -63,9 +63,11 @@ impl Translator {
     }
 
     /// 局表示（例: 日「東1局」/ 英「East 1」）。`round_number` は 0 始まり。
-    pub fn round_label(&self, round_number: usize) -> String {
-        let wind = Wind::from_index(round_number / 4).name(self.lang);
-        let num = (round_number % 4) + 1;
+    ///
+    /// `rounds_per_wind` は場風あたりの局数（＝プレイヤー人数。四麻=4、三麻=3）。
+    pub fn round_label(&self, round_number: usize, rounds_per_wind: usize) -> String {
+        let wind = Wind::from_index(round_number / rounds_per_wind).name(self.lang);
+        let num = (round_number % rounds_per_wind) + 1;
         match self.lang {
             Lang::Ja => format!("{wind}{num}局"),
             Lang::En => format!("{wind} {num}"),
@@ -273,10 +275,14 @@ impl Translator {
 pub enum Key {
     /// 対局設定画面のタイトル
     SetupTitle,
-    /// 対局モード: 四人打ち
-    ModeFourPlayer,
-    /// 対局モード: 三麻（3人打ち）
-    ModeThreePlayer,
+    /// 対局モード: 四人東風
+    ModeFourEast,
+    /// 対局モード: 四人半荘
+    ModeFourHanchan,
+    /// 対局モード: 三人東風
+    ModeThreeEast,
+    /// 対局モード: 三人半荘
+    ModeThreeHanchan,
     /// 北抜きドラトグル
     NukiDoraToggle,
     /// CPU の強さ見出し
@@ -407,13 +413,21 @@ impl Key {
                 Lang::Ja => "対局設定",
                 Lang::En => "Game Setup",
             },
-            Key::ModeFourPlayer => match lang {
-                Lang::Ja => "四人打ち",
-                Lang::En => "4-Player",
+            Key::ModeFourEast => match lang {
+                Lang::Ja => "四人東風",
+                Lang::En => "4P East",
             },
-            Key::ModeThreePlayer => match lang {
-                Lang::Ja => "三麻",
-                Lang::En => "3-Player",
+            Key::ModeFourHanchan => match lang {
+                Lang::Ja => "四人半荘",
+                Lang::En => "4P Hanchan",
+            },
+            Key::ModeThreeEast => match lang {
+                Lang::Ja => "三人東風",
+                Lang::En => "3P East",
+            },
+            Key::ModeThreeHanchan => match lang {
+                Lang::Ja => "三人半荘",
+                Lang::En => "3P Hanchan",
             },
             Key::NukiDoraToggle => match lang {
                 Lang::Ja => "北抜きドラ",
@@ -687,5 +701,19 @@ mod tests {
     fn out_of_range_index_is_empty() {
         let t = Translator::new(Lang::En);
         assert_eq!(t.strength_label(9), "");
+    }
+
+    /// 局表示が場風あたりの局数（四麻=4、三麻=3）を反映すること（#271）
+    #[test]
+    fn round_label_respects_rounds_per_wind() {
+        let ja = Translator::new(Lang::Ja);
+        let en = Translator::new(Lang::En);
+        // 四麻: 東4局の次が南1局
+        assert_eq!(ja.round_label(3, 4), "東4局");
+        assert_eq!(ja.round_label(4, 4), "南1局");
+        // 三麻: 東3局の次が南1局
+        assert_eq!(ja.round_label(2, 3), "東3局");
+        assert_eq!(ja.round_label(3, 3), "南1局");
+        assert_eq!(en.round_label(3, 3), "South 1");
     }
 }

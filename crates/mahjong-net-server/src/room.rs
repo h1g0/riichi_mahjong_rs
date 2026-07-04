@@ -779,6 +779,7 @@ impl Room {
             host_seat: HOST_SEAT,
             your_seat: seat,
             rules: self.settings.rules.clone(),
+            length: self.settings.length,
         };
         self.send_to_seat(seat, msg);
     }

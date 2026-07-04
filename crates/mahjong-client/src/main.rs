@@ -18,7 +18,7 @@ mod transport;
 mod wasm_rng;
 
 use adapter::{ConnStatus, GameAdapter, LocalAdapter, RemoteAdapter, RoomView, error_code_message};
-use game::{GamePhase, GameState, PlayerLabel, RoomViewUi};
+use game::{GameMode, GamePhase, GameState, PlayerLabel, RoomViewUi};
 use mahjong_core::settings::Lang;
 use mahjong_server::protocol::net::SeatInfo;
 use renderer::{OnlineLobbyAction, OnlineMenuAction, SetupAction, TileTextures};
@@ -103,7 +103,7 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
         code: room.code.clone(),
         seat_labels: build_seat_labels(room, lang),
         is_host: room.is_host(),
-        three_player: room.three_player(),
+        mode: GameMode::from_parts(room.three_player(), room.length),
     });
 
     if let Some(err) = remote.take_error() {
@@ -253,7 +253,8 @@ async fn main() {
                             let url = transport::default_server_url();
                             let name = display_name(&game_state);
                             let rules = game_state.online_state.build_rules();
-                            online = Some(RemoteAdapter::create_room(&url, &name, 1, rules));
+                            let length = game_state.online_state.length();
+                            online = Some(RemoteAdapter::create_room(&url, &name, length, rules));
                             let msg = i18n::Key::Connecting.text(game_state.lang);
                             set_status(&mut game_state, msg, false);
                         }

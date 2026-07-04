@@ -108,7 +108,8 @@ A Japanese-language edition of this document is maintained in parallel at
 |---|---|---|---|---|
 | 局 | kyoku | hand (gameplay division) | — | One deal, from East's first discard to the win/draw. |
 | 場 | ba | round | — | A division of four+ hands named after a wind (East, South). |
-| 半荘 | hanchan | hanchan / game | — | The East and South rounds together. |
+| 半荘 | hanchan | hanchan / game | `GameLength::Hanchan` | The East and South rounds together. UI label: "4P Hanchan" / "3P Hanchan". |
+| 東風戦 | tonpuusen | East-only game | `GameLength::EastOnly` | The East round only. UI label: "4P East" / "3P East". |
 | 巡（目） | jun | turn | — | From drawing/calling to discarding. |
 | 下家 | shimocha | right player | — | The player to your right; draws immediately after you. |
 | 対面 | toimen | across player | — | The player seated opposite you. |

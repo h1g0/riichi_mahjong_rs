@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ClientAction, ServerEvent};
 use crate::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
+use crate::table::GameLength;
 
 /// プロトコルバージョン
 ///
@@ -57,8 +58,9 @@ pub enum ClientMessage {
 
     /// ルームを作成する（作成者がホスト）
     CreateRoom {
-        /// 東風戦(1)か東南戦(2)か
-        round_count: u8,
+        /// 対局の長さ（東風戦か半荘戦か）
+        #[serde(default)]
+        length: GameLength,
         /// ルール設定（三麻・北抜き・喰いタン・三家和などの全フラグ）
         ///
         /// 持ち点はサーバがルールから決める（四麻25000点・三麻35000点）。
@@ -115,6 +117,9 @@ pub enum ServerMessage {
         /// このルームのルール設定（三麻か否かの表示などに使う）
         #[serde(default)]
         rules: Settings,
+        /// 対局の長さ（東風戦か半荘戦か。東風/半荘の表示に使う）
+        #[serde(default)]
+        length: GameLength,
     },
 
     /// ゲーム内イベント
@@ -255,11 +260,11 @@ mod tests {
                 display_name: String::new(),
             },
             ClientMessage::CreateRoom {
-                round_count: 2,
+                length: GameLength::Hanchan,
                 rules: Settings::new(),
             },
             ClientMessage::CreateRoom {
-                round_count: 1,
+                length: GameLength::EastOnly,
                 rules: Settings {
                     three_player: true,
                     nuki_dora: false,
@@ -332,6 +337,7 @@ mod tests {
                 host_seat: 0,
                 your_seat: 1,
                 rules: Settings::new(),
+                length: GameLength::Hanchan,
             },
             ServerMessage::Event(ServerEvent::TileDrawn {
                 tile: Tile::new(Tile::P5),
@@ -400,6 +406,17 @@ mod tests {
                 ServerMessage::Error { code: c, .. } => assert_eq!(c, code),
                 _ => panic!("variant changed"),
             }
+        }
+    }
+
+    /// length を送らない旧サーバの RoomState が東風戦に補完されること
+    #[test]
+    fn test_room_state_without_length_defaults_to_east_only() {
+        let json = r#"{"RoomState":{"code":"ABC234","seats":["Empty","Empty","Empty","Empty"],"host_seat":0,"your_seat":1}}"#;
+        let decoded = ServerMessage::from_json(json).expect("decode");
+        match decoded {
+            ServerMessage::RoomState { length, .. } => assert_eq!(length, GameLength::EastOnly),
+            _ => panic!("variant changed"),
         }
     }
 

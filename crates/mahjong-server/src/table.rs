@@ -3,19 +3,45 @@
 //! 半荘（東風戦/東南戦）を通した状態を管理する。
 //! 局の生成・進行・終了判定を行う。
 
+use serde::{Deserialize, Serialize};
+
 use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, Wind};
 
 use crate::protocol::{ClientAction, ServerEvent};
 use crate::round::{CallResponse, Round, RoundResult, TurnPhase};
 
+/// 対局の長さ（東風戦か半荘戦か）
+///
+/// 半荘戦は東風戦（東入り）に南入りを加えたもの。総局数は
+/// [`GameLength::wind_count`] × プレイヤー人数で決まる
+/// （四麻: 東風戦=4局・半荘戦=8局、三麻: 東風戦=3局・半荘戦=6局）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GameLength {
+    /// 東風戦（東のみ）
+    #[default]
+    EastOnly,
+    /// 半荘戦（東 + 南）
+    Hanchan,
+}
+
+impl GameLength {
+    /// プレイする場風の数（東風戦=1, 半荘戦=2）
+    fn wind_count(self) -> usize {
+        match self {
+            GameLength::EastOnly => 1,
+            GameLength::Hanchan => 2,
+        }
+    }
+}
+
 /// ゲームの設定
 #[derive(Debug, Clone)]
 pub struct GameSettings {
     /// 初期持ち点
     pub initial_score: i32,
-    /// 東風戦(1)か東南戦(2)か
-    pub round_count: u8,
+    /// 対局の長さ（東風戦か半荘戦か）
+    pub length: GameLength,
     /// ルール設定
     pub rules: Settings,
 }
@@ -24,7 +50,7 @@ impl Default for GameSettings {
     fn default() -> Self {
         GameSettings {
             initial_score: 25000,
-            round_count: 1, // 東風戦
+            length: GameLength::EastOnly,
             rules: Settings::new(),
         }
     }
@@ -35,11 +61,11 @@ impl GameSettings {
     ///
     /// 持ち点はルールから決まる（四麻25000点・三麻35000点）。
     /// ルーム作成（`CreateRoom`）やローカル対局設定からの変換に使う。
-    pub fn with_rules(round_count: u8, rules: Settings) -> Self {
+    pub fn with_rules(length: GameLength, rules: Settings) -> Self {
         let initial_score = if rules.three_player { 35000 } else { 25000 };
         GameSettings {
             initial_score,
-            round_count,
+            length,
             rules,
         }
     }
@@ -47,7 +73,7 @@ impl GameSettings {
     /// 三麻の標準設定を返す（35000点持ち・東風戦）
     pub fn sanma_default() -> Self {
         Self::with_rules(
-            1, // 東風戦（東1〜3局）
+            GameLength::EastOnly, // 東風戦（東1〜3局）
             Settings {
                 three_player: true,
                 ..Settings::new()
@@ -112,7 +138,7 @@ impl Table {
     /// 四麻: 東風戦=4, 東南戦=8
     /// 三麻: 東風戦=3, 東南戦=6
     fn total_rounds(&self) -> usize {
-        self.settings.round_count as usize * self.player_count()
+        self.settings.length.wind_count() * self.player_count()
     }
 
     /// プレイヤー人数を返す（四麻=4、三麻=3）
@@ -490,7 +516,7 @@ mod tests {
     fn test_table_east_wind_game() {
         let mut table = Table::new(GameSettings {
             initial_score: 25000,
-            round_count: 1, // 東風戦（4局）
+            length: GameLength::EastOnly, // 東風戦（4局）
             ..Default::default()
         });
 
@@ -517,12 +543,12 @@ mod tests {
             triple_ron_draw: true,
             ..Settings::new()
         };
-        let settings = GameSettings::with_rules(2, rules.clone());
+        let settings = GameSettings::with_rules(GameLength::Hanchan, rules.clone());
         assert_eq!(settings.initial_score, 35000);
-        assert_eq!(settings.round_count, 2);
+        assert_eq!(settings.length, GameLength::Hanchan);
         assert_eq!(settings.rules, rules);
 
-        let four_player = GameSettings::with_rules(1, Settings::new());
+        let four_player = GameSettings::with_rules(GameLength::EastOnly, Settings::new());
         assert_eq!(four_player.initial_score, 25000);
     }
 
@@ -561,7 +587,7 @@ mod tests {
     #[test]
     fn test_sanma_dealer_rotation_wraps_at_three() {
         let mut table = Table::new(GameSettings {
-            round_count: 2, // 東南戦（6局）にして親が一周するのを確認
+            length: GameLength::Hanchan, // 東南戦（6局）にして親が一周するのを確認
             ..GameSettings::sanma_default()
         });
 
@@ -581,6 +607,48 @@ mod tests {
         assert_eq!(dealers, vec![0, 1, 2, 0]);
         // 東1〜3局の後は南入する
         assert_eq!(table.round_wind, Wind::South);
+    }
+
+    /// 指定した設定の卓をノーテン流局で回しゲーム終了までの局数を数える
+    fn count_rounds_until_game_over(settings: GameSettings, max_rounds: usize) -> usize {
+        let mut table = Table::new(settings);
+        for i in 0..max_rounds {
+            if table.is_game_over {
+                return i;
+            }
+            table.start_round();
+            let round = table.current_round_mut().unwrap();
+            round.phase = TurnPhase::RoundOver;
+            round.result = Some(RoundResult::ExhaustiveDraw {
+                dealer_tenpai: false,
+            });
+            table.finish_round();
+        }
+        assert!(
+            table.is_game_over,
+            "{max_rounds}局回してもゲームが終了しない"
+        );
+        max_rounds
+    }
+
+    /// 四麻半荘は8局（東1〜南4）で終了する（#271）
+    #[test]
+    fn test_hanchan_game_is_eight_rounds() {
+        let settings = GameSettings {
+            length: GameLength::Hanchan,
+            ..Default::default()
+        };
+        assert_eq!(count_rounds_until_game_over(settings, 8), 8);
+    }
+
+    /// 三麻半荘は6局（東1〜南3）で終了する（#271）
+    #[test]
+    fn test_sanma_hanchan_game_is_six_rounds() {
+        let settings = GameSettings {
+            length: GameLength::Hanchan,
+            ..GameSettings::sanma_default()
+        };
+        assert_eq!(count_rounds_until_game_over(settings, 6), 6);
     }
 
     #[test]
@@ -776,7 +844,7 @@ mod tests {
     fn test_table_advance_round_updates_prevailing_wind_in_south_game() {
         let mut table = Table::new(GameSettings {
             initial_score: 25000,
-            round_count: 2,
+            length: GameLength::Hanchan,
             ..Default::default()
         });
 

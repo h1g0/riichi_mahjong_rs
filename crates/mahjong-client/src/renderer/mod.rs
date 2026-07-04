@@ -31,7 +31,7 @@ use mahjong_server::cpu::client::CpuConfig;
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 
-use crate::game::{GamePhase, GameState, SetupState};
+use crate::game::{GameMode, GamePhase, GameState, SetupState};
 use crate::i18n::Key;
 
 const RIICHI_DISABLED_TINT: Color = Color::new(0.45, 0.45, 0.42, 1.0);

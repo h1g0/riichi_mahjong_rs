@@ -44,9 +44,10 @@ pub(super) fn setup_lang_button_rect(idx: usize) -> SetupButton {
 /// 言語切替トグルに表示する固有名（言語非依存の自称表記）。
 pub(super) const SETUP_LANG_LABELS: [&str; 2] = ["日本語", "English"];
 
-/// 対局モードトグルのボタン矩形（パネル左上）。idx 0=四人打ち, 1=三麻。
+/// 対局モードトグルのボタン矩形（パネル左上）。
+/// idx 0=四人東風, 1=四人半荘, 2=三人東風, 3=三人半荘。
 pub(super) fn setup_mode_button_rect(idx: usize) -> SetupButton {
-    const W: f32 = 84.0;
+    const W: f32 = 96.0;
     const H: f32 = 28.0;
     const GAP: f32 = 6.0;
     let left = setup_panel_x() + SETUP_CARD_PAD;
@@ -61,7 +62,7 @@ pub(super) fn setup_mode_button_rect(idx: usize) -> SetupButton {
 
 /// 北抜きドラトグルのボタン矩形（三麻選択時のみ表示）。
 pub(super) fn setup_nuki_button_rect() -> SetupButton {
-    let m = setup_mode_button_rect(1);
+    let m = setup_mode_button_rect(GameMode::ALL.len() - 1);
     SetupButton {
         x: m.x + m.w + 18.0,
         y: m.y,
@@ -175,15 +176,13 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>) {
         draw_setup_option(font, &btn, label, idx == active_lang);
     }
 
-    // 対局モードトグル（四人打ち / 三麻）
-    let mode_labels = [Key::ModeFourPlayer, Key::ModeThreePlayer];
-    for (idx, key) in mode_labels.into_iter().enumerate() {
+    // 対局モードトグル（四人東風 / 四人半荘 / 三人東風 / 三人半荘）
+    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
         let btn = setup_mode_button_rect(idx);
-        let selected = (idx == 1) == setup.three_player;
-        draw_setup_option(font, &btn, tr.get(key), selected);
+        draw_setup_option(font, &btn, tr.get(mode.label_key()), mode == setup.mode);
     }
     // 北抜きドラトグル（三麻のみ）
-    if setup.three_player {
+    if setup.mode.three_player() {
         let btn = setup_nuki_button_rect();
         draw_setup_option(font, &btn, tr.get(Key::NukiDoraToggle), setup.nuki_dora);
     }
@@ -335,15 +334,15 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
 
     let setup = &mut state.setup_state;
 
-    // 対局モードトグル（四人打ち / 三麻）
-    for idx in 0..2 {
+    // 対局モードトグル（四人東風 / 四人半荘 / 三人東風 / 三人半荘）
+    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
         if setup_mode_button_rect(idx).contains(mx, my) {
-            setup.three_player = idx == 1;
+            setup.mode = mode;
             return None;
         }
     }
     // 北抜きドラトグル（三麻のみ）
-    if setup.three_player && setup_nuki_button_rect().contains(mx, my) {
+    if setup.mode.three_player() && setup_nuki_button_rect().contains(mx, my) {
         setup.nuki_dora = !setup.nuki_dora;
         return None;
     }
