@@ -79,6 +79,15 @@ pub enum ClientMessage {
     /// ルームから退出する
     LeaveRoom,
 
+    /// 空席を埋めるCPUの強さ・性格を設定する（ホストのみ。開始前のみ）
+    ///
+    /// サーバは設定を保持して `RoomState` で全員へ共有する。
+    /// 対局開始時の割り当ては `StartGame` 時の設定が優先される。
+    SetCpuConfigs {
+        /// 各CPUの強さ・性格（下家・対面・上家の順）
+        cpu_configs: [CpuSpec; 3],
+    },
+
     /// 対局を開始する（ホストのみ。空席はCPUで埋める）
     StartGame {
         /// ホストが選んだ各CPUの強さ・性格（下家・対面・上家の順）。
@@ -120,6 +129,12 @@ pub enum ServerMessage {
         /// 対局の長さ（東風戦か半荘戦か。東風/半荘の表示に使う）
         #[serde(default)]
         length: GameLength,
+        /// 空席を埋めるCPUの強さ・性格（下家・対面・上家の順）
+        ///
+        /// ホストが `SetCpuConfigs` で変更でき、ロビーの空席表示に使う。
+        /// 旧サーバのメッセージには無いため `None` に補完される。
+        #[serde(default)]
+        cpu_configs: Option<[CpuSpec; 3]>,
     },
 
     /// ゲーム内イベント
@@ -276,6 +291,22 @@ mod tests {
                 code: "ABC234".to_string(),
             },
             ClientMessage::LeaveRoom,
+            ClientMessage::SetCpuConfigs {
+                cpu_configs: [
+                    CpuSpec {
+                        level: CpuLevel::Weak,
+                        personality: CpuPersonality::Defensive,
+                    },
+                    CpuSpec {
+                        level: CpuLevel::Normal,
+                        personality: CpuPersonality::Balanced,
+                    },
+                    CpuSpec {
+                        level: CpuLevel::Strong,
+                        personality: CpuPersonality::Speedy,
+                    },
+                ],
+            },
             ClientMessage::StartGame { cpu_configs: None },
             ClientMessage::StartGame {
                 cpu_configs: Some([
@@ -338,6 +369,20 @@ mod tests {
                 your_seat: 1,
                 rules: Settings::new(),
                 length: GameLength::Hanchan,
+                cpu_configs: Some([
+                    CpuSpec {
+                        level: CpuLevel::Normal,
+                        personality: CpuPersonality::Balanced,
+                    },
+                    CpuSpec {
+                        level: CpuLevel::Normal,
+                        personality: CpuPersonality::Speedy,
+                    },
+                    CpuSpec {
+                        level: CpuLevel::Normal,
+                        personality: CpuPersonality::HighValue,
+                    },
+                ]),
             },
             ServerMessage::Event(ServerEvent::TileDrawn {
                 tile: Tile::new(Tile::P5),
@@ -416,6 +461,17 @@ mod tests {
         let decoded = ServerMessage::from_json(json).expect("decode");
         match decoded {
             ServerMessage::RoomState { length, .. } => assert_eq!(length, GameLength::EastOnly),
+            _ => panic!("variant changed"),
+        }
+    }
+
+    /// cpu_configs を送らない旧サーバの RoomState が None に補完されること（#245）
+    #[test]
+    fn test_room_state_without_cpu_configs_defaults_to_none() {
+        let json = r#"{"RoomState":{"code":"ABC234","seats":["Empty","Empty","Empty","Empty"],"host_seat":0,"your_seat":1}}"#;
+        let decoded = ServerMessage::from_json(json).expect("decode");
+        match decoded {
+            ServerMessage::RoomState { cpu_configs, .. } => assert_eq!(cpu_configs, None),
             _ => panic!("variant changed"),
         }
     }

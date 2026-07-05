@@ -400,6 +400,76 @@ async fn test_host_chosen_cpu_configs_apply() {
     .expect("テスト全体がタイムアウトした");
 }
 
+/// ホストの SetCpuConfigs が全参加者の RoomState に共有される（#245）
+#[tokio::test]
+async fn test_set_cpu_configs_shared_in_lobby() {
+    use mahjong_server::cpu::client::{CpuLevel, CpuPersonality};
+    use mahjong_server::protocol::net::{CpuSpec, SeatInfo};
+
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let addr = start_server(fast_config()).await;
+        let mut host = TestClient::connect(addr).await;
+        host.hello("ホスト").await;
+        let code = host.create_room().await;
+
+        let mut guest = TestClient::connect(addr).await;
+        guest.hello("ゲスト").await;
+        guest
+            .send(&ClientMessage::JoinRoom { code: code.clone() })
+            .await;
+        // 入室による RoomState を読み飛ばす（既定のCPU設定が入っている）
+        match guest.recv().await {
+            ServerMessage::RoomState { cpu_configs, .. } => {
+                assert!(
+                    cpu_configs.is_some(),
+                    "ロビーの RoomState はCPU設定を含むべき"
+                );
+            }
+            other => panic!("RoomStateでないメッセージ: {other:?}"),
+        }
+        host.recv().await;
+
+        let specs = [
+            CpuSpec {
+                level: CpuLevel::Strong,
+                personality: CpuPersonality::Defensive,
+            },
+            CpuSpec {
+                level: CpuLevel::Weak,
+                personality: CpuPersonality::Speedy,
+            },
+            CpuSpec {
+                level: CpuLevel::Normal,
+                personality: CpuPersonality::HighValue,
+            },
+        ];
+
+        // ホスト以外は変更できない
+        guest
+            .send(&ClientMessage::SetCpuConfigs { cpu_configs: specs })
+            .await;
+        assert_eq!(guest.recv_error().await, ErrorCode::NotHost);
+
+        // ホストの変更は全員へ新しい RoomState として届く
+        host.send(&ClientMessage::SetCpuConfigs { cpu_configs: specs })
+            .await;
+        for client in [&mut host, &mut guest] {
+            match client.recv().await {
+                ServerMessage::RoomState {
+                    cpu_configs, seats, ..
+                } => {
+                    assert_eq!(cpu_configs, Some(specs));
+                    // 対局開始前なので空席は Empty のまま（表示側で補う）
+                    assert!(matches!(seats[2], SeatInfo::Empty));
+                }
+                other => panic!("RoomStateでないメッセージ: {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("テスト全体がタイムアウトした");
+}
+
 /// プロトコルバージョン不一致は VersionMismatch エラーになる
 #[tokio::test]
 async fn test_version_mismatch() {
