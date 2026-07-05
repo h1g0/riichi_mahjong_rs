@@ -3,6 +3,7 @@
 //! 埋め込みPNGを使って麻雀牌を描画する。
 
 mod board;
+mod menu;
 mod online;
 mod overlay;
 mod result;
@@ -12,6 +13,7 @@ mod tests;
 mod theme;
 mod tiles;
 
+pub use menu::{ModeSelectAction, TopMenuAction, handle_mode_select_input, handle_top_menu_input};
 pub use setup::{SetupAction, handle_setup_input};
 
 use board::*;
@@ -31,7 +33,7 @@ use mahjong_server::cpu::client::CpuConfig;
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 
-use crate::game::{GameMode, GamePhase, GameState, SetupState};
+use crate::game::{GamePhase, GameState, SetupState};
 use crate::i18n::Key;
 
 const RIICHI_DISABLED_TINT: Color = Color::new(0.45, 0.45, 0.42, 1.0);
@@ -334,8 +336,16 @@ pub fn draw_game(
     tile_textures: &TileTextures,
 ) -> Option<OverlayClick> {
     match state.phase {
-        GamePhase::Setup => {
-            draw_setup(state, font);
+        GamePhase::TopMenu => {
+            menu::draw_top_menu(state, font);
+            None
+        }
+        GamePhase::ModeSelect(origin) => {
+            menu::draw_mode_select(state, font, origin);
+            None
+        }
+        GamePhase::CpuSetup(origin) => {
+            draw_setup(state, font, origin);
             None
         }
         GamePhase::OnlineMenu => {

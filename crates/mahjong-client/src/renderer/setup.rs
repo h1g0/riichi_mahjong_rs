@@ -1,8 +1,12 @@
-//! 設定画面の描画と入力処理
+//! CPU設定画面の描画と入力処理
+//!
+//! CPU対戦では「対局開始」、オンライン対戦（ホストがロビーから開く）では
+//! 「決定」で確定する。対局モードはモード選択画面（menu.rs）で選ぶ。
 
 use super::*;
+use crate::game::MenuOrigin;
 
-// ========== 設定画面 ==========
+// ========== CPU設定画面 ==========
 
 /// 設定画面のボタン領域
 pub(super) struct SetupButton {
@@ -28,48 +32,6 @@ pub(super) const SETUP_CARD_Y: f32 = 142.0;
 pub(super) const SETUP_CARD_H: f32 = 348.0;
 pub(super) const SETUP_OPT_H: f32 = 28.0;
 pub(super) const SETUP_OPT_STEP: f32 = 32.0;
-
-/// 言語切替トグルのボタン矩形（パネル右上）。idx 0=日本語, 1=English。
-pub(super) fn setup_lang_button_rect(idx: usize) -> SetupButton {
-    const W: f32 = 84.0;
-    const H: f32 = 28.0;
-    const GAP: f32 = 6.0;
-    let right = setup_panel_x() + SETUP_PANEL_W - SETUP_CARD_PAD;
-    let y = SETUP_PANEL_Y + 24.0;
-    // 右詰めで [日本語][English] を並べる
-    let x = right - (2.0 - idx as f32) * W - (1.0 - idx as f32) * GAP;
-    SetupButton { x, y, w: W, h: H }
-}
-
-/// 言語切替トグルに表示する固有名（言語非依存の自称表記）。
-pub(super) const SETUP_LANG_LABELS: [&str; 2] = ["日本語", "English"];
-
-/// 対局モードトグルのボタン矩形（パネル左上）。
-/// idx 0=四人東風, 1=四人半荘, 2=三人東風, 3=三人半荘。
-pub(super) fn setup_mode_button_rect(idx: usize) -> SetupButton {
-    const W: f32 = 96.0;
-    const H: f32 = 28.0;
-    const GAP: f32 = 6.0;
-    let left = setup_panel_x() + SETUP_CARD_PAD;
-    let y = SETUP_PANEL_Y + 24.0;
-    SetupButton {
-        x: left + idx as f32 * (W + GAP),
-        y,
-        w: W,
-        h: H,
-    }
-}
-
-/// 北抜きドラトグルのボタン矩形（三麻選択時のみ表示）。
-pub(super) fn setup_nuki_button_rect() -> SetupButton {
-    let m = setup_mode_button_rect(GameMode::ALL.len() - 1);
-    SetupButton {
-        x: m.x + m.w + 18.0,
-        y: m.y,
-        w: 110.0,
-        h: m.h,
-    }
-}
 
 pub(super) fn setup_panel_x() -> f32 {
     (DESIGN_W - SETUP_PANEL_W) / 2.0
@@ -106,7 +68,7 @@ pub(super) fn setup_start_rect() -> SetupButton {
     }
 }
 
-pub(super) fn setup_online_rect() -> SetupButton {
+pub(super) fn setup_back_rect() -> SetupButton {
     let s = setup_start_rect();
     SetupButton {
         x: DESIGN_W / 2.0 - 110.0,
@@ -137,8 +99,11 @@ pub(super) fn draw_setup_option(
     draw_jp_text(font, label, btn.x + 12.0, btn.y + 18.0, 13, text_color);
 }
 
-/// 設定画面を描画する
-pub(super) fn draw_setup(state: &GameState, font: Option<&Font>) {
+/// CPU設定画面を描画する
+///
+/// `origin` により確定ボタンの文言が変わる
+/// （ローカル=対局開始、オンライン=決定）。
+pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOrigin) {
     draw_setup_background();
     let setup = &state.setup_state;
     let tr = state.tr();
@@ -155,37 +120,24 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>) {
         theme::PANEL_BORDER,
     );
 
-    // タイトル
+    // タイトル（選択中の対局モードを添える）
     let cx = DESIGN_W / 2.0;
     theme::draw_text_centered(
         font,
-        tr.get(Key::SetupTitle),
+        tr.get(Key::CpuSetupTitle),
         cx,
         SETUP_PANEL_Y + 52.0,
         26,
         theme::TEXT_BR,
     );
-
-    // 言語切替トグル（日本語 / English）
-    let active_lang = match state.lang {
-        Lang::Ja => 0,
-        Lang::En => 1,
-    };
-    for (idx, &label) in SETUP_LANG_LABELS.iter().enumerate() {
-        let btn = setup_lang_button_rect(idx);
-        draw_setup_option(font, &btn, label, idx == active_lang);
-    }
-
-    // 対局モードトグル（四人東風 / 四人半荘 / 三人東風 / 三人半荘）
-    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
-        let btn = setup_mode_button_rect(idx);
-        draw_setup_option(font, &btn, tr.get(mode.label_key()), mode == setup.mode);
-    }
-    // 北抜きドラトグル（三麻のみ）
-    if setup.mode.three_player() {
-        let btn = setup_nuki_button_rect();
-        draw_setup_option(font, &btn, tr.get(Key::NukiDoraToggle), setup.nuki_dora);
-    }
+    theme::draw_text_centered(
+        font,
+        tr.get(setup.mode.label_key()),
+        cx,
+        SETUP_PANEL_Y + 78.0,
+        13,
+        theme::GOLD_LT,
+    );
 
     // CPU カード（三麻はCPU2人）
     let card_w = setup_card_w();
@@ -271,7 +223,11 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>) {
         }
     }
 
-    // 対局開始ボタン（ゴールド）
+    // 確定ボタン（ゴールド。ローカル=対局開始、オンライン=決定）
+    let confirm_key = match origin {
+        MenuOrigin::Local => Key::StartGame,
+        MenuOrigin::Online => Key::Confirm,
+    };
     let s = setup_start_rect();
     theme::draw_gradient_button(
         s.x,
@@ -286,66 +242,42 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>) {
     );
     theme::draw_text_centered(
         font,
-        tr.get(Key::StartGame),
+        tr.get(confirm_key),
         cx,
         s.y + 34.0,
         20,
         theme::GOLD_LT,
     );
 
-    // オンライン対戦ボタン
-    let o = setup_online_rect();
-    theme::draw_rounded_rect(o.x, o.y, o.w, o.h, 6.0, theme::rgba(0xffffff, 0.05));
-    theme::draw_rounded_rect_lines(o.x, o.y, o.w, o.h, 6.0, 1.0, theme::rgba(0xc8a227, 0.3));
-    theme::draw_text_centered(
-        font,
-        tr.get(Key::OnlinePlay),
-        cx,
-        o.y + 24.0,
-        14,
-        theme::TEXT,
-    );
+    // 戻るボタン
+    let b = setup_back_rect();
+    theme::draw_rounded_rect(b.x, b.y, b.w, b.h, 6.0, theme::rgba(0xffffff, 0.05));
+    theme::draw_rounded_rect_lines(b.x, b.y, b.w, b.h, 6.0, 1.0, theme::rgba(0xc8a227, 0.3));
+    theme::draw_text_centered(font, tr.get(Key::Back), cx, b.y + 24.0, 14, theme::TEXT);
 }
 
-/// 設定画面での操作
+/// CPU設定画面での操作
 pub enum SetupAction {
     /// ローカル対局を開始する
     StartLocal([CpuConfig; 3]),
-    /// オンライン対戦メニューへ
-    GoOnline,
+    /// CPU設定を確定してロビーへ戻る（オンラインのホストのみ）
+    ApplyOnline,
+    /// 前の画面へ戻る（ローカル=モード選択、オンライン=ロビー）
+    Back,
 }
 
-/// 設定画面の入力を処理する。ボタンが押された場合 Some(action) を返す。
-pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option<SetupAction> {
+/// CPU設定画面の入力を処理する。ボタンが押された場合 Some(action) を返す。
+pub fn handle_setup_input(
+    state: &mut GameState,
+    _font: Option<&Font>,
+    origin: MenuOrigin,
+) -> Option<SetupAction> {
     if !is_mouse_button_pressed(MouseButton::Left) {
         return None;
     }
 
     let (mx, my) = mouse_position_design();
-
-    // 言語切替トグル（日本語 / English）
-    for (idx, lang) in [Lang::Ja, Lang::En].into_iter().enumerate() {
-        if setup_lang_button_rect(idx).contains(mx, my) {
-            state.lang = lang;
-            crate::persistence::save_lang(lang);
-            return None;
-        }
-    }
-
     let setup = &mut state.setup_state;
-
-    // 対局モードトグル（四人東風 / 四人半荘 / 三人東風 / 三人半荘）
-    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
-        if setup_mode_button_rect(idx).contains(mx, my) {
-            setup.mode = mode;
-            return None;
-        }
-    }
-    // 北抜きドラトグル（三麻のみ）
-    if setup.mode.three_player() && setup_nuki_button_rect().contains(mx, my) {
-        setup.nuki_dora = !setup.nuki_dora;
-        return None;
-    }
 
     for cpu_idx in 0..setup.cpu_count() {
         // 強さボタン
@@ -364,16 +296,21 @@ pub fn handle_setup_input(state: &mut GameState, _font: Option<&Font>) -> Option
         }
     }
 
-    // 対局開始ボタン
+    // 確定ボタン（ローカル=対局開始、オンライン=決定）
     if setup_start_rect().contains(mx, my) {
-        let configs = setup.build_configs();
-        state.phase = GamePhase::WaitingForStart;
-        return Some(SetupAction::StartLocal(configs));
+        return match origin {
+            MenuOrigin::Local => {
+                let configs = setup.build_configs();
+                state.phase = GamePhase::WaitingForStart;
+                Some(SetupAction::StartLocal(configs))
+            }
+            MenuOrigin::Online => Some(SetupAction::ApplyOnline),
+        };
     }
 
-    // オンライン対戦ボタン
-    if setup_online_rect().contains(mx, my) {
-        return Some(SetupAction::GoOnline);
+    // 戻るボタン
+    if setup_back_rect().contains(mx, my) {
+        return Some(SetupAction::Back);
     }
 
     None
