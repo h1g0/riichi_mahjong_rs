@@ -50,6 +50,26 @@ pub fn default_server_url() -> String {
     }
 }
 
+/// 接続URLにルームコードのクエリパラメータ（`room=CODE`）を付ける
+///
+/// 複数マシン構成のサーバが、WebSocket アップグレード前にルームの所在
+/// （どのマシンが所持しているか）を判断して接続を転送するために使う。
+/// コードはユーザー入力なので、URLとして安全な文字以外はエスケープする。
+pub fn url_with_room(url: &str, code: &str) -> String {
+    let separator = if url.contains('?') { '&' } else { '?' };
+    let encoded: String = code
+        .bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect();
+    format!("{url}{separator}room={encoded}")
+}
+
 /// サーバへの接続を開始し、トランスポートを返す
 ///
 /// 接続は非同期に進行し、結果は `poll()` の `Opened` / `Error` で通知される。
@@ -346,5 +366,32 @@ mod wasm {
                 mahjong_ws_close(self.handle);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::url_with_room;
+
+    #[test]
+    fn test_url_with_room_appends_query() {
+        assert_eq!(
+            url_with_room("ws://127.0.0.1:8080/ws", "ABC234"),
+            "ws://127.0.0.1:8080/ws?room=ABC234"
+        );
+        // 既にクエリがある場合は & でつなぐ
+        assert_eq!(
+            url_with_room("wss://example.com/ws?v=1", "ABC234"),
+            "wss://example.com/ws?v=1&room=ABC234"
+        );
+    }
+
+    #[test]
+    fn test_url_with_room_escapes_unsafe_chars() {
+        // ユーザー入力のコードに含まれうるURL構造を壊す文字はエスケープする
+        assert_eq!(
+            url_with_room("ws://h/ws", "A&B=#?"),
+            "ws://h/ws?room=A%26B%3D%23%3F"
+        );
     }
 }

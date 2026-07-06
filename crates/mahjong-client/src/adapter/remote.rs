@@ -86,7 +86,11 @@ enum LobbyIntent {
 const RECONNECT_BACKOFF: [f64; 5] = [1.0, 2.0, 4.0, 8.0, 10.0];
 
 /// 新しいトランスポートを生成する関数（再接続で使う）
-type Connector = Box<dyn FnMut() -> Box<dyn Transport>>;
+///
+/// 引数は参加・再接続したいルームのコード。指定すると接続URLに
+/// `?room=CODE` が付き、複数マシン構成のサーバがアップグレード前に
+/// ルームを所持するマシンへ接続を転送できる。
+type Connector = Box<dyn FnMut(Option<&str>) -> Box<dyn Transport>>;
 
 /// 現在時刻（秒）を返す関数
 type Clock = Box<dyn Fn() -> f64>;
@@ -159,7 +163,8 @@ impl RemoteAdapter {
     /// `rules` にはルームのルール設定を丸ごと渡す（三麻・北抜きに限らず、
     /// 将来ルール選択UIが増えてもこのシグネチャのまま拡張できる）。
     pub fn create_room(url: &str, display_name: &str, length: GameLength, rules: Settings) -> Self {
-        let (transport, connector) = Self::connector_for(url);
+        let mut connector = Self::connector_for(url);
+        let transport = connector(None);
         Self::build(
             transport,
             connector,
@@ -171,24 +176,26 @@ impl RemoteAdapter {
 
     /// サーバに接続して既存のルームに参加する
     pub fn join_room(url: &str, display_name: &str, code: &str) -> Self {
-        let (transport, connector) = Self::connector_for(url);
+        let code = code.trim().to_ascii_uppercase();
+        let mut connector = Self::connector_for(url);
+        // 参加時からコードを付け、最初の接続で所持マシンへ届くようにする
+        let transport = connector(Some(&code));
         Self::build(
             transport,
             connector,
             default_clock(),
             display_name,
-            LobbyIntent::Join {
-                code: code.trim().to_ascii_uppercase(),
-            },
+            LobbyIntent::Join { code },
         )
     }
 
-    /// 指定URL用のコネクタと最初のトランスポートを作る
-    fn connector_for(url: &str) -> (Box<dyn Transport>, Connector) {
+    /// 指定URL用のコネクタを作る
+    fn connector_for(url: &str) -> Connector {
         let url = url.to_string();
-        let mut connector: Connector = Box::new(move || crate::transport::connect(&url));
-        let transport = connector();
-        (transport, connector)
+        Box::new(move |room| match room {
+            Some(code) => crate::transport::connect(&crate::transport::url_with_room(&url, code)),
+            None => crate::transport::connect(&url),
+        })
     }
 
     /// 対局を開始する（ホストのみ有効。結果はサーバが判断する）
@@ -308,8 +315,9 @@ impl RemoteAdapter {
             return;
         };
 
-        // 新しいトランスポートを張り、再入室をやり直す
-        self.transport = (self.connector)();
+        // 新しいトランスポートを張り、再入室をやり直す。ルームコードを
+        // 付けて接続し、複数マシン構成でも元のルームへ戻れるようにする
+        self.transport = (self.connector)(Some(&code));
         self.status = ConnStatus::Connecting;
         self.pending_intent = Some(LobbyIntent::Join { code });
 
@@ -599,7 +607,7 @@ mod tests {
     fn build_test(transport: Box<dyn Transport>, intent: LobbyIntent) -> RemoteAdapter {
         RemoteAdapter::build(
             transport,
-            Box::new(|| panic!("このテストでは再接続を想定していません")),
+            Box::new(|_| panic!("このテストでは再接続を想定していません")),
             Box::new(|| 0.0),
             "テスト",
             intent,
@@ -879,7 +887,8 @@ mod tests {
         let url = crate::transport::default_server_url();
         // 本番の時計は macroquad（ウィンドウ前提）なので、ヘッドレスな
         // E2E では std の経過秒で代用する
-        let (transport, connector) = RemoteAdapter::connector_for(&url);
+        let mut connector = RemoteAdapter::connector_for(&url);
+        let transport = connector(None);
         let clock_start = std::time::Instant::now();
         let mut adapter = RemoteAdapter::build(
             transport,
@@ -1008,12 +1017,18 @@ mod tests {
         assert!(adapter.status_text(Lang::Ja).is_none());
     }
 
-    /// 連続するモックを払い出すコネクタを作る
+    /// 連続するモックを払い出すコネクタと、渡されたルームコードの記録を作る
     fn queued_connector(
         transports: Vec<Box<dyn Transport>>,
-    ) -> Box<dyn FnMut() -> Box<dyn Transport>> {
+    ) -> (Connector, Rc<RefCell<Vec<Option<String>>>>) {
         let mut queue = VecDeque::from(transports);
-        Box::new(move || queue.pop_front().expect("コネクタが想定より多く呼ばれた"))
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let record = calls.clone();
+        let connector = Box::new(move |room: Option<&str>| {
+            record.borrow_mut().push(room.map(String::from));
+            queue.pop_front().expect("コネクタが想定より多く呼ばれた")
+        });
+        (connector, calls)
     }
 
     #[test]
@@ -1024,9 +1039,10 @@ mod tests {
         let now = Rc::new(RefCell::new(0.0_f64));
         let now_clock = now.clone();
 
+        let (connector, connector_calls) = queued_connector(vec![t2]);
         let mut adapter = RemoteAdapter::build(
             t1,
-            queued_connector(vec![t2]),
+            connector,
             Box::new(move || *now_clock.borrow()),
             "テスト",
             LobbyIntent::Join {
@@ -1057,10 +1073,15 @@ mod tests {
         adapter.tick();
         assert!(h2.sent().is_empty());
 
-        // バックオフ経過後に2本目で再接続: Hello を送る
+        // バックオフ経過後に2本目で再接続: Hello を送る。
+        // 再接続はルームコード付きで張られる（複数マシン構成での転送用）
         *now.borrow_mut() = 1.5;
         h2.push(WsEvent::Opened);
         adapter.tick();
+        assert_eq!(
+            connector_calls.borrow().as_slice(),
+            [Some("ABC234".to_string())]
+        );
         let sent = h2.sent();
         assert!(matches!(
             sent.first(),
@@ -1101,9 +1122,10 @@ mod tests {
         let now = Rc::new(RefCell::new(0.0_f64));
         let now_clock = now.clone();
 
+        let (connector, _connector_calls) = queued_connector(vec![t2]);
         let mut adapter = RemoteAdapter::build(
             t1,
-            queued_connector(vec![t2]),
+            connector,
             Box::new(move || *now_clock.borrow()),
             "テスト",
             LobbyIntent::Join {
@@ -1178,7 +1200,7 @@ mod tests {
         let now_clock = now.clone();
         let mut adapter = RemoteAdapter::build(
             transport,
-            Box::new(|| panic!("再接続なし")),
+            Box::new(|_| panic!("再接続なし")),
             Box::new(move || *now_clock.borrow()),
             "テスト",
             LobbyIntent::Create {
@@ -1208,7 +1230,7 @@ mod tests {
         let now_clock = now.clone();
         let mut adapter = RemoteAdapter::build(
             transport,
-            Box::new(|| panic!("再接続なし")),
+            Box::new(|_| panic!("再接続なし")),
             Box::new(move || *now_clock.borrow()),
             "テスト",
             LobbyIntent::Create {
