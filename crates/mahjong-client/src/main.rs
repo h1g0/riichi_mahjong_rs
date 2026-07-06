@@ -18,10 +18,12 @@ mod transport;
 mod wasm_rng;
 
 use adapter::{ConnStatus, GameAdapter, LocalAdapter, RemoteAdapter, RoomView, error_code_message};
-use game::{GameMode, GamePhase, GameState, PlayerLabel, RoomViewUi};
+use game::{GameMode, GamePhase, GameState, MenuOrigin, PlayerLabel, RoomViewUi};
 use mahjong_core::settings::Lang;
 use mahjong_server::protocol::net::SeatInfo;
-use renderer::{OnlineLobbyAction, OnlineMenuAction, SetupAction, TileTextures};
+use renderer::{
+    ModeSelectAction, OnlineLobbyAction, OnlineMenuAction, SetupAction, TileTextures, TopMenuAction,
+};
 
 fn window_conf() -> Conf {
     Conf {
@@ -57,7 +59,15 @@ fn build_seat_labels(room: &RoomView, lang: Lang) -> [String; 4] {
             return String::new();
         }
         let who = match &room.seats[i] {
-            SeatInfo::Empty => tr.get(i18n::Key::EmptySeat).to_string(),
+            SeatInfo::Empty => match room.cpu_configs {
+                // 空席を埋めるCPUの設定を添える（サーバの config_for_seat と
+                // 同じ規則: 座席1〜3 → configs[0..3]）
+                Some(configs) => {
+                    let spec = configs[i.saturating_sub(1).min(2)];
+                    tr.empty_seat_cpu_label(spec.level, spec.personality)
+                }
+                None => tr.get(i18n::Key::EmptySeat).to_string(),
+            },
             SeatInfo::Cpu { level, personality } => tr.cpu_seat_label(*level, *personality),
             SeatInfo::Human { name, connected } => {
                 if *connected {
@@ -213,9 +223,55 @@ async fn main() {
         }
 
         match game_state.phase {
-            GamePhase::Setup => {
-                // 設定画面の入力処理
-                if let Some(action) = renderer::handle_setup_input(&mut game_state, font.as_ref()) {
+            GamePhase::TopMenu => {
+                if let Some(action) = renderer::handle_top_menu_input(&mut game_state) {
+                    match action {
+                        TopMenuAction::CpuBattle => {
+                            game_state.phase = GamePhase::ModeSelect(MenuOrigin::Local);
+                        }
+                        TopMenuAction::Online => {
+                            game_state.online_state.status_line = None;
+                            game_state.online_state.status_is_error = false;
+                            game_state.online_state.room = None;
+                            game_state.phase = GamePhase::OnlineMenu;
+                        }
+                    }
+                }
+            }
+
+            GamePhase::ModeSelect(origin) => {
+                if let Some(action) = renderer::handle_mode_select_input(&mut game_state, origin) {
+                    match (action, origin) {
+                        (ModeSelectAction::ModeChosen(_), MenuOrigin::Local) => {
+                            // 選んだモードでCPU設定へ（モードは setup_state に反映済み）
+                            game_state.phase = GamePhase::CpuSetup(MenuOrigin::Local);
+                        }
+                        (ModeSelectAction::ModeChosen(_), MenuOrigin::Online) => {
+                            // 選んだモードでルームを作成する（online_state に反映済み）
+                            let url = transport::default_server_url();
+                            let name = display_name(&game_state);
+                            let rules = game_state.online_state.build_rules();
+                            let length = game_state.online_state.length();
+                            online = Some(RemoteAdapter::create_room(&url, &name, length, rules));
+                            let msg = i18n::Key::Connecting.text(game_state.lang);
+                            set_status(&mut game_state, msg, false);
+                            // 接続状況の表示と入室待ちはオンラインメニューが担う
+                            game_state.phase = GamePhase::OnlineMenu;
+                        }
+                        (ModeSelectAction::Back, MenuOrigin::Local) => {
+                            game_state.phase = GamePhase::TopMenu;
+                        }
+                        (ModeSelectAction::Back, MenuOrigin::Online) => {
+                            game_state.phase = GamePhase::OnlineMenu;
+                        }
+                    }
+                }
+            }
+
+            GamePhase::CpuSetup(origin) => {
+                if let Some(action) =
+                    renderer::handle_setup_input(&mut game_state, font.as_ref(), origin)
+                {
                     match action {
                         SetupAction::StartLocal(mut configs) => {
                             // ローカル対局開始（三麻設定は setup_state から反映される）
@@ -236,11 +292,19 @@ async fn main() {
                             }
                             adapter = Some(Box::new(new_adapter));
                         }
-                        SetupAction::GoOnline => {
-                            game_state.online_state.status_line = None;
-                            game_state.online_state.status_is_error = false;
-                            game_state.online_state.room = None;
-                            game_state.phase = GamePhase::OnlineMenu;
+                        SetupAction::ApplyOnline => {
+                            // CPU設定をサーバへ送って全員のロビー表示に反映する
+                            if let Some(remote) = &mut online {
+                                let specs = game_state.setup_state.build_cpu_specs();
+                                remote.set_cpu_configs(specs);
+                            }
+                            game_state.phase = GamePhase::OnlineLobby;
+                        }
+                        SetupAction::Back => {
+                            game_state.phase = match origin {
+                                MenuOrigin::Local => GamePhase::ModeSelect(MenuOrigin::Local),
+                                MenuOrigin::Online => GamePhase::OnlineLobby,
+                            };
                         }
                     }
                 }
@@ -250,13 +314,8 @@ async fn main() {
                 if let Some(action) = renderer::handle_online_menu_input(&mut game_state) {
                     match action {
                         OnlineMenuAction::CreateRoom => {
-                            let url = transport::default_server_url();
-                            let name = display_name(&game_state);
-                            let rules = game_state.online_state.build_rules();
-                            let length = game_state.online_state.length();
-                            online = Some(RemoteAdapter::create_room(&url, &name, length, rules));
-                            let msg = i18n::Key::Connecting.text(game_state.lang);
-                            set_status(&mut game_state, msg, false);
+                            // ルーム作成の前に対局モードを選ぶ
+                            game_state.phase = GamePhase::ModeSelect(MenuOrigin::Online);
                         }
                         OnlineMenuAction::JoinRoom => {
                             let code = game_state.online_state.code_input.clone();
@@ -275,7 +334,7 @@ async fn main() {
                             online = None;
                             game_state.online_state.status_line = None;
                             game_state.online_state.status_is_error = false;
-                            game_state.phase = GamePhase::Setup;
+                            game_state.phase = GamePhase::TopMenu;
                         }
                     }
                 }
@@ -291,6 +350,13 @@ async fn main() {
             GamePhase::OnlineLobby => {
                 if let Some(action) = renderer::handle_online_lobby_input(&game_state) {
                     match action {
+                        OnlineLobbyAction::OpenCpuSettings => {
+                            // ルームのモードに合わせてCPU人数を揃えてから開く
+                            if let Some(room) = &game_state.online_state.room {
+                                game_state.setup_state.mode = room.mode;
+                            }
+                            game_state.phase = GamePhase::CpuSetup(MenuOrigin::Online);
+                        }
                         OnlineLobbyAction::StartGame => {
                             if let Some(remote) = &mut online {
                                 // ホストが設定画面で選んだCPUの強さ・性格を送る
@@ -338,7 +404,7 @@ async fn main() {
 
             GamePhase::GameOver => {
                 if is_mouse_button_pressed(MouseButton::Left) {
-                    // 設定画面に戻る
+                    // トップ画面に戻る
                     game_state = GameState::new();
                     adapter = None;
                     online = None;

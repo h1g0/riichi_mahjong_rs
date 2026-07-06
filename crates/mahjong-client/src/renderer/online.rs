@@ -6,7 +6,7 @@
 use macroquad::prelude::*;
 
 use super::{DESIGN_W, draw_jp_text, theme};
-use crate::game::{GameMode, GameState};
+use crate::game::GameState;
 use crate::i18n::Key;
 
 /// パネルのレイアウト（設定画面と揃える）
@@ -51,33 +51,6 @@ const CODE_BOX: Rect2 = Rect2 {
     w: 400.0,
     h: 44.0,
 };
-/// 対局モードトグル（四人東風/四人半荘/三人東風/三人半荘）と北抜きトグルの行
-const MODE_BTN_W: f32 = 100.0;
-const MODE_BTN_H: f32 = 32.0;
-const MODE_BTN_GAP: f32 = 8.0;
-const MODE_Y: f32 = 408.0;
-
-/// 対局モードトグルのボタン矩形。
-/// idx 0=四人東風, 1=四人半荘, 2=三人東風, 3=三人半荘。
-fn mode_btn_rect(idx: usize) -> Rect2 {
-    Rect2 {
-        x: NAME_BOX.x + idx as f32 * (MODE_BTN_W + MODE_BTN_GAP),
-        y: MODE_Y,
-        w: MODE_BTN_W,
-        h: MODE_BTN_H,
-    }
-}
-
-/// 北抜きドラトグルのボタン矩形（三麻選択時のみ表示）。
-fn nuki_btn_rect() -> Rect2 {
-    Rect2 {
-        x: NAME_BOX.x + GameMode::ALL.len() as f32 * (MODE_BTN_W + MODE_BTN_GAP) + 10.0,
-        y: MODE_Y,
-        w: 130.0,
-        h: MODE_BTN_H,
-    }
-}
-
 const CREATE_BTN: Rect2 = Rect2 {
     x: 440.0,
     y: 450.0,
@@ -95,6 +68,13 @@ const BACK_BTN: Rect2 = Rect2 {
     y: 610.0,
     w: 400.0,
     h: 40.0,
+};
+/// ロビーのCPU設定ボタン（ホストのみ表示）
+const CPU_SETUP_BTN: Rect2 = Rect2 {
+    x: 440.0,
+    y: 500.0,
+    w: 400.0,
+    h: 44.0,
 };
 const START_BTN: Rect2 = Rect2 {
     x: 440.0,
@@ -123,6 +103,8 @@ pub enum OnlineMenuAction {
 /// ロビーでの操作
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnlineLobbyAction {
+    /// CPU設定画面を開く（ホストのみ）
+    OpenCpuSettings,
     /// 対局を開始する（ホストのみ）
     StartGame,
     /// 退出する
@@ -226,33 +208,6 @@ fn draw_input_box(font: Option<&Font>, rect: &Rect2, text: &str, focused: bool) 
     );
 }
 
-/// 小さなトグルボタン（設定画面のオプションボタンと同じ見た目）を描画する。
-fn draw_toggle(font: Option<&Font>, rect: &Rect2, label: &str, selected: bool) {
-    let (fill, border, text_color) = if selected {
-        (
-            theme::rgba(0xc8a227, 0.13),
-            theme::rgba(0xc8a227, 0.45),
-            theme::GOLD_LT,
-        )
-    } else {
-        (
-            Color::new(1.0, 1.0, 1.0, 0.04),
-            Color::new(1.0, 1.0, 1.0, 0.07),
-            theme::TEXT_DIM,
-        )
-    };
-    theme::draw_rounded_rect(rect.x, rect.y, rect.w, rect.h, 4.0, fill);
-    theme::draw_rounded_rect_lines(rect.x, rect.y, rect.w, rect.h, 4.0, 1.0, border);
-    theme::draw_text_centered(
-        font,
-        label,
-        rect.center_x(),
-        rect.y + rect.h / 2.0 + 5.0,
-        13,
-        text_color,
-    );
-}
-
 fn draw_status_line(state: &GameState, font: Option<&Font>, y: f32) {
     if let Some(line) = &state.online_state.status_line {
         let color = if state.online_state.status_is_error {
@@ -290,25 +245,6 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
         theme::TEXT_DIM,
     );
     draw_input_box(font, &CODE_BOX, &online.code_input, online.code_focused);
-
-    // 対局モードトグル（ルーム作成時に適用される）
-    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
-        let selected = mode == online.mode;
-        draw_toggle(
-            font,
-            &mode_btn_rect(idx),
-            tr.get(mode.label_key()),
-            selected,
-        );
-    }
-    if online.mode.three_player() {
-        draw_toggle(
-            font,
-            &nuki_btn_rect(),
-            tr.get(Key::NukiDoraToggle),
-            online.nuki_dora,
-        );
-    }
 
     draw_button(font, &CREATE_BTN, tr.get(Key::CreateRoom), true);
     draw_button(font, &JOIN_BTN, tr.get(Key::JoinRoom), true);
@@ -361,17 +297,6 @@ pub fn handle_online_menu_input(state: &mut GameState) -> Option<OnlineMenuActio
     }
     if CODE_BOX.contains(mx, my) {
         online.code_focused = true;
-        return None;
-    }
-    // 対局モードトグル
-    for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
-        if mode_btn_rect(idx).contains(mx, my) {
-            online.mode = mode;
-            return None;
-        }
-    }
-    if online.mode.three_player() && nuki_btn_rect().contains(mx, my) {
-        online.nuki_dora = !online.nuki_dora;
         return None;
     }
 
@@ -451,15 +376,16 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     }
 
     if room.is_host {
-        draw_button(font, &START_BTN, tr.get(Key::StartGame), true);
         theme::draw_text_centered(
             font,
             tr.get(Key::EmptySeatsCpu),
             cx,
-            START_BTN.y - 8.0,
+            CPU_SETUP_BTN.y - 10.0,
             12,
             theme::TEXT_DIM,
         );
+        draw_button(font, &CPU_SETUP_BTN, tr.get(Key::CpuSetupTitle), false);
+        draw_button(font, &START_BTN, tr.get(Key::StartGame), true);
     } else {
         theme::draw_text_centered(
             font,
@@ -487,6 +413,9 @@ pub fn handle_online_lobby_input(state: &GameState) -> Option<OnlineLobbyAction>
         .room
         .as_ref()
         .is_some_and(|room| room.is_host);
+    if is_host && CPU_SETUP_BTN.contains(mx, my) {
+        return Some(OnlineLobbyAction::OpenCpuSettings);
+    }
     if is_host && START_BTN.contains(mx, my) {
         return Some(OnlineLobbyAction::StartGame);
     }

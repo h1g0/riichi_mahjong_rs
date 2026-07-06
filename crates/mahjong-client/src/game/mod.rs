@@ -210,11 +210,24 @@ pub struct GameState {
     pub lang: Lang,
 }
 
+/// モード選択・CPU設定画面の遷移元（戻り先と確定時の動作を決める）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuOrigin {
+    /// CPU対戦（トップ画面 → モード選択 → CPU設定 → 対局開始）
+    Local,
+    /// オンライン対戦（ルーム作成前のモード選択／ロビーからのCPU設定）
+    Online,
+}
+
 /// ゲームフェーズ
 #[derive(Debug, Clone, PartialEq)]
 pub enum GamePhase {
-    /// 対局開始前の設定画面
-    Setup,
+    /// トップ画面（CPU対戦・オンライン対戦・設定・言語設定）
+    TopMenu,
+    /// 対局モード選択（四人東風〜三人半荘・北抜きドラ）
+    ModeSelect(MenuOrigin),
+    /// CPU設定画面（強さ・性格。ローカルは対局開始、オンラインは決定）
+    CpuSetup(MenuOrigin),
     /// オンライン対戦メニュー（名前・ルームコード入力）
     OnlineMenu,
     /// オンラインロビー（メンバー待ち）
@@ -260,7 +273,7 @@ impl GameState {
             win_results: Vec::new(),
             win_result_index: 0,
             is_my_turn: false,
-            phase: GamePhase::Setup,
+            phase: GamePhase::TopMenu,
             available_calls: Vec::new(),
             call_target_tile: None,
             call_discarder: None,

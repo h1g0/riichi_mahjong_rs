@@ -46,6 +46,8 @@ pub struct RoomView {
     pub rules: Settings,
     /// 対局の長さ（東風戦か半荘戦か）
     pub length: GameLength,
+    /// 空席を埋めるCPUの強さ・性格（旧サーバでは None）
+    pub cpu_configs: Option<[CpuSpec; 3]>,
 }
 
 impl RoomView {
@@ -196,6 +198,13 @@ impl RemoteAdapter {
     /// `cpu_configs` でCPUの強さ・性格を指定する（`None` ならサーバ既定）。
     pub fn start_game(&mut self, cpu_configs: Option<[CpuSpec; 3]>) {
         self.send(&ClientMessage::StartGame { cpu_configs });
+    }
+
+    /// 空席を埋めるCPUの強さ・性格を設定する（ホストのみ有効）
+    ///
+    /// サーバが保持して RoomState で全員のロビー表示へ共有する。
+    pub fn set_cpu_configs(&mut self, cpu_configs: [CpuSpec; 3]) {
+        self.send(&ClientMessage::SetCpuConfigs { cpu_configs });
     }
 
     /// ルームから退出する
@@ -351,6 +360,7 @@ impl RemoteAdapter {
                 your_seat,
                 rules,
                 length,
+                cpu_configs,
             } => {
                 self.room_code = Some(code.clone());
                 // 座席情報から人間プレイヤーの接続状態を取り込む
@@ -367,6 +377,7 @@ impl RemoteAdapter {
                     your_seat,
                     rules,
                     length,
+                    cpu_configs,
                 });
             }
             ServerMessage::Event(event) => {
@@ -641,6 +652,7 @@ mod tests {
             your_seat,
             rules: Settings::new(),
             length: GameLength::EastOnly,
+            cpu_configs: None,
         }
     }
 
@@ -736,6 +748,7 @@ mod tests {
             your_seat: 0,
             rules: Settings::new(),
             length: GameLength::Hanchan,
+            cpu_configs: None,
         };
         handle.push_msg(&msg);
         adapter.tick();
@@ -778,6 +791,60 @@ mod tests {
         assert_eq!(room.code, "ABC234");
         assert_eq!(room.your_seat, 0);
         assert!(room.is_host());
+    }
+
+    /// set_cpu_configs が SetCpuConfigs を送り、RoomState のCPU設定が
+    /// RoomView に反映されること（#245）
+    #[test]
+    fn test_set_cpu_configs_roundtrip() {
+        use mahjong_server::cpu::client::{CpuLevel, CpuPersonality};
+
+        let (mut adapter, handle) = create_adapter();
+        let specs = [
+            CpuSpec {
+                level: CpuLevel::Strong,
+                personality: CpuPersonality::Defensive,
+            },
+            CpuSpec {
+                level: CpuLevel::Weak,
+                personality: CpuPersonality::Speedy,
+            },
+            CpuSpec {
+                level: CpuLevel::Normal,
+                personality: CpuPersonality::HighValue,
+            },
+        ];
+        adapter.set_cpu_configs(specs);
+
+        let sent = handle.sent();
+        assert!(matches!(
+            sent[0],
+            ClientMessage::SetCpuConfigs { cpu_configs } if cpu_configs == specs
+        ));
+
+        // サーバがCPU設定入りの RoomState を返すと RoomView に反映される
+        let msg = ServerMessage::RoomState {
+            code: "ABC234".to_string(),
+            seats: [
+                SeatInfo::Human {
+                    name: "ホスト".to_string(),
+                    connected: true,
+                },
+                SeatInfo::Empty,
+                SeatInfo::Empty,
+                SeatInfo::Empty,
+            ],
+            host_seat: 0,
+            your_seat: 0,
+            rules: Settings::new(),
+            length: GameLength::EastOnly,
+            cpu_configs: Some(specs),
+        };
+        handle.push_msg(&msg);
+        adapter.tick();
+
+        let room = adapter.room().expect("入室しているはず");
+        assert_eq!(room.cpu_configs, Some(specs));
     }
 
     #[test]

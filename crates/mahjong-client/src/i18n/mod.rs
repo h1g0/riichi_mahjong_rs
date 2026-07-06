@@ -161,6 +161,18 @@ impl Translator {
         }
     }
 
+    /// ロビーの空席行（空席をどのCPUが埋めるかを添える）。
+    ///
+    /// 例: 日「空席（CPU: 普通・バランス）」/ 英「Empty (CPU: Normal, Balanced)」。
+    pub fn empty_seat_cpu_label(&self, level: CpuLevel, personality: CpuPersonality) -> String {
+        let lv = self.cpu_level_name(level);
+        let ps = self.cpu_personality_name(personality);
+        match self.lang {
+            Lang::Ja => format!("空席（CPU: {lv}・{ps}）"),
+            Lang::En => format!("Empty (CPU: {lv}, {ps})"),
+        }
+    }
+
     /// ロビーの参加者行（例: 日「1: {who}{marks}」/ 英「1: {who}{marks}」）。
     ///
     /// 席順（風）は対局開始時にランダムで決まるため、風ではなく
@@ -273,8 +285,24 @@ impl Translator {
 /// `Lang` に追加し、各 `match` 腕へ訳を足す（コンパイル時に網羅性が保証される）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
-    /// 対局設定画面のタイトル
-    SetupTitle,
+    /// トップ画面のタイトル
+    AppTitle,
+    /// トップ画面: CPU対戦ボタン
+    CpuBattle,
+    /// トップ画面: 設定ボタン（ルール設定。未実装）
+    SettingsMenu,
+    /// 未実装機能の注記
+    ComingSoon,
+    /// トップ画面: 言語設定の見出し
+    LanguageLabel,
+    /// モード選択画面のタイトル
+    ModeSelectTitle,
+    /// 北抜きドラが三麻のみ有効である旨の注記
+    SanmaOnlyNote,
+    /// CPU設定画面のタイトル・ロビーのCPU設定ボタン
+    CpuSetupTitle,
+    /// 決定ボタン（オンラインのCPU設定確定）
+    Confirm,
     /// 対局モード: 四人東風
     ModeFourEast,
     /// 対局モード: 四人半荘
@@ -409,9 +437,41 @@ impl Key {
     /// 指定言語での文言を返す。
     pub fn text(self, lang: Lang) -> &'static str {
         match self {
-            Key::SetupTitle => match lang {
-                Lang::Ja => "対局設定",
-                Lang::En => "Game Setup",
+            Key::AppTitle => match lang {
+                Lang::Ja => "麻雀",
+                Lang::En => "Riichi Mahjong",
+            },
+            Key::CpuBattle => match lang {
+                Lang::Ja => "CPU対戦",
+                Lang::En => "VS CPU",
+            },
+            Key::SettingsMenu => match lang {
+                Lang::Ja => "設定",
+                Lang::En => "Settings",
+            },
+            Key::ComingSoon => match lang {
+                Lang::Ja => "（準備中）",
+                Lang::En => " (coming soon)",
+            },
+            Key::LanguageLabel => match lang {
+                Lang::Ja => "言語設定",
+                Lang::En => "Language",
+            },
+            Key::ModeSelectTitle => match lang {
+                Lang::Ja => "モード選択",
+                Lang::En => "Select Mode",
+            },
+            Key::SanmaOnlyNote => match lang {
+                Lang::Ja => "（三麻のみ）",
+                Lang::En => " (3-player only)",
+            },
+            Key::CpuSetupTitle => match lang {
+                Lang::Ja => "CPU設定",
+                Lang::En => "CPU Settings",
+            },
+            Key::Confirm => match lang {
+                Lang::Ja => "決定",
+                Lang::En => "Confirm",
             },
             Key::ModeFourEast => match lang {
                 Lang::Ja => "四人東風",
@@ -695,6 +755,21 @@ mod tests {
         assert_eq!(en.personality_label(0), "Balanced");
         assert_eq!(ja.cpu_slot(1), "CPU 2");
         assert_eq!(en.cpu_slot(2), "CPU 3");
+    }
+
+    /// 空席行にCPU設定が言語に応じて添えられること（#245）
+    #[test]
+    fn empty_seat_cpu_label_localizes() {
+        let ja = Translator::new(Lang::Ja);
+        let en = Translator::new(Lang::En);
+        assert_eq!(
+            ja.empty_seat_cpu_label(CpuLevel::Normal, CpuPersonality::Balanced),
+            "空席（CPU: 普通・バランス）"
+        );
+        assert_eq!(
+            en.empty_seat_cpu_label(CpuLevel::Strong, CpuPersonality::Defensive),
+            "Empty (CPU: Strong, Defensive)"
+        );
     }
 
     #[test]

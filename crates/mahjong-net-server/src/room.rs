@@ -361,6 +361,9 @@ impl Room {
 
     fn handle_client_message(&mut self, seat: usize, msg: ClientMessage) {
         match msg {
+            ClientMessage::SetCpuConfigs { cpu_configs } => {
+                self.handle_set_cpu_configs(seat, cpu_configs)
+            }
             ClientMessage::StartGame { cpu_configs } => self.handle_start_game(seat, cpu_configs),
             ClientMessage::Action(action) => {
                 if !self.game_started() || self.awaiting_ready {
@@ -399,6 +402,20 @@ impl Room {
                 self.send_error(seat, ErrorCode::BadMessage, "unexpected message");
             }
         }
+    }
+
+    /// ホストが選んだCPUの強さ・性格を保持し、全員のロビー表示へ共有する
+    fn handle_set_cpu_configs(&mut self, seat: usize, cpu_configs: [CpuSpec; 3]) {
+        if seat != HOST_SEAT {
+            self.send_error(seat, ErrorCode::NotHost, "only the host can configure CPUs");
+            return;
+        }
+        if self.game_started() {
+            self.send_error(seat, ErrorCode::GameInProgress, "game already started");
+            return;
+        }
+        self.cpu_configs = cpu_configs.map(|spec| spec.to_config());
+        self.broadcast_room_state();
     }
 
     fn handle_start_game(&mut self, seat: usize, cpu_configs: Option<[CpuSpec; 3]>) {
@@ -780,6 +797,9 @@ impl Room {
             your_seat: seat,
             rules: self.settings.rules.clone(),
             length: self.settings.length,
+            cpu_configs: Some(std::array::from_fn(|i| {
+                CpuSpec::from_config(&self.cpu_configs[i])
+            })),
         };
         self.send_to_seat(seat, msg);
     }
