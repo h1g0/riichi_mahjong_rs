@@ -146,6 +146,8 @@ Environment variables:
 - `PORT`: listen port (default `8080`).
 - `RUST_LOG`: log filter (for example `mahjong_net_server=debug`).
 - `ALLOWED_ORIGIN`: if set, only WebSocket connections with a matching `Origin` header are accepted (for example `https://your-app.vercel.app`). If unset, all origins are allowed. Note that **native clients do not send an `Origin` header and are rejected (HTTP 403) while this is set** — leave it unset if you need native clients to connect, and rely on browser clients plus the built-in rate limiting otherwise.
+- `INTERNAL_PORT`: port of the private machine-to-machine listener used for room lookups in multi-machine deployments (default `8081`). On Fly it binds to the 6PN private address (`FLY_PRIVATE_IP`), locally to `127.0.0.1`.
+- `MAHJONG_PEERS`: comma-separated `host:port` list of peer internal listeners, overriding the default peer discovery via `<FLY_APP_NAME>.internal` DNS. Useful for testing the multi-machine setup locally.
 
 `GET /healthz` returns `ok` for health checks. The WebSocket endpoint is `GET /ws`.
 
@@ -181,8 +183,9 @@ docker run -e PORT=8080 -p 8080:8080 mahjong-net-server
 
 ### Operational notes
 
-- **Run a single machine.** Rooms are in-memory and are **not** shared across machines, so the server must run as exactly one instance — run `fly scale count 1 -a <app>` once after the first deploy. With a single machine, `auto_stop_machines = "stop"` (as in `fly.toml`) is safe and cheap: the machine stops when idle and the **same** one machine cold-starts on the next connection. Do **not** scale to multiple machines, or a client can reconnect to a machine without its room and the connection drops.
-- **Cold start.** After an idle period the first connection waits a few seconds for the machine to start; that first attempt may need a retry. For an always-on server instead, set `auto_stop_machines = "off"` / `min_machines_running = 1` (costs more).
-- **Rooms do not survive a restart.** A redeploy, restart, or idle-stop drops all active rooms; players just create/join a new room. There is no persistence layer.
+- **Multiple machines are supported.** Rooms are in-memory and pinned to the machine that created them, but joins and reconnects carry the room code as a `/ws?room=CODE` query parameter. A machine that does not host the room looks it up on its peers (via `<app>.internal` DNS and a private internal listener on port 8081) and answers with a `fly-replay` header so Fly Proxy forwards the connection to the owning machine. Scale with `fly scale count 2` (or more); the `[http_service.concurrency]` limits in `fly.toml` control when new connections spill over to (and wake) additional machines.
+- **Cold start.** After an idle period the first connection waits a few seconds for a machine to start; that first attempt may need a retry. For an always-on server instead, set `auto_stop_machines = "off"` / `min_machines_running = 1` (costs more).
+- **Rooms do not survive a restart.** A redeploy or restart drops all active rooms; players just create/join a new room. There is no persistence layer. Machines with active connections are not auto-stopped, so an idle-stop only ever discards rooms whose players have all disconnected.
+- **Rate limiting is per machine.** The per-IP room-entry limit is tracked in each machine's memory, so with N machines the effective cap is up to N times higher; this is acceptable for casual use.
 - Monitor `GET /healthz` (Fly is configured to check it every 15s).
 - The server applies a per-IP room-entry rate limit and per-connection message/frame-size caps; no additional WAF is required for casual use.
