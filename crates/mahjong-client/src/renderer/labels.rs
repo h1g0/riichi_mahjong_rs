@@ -56,9 +56,9 @@ pub(super) fn bake_label(img: &mut Image, label: &str, color: Color, font: &font
 
     let tile_w = img.width as f32;
 
-    // バッジの配置（111px 幅の牌でバッジ約41px・余白約6px）
-    let badge = (tile_w * 0.37).round();
-    let margin = (tile_w * 0.05).round();
+    // バッジの配置（111px 幅の牌でバッジ約47px・余白約4px）
+    let badge = (tile_w * 0.42).round();
+    let margin = (tile_w * 0.04).round();
     let bx = tile_w - margin - badge;
     let by = margin;
     let radius = badge * 0.24;
@@ -77,28 +77,43 @@ pub(super) fn bake_label(img: &mut Image, label: &str, color: Color, font: &font
         Color::new(WHITE.r, WHITE.g, WHITE.b, 0.92),
     );
 
-    // 文字をバッジ中央へ。横に1pxずらした二重描画で擬似太字にする
-    // （theme::draw_text と同じ手法）。
-    let px_size = badge * 0.88;
+    // 文字をバッジ中央へ。カバレッジを縦横に膨張させて擬似太字にする
+    // （1pxずらしの二重描画より線が均一に太り、縮小描画でも潰れにくい）。
+    let px_size = badge * 0.92;
     let (metrics, bitmap) = font.rasterize(ch, px_size);
-    let gx = (bx + (badge - metrics.width as f32) / 2.0).round() as i32;
-    let gy = (by + (badge - metrics.height as f32) / 2.0).round() as i32;
-    blit_glyph(img, gx, gy, &metrics, &bitmap, color);
-    blit_glyph(img, gx + 1, gy, &metrics, &bitmap, color);
+    let (bitmap, glyph_w, glyph_h) = dilate(&bitmap, metrics.width, metrics.height, 2, 2);
+    let gx = (bx + (badge - glyph_w as f32) / 2.0).round() as i32;
+    let gy = (by + (badge - glyph_h as f32) / 2.0).round() as i32;
+    blit_glyph(img, gx, gy, glyph_w, glyph_h, &bitmap, color);
+}
+
+/// グリフのカバレッジを右方向 `dx`・下方向 `dy` ピクセル分膨張させ、
+/// ストロークを太らせた新しいビットマップと寸法を返す。
+fn dilate(bitmap: &[u8], w: usize, h: usize, dx: usize, dy: usize) -> (Vec<u8>, usize, usize) {
+    let (nw, nh) = (w + dx, h + dy);
+    let mut out = vec![0u8; nw * nh];
+    for y in 0..nh {
+        for x in 0..nw {
+            let mut cov = 0u8;
+            for oy in 0..=dy.min(y) {
+                for ox in 0..=dx.min(x) {
+                    let (sx, sy) = (x - ox, y - oy);
+                    if sx < w && sy < h {
+                        cov = cov.max(bitmap[sy * w + sx]);
+                    }
+                }
+            }
+            out[y * nw + x] = cov;
+        }
+    }
+    (out, nw, nh)
 }
 
 /// ラスタライズ済みグリフを画像へアルファ合成する。
-fn blit_glyph(
-    img: &mut Image,
-    gx: i32,
-    gy: i32,
-    metrics: &fontdue::Metrics,
-    bitmap: &[u8],
-    color: Color,
-) {
-    for row in 0..metrics.height {
-        for col in 0..metrics.width {
-            let coverage = bitmap[row * metrics.width + col] as f32 / 255.0;
+fn blit_glyph(img: &mut Image, gx: i32, gy: i32, w: usize, h: usize, bitmap: &[u8], color: Color) {
+    for row in 0..h {
+        for col in 0..w {
+            let coverage = bitmap[row * w + col] as f32 / 255.0;
             blend_pixel(img, gx + col as i32, gy + row as i32, color, coverage);
         }
     }
