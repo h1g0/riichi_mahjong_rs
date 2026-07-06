@@ -8,6 +8,8 @@ edition = "2024"
 mahjong-core = { path = "../mahjong-core" }
 mahjong-server = { path = "../mahjong-server" }
 macroquad = "0.4"
+# 牌インデックスラベルの焼き込み（macroquad も同クレートに依存しており追加コストなし）
+fontdue = "0.9"
 serde = { version = "1", features = ["derive"] }
 getrandom = "0.4"
 

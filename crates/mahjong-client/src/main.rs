@@ -153,7 +153,7 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
 async fn main() {
     let font_bytes: &[u8] = include_bytes!("../../../assets/fonts/NotoSansJP-Regular.ttf");
     let font = load_ttf_font_from_bytes(font_bytes).ok();
-    let tile_textures = TileTextures::load();
+    let tile_textures = TileTextures::load(font_bytes);
 
     if font.is_none() {
         eprintln!("警告: 日本語フォントを読み込めませんでした。デフォルトフォントで表示します。");
