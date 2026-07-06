@@ -8,10 +8,10 @@ use std::collections::VecDeque;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
-use axum::extract::State;
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
@@ -49,11 +49,27 @@ fn generate_token() -> String {
     format!("{:032x}", rand::rng().random::<u128>())
 }
 
+/// 転送済みリクエストに Fly Proxy が付けるヘッダ（再転送のループ防止に使う）
+const FLY_REPLAY_SRC: HeaderName = HeaderName::from_static("fly-replay-src");
+
+/// `/ws` のクエリパラメータ
+///
+/// `room` は参加・再接続したいルームのコード。複数マシン構成で、
+/// WebSocket アップグレード前にルームの所在（どのマシンか）を判断する
+/// ために使う。入室処理自体は従来どおりアップグレード後の
+/// `JoinRoom` メッセージで行うため、このパラメータは省略可能
+/// （省略時はルーム作成またはこのマシンのルームへの参加として扱う）。
+#[derive(serde::Deserialize)]
+pub struct WsQuery {
+    room: Option<String>,
+}
+
 /// `/ws` ハンドラ
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
+    Query(query): Query<WsQuery>,
     headers: HeaderMap,
 ) -> Response {
     // Origin 制限（ALLOWED_ORIGIN 設定時のみ）
@@ -63,11 +79,53 @@ pub async fn ws_handler(
         return StatusCode::FORBIDDEN.into_response();
     }
 
+    // 指定されたルームを他マシンが所持していれば、そのマシンへ転送させる
+    if let Some(code) = query.room.as_deref()
+        && let Some(replay) = maybe_replay(&state, code, &headers).await
+    {
+        return replay;
+    }
+
     // フレーム/メッセージサイズを制限して巨大ペイロードを防ぐ
     let ws = ws
         .max_message_size(MAX_MESSAGE_SIZE)
         .max_frame_size(MAX_MESSAGE_SIZE);
     ws.on_upgrade(move |socket| handle_socket(socket, addr.ip(), state))
+}
+
+/// ルームコードの所在を確認し、他マシンが所持していれば fly-replay 応答を返す
+///
+/// None を返した場合は通常どおりアップグレードする（ローカルに存在する、
+/// ルームが見つからない、または転送済みリクエスト）。見つからない場合に
+/// エラーにしないのは、所在確認と入室の間にルームが閉じられるレースが
+/// ありうるため。エラー通知は従来どおり `JoinRoom` の応答で行う。
+async fn maybe_replay(state: &AppState, code: &str, headers: &HeaderMap) -> Option<Response> {
+    let code = crate::lobby::normalize_code(code);
+    // 形式が不正なコードで無駄なピア照会をしない（このパスは認証も
+    // レート制限も通らないため、照会コストを抑える）
+    if !crate::lobby::is_valid_code(&code) {
+        return None;
+    }
+    if state.lobby.get(&code).is_some() {
+        return None;
+    }
+    // 転送されてきたリクエストは再転送しない（マシン間のループ防止）。
+    // 転送直後にルームが閉じた場合は通常の RoomNotFound フローに任せる
+    if headers.contains_key(FLY_REPLAY_SRC) {
+        return None;
+    }
+    let machine_id = state.peers.find_room(&code).await?;
+    tracing::info!(code, machine_id, "replaying connection to room owner");
+    Some(
+        (
+            StatusCode::NO_CONTENT,
+            [(
+                HeaderName::from_static("fly-replay"),
+                format!("instance={machine_id}"),
+            )],
+        )
+            .into_response(),
+    )
 }
 
 /// 接続元 Origin が許可されるか判定する
@@ -216,7 +274,11 @@ impl Connection {
                     // ルール設定はホストの指定を丸ごと採用する。
                     // 持ち点はサーバが決める（四麻25000点・三麻35000点）。
                     let settings = GameSettings::with_rules(length, rules);
-                    let (_code, room_tx) = self.state.lobby.create_room(settings);
+                    let (_code, room_tx) = self
+                        .state
+                        .lobby
+                        .create_room(settings, &self.state.peers)
+                        .await;
                     Some(room_tx)
                 }
                 ClientMessage::JoinRoom { code } => {
