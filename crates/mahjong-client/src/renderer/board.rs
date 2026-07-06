@@ -130,28 +130,44 @@ pub(super) fn draw_dora_panel(
     );
 }
 
-/// 上部バー中央：局表示と残り枚数。
+/// 上部バー中央：ルール（人数＋東風/半荘）・局・本場の表示。
 pub(super) fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f32) {
     let tr = state.tr();
+    let rule_text = tr.get(state.setup_state.mode.label_key()).to_string();
     let round_text = tr.round_label(state.round_number, state.player_count);
-    let remain_text = tr.wall_count(state.remaining_tiles);
+    let honba_text = if state.honba > 0 {
+        Some(tr.honba_suffix(state.honba))
+    } else {
+        None
+    };
 
     let baseline = bar_h / 2.0 + 6.0;
-    let rdims = theme::measure_scaled(font, &round_text, 16);
     let gap = 12.0;
-    let rmdims = theme::measure_scaled(font, &remain_text, 14);
-    let total_w = rdims.width + gap + rmdims.width;
+    let gdims = theme::measure_scaled(font, &rule_text, 16);
+    let rdims = theme::measure_scaled(font, &round_text, 16);
+    let hdims = honba_text
+        .as_ref()
+        .map(|t| theme::measure_scaled(font, t, 14));
+
+    let mut total_w = gdims.width + gap + rdims.width;
+    if let Some(hd) = &hdims {
+        total_w += gap + hd.width;
+    }
     let start_x = DESIGN_W / 2.0 - total_w / 2.0;
 
-    draw_jp_text(font, &round_text, start_x, baseline, 16, theme::GOLD_LT);
-    draw_jp_text(
-        font,
-        &remain_text,
-        start_x + rdims.width + gap,
-        baseline,
-        14,
-        theme::TEXT_DIM,
-    );
+    draw_jp_text(font, &rule_text, start_x, baseline, 16, theme::GOLD_LT);
+    let round_x = start_x + gdims.width + gap;
+    draw_jp_text(font, &round_text, round_x, baseline, 16, theme::GOLD_LT);
+    if let Some(honba_text) = &honba_text {
+        draw_jp_text(
+            font,
+            honba_text,
+            round_x + rdims.width + gap,
+            baseline,
+            14,
+            theme::TEXT_DIM,
+        );
+    }
 }
 
 /// 上部バー右側：各家の得点チップ（自分を強調）。

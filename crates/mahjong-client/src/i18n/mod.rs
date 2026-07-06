@@ -74,11 +74,11 @@ impl Translator {
         }
     }
 
-    /// 残り枚数（例: 日「{n}枚」/ 英「{n} tiles」）。上部バー用。
-    pub fn wall_count(&self, n: usize) -> String {
+    /// 本場数の表記（例: 日「{n}本場」/ 英「{n} honba」）。上部バーの局表示に付す。
+    pub fn honba_suffix(&self, n: usize) -> String {
         match self.lang {
-            Lang::Ja => format!("{n}枚"),
-            Lang::En => format!("{n} tiles"),
+            Lang::Ja => format!("{n}本場"),
+            Lang::En => format!("{n} honba"),
         }
     }
 
