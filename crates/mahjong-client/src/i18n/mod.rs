@@ -33,6 +33,11 @@ impl Translator {
         key.text(self.lang)
     }
 
+    /// 現在の表示言語。
+    pub fn lang(&self) -> Lang {
+        self.lang
+    }
+
     /// CPU の強さラベル（0=弱い, 1=普通, 2=強い）。
     pub fn strength_label(&self, idx: usize) -> &'static str {
         match self.lang {
