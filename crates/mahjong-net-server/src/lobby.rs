@@ -10,6 +10,7 @@ use mahjong_server::table::GameSettings;
 use rand::RngExt;
 use tokio::sync::mpsc;
 
+use crate::peers::Peers;
 use crate::room::{RoomConfig, RoomMsg, run_room};
 
 /// ルームコードの文字種（紛らわしい 0/O/1/I を除いた32文字）
@@ -24,6 +25,16 @@ fn generate_code() -> String {
     (0..CODE_LEN)
         .map(|_| CODE_ALPHABET[rng.random_range(0..CODE_ALPHABET.len())] as char)
         .collect()
+}
+
+/// ルームコードを正規化する（前後の空白を除き大文字にする）
+pub fn normalize_code(code: &str) -> String {
+    code.trim().to_ascii_uppercase()
+}
+
+/// 正規化済みのルームコードとして正しい形式か判定する
+pub fn is_valid_code(code: &str) -> bool {
+    code.len() == CODE_LEN && code.bytes().all(|b| CODE_ALPHABET.contains(&b))
 }
 
 /// ロビー: ルームコード → ルームアクターのレジストリ
@@ -45,20 +56,36 @@ impl Lobby {
     /// ルームを作成し、アクタータスクを起動する
     ///
     /// 生成したルームコードと、ルームへの送信チャネルを返す。
-    pub fn create_room(&self, settings: GameSettings) -> (String, mpsc::Sender<RoomMsg>) {
+    /// コードはローカルのレジストリに加えて、ピア（他マシン）のルームとも
+    /// 衝突しないことを確認して確定する（衝突すると参加者が誤ったルームへ
+    /// 転送されうるため）。
+    pub async fn create_room(
+        &self,
+        settings: GameSettings,
+        peers: &Peers,
+    ) -> (String, mpsc::Sender<RoomMsg>) {
         let (tx, rx) = mpsc::channel(64);
 
-        let code = {
+        let code = loop {
+            // ローカルで未使用の候補を選び、ピアにも照会する
+            let candidate = peers
+                .pick_unused_code(|| {
+                    let rooms = self.rooms.lock().unwrap();
+                    loop {
+                        let candidate = generate_code();
+                        if !rooms.contains_key(&candidate) {
+                            break candidate;
+                        }
+                    }
+                })
+                .await;
+            // ピア照会（await）中にローカルで同じコードが使われた可能性が
+            // あるため、挿入と同じロック内で再確認する
             let mut rooms = self.rooms.lock().unwrap();
-            // 衝突したら引き直す
-            let code = loop {
-                let candidate = generate_code();
-                if !rooms.contains_key(&candidate) {
-                    break candidate;
-                }
-            };
-            rooms.insert(code.clone(), tx.clone());
-            code
+            if !rooms.contains_key(&candidate) {
+                rooms.insert(candidate.clone(), tx.clone());
+                break candidate;
+            }
         };
 
         tracing::info!(code, "room created");
@@ -75,7 +102,7 @@ impl Lobby {
 
     /// ルームコードからルームを引く（大文字小文字は区別しない）
     pub fn get(&self, code: &str) -> Option<mpsc::Sender<RoomMsg>> {
-        let normalized = code.trim().to_ascii_uppercase();
+        let normalized = normalize_code(code);
         self.rooms.lock().unwrap().get(&normalized).cloned()
     }
 
@@ -109,10 +136,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_normalize_and_validate_code() {
+        assert_eq!(normalize_code(" abc234 "), "ABC234");
+        assert!(is_valid_code("ABC234"));
+        // 長さ違い・不正文字（0/O/1/I や小文字）は拒否
+        assert!(!is_valid_code("ABC23"));
+        assert!(!is_valid_code("ABC2345"));
+        assert!(!is_valid_code("ABC0O1"));
+        assert!(!is_valid_code("abc234"));
+    }
+
     #[tokio::test]
     async fn test_create_and_lookup_room() {
         let lobby = Lobby::new(RoomConfig::default());
-        let (code, _tx) = lobby.create_room(GameSettings::default());
+        let (code, _tx) = lobby
+            .create_room(GameSettings::default(), &Peers::none())
+            .await;
 
         assert_eq!(lobby.room_count(), 1);
         assert!(lobby.get(&code).is_some());
