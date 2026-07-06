@@ -6,7 +6,7 @@ edition = "2024"
 
 [dependencies]
 mahjong-server = { path = "../mahjong-server" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util"] }
 axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
