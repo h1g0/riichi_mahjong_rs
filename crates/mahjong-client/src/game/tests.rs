@@ -422,3 +422,231 @@ fn test_can_discard_for_riichi_after_ankan_uses_opened_melds() {
     assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::M5))));
     assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::M7))));
 }
+
+// ─── 宣言バナー（鳴き・リーチ・和了の発声表示）のテスト ──────────────────────
+
+fn queued_pon(player: Wind) -> ServerEvent {
+    let tile = Tile::new(Tile::P3);
+    ServerEvent::PlayerCalled {
+        player,
+        call_type: CallType::Pon,
+        called_tile: tile,
+        tiles: vec![tile, tile, tile],
+    }
+}
+
+fn round_won_tsumo(winner: Wind) -> ServerEvent {
+    ServerEvent::RoundWon {
+        winner,
+        loser: None,
+        winning_tile: Tile::new(Tile::P1),
+        scores: [25000; 4],
+        yaku_list: vec![],
+        han: 1,
+        fu: 30,
+        score_points: 1000,
+        rank: mahjong_core::scoring::score::ScoreRank::Normal,
+        has_opened: false,
+        uradora_indicators: vec![],
+        riichi_sticks: 0,
+        player_hands: vec![],
+    }
+}
+
+fn round_won_ron(winner: Wind, loser: Wind) -> ServerEvent {
+    match round_won_tsumo(winner) {
+        ServerEvent::RoundWon {
+            winner,
+            winning_tile,
+            scores,
+            yaku_list,
+            han,
+            fu,
+            score_points,
+            rank,
+            has_opened,
+            uradora_indicators,
+            riichi_sticks,
+            player_hands,
+            ..
+        } => ServerEvent::RoundWon {
+            winner,
+            loser: Some(loser),
+            winning_tile,
+            scores,
+            yaku_list,
+            han,
+            fu,
+            score_points,
+            rank,
+            has_opened,
+            uradora_indicators,
+            riichi_sticks,
+            player_hands,
+        },
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn test_call_banner_shown_and_following_events_held() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    // 下家（南）のポン → バナー表示・ポン自体は即適用
+    state.queue_event(queued_pon(Wind::South));
+    state.queue_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 60,
+    });
+    state.process_events(100.0);
+
+    assert!(matches!(
+        state.call_banners[1],
+        Some(CallBanner {
+            label: Key::Pon,
+            ..
+        })
+    ));
+    assert_eq!(state.other_players[0].melds.len(), 1);
+    // 後続の OtherPlayerDrew は保留され、残り枚数は未更新
+    assert_eq!(state.remaining_tiles, 70);
+
+    // 保留明けに適用される
+    state.process_events(100.0 + CALL_HOLD_SECS);
+    assert_eq!(state.remaining_tiles, 60);
+}
+
+#[test]
+fn test_riichi_banner_holds_declaration_discard() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.queue_event(ServerEvent::PlayerRiichi {
+        player: Wind::West,
+        scores: [25000, 25000, 24000, 25000],
+        riichi_sticks: 1,
+    });
+    state.queue_event(ServerEvent::TileDiscarded {
+        player: Wind::West,
+        tile: Tile::new(Tile::M1),
+        is_tsumogiri: true,
+    });
+    state.process_events(100.0);
+
+    // リーチは即適用（点数・供託が更新）、宣言牌の打牌は保留
+    assert!(matches!(
+        state.call_banners[2],
+        Some(CallBanner {
+            label: Key::Riichi,
+            ..
+        })
+    ));
+    assert_eq!(state.riichi_sticks, 1);
+    assert!(state.discards[2].is_empty());
+
+    state.process_events(100.0 + CALL_HOLD_SECS);
+    assert_eq!(state.discards[2].len(), 1);
+    assert!(state.discards[2][0].is_riichi);
+}
+
+#[test]
+fn test_round_won_deferred_until_banner_hold_elapses() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.queue_event(round_won_tsumo(Wind::South));
+    state.process_events(100.0);
+
+    // ツモ宣言バナーだけ表示され、結果画面への遷移は保留される
+    assert!(matches!(
+        state.call_banners[1],
+        Some(CallBanner {
+            label: Key::Tsumo,
+            ..
+        })
+    ));
+    assert_eq!(state.phase, GamePhase::Playing);
+
+    // 保留中は再処理しても遷移しない
+    state.process_events(100.0 + WIN_HOLD_SECS / 2.0);
+    assert_eq!(state.phase, GamePhase::Playing);
+
+    // 保留明けに結果画面へ
+    state.process_events(100.0 + WIN_HOLD_SECS);
+    assert_eq!(state.phase, GamePhase::RoundResult);
+}
+
+#[test]
+fn test_double_ron_shows_banners_for_all_winners() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.queue_event(round_won_ron(Wind::South, Wind::East));
+    state.queue_event(round_won_ron(Wind::West, Wind::East));
+    state.process_events(100.0);
+
+    // 2人分のロンバナーが同時に表示される
+    assert!(matches!(
+        state.call_banners[1],
+        Some(CallBanner {
+            label: Key::Ron,
+            ..
+        })
+    ));
+    assert!(matches!(
+        state.call_banners[2],
+        Some(CallBanner {
+            label: Key::Ron,
+            ..
+        })
+    ));
+    assert_eq!(state.phase, GamePhase::Playing);
+
+    // 保留明けに両方の RoundWon が適用される（2ページ分の結果）
+    state.process_events(100.0 + WIN_HOLD_SECS);
+    assert_eq!(state.phase, GamePhase::RoundResult);
+    assert_eq!(state.win_results.len(), 2);
+}
+
+#[test]
+fn test_banner_expires_after_display_duration() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.queue_event(queued_pon(Wind::South));
+    state.process_events(100.0);
+    assert!(state.call_banners[1].is_some());
+
+    state.process_events(100.0 + CALL_BANNER_SECS);
+    assert!(state.call_banners[1].is_none());
+}
+
+#[test]
+fn test_banners_cleared_on_new_round() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.queue_event(queued_pon(Wind::South));
+    state.process_events(100.0);
+    assert!(state.call_banners[1].is_some());
+
+    state.queue_event(game_started_4p(Wind::East, 1));
+    state.process_events(100.0 + CALL_HOLD_SECS);
+    assert!(state.call_banners[1].is_none());
+}
+
+#[test]
+fn test_win_announcement_collapses_stale_action_ui() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.available_calls = vec![AvailableCall::Ron];
+    state.can_tsumo = true;
+
+    // ロン宣言の保留中は古いロン・ツモボタンを畳む
+    state.queue_event(round_won_ron(Wind::East, Wind::South));
+    state.process_events(100.0);
+    assert!(state.available_calls.is_empty());
+    assert!(!state.can_tsumo);
+    assert_eq!(state.phase, GamePhase::Playing);
+}

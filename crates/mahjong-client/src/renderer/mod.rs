@@ -2,6 +2,7 @@
 //!
 //! 埋め込みPNGを使って麻雀牌を描画する。
 
+mod banners;
 mod board;
 mod labels;
 mod menu;
@@ -448,6 +449,7 @@ pub fn draw_game(
             draw_hand(state, font, tile_textures);
             draw_top_bar(state, font, tile_textures);
             let click = overlay::draw_action_buttons(state, font, tile_textures);
+            banners::draw_call_banners(state, font);
             online::draw_connection_banner(state, font);
             online::draw_turn_timer(state, font);
             click
@@ -461,6 +463,8 @@ pub fn draw_game(
             draw_hand(state, font, tile_textures);
             draw_top_bar(state, font, tile_textures);
             draw_result(state, font, tile_textures);
+            // 結果画面へ切り替わった直後もフェード中のロン・ツモ宣言を出し切る
+            banners::draw_call_banners(state, font);
             online::draw_connection_banner(state, font);
             None
         }

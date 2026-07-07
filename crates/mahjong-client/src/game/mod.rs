@@ -2,6 +2,8 @@
 //!
 //! サーバから受信したイベントに基づいてクライアント側の状態を管理する。
 
+use std::collections::VecDeque;
+
 use macroquad::prelude::*;
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
@@ -27,6 +29,32 @@ pub use labels::PlayerLabel;
 pub use setup::{GameMode, OnlineUiState, RoomViewUi, SetupState};
 
 use labels::*;
+
+/// 鳴き・リーチ宣言バナー表示後、後続イベントの適用を保留する時間（秒）
+pub const CALL_HOLD_SECS: f64 = 0.9;
+/// ロン・ツモ・九種九牌の宣言バナー表示から結果画面表示までの保留時間（秒）
+pub const WIN_HOLD_SECS: f64 = 1.2;
+/// 宣言バナーの表示時間（秒）
+pub const CALL_BANNER_SECS: f64 = 1.5;
+
+/// 鳴き・リーチなどの宣言バナー（発声の代わりに画面へ表示する吹き出し）
+#[derive(Debug, Clone, Copy)]
+pub struct CallBanner {
+    /// 表示する文言（ポン・チー・カン・リーチ・ロン・ツモなど）
+    pub label: Key,
+    /// 表示開始時刻（[`GameState::process_events`] に渡された now と同じ時計）
+    pub shown_at: f64,
+}
+
+/// 宣言イベントの表示内容（`declaration_for` が返す）
+struct Declaration {
+    /// バナーを出すプレイヤーと文言（ダブロン時は複数）
+    banners: Vec<(Wind, Key)>,
+    /// 後続イベントの適用を保留する時間（秒）
+    hold_secs: f64,
+    /// true ならイベント自体の適用も保留する（ロン・ツモ・九種九牌）
+    before_apply: bool,
+}
 
 /// 1人分の和了結果（結果画面の1ページ分）
 #[derive(Debug, Clone)]
@@ -206,6 +234,14 @@ pub struct GameState {
     pub pei_counts: [u8; 4],
     /// 北抜き可能か（自分の手番で手牌・ツモ牌に北がある場合）
     pub can_pei: bool,
+    /// 各プレイヤーの宣言バナー（相対位置順: 自分=0, 下家=1, 対面=2, 上家=3）
+    pub call_banners: [Option<CallBanner>; 4],
+    /// 未適用のサーバイベント（宣言演出中は適用を保留する）
+    pending_events: VecDeque<ServerEvent>,
+    /// この時刻まで後続イベントの適用を保留する
+    event_hold_until: f64,
+    /// キュー先頭イベントの宣言バナーを表示済みか（適用前保留の管理用）
+    head_announced: bool,
     /// 表示言語
     pub lang: Lang,
 }
@@ -318,6 +354,10 @@ impl GameState {
             nuki_dora: false,
             pei_counts: [0; 4],
             can_pei: false,
+            call_banners: [None; 4],
+            pending_events: VecDeque::new(),
+            event_hold_until: 0.0,
+            head_announced: false,
             // 保存された表示言語を読み込む（未保存なら日本語）。
             // 「もう一度」などで new() が再生成されても選択を保つ。
             lang: crate::persistence::load_lang().unwrap_or(Lang::Ja),
@@ -403,6 +443,127 @@ impl GameState {
             2 => MeldFrom::Opposite,  // 対面
             1 => MeldFrom::Following, // 下家
             _ => MeldFrom::Myself,    // 自家（通常ここには来ない）
+        }
+    }
+
+    /// サーバイベントを受信キューへ積む。適用は [`process_events`](Self::process_events) が行う。
+    pub fn queue_event(&mut self, event: ServerEvent) {
+        self.pending_events.push_back(event);
+    }
+
+    /// キュー内のイベントを順に適用する。毎フレーム呼ぶこと。
+    ///
+    /// 宣言（鳴き・リーチ・北抜き・和了・九種九牌）を伴うイベントでは
+    /// 宣言バナーを表示し、[`CALL_HOLD_SECS`]（和了系は [`WIN_HOLD_SECS`]）の間
+    /// 後続イベントの適用を保留する。これにより「発声 → 実際の挙動」の順に
+    /// 見え、プレイヤーが宣言に気付きやすくなる。和了・九種九牌はイベント
+    /// 自体の適用（結果画面への遷移）も保留する。
+    pub fn process_events(&mut self, now: f64) {
+        // 表示時間を過ぎたバナーを片付ける
+        for slot in &mut self.call_banners {
+            if slot.is_some_and(|b| now - b.shown_at >= CALL_BANNER_SECS) {
+                *slot = None;
+            }
+        }
+
+        loop {
+            if now < self.event_hold_until || self.pending_events.is_empty() {
+                return;
+            }
+
+            if !self.head_announced
+                && let Some(decl) = self.declaration_for(&self.pending_events[0])
+            {
+                for &(wind, label) in &decl.banners {
+                    let rel = self.relative_player_index(wind);
+                    self.call_banners[rel] = Some(CallBanner {
+                        label,
+                        shown_at: now,
+                    });
+                }
+                self.event_hold_until = now + decl.hold_secs;
+                if decl.before_apply {
+                    // 宣言だけ見せて、イベントの適用は保留が明けてから行う。
+                    // 保留中に古い操作UI（ロン・ツモボタン等）が残らないよう畳む。
+                    self.head_announced = true;
+                    self.available_calls.clear();
+                    self.can_tsumo = false;
+                    self.can_riichi = false;
+                } else {
+                    let event = self.pending_events.pop_front().expect("front checked");
+                    self.handle_event(event);
+                }
+                continue;
+            }
+
+            let event = self.pending_events.pop_front().expect("front checked");
+            self.head_announced = false;
+            self.handle_event(event);
+        }
+    }
+
+    /// イベントが宣言（発声）を伴う場合、その表示内容を返す。
+    fn declaration_for(&self, event: &ServerEvent) -> Option<Declaration> {
+        match event {
+            ServerEvent::PlayerCalled {
+                player, call_type, ..
+            } => {
+                let label = match call_type {
+                    CallType::Pon => Key::Pon,
+                    CallType::Chi => Key::Chi,
+                    CallType::Ankan | CallType::Daiminkan | CallType::Kakan => Key::Kan,
+                    // ロンは RoundWon 側で宣言する（サーバは通常送らない）
+                    CallType::Ron => return None,
+                };
+                Some(Declaration {
+                    banners: vec![(*player, label)],
+                    hold_secs: CALL_HOLD_SECS,
+                    before_apply: false,
+                })
+            }
+            ServerEvent::PlayerRiichi { player, .. } => Some(Declaration {
+                banners: vec![(*player, Key::Riichi)],
+                hold_secs: CALL_HOLD_SECS,
+                before_apply: false,
+            }),
+            ServerEvent::PeiDeclared { player, .. } => Some(Declaration {
+                banners: vec![(*player, Key::Pei)],
+                hold_secs: CALL_HOLD_SECS,
+                before_apply: false,
+            }),
+            ServerEvent::RoundWon { .. } if self.phase == GamePhase::Playing => {
+                // ダブロン・トリロンでは RoundWon が連続で届くため、
+                // キュー内の和了者すべてのバナーを同時に表示する。
+                let banners: Vec<(Wind, Key)> = self
+                    .pending_events
+                    .iter()
+                    .filter_map(|ev| match ev {
+                        ServerEvent::RoundWon { winner, loser, .. } => {
+                            let label = if loser.is_some() {
+                                Key::Ron
+                            } else {
+                                Key::Tsumo
+                            };
+                            Some((*winner, label))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                Some(Declaration {
+                    banners,
+                    hold_secs: WIN_HOLD_SECS,
+                    before_apply: true,
+                })
+            }
+            ServerEvent::RoundDraw {
+                declarer: Some(declarer),
+                ..
+            } if self.phase == GamePhase::Playing => Some(Declaration {
+                banners: vec![(*declarer, Key::NineTerminals)],
+                hold_secs: WIN_HOLD_SECS,
+                before_apply: true,
+            }),
+            _ => None,
         }
     }
 
