@@ -404,26 +404,15 @@ impl GameState {
 
                 let lang = self.lang;
                 let tr = Translator::new(lang);
-                let winner_is_me = self.relative_player_index(winner) == 0;
-                let winner_name = if winner_is_me {
-                    Key::You.text(lang).to_string()
-                } else {
-                    self.wind_to_name(winner)
-                };
-                let loser_name = loser.map(|l| {
-                    if self.relative_player_index(l) == 0 {
-                        Key::You.text(lang).to_string()
-                    } else {
-                        self.wind_to_name(l)
-                    }
-                });
+                let winner_name = self.player_display_name(winner);
+                let loser_name = loser.map(|l| self.player_display_name(l));
                 let win_type = if loser.is_some() {
                     tr.get(Key::Ron)
                 } else {
                     tr.get(Key::Tsumo)
                 };
                 let loser_text = if let Some(l) = loser {
-                    tr.dealt_in_by(&self.wind_to_name(l))
+                    tr.dealt_in_by(&self.player_display_name(l))
                 } else {
                     String::new()
                 };
