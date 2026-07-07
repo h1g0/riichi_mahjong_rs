@@ -3,6 +3,7 @@
 //! 埋め込みPNGを使って麻雀牌を描画する。
 
 mod board;
+mod labels;
 mod menu;
 mod online;
 mod overlay;
@@ -150,66 +151,93 @@ fn make_board_camera(rotation_deg: f32) -> Camera2D {
     }
 }
 
+/// 牌の表面PNG（インデックスは [`Tile`] の種別値と一致）。
+const TILE_PNGS: [&[u8]; Tile::LEN] = [
+    include_bytes!("../../../../assets/images/tiles/1m.png"),
+    include_bytes!("../../../../assets/images/tiles/2m.png"),
+    include_bytes!("../../../../assets/images/tiles/3m.png"),
+    include_bytes!("../../../../assets/images/tiles/4m.png"),
+    include_bytes!("../../../../assets/images/tiles/5m.png"),
+    include_bytes!("../../../../assets/images/tiles/6m.png"),
+    include_bytes!("../../../../assets/images/tiles/7m.png"),
+    include_bytes!("../../../../assets/images/tiles/8m.png"),
+    include_bytes!("../../../../assets/images/tiles/9m.png"),
+    include_bytes!("../../../../assets/images/tiles/1p.png"),
+    include_bytes!("../../../../assets/images/tiles/2p.png"),
+    include_bytes!("../../../../assets/images/tiles/3p.png"),
+    include_bytes!("../../../../assets/images/tiles/4p.png"),
+    include_bytes!("../../../../assets/images/tiles/5p.png"),
+    include_bytes!("../../../../assets/images/tiles/6p.png"),
+    include_bytes!("../../../../assets/images/tiles/7p.png"),
+    include_bytes!("../../../../assets/images/tiles/8p.png"),
+    include_bytes!("../../../../assets/images/tiles/9p.png"),
+    include_bytes!("../../../../assets/images/tiles/1s.png"),
+    include_bytes!("../../../../assets/images/tiles/2s.png"),
+    include_bytes!("../../../../assets/images/tiles/3s.png"),
+    include_bytes!("../../../../assets/images/tiles/4s.png"),
+    include_bytes!("../../../../assets/images/tiles/5s.png"),
+    include_bytes!("../../../../assets/images/tiles/6s.png"),
+    include_bytes!("../../../../assets/images/tiles/7s.png"),
+    include_bytes!("../../../../assets/images/tiles/8s.png"),
+    include_bytes!("../../../../assets/images/tiles/9s.png"),
+    include_bytes!("../../../../assets/images/tiles/1z.png"),
+    include_bytes!("../../../../assets/images/tiles/2z.png"),
+    include_bytes!("../../../../assets/images/tiles/3z.png"),
+    include_bytes!("../../../../assets/images/tiles/4z.png"),
+    include_bytes!("../../../../assets/images/tiles/5z.png"),
+    include_bytes!("../../../../assets/images/tiles/6z.png"),
+    include_bytes!("../../../../assets/images/tiles/7z.png"),
+];
+
 pub struct TileTextures {
     standard_tiles: Vec<Texture2D>,
+    /// 英語UI用: 右上にインデックスラベルを焼き込んだ牌（[`labels`] 参照）
+    labeled_tiles: Vec<Texture2D>,
     red_5m: Texture2D,
     red_5p: Texture2D,
     red_5s: Texture2D,
+    labeled_red_5m: Texture2D,
+    labeled_red_5p: Texture2D,
+    labeled_red_5s: Texture2D,
     back: Texture2D,
     stick1000: Texture2D,
     stick100: Texture2D,
+    /// ラベル付きセットを使うか（言語設定から毎フレーム更新される）
+    labels_enabled: std::cell::Cell<bool>,
 }
 
 impl TileTextures {
-    pub fn load() -> Self {
-        let standard_tiles = vec![
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/1m.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/2m.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/3m.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/4m.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/5m.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/6m.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/7m.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/8m.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/9m.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/1p.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/2p.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/3p.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/4p.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/5p.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/6p.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/7p.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/8p.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/9p.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/1s.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/2s.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/3s.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/4s.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/5s.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/6s.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/7s.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/8s.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/9s.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/1z.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/2z.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/3z.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/4z.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/5z.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/6z.png")),
-            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/7z.png")),
-        ];
+    /// 全テクスチャを読み込む。`font_bytes` はラベル焼き込みに使う TTF
+    /// （読めない場合はラベルなしのテクスチャで代替する）。
+    pub fn load(font_bytes: &[u8]) -> Self {
+        let label_font =
+            fontdue::Font::from_bytes(font_bytes, fontdue::FontSettings::default()).ok();
+
+        let mut standard_tiles = Vec::with_capacity(Tile::LEN);
+        let mut labeled_tiles = Vec::with_capacity(Tile::LEN);
+        for (tile_type, png) in TILE_PNGS.iter().enumerate() {
+            let img = image_from_png(png);
+            standard_tiles.push(texture_from_image(&img));
+            labeled_tiles.push(labeled_texture(
+                img,
+                tile_type as mahjong_core::tile::TileType,
+                label_font.as_ref(),
+            ));
+        }
+
+        let red_5m_img = image_from_png(include_bytes!("../../../../assets/images/tiles/r5m.png"));
+        let red_5p_img = image_from_png(include_bytes!("../../../../assets/images/tiles/r5p.png"));
+        let red_5s_img = image_from_png(include_bytes!("../../../../assets/images/tiles/r5s.png"));
 
         Self {
             standard_tiles,
-            red_5m: load_texture_from_png(include_bytes!(
-                "../../../../assets/images/tiles/r5m.png"
-            )),
-            red_5p: load_texture_from_png(include_bytes!(
-                "../../../../assets/images/tiles/r5p.png"
-            )),
-            red_5s: load_texture_from_png(include_bytes!(
-                "../../../../assets/images/tiles/r5s.png"
-            )),
+            labeled_tiles,
+            red_5m: texture_from_image(&red_5m_img),
+            red_5p: texture_from_image(&red_5p_img),
+            red_5s: texture_from_image(&red_5s_img),
+            labeled_red_5m: labeled_texture(red_5m_img, Tile::M5, label_font.as_ref()),
+            labeled_red_5p: labeled_texture(red_5p_img, Tile::P5, label_font.as_ref()),
+            labeled_red_5s: labeled_texture(red_5s_img, Tile::S5, label_font.as_ref()),
             back: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/back.png")),
             stick1000: load_texture_from_png(include_bytes!(
                 "../../../../assets/images/sticks/stick1000.png"
@@ -217,21 +245,61 @@ impl TileTextures {
             stick100: load_texture_from_png(include_bytes!(
                 "../../../../assets/images/sticks/stick100.png"
             )),
+            labels_enabled: std::cell::Cell::new(false),
         }
     }
 
+    /// ラベル付きセットを使うかを切り替える（[`draw_game`] が言語設定から
+    /// 毎フレーム設定するため、実行中の言語切替にも即応する）。
+    fn set_labels_enabled(&self, enabled: bool) {
+        self.labels_enabled.set(enabled);
+    }
+
     fn for_tile(&self, tile: &Tile) -> &Texture2D {
+        let labeled = self.labels_enabled.get();
         if tile.is_red_dora() {
-            match tile.get() {
-                Tile::M5 => return &self.red_5m,
-                Tile::P5 => return &self.red_5p,
-                Tile::S5 => return &self.red_5s,
+            match (tile.get(), labeled) {
+                (Tile::M5, false) => return &self.red_5m,
+                (Tile::P5, false) => return &self.red_5p,
+                (Tile::S5, false) => return &self.red_5s,
+                (Tile::M5, true) => return &self.labeled_red_5m,
+                (Tile::P5, true) => return &self.labeled_red_5p,
+                (Tile::S5, true) => return &self.labeled_red_5s,
                 _ => {}
             }
         }
 
-        &self.standard_tiles[tile.get() as usize]
+        if labeled {
+            &self.labeled_tiles[tile.get() as usize]
+        } else {
+            &self.standard_tiles[tile.get() as usize]
+        }
     }
+}
+
+fn image_from_png(bytes: &[u8]) -> Image {
+    Image::from_file_with_format(bytes, Some(ImageFormat::Png))
+        .expect("組み込み牌PNGのデコードに失敗")
+}
+
+fn texture_from_image(img: &Image) -> Texture2D {
+    let texture = Texture2D::from_image(img);
+    texture.set_filter(FilterMode::Linear);
+    texture
+}
+
+/// 牌画像へインデックスラベルを焼き込んでテクスチャ化する。
+/// フォントがない場合はラベルなしでテクスチャ化する。
+fn labeled_texture(
+    mut img: Image,
+    tile_type: mahjong_core::tile::TileType,
+    font: Option<&fontdue::Font>,
+) -> Texture2D {
+    if let Some(font) = font {
+        let (label, color) = labels::tile_index_label(tile_type);
+        labels::bake_label(&mut img, label, color, font);
+    }
+    texture_from_image(&img)
 }
 
 fn load_texture_from_png(bytes: &[u8]) -> Texture2D {
@@ -335,6 +403,9 @@ pub fn draw_game(
     font: Option<&Font>,
     tile_textures: &TileTextures,
 ) -> Option<OverlayClick> {
+    // 英語UIでは牌の右上にインデックスラベル付きのテクスチャを使う
+    tile_textures.set_labels_enabled(state.tr().lang() == Lang::En);
+
     match state.phase {
         GamePhase::TopMenu => {
             menu::draw_top_menu(state, font);
