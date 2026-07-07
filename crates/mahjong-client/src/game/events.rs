@@ -67,6 +67,7 @@ impl GameState {
                     OtherPlayerHand::new(),
                 ];
                 self.last_discarder = None;
+                self.call_banners = [None; 4];
             }
 
             ServerEvent::TileDrawn {

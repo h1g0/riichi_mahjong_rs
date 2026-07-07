@@ -210,11 +210,13 @@ async fn main() {
         }
 
         // アダプターを毎フレーム進め、イベントを反映する
+        // （宣言バナー表示中は process_events が後続イベントの適用を保留する）
         if let Some(adp) = &mut adapter {
             adp.tick();
             for event in adp.poll_events() {
-                game_state.handle_event(event);
+                game_state.queue_event(event);
             }
+            game_state.process_events(get_time());
             // 対局中の接続バナー（ローカル対戦では常に None）
             game_state.online_state.status_line = adp.status_text(game_state.lang);
             game_state.online_state.status_is_error = game_state.online_state.status_line.is_some();
@@ -288,8 +290,9 @@ async fn main() {
                             new_adapter.start_game();
                             let events = new_adapter.poll_events();
                             for event in events {
-                                game_state.handle_event(event);
+                                game_state.queue_event(event);
                             }
+                            game_state.process_events(get_time());
                             adapter = Some(Box::new(new_adapter));
                         }
                         SetupAction::ApplyOnline => {
