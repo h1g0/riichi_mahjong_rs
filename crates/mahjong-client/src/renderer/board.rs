@@ -217,18 +217,7 @@ pub(super) fn short_player_name(
     rel: usize,
     lang: Lang,
 ) -> String {
-    use crate::game::PlayerLabel;
-    match label {
-        PlayerLabel::Me => Key::You.text(lang).to_string(),
-        PlayerLabel::Human(name) => {
-            let mut s: String = name.chars().take(5).collect();
-            if name.chars().count() > 5 {
-                s.push('…');
-            }
-            s
-        }
-        PlayerLabel::Cpu { .. } => format!("CPU{}", rel),
-    }
+    label.short_name(rel, lang)
 }
 
 /// 桁区切り付きの得点表記。

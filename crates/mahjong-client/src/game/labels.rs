@@ -57,6 +57,21 @@ impl PlayerLabel {
             }
         }
     }
+
+    /// 得点チップや和了結果などで使う短い表示名（例:「CPU2」）。
+    pub fn short_name(&self, rel: usize, lang: Lang) -> String {
+        match self {
+            PlayerLabel::Me => Key::You.text(lang).to_string(),
+            PlayerLabel::Human(name) => {
+                let mut s: String = name.chars().take(5).collect();
+                if name.chars().count() > 5 {
+                    s.push('…');
+                }
+                s
+            }
+            PlayerLabel::Cpu { .. } => format!("CPU{}", rel),
+        }
+    }
 }
 
 /// CPU の表示名（例: 日「CPU1（普通・バランス）」/ 英「CPU1 (Normal, Balanced)」）。

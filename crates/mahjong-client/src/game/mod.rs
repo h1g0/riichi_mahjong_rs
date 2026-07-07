@@ -413,4 +413,11 @@ impl GameState {
             Lang::En => wind.name(Lang::En).to_string(),
         }
     }
+
+    /// 和了結果などに使うプレイヤー名（例:「CPU2」）。席名ではなくプレイヤー名を表示する。
+    fn player_display_name(&self, wind: Wind) -> String {
+        let rel = self.relative_player_index(wind);
+        let seat = (self.my_seat + rel) % self.player_count;
+        self.player_labels[seat].short_name(rel, self.lang)
+    }
 }
