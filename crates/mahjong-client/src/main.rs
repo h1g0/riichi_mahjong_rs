@@ -4,6 +4,7 @@
 //! GameAdapterを通してサーバとやり取りする
 //! （ローカル対戦はLocalAdapter、オンライン対戦はRemoteAdapter）。
 
+use macroquad::miniquad::conf::Icon;
 use macroquad::prelude::*;
 
 mod adapter;
@@ -25,11 +26,33 @@ use renderer::{
     ModeSelectAction, OnlineLobbyAction, OnlineMenuAction, SetupAction, TileTextures, TopMenuAction,
 };
 
+/// ウィンドウ/タスクバー用アイコン（16/32/64pxのRGBAを埋め込みPNGから復元）
+fn app_icon() -> Icon {
+    fn rgba(png: &[u8]) -> Vec<u8> {
+        Image::from_file_with_format(png, Some(ImageFormat::Png))
+            .expect("組み込みアイコンPNGのデコードに失敗")
+            .bytes
+    }
+
+    Icon {
+        small: rgba(include_bytes!("../../../assets/images/others/icon-16.png"))
+            .try_into()
+            .expect("16x16アイコンのサイズが不正"),
+        medium: rgba(include_bytes!("../../../assets/images/others/icon-32.png"))
+            .try_into()
+            .expect("32x32アイコンのサイズが不正"),
+        big: rgba(include_bytes!("../../../assets/images/others/icon-64.png"))
+            .try_into()
+            .expect("64x64アイコンのサイズが不正"),
+    }
+}
+
 fn window_conf() -> Conf {
     Conf {
-        window_title: "麻雀".to_owned(),
+        window_title: "Riichi Mahjong RS".to_owned(),
         window_width: 1280,
         window_height: 800,
+        icon: Some(app_icon()),
         ..Default::default()
     }
 }

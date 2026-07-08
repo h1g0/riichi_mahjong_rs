@@ -94,7 +94,7 @@ pub enum TopMenuAction {
 }
 
 /// メニュー画面共通のパネルとタイトルを描画する
-fn draw_menu_panel(font: Option<&Font>, title: &str, title_size: u16) {
+fn draw_panel_background() {
     super::draw_setup_background();
     theme::draw_panel(
         panel_x(),
@@ -105,6 +105,10 @@ fn draw_menu_panel(font: Option<&Font>, title: &str, title_size: u16) {
         theme::PANEL_BG,
         theme::PANEL_BORDER,
     );
+}
+
+fn draw_menu_panel(font: Option<&Font>, title: &str, title_size: u16) {
+    draw_panel_background();
     theme::draw_text_centered(
         font,
         title,
@@ -112,6 +116,23 @@ fn draw_menu_panel(font: Option<&Font>, title: &str, title_size: u16) {
         PANEL_Y + 80.0,
         title_size,
         theme::TEXT_BR,
+    );
+}
+
+/// トップ画面のロゴを描画する（パネル背景 + ロゴ画像）
+fn draw_menu_logo(logo: &Texture2D) {
+    draw_panel_background();
+    let logo_w = PANEL_W - 80.0;
+    let logo_h = logo_w * logo.height() / logo.width();
+    draw_texture_ex(
+        logo,
+        DESIGN_W / 2.0 - logo_w / 2.0,
+        PANEL_Y + 80.0 - logo_h / 2.0,
+        WHITE,
+        DrawTextureParams {
+            dest_size: Some(vec2(logo_w, logo_h)),
+            ..Default::default()
+        },
     );
 }
 
@@ -223,9 +244,9 @@ fn draw_toggle(font: Option<&Font>, rect: &Rect2, label: &str, selected: bool, s
 }
 
 /// トップ画面を描画する
-pub fn draw_top_menu(state: &GameState, font: Option<&Font>) {
+pub fn draw_top_menu(state: &GameState, font: Option<&Font>, tile_textures: &super::TileTextures) {
     let tr = state.tr();
-    draw_menu_panel(font, tr.get(Key::AppTitle), 32);
+    draw_menu_logo(tile_textures.logo());
 
     draw_menu_button(font, &top_cpu_rect(), tr.get(Key::CpuBattle), true);
     draw_menu_button(font, &top_online_rect(), tr.get(Key::OnlinePlay), true);

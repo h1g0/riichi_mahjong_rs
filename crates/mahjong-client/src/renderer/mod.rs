@@ -203,6 +203,7 @@ pub struct TileTextures {
     back: Texture2D,
     stick1000: Texture2D,
     stick100: Texture2D,
+    logo: Texture2D,
     /// ラベル付きセットを使うか（言語設定から毎フレーム更新される）
     labels_enabled: std::cell::Cell<bool>,
 }
@@ -246,8 +247,16 @@ impl TileTextures {
             stick100: load_texture_from_png(include_bytes!(
                 "../../../../assets/images/sticks/stick100.png"
             )),
+            logo: load_texture_from_png(include_bytes!(
+                "../../../../assets/images/others/logo.png"
+            )),
             labels_enabled: std::cell::Cell::new(false),
         }
+    }
+
+    /// トップ画面ロゴのテクスチャ
+    pub fn logo(&self) -> &Texture2D {
+        &self.logo
     }
 
     /// ラベル付きセットを使うかを切り替える（[`draw_game`] が言語設定から
@@ -409,7 +418,7 @@ pub fn draw_game(
 
     match state.phase {
         GamePhase::TopMenu => {
-            menu::draw_top_menu(state, font);
+            menu::draw_top_menu(state, font, tile_textures);
             None
         }
         GamePhase::ModeSelect(origin) => {

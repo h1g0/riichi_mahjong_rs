@@ -19,6 +19,7 @@ curl -L https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js -o public/mq_
 cp target/wasm32-unknown-unknown/release/mahjong-client.wasm public/mahjong-client.wasm
 cp crates/mahjong-client/js/ws.js public/ws.js
 cp crates/mahjong-client/js/storage.js public/storage.js
+cp favicon.png public/favicon.png
 cp index.html public/index.html
 
 # Rename assets with a content hash so browsers can cache them immutably
