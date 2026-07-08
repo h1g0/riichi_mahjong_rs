@@ -1,4 +1,4 @@
-# riichi_mahjong_rs
+# Riichi Mahjong RS
 
 [English version](../README.md)
 
