@@ -122,7 +122,7 @@ fn draw_menu_panel(font: Option<&Font>, title: &str, title_size: u16) {
 /// トップ画面のロゴを描画する（パネル背景 + ロゴ画像）
 fn draw_menu_logo(logo: &Texture2D) {
     draw_panel_background();
-    let logo_w = 380.0;
+    let logo_w = PANEL_W - 80.0;
     let logo_h = logo_w * logo.height() / logo.width();
     draw_texture_ex(
         logo,
