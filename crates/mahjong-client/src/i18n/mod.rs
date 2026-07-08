@@ -290,8 +290,6 @@ impl Translator {
 /// `Lang` に追加し、各 `match` 腕へ訳を足す（コンパイル時に網羅性が保証される）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
-    /// トップ画面のタイトル
-    AppTitle,
     /// トップ画面: CPU対戦ボタン
     CpuBattle,
     /// トップ画面: 設定ボタン（ルール設定。未実装）
@@ -442,10 +440,6 @@ impl Key {
     /// 指定言語での文言を返す。
     pub fn text(self, lang: Lang) -> &'static str {
         match self {
-            Key::AppTitle => match lang {
-                Lang::Ja => "麻雀",
-                Lang::En => "Riichi Mahjong",
-            },
             Key::CpuBattle => match lang {
                 Lang::Ja => "CPU対戦",
                 Lang::En => "VS CPU",

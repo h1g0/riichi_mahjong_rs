@@ -27,7 +27,7 @@ use renderer::{
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "麻雀".to_owned(),
+        window_title: "Riichi Mahjong RS".to_owned(),
         window_width: 1280,
         window_height: 800,
         ..Default::default()
