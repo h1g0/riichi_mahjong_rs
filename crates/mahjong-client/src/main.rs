@@ -151,7 +151,7 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let font_bytes: &[u8] = include_bytes!("../../../assets/fonts/NotoSansJP-Regular.ttf");
+    let font_bytes: &[u8] = include_bytes!("../../../assets/fonts/ShipporiMincho-Regular.ttf");
     let font = load_ttf_font_from_bytes(font_bytes).ok();
     let tile_textures = TileTextures::load(font_bytes);
 
