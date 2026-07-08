@@ -149,7 +149,7 @@ fn every_tile_type_has_a_label() {
 
 /// テスト用にアプリ同梱フォントを読み込む。
 fn test_font() -> fontdue::Font {
-    let bytes: &[u8] = include_bytes!("../../../../assets/fonts/NotoSansJP-Regular.ttf");
+    let bytes: &[u8] = include_bytes!("../../../../assets/fonts/ShipporiMincho-Regular.ttf");
     fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).expect("font")
 }
 
