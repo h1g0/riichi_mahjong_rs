@@ -6,6 +6,8 @@
 
 Implementation for Japanese Riichi Mahjong in Rust.
 
+**You can [play it here](https://riichi-mahjong-rs.vercel.app).**
+
 ![Screenshot of gameplay](./docs/image1.png)
 
 ## Current status

@@ -6,6 +6,8 @@
 
 麻雀（一般的なリーチ麻雀）のRustでの実装です。
 
+**[こちら](https://riichi-mahjong-rs.vercel.app) でプレイすることができます。**
+
 ![プレイ中の画面](./image1.png)
 
 ## 現在の実装状況
