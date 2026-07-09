@@ -157,6 +157,11 @@ pub fn check(
         Kind::LittleDragons,
         check_little_dragons(analyzer, status, settings)?,
     );
+    // 三槓子
+    result.insert(
+        Kind::ThreeQuads,
+        check_three_quads(analyzer, status, settings)?,
+    );
     // 混一色
     result.insert(
         Kind::CommonFlush,

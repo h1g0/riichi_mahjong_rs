@@ -198,7 +198,7 @@ means the yaku is not currently implemented in the codebase.
 | 三色同刻 | Sanshoku Dōkō | Mixed Triplets | `MixedTriplets` | 2 | |
 | 対々和 | Toitoi | All Triplets | `AllTriplets` | 2 | |
 | 三暗刻 | San'ankō | Three Concealed Triplets | `ThreeConcealedTriplets` | 2 | |
-| 三槓子 | Sankantsu | Three Quads | — | 2 | **Not implemented.** |
+| 三槓子 | Sankantsu | Three Quads | `ThreeQuads` | 2 | No open/closed distinction. |
 | 混全帯么九 | Chanta | Common Ends | `CommonEnds` | 2 / 1 | |
 | 混老頭 | Honrōtō | Common Terminals | `CommonTerminals` | 2 | |
 | 小三元 | Shōsangen | Little Dragons | `LittleDragons` | 2 | Plus 2 han from the dragon Value Honours. |

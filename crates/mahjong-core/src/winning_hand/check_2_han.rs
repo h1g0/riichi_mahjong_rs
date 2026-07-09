@@ -387,6 +387,27 @@ pub fn check_little_dragons(
         Ok((name, false, 0))
     }
 }
+/// 三槓子
+pub fn check_three_quads(
+    hand_analyzer: &HandAnalyzer,
+    status: &Status,
+    settings: &Settings,
+) -> Result<(&'static str, bool, u32)> {
+    let name = get(
+        Kind::ThreeQuads,
+        status.has_claimed_open,
+        settings.display_lang,
+    );
+    if !hand_analyzer.shanten.has_won() {
+        return Ok((name, false, 0));
+    }
+    // 三槓子: 槓子がちょうど3つ（4つの場合は四槓子となるため対象外）
+    if status.kan_count == 3 {
+        Ok((name, true, 2))
+    } else {
+        Ok((name, false, 0))
+    }
+}
 
 /// ユニットテスト
 #[cfg(test)]
@@ -572,6 +593,51 @@ mod tests {
         assert_eq!(
             check_little_dragons(&test_analyzer, &status, &settings).unwrap(),
             ("小三元", true, 2)
+        );
+    }
+    #[test]
+    /// 三槓子で和了った（暗槓・明槓・加槓の組み合わせ）
+    fn test_three_quads() {
+        let test_str = "111333m444s1777z 1z";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.kan_count = 3;
+        status.is_self_drawn = true;
+        assert_eq!(
+            check_three_quads(&test_analyzer, &status, &settings).unwrap(),
+            ("三槓子", true, 2)
+        );
+    }
+    #[test]
+    /// 槓子が2つでは三槓子は成立しない
+    fn test_three_quads_not_win_with_two_kans() {
+        let test_str = "111333m444s1777z 1z";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.kan_count = 2;
+        status.is_self_drawn = true;
+        assert_eq!(
+            check_three_quads(&test_analyzer, &status, &settings).unwrap(),
+            ("三槓子", false, 0)
+        );
+    }
+    #[test]
+    /// 槓子が4つのときは四槓子のみで三槓子と二重計上しない
+    fn test_three_quads_not_win_with_four_kans() {
+        let test_str = "111333m444s1777z 1z";
+        let test = Hand::from(test_str);
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        let settings = Settings::new();
+        status.kan_count = 4;
+        status.is_self_drawn = true;
+        assert_eq!(
+            check_three_quads(&test_analyzer, &status, &settings).unwrap(),
+            ("三槓子", false, 0)
         );
     }
 }
