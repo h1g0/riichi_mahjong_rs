@@ -197,7 +197,7 @@
 | 三色同刻 | Sanshoku Dōkō | Mixed Triplets | `MixedTriplets` | 2 | |
 | 対々和 | Toitoi | All Triplets | `AllTriplets` | 2 | |
 | 三暗刻 | San'ankō | Three Concealed Triplets | `ThreeConcealedTriplets` | 2 | |
-| 三槓子 | Sankantsu | Three Quads | — | 2 | **未実装。** |
+| 三槓子 | Sankantsu | Three Quads | `ThreeQuads` | 2 | 鳴き有無を問わず成立。 |
 | 混全帯么九 | Chanta | Common Ends | `CommonEnds` | 2 / 1 | |
 | 混老頭 | Honrōtō | Common Terminals | `CommonTerminals` | 2 | |
 | 小三元 | Shōsangen | Little Dragons | `LittleDragons` | 2 | 三元牌の役牌で別途 +2 翻。 |

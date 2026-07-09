@@ -89,6 +89,8 @@ pub enum Kind {
     CommonTerminals,
     /// 小三元
     LittleDragons,
+    /// 三槓子
+    ThreeQuads,
     /// 混一色
     CommonFlush,
     /// 清一色
@@ -225,6 +227,8 @@ fn get_en(hand_kind: Kind, has_openned: bool) -> &'static str {
         Kind::CommonTerminals => "Common Terminals",
         // 小三元
         Kind::LittleDragons => "Little Dragons",
+        // 三槓子
+        Kind::ThreeQuads => "Three Quads",
         // 混一色
         Kind::CommonFlush => {
             openned_name!("Common Flush", has_openned, Lang::En)
@@ -328,6 +332,8 @@ fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
         Kind::CommonTerminals => "混老頭",
         // 小三元
         Kind::LittleDragons => "小三元",
+        // 三槓子
+        Kind::ThreeQuads => "三槓子",
         // 混一色
         Kind::CommonFlush => {
             openned_name!("混一色", has_openned, Lang::Ja)
@@ -414,6 +420,7 @@ mod tests {
             (Kind::PerfectEnds, "Perfect Ends"),
             (Kind::CommonTerminals, "Common Terminals"),
             (Kind::LittleDragons, "Little Dragons"),
+            (Kind::ThreeQuads, "Three Quads"),
             (Kind::CommonFlush, "Common Flush"),
             (Kind::PerfectFlush, "Perfect Flush"),
             (Kind::ThirteenOrphans, "Thirteen Orphans"),
@@ -485,6 +492,7 @@ mod tests {
             (Kind::ValueHonourRedDragon, "Value Honour (Red dragon)"),
             (Kind::CommonTerminals, "Common Terminals"),
             (Kind::LittleDragons, "Little Dragons"),
+            (Kind::ThreeQuads, "Three Quads"),
             (Kind::ThirteenOrphans, "Thirteen Orphans"),
             (Kind::FourConcealedTriplets, "Four Concealed Triplets"),
             (
@@ -541,6 +549,7 @@ mod tests {
             (Kind::PerfectEnds, "純全帯么九"),
             (Kind::CommonTerminals, "混老頭"),
             (Kind::LittleDragons, "小三元"),
+            (Kind::ThreeQuads, "三槓子"),
             (Kind::CommonFlush, "混一色"),
             (Kind::PerfectFlush, "清一色"),
             (Kind::ThirteenOrphans, "国士無双"),
@@ -608,6 +617,7 @@ mod tests {
             (Kind::ValueHonourRedDragon, "役牌（中）"),
             (Kind::CommonTerminals, "混老頭"),
             (Kind::LittleDragons, "小三元"),
+            (Kind::ThreeQuads, "三槓子"),
             (Kind::ThirteenOrphans, "国士無双"),
             (Kind::FourConcealedTriplets, "四暗刻"),
             (Kind::FourConcealedTripletsPairWait, "四暗刻単騎待ち"),
