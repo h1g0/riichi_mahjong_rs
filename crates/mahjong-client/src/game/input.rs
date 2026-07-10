@@ -212,6 +212,13 @@ impl GameState {
             return None;
         }
 
+        // 未適用のサーバイベントが残っている間（宣言バナーの保留中など）は
+        // 入力を受け付けない。画面は古い状態のままなので、それに基づく操作は
+        // サーバの状態と食い違うため。
+        if !self.pending_events.is_empty() {
+            return None;
+        }
+
         // リーチ中はツモ切り自動処理（マウス入力不要）
         if self.is_my_turn && self.is_riichi && self.drawn.is_some() && !self.can_tsumo {
             self.drawn.take();
