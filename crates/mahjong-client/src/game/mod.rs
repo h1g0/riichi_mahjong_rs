@@ -492,6 +492,16 @@ impl GameState {
                 } else {
                     let event = self.pending_events.pop_front().expect("front checked");
                     self.handle_event(event);
+                    // 自分の鳴きでは PlayerCalled の直後に HandUpdated が届く。
+                    // これを保留すると、保留中の打牌が保留明けの HandUpdated で
+                    // 巻き戻されて手牌がサーバと食い違うため、同時に適用する。
+                    if matches!(
+                        self.pending_events.front(),
+                        Some(ServerEvent::HandUpdated { .. })
+                    ) {
+                        let event = self.pending_events.pop_front().expect("front checked");
+                        self.handle_event(event);
+                    }
                 }
                 continue;
             }
