@@ -149,6 +149,11 @@ impl GameState {
         if !self.is_three_player() || !self.nuki_dora {
             return;
         }
+        // 生牌山が空（海底ツモ）では補充ツモができず北抜き不可。
+        // サーバも却下するため、押しても無反応なボタンを出さない（#296）。
+        if self.remaining_tiles == 0 {
+            return;
+        }
         let drawn_is_north = self.drawn.is_some_and(|t| t.get() == Tile::Z4);
         if self.is_riichi {
             self.can_pei = drawn_is_north;
