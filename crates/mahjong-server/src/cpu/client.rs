@@ -427,6 +427,12 @@ impl CpuClient {
             return None;
         }
 
+        // 生牌山が空（海底ツモ後）は補充ツモができずサーバに却下されるため
+        // 宣言しない。却下されたCPUは再打診されず局が停止する（#296）。
+        if self.state.remaining_tiles == 0 {
+            return None;
+        }
+
         let drawn_is_north = self.state.my_drawn.is_some_and(|t| t.get() == Tile::Z4);
 
         if self.state.is_riichi {
