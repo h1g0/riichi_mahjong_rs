@@ -313,7 +313,21 @@ impl GameDriver {
         }
         match round.phase {
             TurnPhase::WaitForDiscard if round.current_player == seat => {
-                Some(ClientAction::Discard { tile: None })
+                // 鳴き直後の打牌待ちにはツモ牌がなく、ツモ切り指定（None）は
+                // 失敗する。その場合は喰い替え禁止でない手牌の牌を選ぶ。
+                let player = &round.players[seat];
+                let tile = if player.hand.drawn().is_some() {
+                    None
+                } else {
+                    player
+                        .hand
+                        .tiles()
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|t| !player.is_swap_call_forbidden(*t))
+                };
+                Some(ClientAction::Discard { tile })
             }
             TurnPhase::WaitForCalls => {
                 let pending = round
@@ -884,6 +898,34 @@ mod tests {
             driver.pending_cpu_batches.front().unwrap().actions,
             vec![(1, ClientAction::Discard { tile: None })]
         );
+    }
+
+    /// 鳴き直後（ツモ牌なし）の既定アクションが手牌から打牌することを確認
+    ///
+    /// ツモ切り指定（None）はツモ牌が無いと失敗するため、切断・タイムアウト
+    /// 代行やCPUフォールバックが鳴き直後の打牌待ちで空振りし、局が停止していた。
+    /// 喰い替え禁止の牌は避けて選ぶ。
+    #[test]
+    fn test_force_default_action_discards_from_hand_without_drawn() {
+        let mut driver = driver_with_three_cpus();
+        driver.table_mut().start_round();
+        {
+            let round = driver.table_mut().current_round_mut().unwrap();
+            let seat_wind = round.players[0].seat_wind;
+            let hand = Hand::from("1m2m3m4m5m6m7m8m9m1p2p3p 4p");
+            round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+            // 鳴き直後の状態を作る: ツモ牌なし・末尾の3pは喰い替え禁止
+            round.players[0].set_forbidden_discards(vec![Tile::P3]);
+            round.current_player = 0;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.drain_events();
+        }
+
+        assert!(driver.force_default_action(0));
+        let round = driver.table().current_round().unwrap();
+        assert_eq!(round.players[0].discards.len(), 1, "既定打牌が空振りした");
+        // 喰い替え禁止の3pを避け、それ以外で最後尾の2pを捨てる
+        assert_eq!(round.players[0].discards[0].tile.get(), Tile::P2);
     }
 
     /// 却下されたCPUアクションが既定アクションにフォールバックすることを確認（#296）
