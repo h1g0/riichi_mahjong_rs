@@ -214,6 +214,25 @@ fn test_sanma_can_pei_with_north_in_hand() {
     assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
 }
 
+/// 海底ツモ（山残り0）では北抜きボタンを出さないこと（#296 の回帰テスト）。
+/// サーバは補充ツモ不能で北抜きを却下するため、表示しても無反応になる。
+#[test]
+fn test_sanma_no_pei_on_last_draw() {
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started(Wind::East));
+    state.hand = vec![Tile::new(Tile::Z4)];
+
+    // 海底牌のツモ: 北を持っていても北抜き不可
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::Z4),
+        remaining_tiles: 0,
+        can_tsumo: false,
+        can_riichi: false,
+        is_furiten: false,
+    });
+    assert!(!state.can_pei, "海底ツモで北抜き可になっている");
+}
+
 #[test]
 fn test_setup_state_build_game_settings() {
     let mut setup = SetupState::new();

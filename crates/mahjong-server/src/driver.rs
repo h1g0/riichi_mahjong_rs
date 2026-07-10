@@ -297,36 +297,53 @@ impl GameDriver {
     }
 
     fn force_default_action_impl(&mut self, seat: usize, now: Option<f64>) -> bool {
-        let action = {
-            let round = match self.table.current_round() {
-                Some(r) => r,
-                None => return false,
-            };
-            if round.is_over() {
-                return false;
-            }
-            match round.phase {
-                TurnPhase::WaitForDiscard if round.current_player == seat => {
-                    ClientAction::Discard { tile: None }
-                }
-                TurnPhase::WaitForCalls => {
-                    let pending = round
-                        .call_state
-                        .as_ref()
-                        .map(|cs| !cs.responded[seat])
-                        .unwrap_or(false);
-                    if !pending {
-                        return false;
-                    }
-                    ClientAction::Pass
-                }
-                TurnPhase::WaitForNineTerminals if round.current_player == seat => {
-                    ClientAction::NineTerminals { declare: false }
-                }
-                _ => return false,
-            }
+        let Some(action) = self.default_action_for(seat) else {
+            return false;
         };
         self.handle_action_impl(seat, action, now)
+    }
+
+    /// 指定した座席の既定アクション（ツモ切り/パス/九種続行）を返す
+    ///
+    /// その座席の入力待ちでなければ None を返す。
+    fn default_action_for(&self, seat: usize) -> Option<ClientAction> {
+        let round = self.table.current_round()?;
+        if round.is_over() {
+            return None;
+        }
+        match round.phase {
+            TurnPhase::WaitForDiscard if round.current_player == seat => {
+                Some(ClientAction::Discard { tile: None })
+            }
+            TurnPhase::WaitForCalls => {
+                let pending = round
+                    .call_state
+                    .as_ref()
+                    .map(|cs| !cs.responded[seat])
+                    .unwrap_or(false);
+                pending.then_some(ClientAction::Pass)
+            }
+            TurnPhase::WaitForNineTerminals if round.current_player == seat => {
+                Some(ClientAction::NineTerminals { declare: false })
+            }
+            _ => None,
+        }
+    }
+
+    /// CPUのアクションを適用する。サーバに却下された場合は既定アクションへ
+    /// フォールバックする
+    ///
+    /// 却下されたCPUは新しいイベントが出ないかぎり再打診されないため、
+    /// 放置するとその座席の入力待ちのまま局が永久に停止する
+    /// （例: 海底ツモでの北抜き宣言は補充ツモ不能で却下される。#296）。
+    /// フォールバックにより、CPUの判断とサーバの検証がずれても局は進行する。
+    fn apply_cpu_action(&mut self, seat: usize, action: ClientAction) {
+        if self.table.handle_action(seat, action) {
+            return;
+        }
+        if let Some(fallback) = self.default_action_for(seat) {
+            self.table.handle_action(seat, fallback);
+        }
     }
 
     /// CPU進行やツモのために tick が必要か（人間の入力待ちなら false）
@@ -435,7 +452,7 @@ impl GameDriver {
         // 残っている待機バッチがあれば先に適用する（遅延未使用なら常に空）
         while let Some(batch) = self.pending_cpu_batches.pop_front() {
             for (seat, action) in batch.actions {
-                self.table.handle_action(seat, action);
+                self.apply_cpu_action(seat, action);
             }
         }
 
@@ -456,7 +473,7 @@ impl GameDriver {
 
             // CPUのアクションをサーバに送信（これが新たなイベントを生成する）
             for (seat, action) in cpu_actions {
-                self.table.handle_action(seat, action);
+                self.apply_cpu_action(seat, action);
             }
         }
     }
@@ -532,7 +549,7 @@ impl GameDriver {
 
         let pending = self.pending_cpu_batches.pop_front().unwrap();
         for (seat, action) in pending.actions {
-            self.table.handle_action(seat, action);
+            self.apply_cpu_action(seat, action);
         }
 
         true
@@ -866,6 +883,38 @@ mod tests {
         assert_eq!(
             driver.pending_cpu_batches.front().unwrap().actions,
             vec![(1, ClientAction::Discard { tile: None })]
+        );
+    }
+
+    /// 却下されたCPUアクションが既定アクションにフォールバックすることを確認（#296）
+    ///
+    /// CPUの判断とサーバの検証がずれた場合（例: 海底ツモでの北抜き宣言）に、
+    /// そのまま放置するとCPUは再打診されず局が永久に停止していた。
+    #[test]
+    fn test_rejected_cpu_action_falls_back_to_default() {
+        let mut driver = driver_with_three_cpus();
+        driver.set_cpu_action_delay(1.0);
+        driver.table_mut().start_round();
+
+        // 座席1（CPU）の打牌待ちにする
+        {
+            let round = driver.table_mut().current_round_mut().unwrap();
+            round.current_player = 1;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.players[1].draw(Tile::new(Tile::Z7));
+            round.drain_events();
+        }
+
+        // 四麻では北抜きは常に却下される無効アクション
+        driver.schedule_cpu_actions(vec![(1, ClientAction::Pei)], 1.0, 10.0);
+        driver.tick_at(20.0);
+
+        // 却下後にツモ切りへフォールバックし、局が進行している
+        let round = driver.table().current_round().unwrap();
+        assert_eq!(
+            round.players[1].discards.len(),
+            1,
+            "却下されたCPUアクションがフォールバックされず局が停止している"
         );
     }
 

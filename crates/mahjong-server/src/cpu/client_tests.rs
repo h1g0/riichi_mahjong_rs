@@ -77,6 +77,7 @@ fn test_consider_pei_declares_with_north_in_hand() {
     let mut client = CpuClient::new(config);
     client.state.three_player = true;
     client.state.nuki_dora = true;
+    client.state.remaining_tiles = 30;
     // 北入りの普通の手（国士狙いではない）
     client.state.my_hand = vec![
         Tile::new(Tile::P2),
@@ -152,12 +153,30 @@ fn test_consider_pei_riichi_only_drawn_north() {
     client.state.three_player = true;
     client.state.nuki_dora = true;
     client.state.is_riichi = true;
+    client.state.remaining_tiles = 30;
     client.state.my_hand = vec![Tile::new(Tile::Z4)]; // リーチ中の手牌は抜けない
 
     assert_eq!(client.consider_pei(), None);
 
     client.state.my_drawn = Some(Tile::new(Tile::Z4));
     assert_eq!(client.consider_pei(), Some(ClientAction::Pei));
+}
+
+/// 回帰テスト（#296）: 生牌山が空（海底ツモ後）は北抜きを宣言しない
+///
+/// 補充ツモができないためサーバに却下され、却下されたCPUは再打診
+/// されないため局が永久に停止していた。
+#[test]
+fn test_consider_pei_none_when_wall_empty() {
+    let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+    let mut client = CpuClient::new(config);
+    client.state.three_player = true;
+    client.state.nuki_dora = true;
+    client.state.remaining_tiles = 0;
+    client.state.my_hand = vec![Tile::new(Tile::P2), Tile::new(Tile::Z4)];
+    client.state.my_drawn = Some(Tile::new(Tile::Z4));
+
+    assert_eq!(client.consider_pei(), None);
 }
 
 #[test]
