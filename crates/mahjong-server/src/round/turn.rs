@@ -237,6 +237,45 @@ impl Round {
         self.push_draw_events(player_idx, tile, "kan_draw");
     }
 
+    /// 却下した打牌・リーチ宣言の送り主に正しい手牌を送り返して再同期させる
+    ///
+    /// クライアントは打牌をローカルの手牌へ楽観的に適用してから送信するため、
+    /// サーバが黙って却下するとクライアントの手牌が食い違ったままになり、
+    /// 以降その牌の打牌が却下され続けて進行が止まって見える（#294）。
+    /// `HandUpdated` で手牌を戻し、手番でツモ牌があれば `TileDrawn` も
+    /// 再送して打牌をやり直させる（本人のみ。`OtherPlayerDrew` は送らない）。
+    pub(crate) fn resync_hand(&mut self, player_idx: usize) {
+        if player_idx >= self.player_count {
+            return;
+        }
+
+        self.events.push((
+            player_idx,
+            ServerEvent::HandUpdated {
+                hand: self.players[player_idx].hand.tiles().to_vec(),
+            },
+        ));
+
+        if self.phase == TurnPhase::WaitForDiscard
+            && self.current_player == player_idx
+            && let Some(drawn) = self.players[player_idx].hand.drawn()
+        {
+            let can_tsumo = self.can_tsumo();
+            let can_riichi = self.can_player_riichi(player_idx);
+            let is_furiten = self.players[player_idx].is_furiten();
+            self.events.push((
+                player_idx,
+                ServerEvent::TileDrawn {
+                    tile: drawn,
+                    remaining_tiles: self.wall.remaining(),
+                    can_tsumo,
+                    can_riichi,
+                    is_furiten,
+                },
+            ));
+        }
+    }
+
     /// ツモ直後の通知イベントを積む
     ///
     /// 本人には牌と可能アクションを含む `TileDrawn`、

@@ -207,13 +207,15 @@ impl Table {
         match action {
             // === 手番アクション（current_player のみ） ===
             ClientAction::Discard { tile } => {
-                if round.current_player != player_idx {
-                    return false;
+                let accepted = round.current_player == player_idx
+                    && round.phase == TurnPhase::WaitForDiscard
+                    && round.do_discard(tile);
+                if !accepted {
+                    // クライアントは打牌をローカル適用済みのため、黙殺すると
+                    // 手牌が食い違ったままになる。正しい手牌を送り返す（#294）
+                    round.resync_hand(player_idx);
                 }
-                if round.phase != TurnPhase::WaitForDiscard {
-                    return false;
-                }
-                round.do_discard(tile)
+                accepted
             }
             ClientAction::Tsumo => {
                 if round.current_player != player_idx {
@@ -222,10 +224,12 @@ impl Table {
                 round.do_tsumo()
             }
             ClientAction::Riichi { tile } => {
-                if round.current_player != player_idx {
-                    return false;
+                let accepted = round.current_player == player_idx && round.do_riichi(tile);
+                if !accepted {
+                    // リーチ宣言牌もクライアントでローカル適用済み（#294）
+                    round.resync_hand(player_idx);
                 }
-                round.do_riichi(tile)
+                accepted
             }
 
             // === 鳴きアクション（WaitForCalls フェーズで対象プレイヤーのみ） ===
@@ -360,6 +364,138 @@ impl Table {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::player::Player;
+    use mahjong_core::hand::Hand;
+
+    /// 却下された打牌が本人へ HandUpdated + TileDrawn の再同期を送ること（#294）
+    ///
+    /// クライアントは打牌をローカル適用してから送信するため、黙殺すると
+    /// 手牌が食い違ったままになり、以降の打牌が却下され続けて
+    /// フリーズしたように見えていた。
+    #[test]
+    fn test_rejected_discard_resyncs_hand() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+        {
+            let round = table.current_round_mut().unwrap();
+            let seat_wind = round.players[0].seat_wind;
+            let hand = Hand::from("1m2m3m4m5m6m7m8m9m1p2p3p1s 5z");
+            round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+            round.players[0].draw(hand.drawn().unwrap());
+            round.current_player = 0;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.drain_events();
+        }
+
+        // 手牌に存在しない牌（東）の打牌は却下される
+        let accepted = table.handle_action(
+            0,
+            ClientAction::Discard {
+                tile: Some(Tile::new(Tile::Z1)),
+            },
+        );
+        assert!(!accepted);
+
+        // サーバの状態は変わらない
+        let expected_hand = {
+            let round = table.current_round().unwrap();
+            assert_eq!(round.phase, TurnPhase::WaitForDiscard);
+            assert!(round.players[0].discards.is_empty());
+            round.players[0].hand.tiles().to_vec()
+        };
+
+        // 本人にだけ HandUpdated + TileDrawn（同じツモ牌）が届く
+        let events = table.drain_events();
+        assert!(
+            events.iter().any(|(seat, e)| *seat == 0
+                && matches!(e, ServerEvent::HandUpdated { hand } if *hand == expected_hand)),
+            "HandUpdated が送られていない"
+        );
+        assert!(
+            events.iter().any(|(seat, e)| *seat == 0
+                && matches!(e, ServerEvent::TileDrawn { tile, .. } if tile.get() == Tile::Z5)),
+            "TileDrawn が再送されていない"
+        );
+        assert!(
+            events.iter().all(|(seat, _)| *seat == 0),
+            "他プレイヤーへイベントが送られている"
+        );
+    }
+
+    /// ツモ牌が無い打牌待ち（鳴き直後）での却下は HandUpdated のみ送ること
+    #[test]
+    fn test_rejected_discard_without_drawn_resyncs_hand_only() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+        {
+            let round = table.current_round_mut().unwrap();
+            round.current_player = 0;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.drain_events();
+        }
+
+        // ツモ牌が無いのでツモ切り指定は却下される
+        let accepted = table.handle_action(0, ClientAction::Discard { tile: None });
+        assert!(!accepted);
+
+        let events = table.drain_events();
+        assert!(
+            events
+                .iter()
+                .any(|(seat, e)| *seat == 0 && matches!(e, ServerEvent::HandUpdated { .. })),
+            "HandUpdated が送られていない"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|(_, e)| matches!(e, ServerEvent::TileDrawn { .. })),
+            "ツモ牌が無いのに TileDrawn が送られている"
+        );
+    }
+
+    /// 却下されたリーチ宣言も再同期を送ること（#294）
+    ///
+    /// リーチ宣言牌もクライアントでローカル適用済みのため、黙殺すると
+    /// 打牌の場合と同じ手牌不整合になる。
+    #[test]
+    fn test_rejected_riichi_resyncs_hand() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+        {
+            let round = table.current_round_mut().unwrap();
+            let seat_wind = round.players[0].seat_wind;
+            // テンパイしていない手（リーチ不可）
+            let hand = Hand::from("1m4m7m2p5p8p3s6s9s1z2z3z4z 5z");
+            round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+            round.players[0].draw(hand.drawn().unwrap());
+            round.current_player = 0;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.drain_events();
+        }
+
+        let accepted = table.handle_action(0, ClientAction::Riichi { tile: None });
+        assert!(!accepted);
+
+        // リーチは成立していない
+        {
+            let round = table.current_round().unwrap();
+            assert!(!round.players[0].is_riichi);
+            assert_eq!(round.riichi_sticks, 0);
+        }
+
+        let events = table.drain_events();
+        assert!(
+            events
+                .iter()
+                .any(|(seat, e)| *seat == 0 && matches!(e, ServerEvent::HandUpdated { .. })),
+            "HandUpdated が送られていない"
+        );
+        assert!(
+            events.iter().any(|(seat, e)| *seat == 0
+                && matches!(e, ServerEvent::TileDrawn { tile, .. } if tile.get() == Tile::Z5)),
+            "TileDrawn が再送されていない"
+        );
+    }
 
     #[test]
     fn test_table_new() {
