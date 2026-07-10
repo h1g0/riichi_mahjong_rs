@@ -636,6 +636,66 @@ fn test_banners_cleared_on_new_round() {
     assert!(state.call_banners[1].is_none());
 }
 
+/// 自分の鳴き（PlayerCalled）の直後に届く HandUpdated は、宣言バナーの
+/// 保留を待たず同一フレームで適用されること（回帰テスト）。
+/// 保留すると、その間の打牌が保留明けの HandUpdated で巻き戻され、
+/// 手牌がサーバと恒久的に食い違う（捨てた牌が手牌に復活する）。
+#[test]
+fn test_own_call_applies_hand_update_in_same_frame() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    // 自分（東）のポン: サーバは PlayerCalled → HandUpdated の順で送る
+    state.queue_event(queued_pon(Wind::East));
+    let new_hand = vec![Tile::new(Tile::M1); 11];
+    state.queue_event(ServerEvent::HandUpdated {
+        hand: new_hand.clone(),
+    });
+    state.queue_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 60,
+    });
+    state.process_events(100.0);
+
+    // ポンと手牌更新が同一フレームで適用され、手牌は最新になる
+    assert_eq!(state.melds.len(), 1);
+    assert_eq!(state.hand, new_hand);
+    assert!(state.is_my_turn);
+
+    // 宣言バナーの保留自体は維持され、さらに後続のイベントは適用されない
+    assert_eq!(state.remaining_tiles, 70);
+    state.process_events(100.0 + CALL_HOLD_SECS);
+    assert_eq!(state.remaining_tiles, 60);
+}
+
+/// 未適用のサーバイベントが残っている間は入力を受け付けないこと
+/// （回帰テスト）。画面が古い状態のまま打牌すると、その打牌が
+/// 後続イベントの適用で巻き戻されてサーバと食い違う。
+#[test]
+fn test_input_blocked_while_events_pending() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    // リーチ中のツモ切り自動打牌はマウス入力なしで発火する
+    state.is_my_turn = true;
+    state.is_riichi = true;
+    state.drawn = Some(Tile::new(Tile::M1));
+
+    // 未適用イベントが残っている間は入力（自動打牌含む）を受け付けない
+    state.queue_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 60,
+    });
+    assert!(state.handle_input(None).is_none());
+    assert!(state.drawn.is_some());
+
+    // キューを消化すれば打牌できる
+    state.process_events(100.0);
+    assert!(matches!(
+        state.handle_input(None),
+        Some(ClientAction::Discard { tile: None })
+    ));
+}
+
 #[test]
 fn test_win_announcement_collapses_stale_action_ui() {
     let mut state = GameState::new();
