@@ -262,14 +262,6 @@ impl Translator {
         }
     }
 
-    /// 自分の手牌からの暗カン／加カンボタン（例: 日「{tile}カン」/ 英「{tile} Kan」）。
-    pub fn kan_with_tile(&self, tile: &str) -> String {
-        match self.lang {
-            Lang::Ja => format!("{tile}カン"),
-            Lang::En => format!("{tile} Kan"),
-        }
-    }
-
     /// 順位の接尾辞（日は常に「位」、英は序数接尾辞）。`rank` は 0 始まり。
     pub fn place_suffix(&self, rank: usize) -> &'static str {
         match self.lang {
@@ -366,6 +358,8 @@ pub enum Key {
     Riichi,
     /// 鳴き確認の見出し
     CallPrompt,
+    /// 自分の手番でのカン確認の見出し
+    SelfCallPrompt,
     /// ポン
     Pon,
     /// カン
@@ -591,6 +585,10 @@ impl Key {
             Key::CallPrompt => match lang {
                 Lang::Ja => "鳴きますか？",
                 Lang::En => "Call?",
+            },
+            Key::SelfCallPrompt => match lang {
+                Lang::Ja => "カンしますか？",
+                Lang::En => "Kan?",
             },
             Key::Pon => match lang {
                 Lang::Ja => "ポン",

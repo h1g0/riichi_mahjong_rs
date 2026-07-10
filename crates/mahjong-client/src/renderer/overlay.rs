@@ -43,6 +43,14 @@ const CALL_BTN_BASE_Y_NO_RON: f32 = 624.0;
 /// 鳴きオーバーレイパネルの高さ
 const CALL_OVERLAY_PANEL_H: f32 = 96.0;
 
+// ─── 自分の手番のカン／北抜きパネル定数 ──────────────────────────────────────
+/// セルフカン・北抜きパネルの下端 Y 座標（ツモ・リーチボタンより上に置く）
+const SELF_CALL_PANEL_BOTTOM_Y: f32 = 556.0;
+/// 各カン牌スプライトとそのボタンの間隔
+const SELF_CALL_TILE_GAP: f32 = 8.0;
+/// カン／北抜きボタン（牌＋ボタンのまとまり）どうしの間隔
+const SELF_CALL_UNIT_SPACING: f32 = 12.0;
+
 // ─── 和了ボタン定数 ──────────────────────────────────────────────────────────
 
 const AGARI_BTN_W: f32 = 200.0;
@@ -62,6 +70,7 @@ enum CallBtnKind {
     Pon,
     Chi,
     Kan,
+    Pei,
     Pass,
 }
 
@@ -85,6 +94,11 @@ fn draw_call_button(
             theme::rgb_pub(0x1a6633),
             theme::rgb_pub(0x0f4422),
             theme::rgb_pub(0x44aa66),
+        ),
+        CallBtnKind::Pei => (
+            theme::rgb_pub(0x1a7a3a),
+            theme::rgb_pub(0x0f4a22),
+            theme::rgb_pub(0x44cc66),
         ),
         CallBtnKind::Pass => (
             theme::rgba(0x232323, 0.9),
@@ -253,63 +267,11 @@ pub(super) fn draw_action_buttons(
         }
     }
 
-    // 暗カンボタン（和了・リーチ列の上に積む）
-    const KAN_BTN_W: f32 = 100.0;
-    const KAN_BTN_H: f32 = 40.0;
-    const KAN_BTN_Y: f32 = 510.0;
-    for (idx, tile) in state.self_kan_options.iter().enumerate() {
-        let x = AGARI_BTN_X + idx as f32 * (KAN_BTN_W + 10.0);
-        theme::draw_gradient_button(
-            x,
-            KAN_BTN_Y,
-            KAN_BTN_W,
-            KAN_BTN_H,
-            6.0,
-            theme::rgb_pub(0x1a3a99),
-            theme::rgb_pub(0x0f2260),
-            theme::rgb_pub(0x4466cc),
-            1.0,
-        );
-        theme::draw_text_centered(
-            font,
-            &tr.kan_with_tile(&tile.to_string()),
-            x + KAN_BTN_W / 2.0,
-            KAN_BTN_Y + KAN_BTN_H / 2.0 + 6.0,
-            SMALL_FONT,
-            WHITE,
-        );
-        if clicked && result.is_none() && hit_rect(mx, my, x, KAN_BTN_Y, KAN_BTN_W, KAN_BTN_H) {
-            result = Some(OverlayClick::Action(ClientAction::Kan {
-                tile_index: tile.get() as usize,
-            }));
-        }
-    }
-
-    // 北抜きボタン（三麻+北抜きあり時のみ。暗カンボタンの並びに置く）
-    if state.can_pei {
-        let x = AGARI_BTN_X + state.self_kan_options.len() as f32 * (KAN_BTN_W + 10.0);
-        theme::draw_gradient_button(
-            x,
-            KAN_BTN_Y,
-            KAN_BTN_W,
-            KAN_BTN_H,
-            6.0,
-            theme::rgb_pub(0x1a7a3a),
-            theme::rgb_pub(0x0f4a22),
-            theme::rgb_pub(0x44cc66),
-            1.0,
-        );
-        theme::draw_text_centered(
-            font,
-            tr.get(Key::Pei),
-            x + KAN_BTN_W / 2.0,
-            KAN_BTN_Y + KAN_BTN_H / 2.0 + 6.0,
-            SMALL_FONT,
-            WHITE,
-        );
-        if clicked && result.is_none() && hit_rect(mx, my, x, KAN_BTN_Y, KAN_BTN_W, KAN_BTN_H) {
-            result = Some(OverlayClick::Action(ClientAction::Pei));
-        }
+    // 暗カン・加カン／北抜きパネル（チー・ポンと同じ鳴きパネル調のUI）
+    if result.is_none()
+        && let Some(click) = draw_self_call_overlay(state, font, tile_textures, clicked, mx, my)
+    {
+        result = Some(click);
     }
 
     if !state.riichi_selection_mode && !state.is_riichi {
@@ -545,6 +507,105 @@ fn draw_call_overlay(
     );
     if clicked && result.is_none() && hit_rect(mx, my, pass_x, base_y, btn_w, btn_h) {
         result = Some(OverlayClick::Action(ClientAction::Pass));
+    }
+
+    result
+}
+
+// ─── 自分の手番のカン／北抜きパネル ──────────────────────────────────────────
+
+/// 自分の手番で可能な暗カン・加カン／北抜きを、チー・ポンと同じ鳴きパネル調の
+/// UI で描画する。牌はスプライトで示し、ボタンには役名のみを表示する。
+fn draw_self_call_overlay(
+    state: &GameState,
+    font: Option<&Font>,
+    tile_textures: &TileTextures,
+    clicked: bool,
+    mx: f32,
+    my: f32,
+) -> Option<OverlayClick> {
+    let tr = state.tr();
+
+    // 表示する各ユニット（牌スプライト＋ボタン）を組み立てる。
+    let mut units: Vec<(Tile, &'static str, CallBtnKind, ClientAction)> = Vec::new();
+    for tile in &state.self_kan_options {
+        units.push((
+            *tile,
+            tr.get(Key::Kan),
+            CallBtnKind::Kan,
+            ClientAction::Kan {
+                tile_index: tile.get() as usize,
+            },
+        ));
+    }
+    if state.can_pei {
+        units.push((
+            Tile::new(Tile::Z4),
+            tr.get(Key::Pei),
+            CallBtnKind::Pei,
+            ClientAction::Pei,
+        ));
+    }
+    if units.is_empty() {
+        return None;
+    }
+
+    let btn_w = CALL_BTN_W;
+    let btn_h = CALL_BTN_H;
+    let tile_w = CALL_PANEL_TILE_W;
+    let tile_h = CALL_PANEL_TILE_H;
+    let pad = CALL_PANEL_PAD;
+
+    // 1 ユニット = 牌スプライト＋間隔＋ボタン
+    let unit_w = tile_w + SELF_CALL_TILE_GAP + btn_w;
+    let units_w = units.len() as f32 * unit_w + (units.len() - 1) as f32 * SELF_CALL_UNIT_SPACING;
+
+    let panel_w = units_w + pad * 2.0;
+    let panel_h = CALL_OVERLAY_PANEL_H;
+    let panel_x = CALL_PANEL_RIGHT_X_NO_RON - panel_w;
+    let panel_y = SELF_CALL_PANEL_BOTTOM_Y - panel_h;
+    // ボタン下端をパネル下端から 8px 上げ（鳴きパネルと同じ余白）。
+    let base_y = SELF_CALL_PANEL_BOTTOM_Y - 8.0 - btn_h;
+    let base_x = panel_x + pad;
+
+    // パネル背景
+    theme::draw_panel(
+        panel_x,
+        panel_y,
+        panel_w,
+        panel_h,
+        8.0,
+        theme::rgba(0x050e08, 0.95),
+        theme::GOLD_DK,
+    );
+
+    draw_jp_text(
+        font,
+        tr.get(Key::SelfCallPrompt),
+        panel_x + pad,
+        panel_y + 30.0,
+        FONT_SIZE,
+        theme::GOLD_LT,
+    );
+
+    let mut result = None;
+    for (idx, (tile, label, kind, action)) in units.into_iter().enumerate() {
+        let unit_x = base_x + idx as f32 * (unit_w + SELF_CALL_UNIT_SPACING);
+        // 牌スプライト（ボタンと縦中央を揃える）
+        let tile_y = base_y + (btn_h - tile_h) / 2.0;
+        draw_tile_sprite(
+            tile_textures.for_tile(&tile),
+            unit_x,
+            tile_y,
+            tile_w - 8.0,
+            tile_h - 8.0,
+            WHITE,
+        );
+        let btn_x = unit_x + tile_w + SELF_CALL_TILE_GAP;
+        draw_call_button(font, btn_x, base_y, btn_w, btn_h, label, kind);
+        if clicked && result.is_none() && hit_rect(mx, my, btn_x, base_y, btn_w, btn_h) {
+            result = Some(OverlayClick::Action(action));
+        }
     }
 
     result
