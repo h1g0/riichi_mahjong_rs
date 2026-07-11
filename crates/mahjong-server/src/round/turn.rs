@@ -54,13 +54,20 @@ impl Round {
             return false;
         }
 
+        // 手出しなら打牌前のソート済み手牌内での位置を控える（他家の手牌演出用）
+        let hand_index = self.discard_hand_index(self.current_player, tile);
         let Some(discarded) = self.players[self.current_player].try_discard(tile) else {
             return false;
         };
 
         // 一発フラグは try_discard() 内で解除済み。
         // リーチ宣言牌の打牌は do_riichi() が別途処理し、そこでフラグを復元する。
-        self.announce_discard_and_check_calls(discarded, self.current_player, tile.is_none());
+        self.announce_discard_and_check_calls(
+            discarded,
+            self.current_player,
+            tile.is_none(),
+            hand_index,
+        );
 
         true
     }
@@ -183,6 +190,23 @@ impl Round {
         self.last_draw_was_dead_wall = false;
         self.push_draw_events(player_idx, tile, "pei_draw");
         true
+    }
+
+    /// 手出し打牌が手牌（ツモ牌を除く・ソート済み）の何枚目かを返す
+    ///
+    /// `Player::try_discard` と同じ検索（完全一致の先頭位置）を打牌前に行う。
+    /// ツモ切り（`tile` が None）や手牌に存在しない牌では None。
+    pub(super) fn discard_hand_index(
+        &self,
+        player_idx: usize,
+        tile: Option<Tile>,
+    ) -> Option<usize> {
+        let target = tile?;
+        self.players[player_idx]
+            .hand
+            .tiles()
+            .iter()
+            .position(|t| *t == target)
     }
 
     /// 指定プレイヤーの最後の捨て牌を「鳴かれた」としてマークする

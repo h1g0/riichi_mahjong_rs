@@ -439,10 +439,65 @@ pub(super) fn draw_tile_sprite_rotated(
     );
 }
 
+/// 他家のツモ牌を手牌の右に離して置くときの間隔（縮小サイズに合わせる）
+pub(super) const OTHER_DRAWN_GAP: f32 = 8.0;
+/// 手出しアニメーション: 抜かれた位置の空白を見せる時間（秒）
+pub(super) const TEDASHI_GAP_HOLD_SECS: f64 = 0.25;
+/// 手出しアニメーション: 空白を詰めるスライドの時間（秒）
+pub(super) const TEDASHI_SLIDE_SECS: f64 = 0.3;
+
+/// 手出しアニメーションの進捗を返す（0.0=空白表示中 〜 1.0=詰め完了）
+pub(super) fn tedashi_progress(elapsed: f64) -> f32 {
+    if elapsed < TEDASHI_GAP_HOLD_SECS {
+        return 0.0;
+    }
+    let t = (((elapsed - TEDASHI_GAP_HOLD_SECS) / TEDASHI_SLIDE_SECS).clamp(0.0, 1.0)) as f32;
+    // ease-out（減速して止まる）
+    1.0 - (1.0 - t) * (1.0 - t)
+}
+
+/// 手出し前後でセンタリング基準（手牌左端）がどれだけずれていたかを返す
+/// （打牌前の左端 X − 打牌後の左端 X）。
+///
+/// ツモ牌があった手出しでは打牌後も手牌の枚数が変わらないためズレなし。
+/// ツモ牌なし（鳴き直後の打牌）では1枚減るぶん中央寄せが半歩ずれる。
+fn tedashi_start_shift(had_drawn: bool, tile_step: f32) -> f32 {
+    if had_drawn { 0.0 } else { -tile_step / 2.0 }
+}
+
+/// 手出しアニメーション中の各牌の X オフセット（打牌後の位置に加算する）を返す。
+///
+/// - 空白より左の牌は動かない（センタリングのズレ分のみ）
+/// - 空白より右の牌は1枚ぶん右（打牌前の位置）から左へ詰める
+/// - 打牌時に張り出していたツモ牌は、ツモ牌スロットから手牌右端へ滑り込む
+pub(super) fn tedashi_tile_offset(
+    final_index: usize,
+    hand_count: usize,
+    gap_index: usize,
+    had_drawn: bool,
+    tile_step: f32,
+    drawn_gap: f32,
+    progress: f32,
+) -> f32 {
+    let shift = tedashi_start_shift(had_drawn, tile_step);
+    let from = if final_index < gap_index {
+        shift
+    } else if had_drawn && final_index + 1 == hand_count {
+        shift + tile_step + drawn_gap
+    } else {
+        shift + tile_step
+    };
+    from * (1.0 - progress)
+}
+
 /// 他プレイヤー（CPU）の手牌を描画する
 ///
 /// 捨て牌と同様に、正規化された「自分」視点（左→右）で描画し、
 /// Camera2D で盤面中心を軸に回転させて各家の位置に配置する。
+///
+/// 非公開の手牌ではツモ牌用のスロットを常に右端へ確保しておき、
+/// ツモ・打牌のたびにセンタリングで手牌全体が動かないようにする。
+/// ツモ牌は自分の手牌と同様、手牌の右へ間隔を空けて張り出す。
 pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
     let tw: f32 = 28.0; // 牌の自然な幅
     let th: f32 = 40.0; // 牌の自然な高さ
@@ -451,16 +506,22 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
     let hand_distance: f32 = 290.0; // 中心から手牌までの距離
 
     let base_y = BOARD_CENTER_Y + hand_distance;
+    let now = get_time();
 
     for other_idx in 0..(state.player_count - 1) {
         let relative_idx = other_idx + 1; // 1=下家, 2=対面, 3=上家（三麻では 1=下家, 2=上家）
         let other = &state.other_players[other_idx];
 
-        // 手牌＋副露の合計幅を計算してセンタリング
+        // 手牌＋ツモ牌スロット＋副露の合計幅を計算してセンタリング
         let hand_count = if other.revealed {
             other.hand.len()
         } else {
             other.concealed_count
+        };
+        let drawn_slot = if other.revealed {
+            0.0
+        } else {
+            OTHER_DRAWN_GAP + tile_step
         };
         let meld_widths: f32 = other.melds.iter().map(|m| calc_meld_width(m, tw, th)).sum();
         let meld_gaps = if other.melds.is_empty() {
@@ -468,12 +529,18 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
         } else {
             meld_gap + (other.melds.len() as f32 - 1.0) * meld_gap
         };
-        let total_width = hand_count as f32 * tile_step + meld_widths + meld_gaps;
+        let total_width = hand_count as f32 * tile_step + drawn_slot + meld_widths + meld_gaps;
         let start_x = BOARD_CENTER_X - total_width / 2.0;
 
         set_camera(&make_board_camera(
             PLAYER_ROTATIONS[rotation_index(relative_idx, state.player_count)],
         ));
+
+        // 進行中の手出しアニメーション（完了していれば無視する）
+        let anim = other.tedashi_anim.and_then(|a| {
+            let p = tedashi_progress(now - a.started_at);
+            (p < 1.0 && !other.revealed).then_some((a, p))
+        });
 
         // 手牌描画（左→右）
         let mut x = start_x;
@@ -483,17 +550,45 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
                 x += tile_step;
             }
         } else {
-            for _ in 0..other.concealed_count {
-                draw_tile_sprite(&tile_textures.back, x, base_y, tw, th, WHITE);
+            for i in 0..hand_count {
+                let offset = anim.map_or(0.0, |(a, p)| {
+                    tedashi_tile_offset(
+                        i,
+                        hand_count,
+                        a.gap_index,
+                        a.had_drawn,
+                        tile_step,
+                        OTHER_DRAWN_GAP,
+                        p,
+                    )
+                });
+                draw_tile_sprite(&tile_textures.back, x + offset, base_y, tw, th, WHITE);
                 x += tile_step;
             }
+
+            // ツモ牌（手牌の右へ間隔を空けて張り出す）
+            if other.has_drawn {
+                draw_tile_sprite(
+                    &tile_textures.back,
+                    x + OTHER_DRAWN_GAP,
+                    base_y,
+                    tw,
+                    th,
+                    WHITE,
+                );
+            }
+            x += drawn_slot;
         }
 
-        // 副露描画（手牌の続き）
+        // 副露描画（ツモ牌スロットの続き）。鳴き直後の手出しではセンタリングの
+        // ズレ分だけ手牌と一緒に滑らせる
+        let meld_offset = anim.map_or(0.0, |(a, p)| {
+            tedashi_start_shift(a.had_drawn, tile_step) * (1.0 - p)
+        });
         if !other.melds.is_empty() {
             x += meld_gap;
         }
-        let xs = other_meld_x_positions(&other.melds, tw, th, meld_gap, x);
+        let xs = other_meld_x_positions(&other.melds, tw, th, meld_gap, x + meld_offset);
         for (meld, &mx) in other.melds.iter().zip(&xs) {
             draw_meld_group(meld, mx, base_y, tw, th, tile_textures);
         }

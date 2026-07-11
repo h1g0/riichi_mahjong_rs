@@ -1071,6 +1071,7 @@ mod tests {
                     player: Wind::South,
                     tile: Tile::new(Tile::S9),
                     is_tsumogiri: true,
+                    hand_index: None,
                 },
             ],
         });

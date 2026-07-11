@@ -1792,3 +1792,57 @@ fn test_sanma_three_winds_draw() {
     }
     assert!(round.check_four_winds_draw(), "三麻の四風連打が成立しない");
 }
+
+/// 手出しの TileDiscarded は打牌前のソート済み手牌内での位置を含む
+#[test]
+fn test_tedashi_discard_event_includes_hand_index() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.drain_events();
+    round.do_draw();
+    round.drain_events();
+
+    // ソート済み手牌: 1m2m3m 1p2p3p 1s2s3s 1z2z3z4z（1p は 0始まりで3番目）
+    round.players[0].hand = Hand::from("123m123p123s1234z 5z");
+    assert!(round.do_discard(Some(Tile::new(Tile::P1))));
+
+    let events = round.drain_events();
+    let discarded = events
+        .iter()
+        .find_map(|(_, e)| match e {
+            crate::protocol::ServerEvent::TileDiscarded {
+                is_tsumogiri,
+                hand_index,
+                ..
+            } => Some((*is_tsumogiri, *hand_index)),
+            _ => None,
+        })
+        .expect("TileDiscarded イベントがない");
+    assert_eq!(discarded, (false, Some(3)));
+}
+
+/// ツモ切りの TileDiscarded は手牌内の位置を含まない
+#[test]
+fn test_tsumogiri_discard_event_has_no_hand_index() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.drain_events();
+    round.do_draw();
+    round.drain_events();
+
+    assert!(round.do_discard(None));
+
+    let events = round.drain_events();
+    let discarded = events
+        .iter()
+        .find_map(|(_, e)| match e {
+            crate::protocol::ServerEvent::TileDiscarded {
+                is_tsumogiri,
+                hand_index,
+                ..
+            } => Some((*is_tsumogiri, *hand_index)),
+            _ => None,
+        })
+        .expect("TileDiscarded イベントがない");
+    assert_eq!(discarded, (true, None));
+}

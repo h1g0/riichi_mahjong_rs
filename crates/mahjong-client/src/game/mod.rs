@@ -96,6 +96,20 @@ pub struct DiscardInfo {
     pub is_called: bool,
 }
 
+/// 他家の手出し打牌の詰めアニメーション状態
+///
+/// 実卓で「手牌のどこから切ったか」が見えるのと同様に、抜かれた位置へ
+/// 一瞬空白を見せてから右側の牌を左へ詰める演出に使う。
+#[derive(Debug, Clone, Copy)]
+pub struct TedashiAnim {
+    /// 打牌前のソート済み手牌（ツモ牌を除く）内で牌が抜かれた位置（0始まり）
+    pub gap_index: usize,
+    /// 打牌時にツモ牌が張り出していたか（ツモ牌が手牌右端へ滑り込む演出用）
+    pub had_drawn: bool,
+    /// アニメーション開始時刻（[`GameState::process_events`] に渡された now と同じ時計）
+    pub started_at: f64,
+}
+
 /// 他プレイヤーの手牌表示情報（相対インデックスで管理）
 #[derive(Debug, Clone)]
 pub struct OtherPlayerHand {
@@ -105,8 +119,12 @@ pub struct OtherPlayerHand {
     pub melds: Vec<Meld>,
     /// 手牌が公開されているか（和了時・テンパイ時）
     pub revealed: bool,
-    /// 非公開時の手牌枚数（裏向き表示用）
+    /// 非公開時の手牌枚数（ツモ牌を除く。裏向き表示用）
     pub concealed_count: usize,
+    /// ツモ牌が手牌の右に張り出しているか（ツモ後〜打牌・北抜きまで）
+    pub has_drawn: bool,
+    /// 直近の手出し打牌の詰めアニメーション状態
+    pub tedashi_anim: Option<TedashiAnim>,
 }
 
 impl OtherPlayerHand {
@@ -116,7 +134,19 @@ impl OtherPlayerHand {
             melds: Vec::new(),
             revealed: false,
             concealed_count: 13,
+            has_drawn: false,
+            tedashi_anim: None,
         }
+    }
+
+    /// 手牌＋ツモ牌から n 枚が消費された（打牌・副露・北抜き）ときの表示枚数更新。
+    ///
+    /// ツモ牌が張り出していた場合、残りは手牌へ組み入れられたとみなす
+    /// （サーバの `Player::try_discard` などと同じ挙動）。
+    fn consume_tiles(&mut self, n: usize) {
+        let total = self.concealed_count + usize::from(self.has_drawn);
+        self.concealed_count = total.saturating_sub(n);
+        self.has_drawn = false;
     }
 }
 
@@ -246,6 +276,9 @@ pub struct GameState {
     event_hold_until: f64,
     /// キュー先頭イベントの宣言バナーを表示済みか（適用前保留の管理用）
     head_announced: bool,
+    /// 直近に [`process_events`](Self::process_events) へ渡された時刻。
+    /// イベント適用時のアニメーション開始時刻として使う。
+    clock: f64,
     /// 表示言語
     pub lang: Lang,
 }
@@ -363,6 +396,7 @@ impl GameState {
             pending_events: VecDeque::new(),
             event_hold_until: 0.0,
             head_announced: false,
+            clock: 0.0,
             // 保存された表示言語を読み込む（未保存なら日本語）。
             // 「もう一度」などで new() が再生成されても選択を保つ。
             lang: crate::persistence::load_lang().unwrap_or(Lang::Ja),
@@ -464,6 +498,8 @@ impl GameState {
     /// 見え、プレイヤーが宣言に気付きやすくなる。和了・九種九牌はイベント
     /// 自体の適用（結果画面への遷移）も保留する。
     pub fn process_events(&mut self, now: f64) {
+        self.clock = now;
+
         // 表示時間を過ぎたバナーを片付ける
         for slot in &mut self.call_banners {
             if slot.is_some_and(|b| now - b.shown_at >= CALL_BANNER_SECS) {

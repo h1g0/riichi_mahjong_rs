@@ -152,6 +152,7 @@ fn test_sanma_relative_player_index_wraps_at_three() {
         player: Wind::East,
         tile: Tile::new(Tile::P3),
         is_tsumogiri: false,
+        hand_index: None,
     });
     assert_eq!(
         state.discards[1].len(),
@@ -342,6 +343,7 @@ fn test_called_tile_is_marked_in_river() {
         player: Wind::South,
         tile,
         is_tsumogiri: false,
+        hand_index: None,
     });
     assert_eq!(state.discards[1].len(), 1);
     assert!(!state.discards[1][0].is_called);
@@ -369,6 +371,7 @@ fn test_called_tile_marked_despite_stale_call_offer() {
         player: Wind::South,
         tile,
         is_tsumogiri: false,
+        hand_index: None,
     });
     // 対面（西）がチー → 古い call_discarder ではなく直前の打牌者を鳴き元とする
     state.handle_event(ServerEvent::PlayerCalled {
@@ -407,6 +410,7 @@ fn test_self_chi_sets_forbidden_swap_discards_and_clears_on_discard() {
         player: Wind::East,
         tile: Tile::new(Tile::P1),
         is_tsumogiri: false,
+        hand_index: None,
     });
     assert!(state.forbidden_discards.is_empty());
 }
@@ -608,6 +612,7 @@ fn test_riichi_banner_holds_declaration_discard() {
         player: Wind::West,
         tile: Tile::new(Tile::M1),
         is_tsumogiri: true,
+        hand_index: None,
     });
     state.process_events(100.0);
 
@@ -861,4 +866,154 @@ fn test_win_announcement_collapses_stale_action_ui() {
     assert!(state.available_calls.is_empty());
     assert!(!state.can_tsumo);
     assert_eq!(state.phase, GamePhase::Playing);
+}
+
+// ── 他家の手牌表示（ツモ牌の張り出しと手出しの詰め演出） ──────────────────
+
+/// 他家のツモは手牌の枚数を変えず、ツモ牌の張り出しだけを立てる
+/// （中央ぞろえで手牌全体が動かないようにするための回帰テスト）
+#[test]
+fn test_other_player_draw_marks_drawn_without_moving_hand() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.handle_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 69,
+    });
+
+    let other = &state.other_players[0];
+    assert!(other.has_drawn);
+    assert_eq!(other.concealed_count, 13, "ツモ牌は手牌の枚数に含めない");
+}
+
+/// ツモ切りでは手牌が動かず、詰め演出も発生しない
+#[test]
+fn test_other_player_tsumogiri_keeps_hand_untouched() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.handle_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 69,
+    });
+
+    state.handle_event(ServerEvent::TileDiscarded {
+        player: Wind::South,
+        tile: Tile::new(Tile::M1),
+        is_tsumogiri: true,
+        hand_index: None,
+    });
+
+    let other = &state.other_players[0];
+    assert!(!other.has_drawn);
+    assert_eq!(other.concealed_count, 13);
+    assert!(other.tedashi_anim.is_none(), "ツモ切りでは詰め演出をしない");
+}
+
+/// 手出しではツモ牌が手牌へ組み入れられ（枚数は変わらない）、
+/// 抜かれた位置の詰め演出が開始される
+#[test]
+fn test_other_player_tedashi_starts_gap_animation() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.queue_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 69,
+    });
+    state.queue_event(ServerEvent::TileDiscarded {
+        player: Wind::South,
+        tile: Tile::new(Tile::M1),
+        is_tsumogiri: false,
+        hand_index: Some(4),
+    });
+    state.process_events(100.0);
+
+    let other = &state.other_players[0];
+    assert!(!other.has_drawn);
+    assert_eq!(other.concealed_count, 13, "手出しではツモ牌が手牌へ入る");
+    let anim = other.tedashi_anim.expect("詰め演出が開始されていない");
+    assert_eq!(anim.gap_index, 4);
+    assert!(anim.had_drawn);
+    assert_eq!(anim.started_at, 100.0);
+}
+
+/// 鳴き直後の打牌（ツモ牌なしの手出し）では手牌が1枚減る
+#[test]
+fn test_other_player_tedashi_after_call_decrements_count() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.last_discarder = Some(Wind::East);
+
+    // 南家がポン（手牌13→11）してから打牌（→10）
+    state.handle_event(ServerEvent::PlayerCalled {
+        player: Wind::South,
+        call_type: CallType::Pon,
+        called_tile: Tile::new(Tile::S1),
+        tiles: vec![Tile::new(Tile::S1); 3],
+    });
+    assert_eq!(state.other_players[0].concealed_count, 11);
+
+    state.handle_event(ServerEvent::TileDiscarded {
+        player: Wind::South,
+        tile: Tile::new(Tile::M1),
+        is_tsumogiri: false,
+        hand_index: Some(0),
+    });
+
+    let other = &state.other_players[0];
+    assert_eq!(other.concealed_count, 10);
+    let anim = other.tedashi_anim.expect("詰め演出が開始されていない");
+    assert!(!anim.had_drawn);
+}
+
+/// 他家の暗カンではツモ牌込みで4枚が副露へ移る
+/// （回帰: 以前はツモ分を差し引かず、1枚多く表示されていた）
+#[test]
+fn test_other_player_ankan_consumes_four_tiles() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.handle_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 69,
+    });
+
+    state.handle_event(ServerEvent::PlayerCalled {
+        player: Wind::South,
+        call_type: CallType::Ankan,
+        called_tile: Tile::new(Tile::Z5),
+        tiles: vec![Tile::new(Tile::Z5); 4],
+    });
+
+    let other = &state.other_players[0];
+    assert_eq!(other.concealed_count, 10, "13枚＋ツモ1枚から4枚が副露へ");
+    assert!(!other.has_drawn);
+
+    // 嶺上ツモで再びツモ牌が張り出す
+    state.handle_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 68,
+    });
+    assert!(state.other_players[0].has_drawn);
+    assert_eq!(state.other_players[0].concealed_count, 10);
+}
+
+/// ツモ牌がある状態の北抜きでは手牌の枚数が変わらない
+/// （北はツモ牌または手牌から抜かれ、ツモ牌は手牌へ組み入れられる）
+#[test]
+fn test_sanma_pei_with_drawn_keeps_hand_count() {
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started(Wind::East));
+    state.handle_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 54,
+    });
+
+    state.handle_event(ServerEvent::PeiDeclared {
+        player: Wind::South,
+        pei_counts: [0, 1, 0, 0],
+    });
+
+    let other = &state.other_players[0];
+    assert_eq!(other.concealed_count, 13);
+    assert!(!other.has_drawn);
 }

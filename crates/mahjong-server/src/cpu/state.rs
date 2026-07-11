@@ -204,6 +204,7 @@ impl CpuGameState {
                 player,
                 tile,
                 is_tsumogiri,
+                ..
             } => {
                 let idx = Self::wind_to_index(*player);
                 self.all_discards[idx].push(*tile);
@@ -661,6 +662,7 @@ mod tests {
             player: Wind::South,
             tile: Tile::new(Tile::Z1),
             is_tsumogiri: false,
+            hand_index: None,
         });
 
         assert_eq!(state.all_discards[1].len(), 1);
@@ -681,6 +683,7 @@ mod tests {
             player: Wind::East,
             tile: Tile::new(Tile::M2),
             is_tsumogiri: false,
+            hand_index: None,
         });
 
         assert_eq!(state.my_drawn, None);
@@ -1035,6 +1038,7 @@ mod tests {
             player: Wind::East,
             tile: Tile::new(Tile::M1),
             is_tsumogiri: false,
+            hand_index: None,
         });
         assert_eq!(state.turn(), 1);
 
@@ -1043,6 +1047,7 @@ mod tests {
             player: Wind::South,
             tile: Tile::new(Tile::P5),
             is_tsumogiri: true,
+            hand_index: None,
         });
         assert_eq!(state.turn(), 2);
         assert_eq!(state.my_discards(), &[Tile::new(Tile::P5)]);
@@ -1085,6 +1090,7 @@ mod tests {
             player: Wind::East,
             tile: Tile::new(Tile::M1),
             is_tsumogiri: false,
+            hand_index: None,
         });
         state.update(&ServerEvent::PlayerCalled {
             player: Wind::South,
@@ -1169,6 +1175,7 @@ mod tests {
             player: Wind::East,
             tile: Tile::new(Tile::M1),
             is_tsumogiri: false,
+            hand_index: None,
         });
 
         assert!(state.my_drawn.is_none());
@@ -1193,6 +1200,7 @@ mod tests {
             player: Wind::East,
             tile: Tile::new(Tile::P5),
             is_tsumogiri: true,
+            hand_index: None,
         });
 
         assert!(state.my_drawn.is_none());
