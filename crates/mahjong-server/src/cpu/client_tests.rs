@@ -731,6 +731,7 @@ fn test_weak_folds_with_genbutsu_against_riichi() {
         player: Wind::South,
         tile: Tile::new(Tile::Z3),
         is_tsumogiri: false,
+        hand_index: None,
     });
     client.handle_event(&ServerEvent::PlayerRiichi {
         player: Wind::South,
@@ -772,6 +773,7 @@ fn test_defense_prefers_suji_over_dangerous_tiles() {
         player: Wind::South,
         tile: Tile::new(Tile::M4),
         is_tsumogiri: false,
+        hand_index: None,
     });
     client.handle_event(&ServerEvent::PlayerRiichi {
         player: Wind::South,
@@ -920,6 +922,7 @@ fn test_cheap_bad_shape_tenpai_folds_against_riichi() {
             player: Wind::West,
             tile: Tile::new(Tile::S2),
             is_tsumogiri: false,
+            hand_index: None,
         });
         client.handle_event(&ServerEvent::PlayerRiichi {
             player: Wind::West,
@@ -1002,6 +1005,7 @@ fn test_folds_against_three_meld_opponent() {
         player: Wind::South,
         tile: Tile::new(Tile::Z3),
         is_tsumogiri: false,
+        hand_index: None,
     });
     let action = client.handle_event(&draw_event(Tile::M5));
     let tile = discarded_tile(&action).expect("expected a hand discard");
@@ -1020,6 +1024,7 @@ fn test_folds_against_three_meld_opponent() {
         player: Wind::South,
         tile: Tile::new(Tile::Z3),
         is_tsumogiri: false,
+        hand_index: None,
     });
     let action = client.handle_event(&draw_event(Tile::M5));
     if let Some(t) = discarded_tile(&action) {
@@ -1060,6 +1065,7 @@ fn test_six_block_hand_dismantles_dead_kanchan_first() {
             player: Wind::West,
             tile: Tile::new(Tile::S3),
             is_tsumogiri: true,
+            hand_index: None,
         });
     }
     let action = client.handle_event(&draw_event(Tile::P8));
@@ -1214,6 +1220,7 @@ fn test_handle_event_returns_none_for_non_actionable() {
             player: Wind::South,
             tile: Tile::new(Tile::M1),
             is_tsumogiri: false,
+            hand_index: None,
         },
         ServerEvent::OtherPlayerDrew {
             player: Wind::South,

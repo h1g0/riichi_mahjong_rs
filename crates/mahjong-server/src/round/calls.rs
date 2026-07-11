@@ -21,6 +21,7 @@ impl Round {
         discarded: Tile,
         discarder: usize,
         is_tsumogiri: bool,
+        hand_index: Option<usize>,
     ) {
         // 全プレイヤーに打牌を通知
         let discarder_wind = self.players[discarder].seat_wind;
@@ -31,6 +32,7 @@ impl Round {
                     player: discarder_wind,
                     tile: discarded,
                     is_tsumogiri,
+                    hand_index,
                 },
             ));
         }

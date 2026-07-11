@@ -107,7 +107,8 @@ impl GameState {
                 self.remaining_tiles = remaining_tiles;
                 let relative_idx = self.relative_player_index(player);
                 if relative_idx > 0 {
-                    self.other_players[relative_idx - 1].concealed_count += 1;
+                    // ツモ牌は手牌の右に張り出して表示する（手牌の枚数には含めない）
+                    self.other_players[relative_idx - 1].has_drawn = true;
                 }
             }
 
@@ -115,6 +116,7 @@ impl GameState {
                 player,
                 tile,
                 is_tsumogiri,
+                hand_index,
             } => {
                 self.last_discarder = Some(player);
                 // 新しい打牌が出たら、過去の鳴き打診で残った call_discarder を捨てる。
@@ -132,12 +134,23 @@ impl GameState {
                     is_called: false,
                 });
 
-                // 他プレイヤーが捨てた場合、隠し手牌の枚数を更新
+                // 他プレイヤーが捨てた場合、隠し手牌の表示を更新
                 if relative_idx > 0 {
-                    let other_idx = relative_idx - 1;
-                    self.other_players[other_idx].concealed_count = self.other_players[other_idx]
-                        .concealed_count
-                        .saturating_sub(1);
+                    let started_at = self.clock;
+                    let other = &mut self.other_players[relative_idx - 1];
+                    let had_drawn = other.has_drawn;
+                    other.consume_tiles(1);
+                    // 手出しなら、抜かれた位置の空白を詰めるアニメーションを開始する
+                    // （ツモ切りは手牌が動かないので演出なし）
+                    other.tedashi_anim = if is_tsumogiri {
+                        None
+                    } else {
+                        hand_index.map(|gap_index| TedashiAnim {
+                            gap_index,
+                            had_drawn,
+                            started_at,
+                        })
+                    };
                 }
 
                 // 自分が捨てた場合
@@ -227,7 +240,6 @@ impl GameState {
                                 meld.category = MeldType::Kakan;
                                 meld.tiles = tiles.clone();
                                 // from はポン時のままにする
-                                other.concealed_count = other.concealed_count.saturating_sub(1);
                             } else {
                                 other.melds.push(Meld {
                                     category,
@@ -235,8 +247,9 @@ impl GameState {
                                     from: meld_from,
                                     called_tile: Some(called_tile),
                                 });
-                                other.concealed_count = other.concealed_count.saturating_sub(1);
                             }
+                            // 加カンは手牌かツモ牌から1枚を副露へ移す
+                            other.consume_tiles(1);
                         }
                         CallType::Ankan => {
                             other.melds.push(Meld {
@@ -245,7 +258,8 @@ impl GameState {
                                 from: MeldFrom::Myself,
                                 called_tile: None,
                             });
-                            other.concealed_count = other.concealed_count.saturating_sub(3);
+                            // 暗カンは手牌＋ツモ牌から4枚を副露へ移す
+                            other.consume_tiles(4);
                         }
                         CallType::Pon | CallType::Chi => {
                             other.melds.push(Meld {
@@ -254,7 +268,7 @@ impl GameState {
                                 from: meld_from,
                                 called_tile: Some(called_tile),
                             });
-                            other.concealed_count = other.concealed_count.saturating_sub(2);
+                            other.consume_tiles(2);
                         }
                         CallType::Daiminkan => {
                             other.melds.push(Meld {
@@ -263,7 +277,7 @@ impl GameState {
                                 from: meld_from,
                                 called_tile: Some(called_tile),
                             });
-                            other.concealed_count = other.concealed_count.saturating_sub(3);
+                            other.consume_tiles(3);
                         }
                     }
                 }
@@ -337,11 +351,10 @@ impl GameState {
 
             ServerEvent::PeiDeclared { player, pei_counts } => {
                 self.pei_counts = pei_counts;
-                // 他家の北抜きは手牌が1枚減って見える（補充ツモで戻る）
+                // 他家の北抜きは手牌かツモ牌から北が1枚消える（補充ツモで戻る）
                 let relative_idx = self.relative_player_index(player);
                 if relative_idx > 0 {
-                    let other = &mut self.other_players[relative_idx - 1];
-                    other.concealed_count = other.concealed_count.saturating_sub(1);
+                    self.other_players[relative_idx - 1].consume_tiles(1);
                 }
             }
 

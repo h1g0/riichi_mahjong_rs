@@ -132,6 +132,8 @@ impl Round {
         //   直後のdiscardでippatsu=falseにされてしまう。
         //   これを防ぐため、一時的にippatsuを保護する）
         let is_tsumogiri = tile.is_none();
+        // 手出しなら打牌前のソート済み手牌内での位置を控える（他家の手牌演出用）
+        let hand_index = self.discard_hand_index(player_idx, tile);
         let Some(discarded) = self.players[player_idx].try_discard(tile) else {
             self.players[player_idx].is_riichi = false;
             self.players[player_idx].is_double_riichi = false;
@@ -162,7 +164,7 @@ impl Round {
             ));
         }
 
-        self.announce_discard_and_check_calls(discarded, player_idx, is_tsumogiri);
+        self.announce_discard_and_check_calls(discarded, player_idx, is_tsumogiri, hand_index);
 
         true
     }

@@ -279,3 +279,61 @@ fn export_labeled_tiles_for_visual_check() {
         img.export_png(&format!("{out}/{name}_labeled.png"));
     }
 }
+
+// ── 他家の手出し詰めアニメーション ──────────────────────────────────────
+
+use super::tiles::{
+    TEDASHI_GAP_HOLD_SECS, TEDASHI_SLIDE_SECS, tedashi_progress, tedashi_tile_offset,
+};
+
+#[test]
+fn tedashi_progress_holds_gap_then_finishes() {
+    // 空白表示中は進捗0のまま
+    assert_eq!(tedashi_progress(0.0), 0.0);
+    assert_eq!(tedashi_progress(TEDASHI_GAP_HOLD_SECS * 0.9), 0.0);
+    // スライド中は0と1の間で単調に進む
+    let mid = tedashi_progress(TEDASHI_GAP_HOLD_SECS + TEDASHI_SLIDE_SECS / 2.0);
+    assert!(0.0 < mid && mid < 1.0);
+    // スライド終了以降は1に張り付く
+    assert_eq!(
+        tedashi_progress(TEDASHI_GAP_HOLD_SECS + TEDASHI_SLIDE_SECS),
+        1.0
+    );
+    assert_eq!(tedashi_progress(999.0), 1.0);
+}
+
+#[test]
+fn tedashi_offsets_show_gap_at_discarded_position() {
+    let (step, gap) = (28.0, 8.0);
+    // 13枚の手牌から5枚目（index 4）を手出し（ツモ牌あり）。
+    // 開始時点（進捗0）: 空白より左は動かず、右は1枚ぶん右にあり、
+    // 右端の牌（元ツモ牌）はツモ牌スロットの位置にある。
+    assert_eq!(tedashi_tile_offset(3, 13, 4, true, step, gap, 0.0), 0.0);
+    assert_eq!(tedashi_tile_offset(4, 13, 4, true, step, gap, 0.0), step);
+    assert_eq!(tedashi_tile_offset(11, 13, 4, true, step, gap, 0.0), step);
+    assert_eq!(
+        tedashi_tile_offset(12, 13, 4, true, step, gap, 0.0),
+        step + gap
+    );
+    // 完了時点（進捗1）: 全牌が最終位置（オフセットなし）
+    for i in 0..13 {
+        assert_eq!(tedashi_tile_offset(i, 13, 4, true, step, gap, 1.0), 0.0);
+    }
+}
+
+#[test]
+fn tedashi_offsets_without_drawn_include_recentering_shift() {
+    let (step, gap) = (28.0, 8.0);
+    // 鳴き直後の打牌（ツモ牌なし）: 1枚減るぶん中央寄せが半歩ずれるため、
+    // 空白より左の牌も半歩ぶんだけ滑る。
+    assert_eq!(
+        tedashi_tile_offset(0, 10, 2, false, step, gap, 0.0),
+        -step / 2.0
+    );
+    assert_eq!(
+        tedashi_tile_offset(5, 10, 2, false, step, gap, 0.0),
+        step / 2.0
+    );
+    // 最終位置ではオフセットなし
+    assert_eq!(tedashi_tile_offset(0, 10, 2, false, step, gap, 1.0), 0.0);
+}
