@@ -406,7 +406,7 @@ async fn main() {
 
             GamePhase::Playing => {
                 if let Some(ref mut adp) = adapter {
-                    let action = game_state.handle_input(overlay_click);
+                    let action = game_state.handle_input(overlay_click, get_time());
                     if let Some(act) = action {
                         adp.send_action(act);
                     }

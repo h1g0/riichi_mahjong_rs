@@ -232,14 +232,20 @@ fn test_riichi_drawn_north_holds_auto_discard_for_pei() {
     });
     assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
 
-    // 北抜き可能な間は自動ツモ切りを保留する
-    assert!(state.handle_input(None).is_none());
+    // 北抜き可能な間は、自動ツモ切りの待ち時間（#291）が過ぎても保留し続ける
+    assert!(state.handle_input(None, 100.0).is_none());
+    assert!(
+        state
+            .handle_input(None, 100.0 + RIICHI_AUTO_DISCARD_SECS * 2.0)
+            .is_none()
+    );
     assert!(state.drawn.is_some(), "自動ツモ切りが発火した");
 
     // 北抜きボタンのクリックで Pei アクションが発行される
-    let action = state.handle_input(Some(crate::renderer::OverlayClick::Action(
-        ClientAction::Pei,
-    )));
+    let action = state.handle_input(
+        Some(crate::renderer::OverlayClick::Action(ClientAction::Pei)),
+        100.0 + RIICHI_AUTO_DISCARD_SECS * 2.0,
+    );
     assert!(matches!(action, Some(ClientAction::Pei)));
 }
 
@@ -259,7 +265,8 @@ fn test_riichi_pei_pass_discards_drawn_north() {
     });
     assert!(state.can_pei);
 
-    let action = state.handle_input(Some(crate::renderer::OverlayClick::PassSelfCall));
+    // パスは待ち時間なしで即座にツモ切りされる
+    let action = state.handle_input(Some(crate::renderer::OverlayClick::PassSelfCall), 100.0);
     assert!(matches!(action, Some(ClientAction::Discard { tile: None })));
     assert!(state.drawn.is_none(), "ツモ切り後もツモ牌が残っている");
     assert!(!state.can_pei);
@@ -755,15 +762,90 @@ fn test_input_blocked_while_events_pending() {
         player: Wind::South,
         remaining_tiles: 60,
     });
-    assert!(state.handle_input(None).is_none());
+    assert!(state.handle_input(None, 100.0).is_none());
     assert!(state.drawn.is_some());
 
-    // キューを消化すれば打牌できる
+    // キューを消化すれば打牌できる（待ち時間経過後）
     state.process_events(100.0);
+    assert!(state.handle_input(None, 100.0).is_none());
     assert!(matches!(
-        state.handle_input(None),
+        state.handle_input(None, 100.0 + RIICHI_AUTO_DISCARD_SECS),
         Some(ClientAction::Discard { tile: None })
     ));
+}
+
+/// リーチ中の自動ツモ切りはツモ牌を表示したまま一定時間待ってから発火する
+/// （#291 回帰テスト）。以前は即時に打牌されツモ牌を確認できなかった。
+#[test]
+fn test_riichi_auto_discard_waits_before_firing() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.is_riichi = true;
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::M1),
+        remaining_tiles: 60,
+        can_tsumo: false,
+        can_riichi: false,
+        is_furiten: false,
+    });
+
+    // 待ち時間中は打牌されず、ツモ牌が表示されたまま
+    assert!(state.handle_input(None, 100.0).is_none());
+    assert!(state.drawn.is_some());
+    assert!(
+        state
+            .handle_input(None, 100.0 + RIICHI_AUTO_DISCARD_SECS / 2.0)
+            .is_none()
+    );
+    assert!(state.drawn.is_some());
+
+    // 待ち時間が経過したら自動でツモ切りする
+    assert!(matches!(
+        state.handle_input(None, 100.0 + RIICHI_AUTO_DISCARD_SECS),
+        Some(ClientAction::Discard { tile: None })
+    ));
+    assert!(state.drawn.is_none());
+}
+
+/// 自動ツモ切りの待ち時間は新しいツモのたびに取り直されること。
+/// 前巡の待機時刻が残ると、次のツモが即時に切られてしまう。
+#[test]
+fn test_riichi_auto_discard_timer_resets_on_new_draw() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.is_riichi = true;
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::M1),
+        remaining_tiles: 60,
+        can_tsumo: false,
+        can_riichi: false,
+        is_furiten: false,
+    });
+
+    // 1巡目: 待機開始 → 発火
+    assert!(state.handle_input(None, 100.0).is_none());
+    assert!(
+        state
+            .handle_input(None, 100.0 + RIICHI_AUTO_DISCARD_SECS)
+            .is_some()
+    );
+
+    // 2巡目のツモ: 待ち時間が取り直され、即時には切られない
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::M2),
+        remaining_tiles: 56,
+        can_tsumo: false,
+        can_riichi: false,
+        is_furiten: false,
+    });
+    let now = 110.0;
+    assert!(state.handle_input(None, now).is_none());
+    assert!(state.drawn.is_some());
+    assert!(
+        state
+            .handle_input(None, now + RIICHI_AUTO_DISCARD_SECS)
+            .is_some()
+    );
 }
 
 #[test]

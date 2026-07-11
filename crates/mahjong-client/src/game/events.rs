@@ -78,6 +78,8 @@ impl GameState {
                 is_furiten,
             } => {
                 self.drawn = Some(tile);
+                // 新しいツモに対して自動ツモ切りの待ち時間を取り直す
+                self.riichi_auto_discard_at = None;
                 self.remaining_tiles = remaining_tiles;
                 self.is_my_turn = true;
                 self.can_tsumo = can_tsumo;
