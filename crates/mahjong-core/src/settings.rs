@@ -53,6 +53,10 @@ pub struct Settings {
     /// 北抜きドラありかなしか（三人麻雀のみ有効。デフォルトはあり）
     /// ありの場合: 手番中に北風牌を晒して1枚につきドラ1として扱い、牌山から補充する。
     pub nuki_dora: bool,
+    /// 役満の包（責任払い）ありかなしか（デフォルトはあり）
+    /// ありの場合: 大三元・大四喜・四槓子を確定させる鳴きをさせたプレイヤーが、
+    /// ツモ和了なら全額、他家への放銃なら放銃者と折半で支払う。
+    pub yakuman_pao: bool,
 }
 
 impl Default for Settings {
@@ -75,6 +79,7 @@ impl Settings {
             forbid_swap_calling: true,
             three_player: false,
             nuki_dora: true,
+            yakuman_pao: true,
         }
     }
 

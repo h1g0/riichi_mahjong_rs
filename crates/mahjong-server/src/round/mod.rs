@@ -12,8 +12,10 @@ mod test_helpers;
 mod turn;
 mod win;
 
+use mahjong_core::scoring::score::ScoreItem;
 use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, TileType, Wind};
+use mahjong_core::winning_hand::name::Kind;
 
 use crate::player::Player;
 use crate::protocol::{AvailableCall, CallType, MeldTiles, PlayerHandInfo, ServerEvent};
@@ -118,6 +120,9 @@ pub struct Round {
     pub call_state: Option<CallState>,
     /// 直前のツモが嶺上牌か
     pub last_draw_was_dead_wall: bool,
+    /// 包（責任払い）の記録。プレイヤーごとの (確定した役満, 責任を負うプレイヤー) のリスト。
+    /// 大三元・大四喜・四槓子を確定させる鳴きが発生した時点で記録される。
+    pub pao: [Vec<(Kind, usize)>; 4],
     /// プレイヤー人数（四麻=4、三麻=3。三麻ではシート3はダミー）
     pub player_count: usize,
     /// ゲーム設定
@@ -253,9 +258,29 @@ impl Round {
             events,
             call_state: None,
             last_draw_was_dead_wall: false,
+            pao: std::array::from_fn(|_| Vec::new()),
             player_count,
             settings,
         }
+    }
+
+    /// 和了役に包（責任払い）の対象役満が含まれる場合、責任を負うプレイヤーを返す
+    ///
+    /// 複数の包が記録されている場合は、後から成立した包を優先する。
+    pub(super) fn pao_player_for_win(
+        &self,
+        winner: usize,
+        yaku_list: &[(ScoreItem, u32)],
+    ) -> Option<usize> {
+        self.pao[winner]
+            .iter()
+            .rev()
+            .find_map(|(pao_kind, liable)| {
+                yaku_list
+                    .iter()
+                    .any(|(item, _)| matches!(item, ScoreItem::Yaku(kind) if kind == pao_kind))
+                    .then_some(*liable)
+            })
     }
 
     /// 指定プレイヤーの次の手番プレイヤーを返す（プレイヤー人数で循環）

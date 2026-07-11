@@ -277,6 +277,64 @@ pub fn calculate_tsumo_score_deltas(
     deltas
 }
 
+/// ツモ和了の点数移動に包（責任払い）を適用する
+///
+/// 包のプレイヤーが他のプレイヤー全員分の支払いを肩代わりする。
+/// 本場ボーナスやツモ損（三麻）を含む支払い総額がそのまま包のプレイヤーに移る。
+///
+/// - `deltas`: `calculate_tsumo_score_deltas` の結果
+/// - `winner`: 和了プレイヤーのインデックス
+/// - `pao_player`: 責任払いを負うプレイヤーのインデックス（winner とは異なること）
+pub fn apply_pao_to_tsumo_deltas(deltas: &mut [i32; 4], winner: usize, pao_player: usize) {
+    let mut total_payment = 0i32;
+    for (i, delta) in deltas.iter_mut().enumerate() {
+        if i != winner {
+            total_payment += *delta;
+            *delta = 0;
+        }
+    }
+    deltas[pao_player] = total_payment;
+}
+
+/// ロン和了の点数移動を包（責任払い）込みで計算する
+///
+/// 包のプレイヤーと放銃者が和了点を折半して支払う。
+/// 本場ボーナスは放銃者が支払う。
+/// 放銃者自身が包のプレイヤーの場合は通常のロンと同じ（全額支払い）。
+///
+/// 戻り値: 各プレイヤーの点数変動 (正=増加、負=減少)。合計は必ず0。
+pub fn calculate_ron_score_deltas_with_pao(
+    winner: usize,
+    loser: usize,
+    pao_player: usize,
+    score_result: &ScoreResult,
+    winner_is_dealer: bool,
+    honba: usize,
+) -> [i32; 4] {
+    if pao_player == loser {
+        return calculate_ron_score_deltas(winner, loser, score_result, winner_is_dealer, honba);
+    }
+
+    let mut deltas = [0i32; 4];
+    let honba_bonus = honba as i32 * 300;
+
+    let ron_points = if winner_is_dealer {
+        score_result.dealer_ron as i32
+    } else {
+        score_result.non_dealer_ron as i32
+    };
+
+    // 折半（端数が出る場合は放銃者が多く支払う）
+    let pao_half = ron_points / 2;
+    let loser_half = ron_points - pao_half;
+
+    deltas[winner] = ron_points + honba_bonus;
+    deltas[loser] = -(loser_half + honba_bonus);
+    deltas[pao_player] = -pao_half;
+
+    deltas
+}
+
 /// 和了結果にドラ・赤ドラ・裏ドラの翻を加算する
 ///
 /// 役判定後の点数計算結果にドラ関連の翻を追加し、
@@ -618,6 +676,99 @@ mod tests {
         );
         // 1（タンヤオ）+ 2（北ドラ）+ 2（表示牌ドラ）= 5翻
         assert_eq!(score.han, 5);
+    }
+
+    fn make_yakuman_score() -> ScoreResult {
+        ScoreResult {
+            han: 13,
+            fu: 0,
+            rank: ScoreRank::Yakuman,
+            dealer_ron: 48000,
+            dealer_tsumo_all: 16000,
+            non_dealer_ron: 32000,
+            non_dealer_tsumo_dealer: 16000,
+            non_dealer_tsumo_non_dealer: 8000,
+            yaku_list: vec![(ScoreItem::Yaku(Kind::BigDragons), 13)],
+            has_opened: true,
+            fu_result: FuResult {
+                total: 0,
+                details: vec![],
+            },
+        }
+    }
+
+    /// 包のツモ和了: 包のプレイヤーが全額を支払う
+    #[test]
+    fn test_pao_tsumo_non_dealer_yakuman() {
+        let score = make_yakuman_score();
+        let mut deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 4);
+        apply_pao_to_tsumo_deltas(&mut deltas, 1, 2);
+        assert_eq!(deltas[0], 0);
+        assert_eq!(deltas[1], 32000); // 16000 + 8000 + 8000
+        assert_eq!(deltas[2], -32000); // 包が全額支払い
+        assert_eq!(deltas[3], 0);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    /// 包のツモ和了（本場あり）: 本場ボーナスも包のプレイヤーが支払う
+    #[test]
+    fn test_pao_tsumo_dealer_yakuman_with_honba() {
+        let score = make_yakuman_score();
+        let mut deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 2, 4);
+        apply_pao_to_tsumo_deltas(&mut deltas, 0, 3);
+        assert_eq!(deltas[0], 48600); // (16000+200) * 3
+        assert_eq!(deltas[1], 0);
+        assert_eq!(deltas[2], 0);
+        assert_eq!(deltas[3], -48600);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    /// 三麻の包ツモ: ツモ損による欠損はそのまま（総額のみ肩代わり）
+    #[test]
+    fn test_pao_tsumo_sanma_tsumo_loss() {
+        let score = make_yakuman_score();
+        let mut deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3);
+        apply_pao_to_tsumo_deltas(&mut deltas, 1, 2);
+        assert_eq!(deltas[0], 0);
+        assert_eq!(deltas[1], 24000); // 16000 + 8000（ツモ損）
+        assert_eq!(deltas[2], -24000);
+        assert_eq!(deltas[3], 0);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    /// 包のロン和了（他家への放銃）: 放銃者と包のプレイヤーで折半
+    #[test]
+    fn test_pao_ron_split_between_loser_and_pao() {
+        let score = make_yakuman_score();
+        let deltas = calculate_ron_score_deltas_with_pao(1, 3, 0, &score, false, 0);
+        assert_eq!(deltas[1], 32000);
+        assert_eq!(deltas[3], -16000); // 放銃者が半額
+        assert_eq!(deltas[0], -16000); // 包が半額
+        assert_eq!(deltas[2], 0);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    /// 包のロン和了（本場あり）: 本場ボーナスは放銃者が支払う
+    #[test]
+    fn test_pao_ron_honba_paid_by_loser() {
+        let score = make_yakuman_score();
+        let deltas = calculate_ron_score_deltas_with_pao(1, 3, 0, &score, false, 2);
+        assert_eq!(deltas[1], 32600);
+        assert_eq!(deltas[3], -16600); // 半額 + 本場600
+        assert_eq!(deltas[0], -16000);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    /// 包のプレイヤー自身への放銃: 通常のロンと同じ（全額支払い）
+    #[test]
+    fn test_pao_ron_from_pao_player_pays_full() {
+        let score = make_yakuman_score();
+        let deltas = calculate_ron_score_deltas_with_pao(1, 0, 0, &score, false, 1);
+        assert_eq!(deltas[1], 32300);
+        assert_eq!(deltas[0], -32300);
+        assert_eq!(deltas[2], 0);
+        assert_eq!(deltas[3], 0);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 
     #[test]
