@@ -210,6 +210,7 @@ impl GameState {
     pub fn handle_input(
         &mut self,
         overlay_click: Option<crate::renderer::OverlayClick>,
+        now: f64,
     ) -> Option<ClientAction> {
         use crate::renderer::OverlayClick;
 
@@ -224,8 +225,16 @@ impl GameState {
             return None;
         }
 
-        // リーチ中はツモ切り自動処理（マウス入力不要）
+        // リーチ中はツモ切り自動処理（マウス入力不要）。
+        // ツモ牌をプレイヤーが確認できるよう、表示してから一定時間待って捨てる（#291）。
         if self.is_my_turn && self.is_riichi && self.drawn.is_some() && !self.can_tsumo {
+            let deadline = *self
+                .riichi_auto_discard_at
+                .get_or_insert(now + RIICHI_AUTO_DISCARD_SECS);
+            if now < deadline {
+                return None;
+            }
+            self.riichi_auto_discard_at = None;
             self.drawn.take();
             return Some(ClientAction::Discard { tile: None });
         }

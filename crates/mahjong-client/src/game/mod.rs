@@ -36,6 +36,8 @@ pub const CALL_HOLD_SECS: f64 = 0.9;
 pub const WIN_HOLD_SECS: f64 = 1.2;
 /// 宣言バナーの表示時間（秒）
 pub const CALL_BANNER_SECS: f64 = 1.5;
+/// リーチ中の自動ツモ切りまでの待ち時間（秒）。ツモ牌を見せてから捨てる。
+pub const RIICHI_AUTO_DISCARD_SECS: f64 = 1.0;
 
 /// 鳴き・リーチなどの宣言バナー（発声の代わりに画面へ表示する吹き出し）
 #[derive(Debug, Clone, Copy)]
@@ -158,6 +160,8 @@ pub struct GameState {
     pub self_kan_options: Vec<Tile>,
     /// 自分がリーチ中か
     pub is_riichi: bool,
+    /// リーチ中の自動ツモ切りを実行する時刻（ツモ牌を見せる待機中のみ Some）
+    riichi_auto_discard_at: Option<f64>,
     /// リーチ宣言のための打牌選択中か
     pub riichi_selection_mode: bool,
     /// リーチ可能な手牌インデックス
@@ -354,6 +358,7 @@ impl GameState {
             nuki_dora: false,
             pei_counts: [0; 4],
             can_pei: false,
+            riichi_auto_discard_at: None,
             call_banners: [None; 4],
             pending_events: VecDeque::new(),
             event_hold_until: 0.0,
