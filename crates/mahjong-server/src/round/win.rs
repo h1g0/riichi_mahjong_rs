@@ -234,7 +234,7 @@ impl Round {
         );
 
         // 点数移動を計算（三麻はツモ損: いない北家分は貰えない）
-        let deltas = scoring::calculate_tsumo_score_deltas(
+        let mut deltas = scoring::calculate_tsumo_score_deltas(
             winner,
             &score_result,
             winner_is_dealer,
@@ -242,6 +242,10 @@ impl Round {
             self.honba,
             self.player_count,
         );
+        // 包（責任払い）: 対象役満が成立していれば包のプレイヤーが全額を支払う
+        if let Some(pao_player) = self.pao_player_for_win(winner, &score_result.yaku_list) {
+            scoring::apply_pao_to_tsumo_deltas(&mut deltas, winner, pao_player);
+        }
         let riichi_sticks = self.riichi_sticks;
 
         // 点数を適用

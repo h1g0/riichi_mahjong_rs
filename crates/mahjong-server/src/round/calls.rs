@@ -1,6 +1,8 @@
 //! 鳴き（ロン・ポン・カン・チー）の判定と解決
 
+use mahjong_core::hand_info::meld::MeldType;
 use mahjong_core::tile::{Tile, TileType};
+use mahjong_core::winning_hand::name::Kind;
 
 use crate::player::Player;
 use crate::protocol::{AvailableCall, CallType, DrawReason, ServerEvent};
@@ -391,13 +393,27 @@ impl Round {
             );
 
             let winner_is_dealer = self.players[winner].is_dealer();
-            let deltas = scoring::calculate_ron_score_deltas(
-                winner,
-                loser,
-                &score_result,
-                winner_is_dealer,
-                honba_for_this,
-            );
+            // 包（責任払い）: 対象役満が成立していれば包のプレイヤーが放銃者と折半で支払う
+            let deltas = if let Some(pao_player) =
+                self.pao_player_for_win(winner, &score_result.yaku_list)
+            {
+                scoring::calculate_ron_score_deltas_with_pao(
+                    winner,
+                    loser,
+                    pao_player,
+                    &score_result,
+                    winner_is_dealer,
+                    honba_for_this,
+                )
+            } else {
+                scoring::calculate_ron_score_deltas(
+                    winner,
+                    loser,
+                    &score_result,
+                    winner_is_dealer,
+                    honba_for_this,
+                )
+            };
 
             // 供託棒は打順最優先の和了者（winner_data の先頭）のみ取得
             let riichi_bonus = if winner_data.is_empty() {
@@ -481,6 +497,48 @@ impl Round {
         });
     }
 
+    /// 包（責任払い）の成立を判定して記録する
+    ///
+    /// ポン・大明カンの直後に呼ぶ。鳴きによって役満が確定した場合、
+    /// 鳴かせたプレイヤー（discarder）を責任払いの対象として記録する。
+    /// - 大三元: 3種類目の三元牌の刻子を鳴きで完成させた
+    /// - 大四喜: 4種類目の風牌の刻子を鳴きで完成させた
+    /// - 四槓子: 4回目のカンを大明カンで完成させた
+    fn record_pao_if_confirmed(
+        &mut self,
+        caller: usize,
+        discarder: usize,
+        called_tile: Tile,
+        is_daiminkan: bool,
+    ) {
+        if !self.settings.yakuman_pao {
+            return;
+        }
+
+        let tt = called_tile.get();
+        let count_melds_in = |range: std::ops::RangeInclusive<TileType>| {
+            self.players[caller]
+                .hand
+                .melds()
+                .iter()
+                .filter(|meld| meld.category != MeldType::Chi)
+                .filter(|meld| range.contains(&meld.tiles[0].get()))
+                .count()
+        };
+        let dragon_meld_count = count_melds_in(Tile::Z5..=Tile::Z7);
+        let wind_meld_count = count_melds_in(Tile::Z1..=Tile::Z4);
+
+        if (Tile::Z5..=Tile::Z7).contains(&tt) && dragon_meld_count == 3 {
+            self.pao[caller].push((Kind::BigDragons, discarder));
+        }
+        if (Tile::Z1..=Tile::Z4).contains(&tt) && wind_meld_count == 4 {
+            self.pao[caller].push((Kind::BigWinds, discarder));
+        }
+        if is_daiminkan && self.players[caller].kan_count() == 4 {
+            self.pao[caller].push((Kind::FourQuads, discarder));
+        }
+    }
+
     /// ポンを実行する
     pub(super) fn execute_pon(
         &mut self,
@@ -491,6 +549,7 @@ impl Round {
     ) {
         let from = Player::meld_from_relative(caller, discarder, self.player_count);
         self.players[caller].do_pon(called_tile, hand_tile_types, from);
+        self.record_pao_if_confirmed(caller, discarder, called_tile, false);
 
         // 捨て牌を「鳴かれた」としてマーク
         self.mark_last_discard_as_called(discarder);
@@ -538,6 +597,7 @@ impl Round {
     pub(super) fn execute_daiminkan(&mut self, caller: usize, discarder: usize, called_tile: Tile) {
         let from = Player::meld_from_relative(caller, discarder, self.player_count);
         self.players[caller].do_daiminkan(called_tile, from);
+        self.record_pao_if_confirmed(caller, discarder, called_tile, true);
 
         self.mark_last_discard_as_called(discarder);
         self.invalidate_first_turn_flags();

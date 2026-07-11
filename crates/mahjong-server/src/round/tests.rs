@@ -1607,6 +1607,175 @@ fn test_pei_win_adds_pei_dora() {
     );
 }
 
+// ===== 役満の包（責任払い #134） =====
+
+/// 3種類目の三元牌をポンさせたプレイヤーが包として記録される
+#[test]
+fn test_pao_recorded_on_third_dragon_pon() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    // プレイヤー1: 白・發をポン済みで、手牌に中が2枚
+    round.players[1].hand = Hand::from("34m88s77z 555z 666z");
+
+    round.execute_pon(
+        1,
+        0,
+        Tile::new(Tile::Z7),
+        [Tile::new(Tile::Z7), Tile::new(Tile::Z7)],
+    );
+
+    assert_eq!(round.pao[1], vec![(Kind::BigDragons, 0)]);
+}
+
+/// 2種類目の三元牌のポンでは包は記録されない
+#[test]
+fn test_pao_not_recorded_on_second_dragon_pon() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    // プレイヤー1: 白のみポン済み
+    round.players[1].hand = Hand::from("34m88s66z77z 555z");
+
+    round.execute_pon(
+        1,
+        0,
+        Tile::new(Tile::Z6),
+        [Tile::new(Tile::Z6), Tile::new(Tile::Z6)],
+    );
+
+    assert!(round.pao[1].is_empty());
+}
+
+/// 4種類目の風牌をポンさせたプレイヤーが包として記録される
+#[test]
+fn test_pao_recorded_on_fourth_wind_pon() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    // プレイヤー1: 東・南・西をポン済みで、手牌に北が2枚
+    round.players[1].hand = Hand::from("88s44z 111z 222z 333z");
+
+    round.execute_pon(
+        1,
+        2,
+        Tile::new(Tile::Z4),
+        [Tile::new(Tile::Z4), Tile::new(Tile::Z4)],
+    );
+
+    assert_eq!(round.pao[1], vec![(Kind::BigWinds, 2)]);
+}
+
+/// 4回目のカンを大明カンさせたプレイヤーが包として記録される
+#[test]
+fn test_pao_recorded_on_fourth_kan_daiminkan() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    // プレイヤー1: 3回カン済みで、手牌に東が3枚
+    round.players[1].hand = Hand::from("44p111z 1111m 2222s 9999p");
+
+    round.execute_daiminkan(1, 0, Tile::new(Tile::Z1));
+
+    assert_eq!(round.pao[1], vec![(Kind::FourQuads, 0)]);
+}
+
+/// yakuman_pao 無効時は包が記録されない
+#[test]
+fn test_pao_not_recorded_when_disabled() {
+    let settings = Settings {
+        yakuman_pao: false,
+        ..Settings::new()
+    };
+    let mut round = Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
+    round.players[1].hand = Hand::from("34m88s77z 555z 666z");
+
+    round.execute_pon(
+        1,
+        0,
+        Tile::new(Tile::Z7),
+        [Tile::new(Tile::Z7), Tile::new(Tile::Z7)],
+    );
+
+    assert!(round.pao[1].is_empty());
+}
+
+/// 包ありの大三元ツモ: 包のプレイヤーが全額を支払う
+#[test]
+fn test_pao_tsumo_daisangen_full_payment() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.drain_events();
+    round.pao[1] = vec![(Kind::BigDragons, 0)];
+    round.players[1].hand = Hand::from("34m88s 555z 666z 777z 2m");
+    round.players[1].is_first_turn = false;
+    round.current_player = 1;
+    round.phase = TurnPhase::WaitForDiscard;
+
+    assert!(round.do_tsumo());
+
+    // 子の役満ツモ32000点を包のプレイヤー0が全額支払う
+    assert_eq!(round.players[0].score, 25000 - 32000);
+    assert_eq!(round.players[1].score, 25000 + 32000);
+    assert_eq!(round.players[2].score, 25000);
+    assert_eq!(round.players[3].score, 25000);
+}
+
+/// 包ありの大三元ロン（他家に放銃）: 放銃者と包のプレイヤーで折半
+#[test]
+fn test_pao_ron_daisangen_split_payment() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.drain_events();
+    round.pao[1] = vec![(Kind::BigDragons, 0)];
+    round.players[1].hand = Hand::from("34m88s 555z 666z 777z");
+    round.players[1].is_first_turn = false;
+
+    round.execute_ron(vec![1], 3, Tile::new(Tile::M2), false);
+
+    // 子の役満ロン32000点を放銃者3と包のプレイヤー0で折半
+    assert_eq!(round.players[0].score, 25000 - 16000);
+    assert_eq!(round.players[1].score, 25000 + 32000);
+    assert_eq!(round.players[2].score, 25000);
+    assert_eq!(round.players[3].score, 25000 - 16000);
+}
+
+/// 包のプレイヤー自身への放銃: 通常のロンと同じ（全額支払い）
+#[test]
+fn test_pao_ron_from_pao_player_pays_full_amount() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.drain_events();
+    round.pao[1] = vec![(Kind::BigDragons, 0)];
+    round.players[1].hand = Hand::from("34m88s 555z 666z 777z");
+    round.players[1].is_first_turn = false;
+
+    round.execute_ron(vec![1], 0, Tile::new(Tile::M2), false);
+
+    assert_eq!(round.players[0].score, 25000 - 32000);
+    assert_eq!(round.players[1].score, 25000 + 32000);
+    assert_eq!(round.players[2].score, 25000);
+    assert_eq!(round.players[3].score, 25000);
+}
+
+/// 記録された包と異なる役満で和了した場合は通常の支払い
+#[test]
+fn test_pao_not_applied_for_unrelated_yakuman() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.drain_events();
+    // 四槓子の包が記録されているが、和了は大三元（四槓子は不成立）
+    round.pao[1] = vec![(Kind::FourQuads, 0)];
+    round.players[1].hand = Hand::from("34m88s 555z 666z 777z 2m");
+    round.players[1].is_first_turn = false;
+    round.current_player = 1;
+    round.phase = TurnPhase::WaitForDiscard;
+
+    assert!(round.do_tsumo());
+
+    // 通常のツモ支払い: 親16000・子8000ずつ
+    assert_eq!(round.players[0].score, 25000 - 16000);
+    assert_eq!(round.players[1].score, 25000 + 32000);
+    assert_eq!(round.players[2].score, 25000 - 8000);
+    assert_eq!(round.players[3].score, 25000 - 8000);
+}
+
 #[test]
 fn test_sanma_three_winds_draw() {
     let mut round = sanma_round(42, 0);
