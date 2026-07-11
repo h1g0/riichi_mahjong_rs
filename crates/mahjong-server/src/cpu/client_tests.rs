@@ -1,6 +1,7 @@
 //! `CpuClient` のユニットテスト
 
 use super::*;
+use crate::protocol::CallType;
 use mahjong_core::tile::Wind;
 
 fn game_started_event(seat_wind: Wind, hand: Vec<Tile>) -> ServerEvent {
@@ -177,6 +178,49 @@ fn test_consider_pei_none_when_wall_empty() {
     client.state.my_drawn = Some(Tile::new(Tile::Z4));
 
     assert_eq!(client.consider_pei(), None);
+}
+
+/// 回帰テスト: 自分の鳴きを伴わない HandUpdated（打牌却下時の再同期 #294）
+/// に打牌を返さないこと
+///
+/// 返してしまうと「却下 → 再同期 HandUpdated → 再打牌 → 却下」の無限ループで
+/// CPU（代打ち含む）の手番が進まなくなり、局全体が停止する。
+#[test]
+fn test_resync_hand_updated_does_not_trigger_discard() {
+    let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
+    let mut client = CpuClient::new(config);
+    client.state.my_seat_wind = Wind::South;
+
+    let hand = vec![
+        Tile::new(Tile::M1),
+        Tile::new(Tile::M2),
+        Tile::new(Tile::M3),
+        Tile::new(Tile::P4),
+        Tile::new(Tile::P5),
+        Tile::new(Tile::P6),
+        Tile::new(Tile::S7),
+        Tile::new(Tile::S8),
+        Tile::new(Tile::S9),
+        Tile::new(Tile::Z1),
+        Tile::new(Tile::Z1),
+    ];
+
+    // 再同期の HandUpdated（自分の鳴きなし）: 打牌しない
+    let action = client.handle_event(&ServerEvent::HandUpdated { hand: hand.clone() });
+    assert_eq!(action, None, "再同期の HandUpdated に打牌を返している");
+
+    // 自分のポンに続く HandUpdated: 従来どおり打牌する
+    client.handle_event(&ServerEvent::PlayerCalled {
+        player: Wind::South,
+        call_type: CallType::Pon,
+        called_tile: Tile::new(Tile::Z5),
+        tiles: vec![Tile::new(Tile::Z5); 3],
+    });
+    let action = client.handle_event(&ServerEvent::HandUpdated { hand });
+    assert!(
+        matches!(action, Some(ClientAction::Discard { .. })),
+        "ポン直後の HandUpdated で打牌していない"
+    );
 }
 
 #[test]

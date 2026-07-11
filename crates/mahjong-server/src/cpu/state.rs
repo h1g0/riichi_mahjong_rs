@@ -72,6 +72,12 @@ pub struct CpuGameState {
     pub need_discard_after_call: bool,
     /// 直前の鳴きがカン系（嶺上ツモ待ち）か
     pub pending_kan_draw: bool,
+    /// 自分のポン・チーが成立し、直後の HandUpdated で打牌判断が必要か
+    ///
+    /// HandUpdated は打牌却下時の再同期（#294）にも使われるため、
+    /// 受信しただけでは打牌が必要とは限らない。自分の PlayerCalled
+    /// （ポン・チー）に続く HandUpdated のみを打牌トリガーにする。
+    pub pending_call_discard: bool,
 }
 
 impl CpuGameState {
@@ -104,6 +110,7 @@ impl CpuGameState {
             pending_call_tile: None,
             need_discard_after_call: false,
             pending_kan_draw: false,
+            pending_call_discard: false,
         }
     }
 
@@ -168,6 +175,7 @@ impl CpuGameState {
                 self.pending_call_tile = None;
                 self.need_discard_after_call = false;
                 self.pending_kan_draw = false;
+                self.pending_call_discard = false;
             }
 
             ServerEvent::TileDrawn {
@@ -183,6 +191,7 @@ impl CpuGameState {
                 self.can_riichi = *can_riichi;
                 self.is_furiten = *is_furiten;
                 self.need_discard_after_call = false;
+                self.pending_call_discard = false;
             }
 
             ServerEvent::OtherPlayerDrew {
@@ -281,6 +290,9 @@ impl CpuGameState {
                     call_type,
                     CallType::Ankan | CallType::Daiminkan | CallType::Kakan
                 );
+                // 自分のポン・チーなら直後の HandUpdated で打牌判断が必要
+                self.pending_call_discard = *player == self.my_seat_wind
+                    && matches!(call_type, CallType::Pon | CallType::Chi);
             }
 
             ServerEvent::PlayerRiichi {
@@ -316,10 +328,14 @@ impl CpuGameState {
                 if self.pending_kan_draw {
                     // カン系: 嶺上ツモ（TileDrawn）が来るまで打牌不要
                     self.pending_kan_draw = false;
-                } else {
+                } else if self.pending_call_discard {
                     // ポン/チー後: 打牌が必要
+                    self.pending_call_discard = false;
                     self.need_discard_after_call = true;
                 }
+                // それ以外は打牌却下時の再同期（#294）など手牌の同期のみで、
+                // 打牌してはいけない。ここで打牌すると「却下 → 再同期 →
+                // 再打牌 → 却下」の無限ループで局が停止する。
             }
 
             ServerEvent::RoundWon { scores, .. } => {
@@ -820,6 +836,8 @@ mod tests {
     fn test_hand_updated_after_open_call_requires_discard() {
         let mut state = CpuGameState::new();
         state.my_drawn = Some(Tile::new(Tile::S9));
+        // 自分のポン・チー（PlayerCalled）を受けた直後の状態
+        state.pending_call_discard = true;
 
         state.update(&ServerEvent::HandUpdated {
             hand: vec![Tile::new(Tile::M1), Tile::new(Tile::M2)],
@@ -831,7 +849,64 @@ mod tests {
         );
         assert_eq!(state.my_drawn, None);
         assert!(state.need_discard_after_call);
+        assert!(!state.pending_call_discard);
         assert!(!state.pending_kan_draw);
+    }
+
+    /// 回帰テスト: 自分の鳴きを伴わない HandUpdated（打牌却下時の再同期 #294）
+    /// では打牌判断を始めないこと。ここで打牌すると「却下 → 再同期 →
+    /// 再打牌 → 却下」の無限ループでCPU代打ち中の局が停止していた。
+    #[test]
+    fn test_hand_updated_without_own_call_is_resync_only() {
+        let mut state = CpuGameState::new();
+        state.my_drawn = Some(Tile::new(Tile::S9));
+
+        state.update(&ServerEvent::HandUpdated {
+            hand: vec![Tile::new(Tile::M1), Tile::new(Tile::M2)],
+        });
+
+        // 手牌は同期されるが、打牌は要求されない
+        assert_eq!(
+            state.my_hand,
+            vec![Tile::new(Tile::M1), Tile::new(Tile::M2)]
+        );
+        assert_eq!(state.my_drawn, None);
+        assert!(!state.need_discard_after_call);
+    }
+
+    /// 自分のポン・チーの PlayerCalled だけが pending_call_discard を立てること
+    #[test]
+    fn test_pending_call_discard_set_only_by_own_open_call() {
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::South;
+
+        // 他家（西）のポンでは立たない
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::West,
+            call_type: CallType::Pon,
+            called_tile: Tile::new(Tile::M2),
+            tiles: vec![Tile::new(Tile::M2); 3],
+        });
+        assert!(!state.pending_call_discard);
+
+        // 自分（南）のポンで立つ
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::South,
+            call_type: CallType::Pon,
+            called_tile: Tile::new(Tile::M3),
+            tiles: vec![Tile::new(Tile::M3); 3],
+        });
+        assert!(state.pending_call_discard);
+
+        // 自分のカンでは立たない（嶺上ツモ待ち）
+        state.update(&ServerEvent::PlayerCalled {
+            player: Wind::South,
+            call_type: CallType::Ankan,
+            called_tile: Tile::new(Tile::S7),
+            tiles: vec![Tile::new(Tile::S7); 4],
+        });
+        assert!(!state.pending_call_discard);
+        assert!(state.pending_kan_draw);
     }
 
     #[test]
