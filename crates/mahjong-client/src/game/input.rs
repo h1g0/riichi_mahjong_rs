@@ -227,7 +227,13 @@ impl GameState {
 
         // リーチ中はツモ切り自動処理（マウス入力不要）。
         // ツモ牌をプレイヤーが確認できるよう、表示してから一定時間待って捨てる（#291）。
-        if self.is_my_turn && self.is_riichi && self.drawn.is_some() && !self.can_tsumo {
+        // ツモ和了・北抜きが可能な間は保留し、プレイヤーに選ばせる。
+        if self.is_my_turn
+            && self.is_riichi
+            && self.drawn.is_some()
+            && !self.can_tsumo
+            && !self.can_pei
+        {
             let deadline = *self
                 .riichi_auto_discard_at
                 .get_or_insert(now + RIICHI_AUTO_DISCARD_SECS);
@@ -315,6 +321,15 @@ impl GameState {
             // 自分のターン：ツモ・リーチ・暗カン
             match click {
                 OverlayClick::Action(action) => return Some(action),
+                OverlayClick::PassSelfCall => {
+                    // リーチ中の北抜き打診を見送る: 通常のリーチ中と同様ツモ切りする
+                    if self.is_riichi && self.drawn.is_some() {
+                        self.can_pei = false;
+                        self.drawn.take();
+                        return Some(ClientAction::Discard { tile: None });
+                    }
+                    return None;
+                }
                 OverlayClick::ToggleRiichi => {
                     if self.riichi_selection_mode {
                         self.clear_riichi_selection();
@@ -325,6 +340,11 @@ impl GameState {
                 }
                 _ => {}
             }
+        }
+
+        // リーチ中は手牌クリックによる打牌はできない
+        if self.is_riichi {
+            return None;
         }
 
         // オーバーレイがクリックされていない場合は手牌のクリックを処理
@@ -338,10 +358,6 @@ impl GameState {
             || self.pon_option_selecting
             || !self.available_calls.is_empty()
         {
-            return None;
-        }
-
-        if self.is_riichi {
             return None;
         }
 

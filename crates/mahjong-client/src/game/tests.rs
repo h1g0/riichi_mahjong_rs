@@ -214,6 +214,64 @@ fn test_sanma_can_pei_with_north_in_hand() {
     assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
 }
 
+/// リーチ中にツモった北は自動ツモ切りせず、北抜きを選べること（回帰テスト）。
+/// 以前は自動ツモ切りが北抜きの可否を見ずに先へ発火し、
+/// 北抜きボタンが表示されてもクリックできなかった。
+#[test]
+fn test_riichi_drawn_north_holds_auto_discard_for_pei() {
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started(Wind::East));
+    state.is_riichi = true;
+
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::Z4),
+        remaining_tiles: 48,
+        can_tsumo: false,
+        can_riichi: false,
+        is_furiten: false,
+    });
+    assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
+
+    // 北抜き可能な間は、自動ツモ切りの待ち時間（#291）が過ぎても保留し続ける
+    assert!(state.handle_input(None, 100.0).is_none());
+    assert!(
+        state
+            .handle_input(None, 100.0 + RIICHI_AUTO_DISCARD_SECS * 2.0)
+            .is_none()
+    );
+    assert!(state.drawn.is_some(), "自動ツモ切りが発火した");
+
+    // 北抜きボタンのクリックで Pei アクションが発行される
+    let action = state.handle_input(
+        Some(crate::renderer::OverlayClick::Action(ClientAction::Pei)),
+        100.0 + RIICHI_AUTO_DISCARD_SECS * 2.0,
+    );
+    assert!(matches!(action, Some(ClientAction::Pei)));
+}
+
+/// リーチ中の北抜き打診でパスを選ぶと、通常のリーチ中と同様ツモ切りされること
+#[test]
+fn test_riichi_pei_pass_discards_drawn_north() {
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started(Wind::East));
+    state.is_riichi = true;
+
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::Z4),
+        remaining_tiles: 48,
+        can_tsumo: false,
+        can_riichi: false,
+        is_furiten: false,
+    });
+    assert!(state.can_pei);
+
+    // パスは待ち時間なしで即座にツモ切りされる
+    let action = state.handle_input(Some(crate::renderer::OverlayClick::PassSelfCall), 100.0);
+    assert!(matches!(action, Some(ClientAction::Discard { tile: None })));
+    assert!(state.drawn.is_none(), "ツモ切り後もツモ牌が残っている");
+    assert!(!state.can_pei);
+}
+
 /// 海底ツモ（山残り0）では北抜きボタンを出さないこと（#296 の回帰テスト）。
 /// サーバは補充ツモ不能で北抜きを却下するため、表示しても無反応になる。
 #[test]

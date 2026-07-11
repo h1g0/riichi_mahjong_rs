@@ -136,6 +136,8 @@ pub enum OverlayClick {
     ShowPonSelection { options: Vec<[Tile; 2]> },
     /// 選択UIをキャンセルして鳴きパネルに戻る
     CancelMeldSelection,
+    /// カン／北抜きパネルを見送る（リーチ中の北抜き打診でツモ切りを選ぶ）
+    PassSelfCall,
     /// 九種九牌を宣言して流局する
     NineTerminalsDeclare,
     /// 九種九牌を宣言せず続行する
@@ -560,7 +562,16 @@ fn draw_self_call_overlay(
     let unit_w = tile_w + SELF_CALL_TILE_GAP + btn_w;
     let units_w = units.len() as f32 * unit_w + (units.len() - 1) as f32 * SELF_CALL_UNIT_SPACING;
 
-    let panel_w = units_w + pad * 2.0;
+    // リーチ中は手牌クリックで打牌できないため、北抜きを見送って
+    // ツモ切りするためのパスボタンを添える。
+    let show_pass = state.is_riichi;
+    let pass_w = if show_pass {
+        SELF_CALL_UNIT_SPACING + btn_w
+    } else {
+        0.0
+    };
+
+    let panel_w = units_w + pass_w + pad * 2.0;
     let panel_h = CALL_OVERLAY_PANEL_H;
     let panel_x = CALL_PANEL_RIGHT_X_NO_RON - panel_w;
     let panel_y = SELF_CALL_PANEL_BOTTOM_Y - panel_h;
@@ -605,6 +616,22 @@ fn draw_self_call_overlay(
         draw_call_button(font, btn_x, base_y, btn_w, btn_h, label, kind);
         if clicked && result.is_none() && hit_rect(mx, my, btn_x, base_y, btn_w, btn_h) {
             result = Some(OverlayClick::Action(action));
+        }
+    }
+
+    if show_pass {
+        let pass_x = base_x + units_w + SELF_CALL_UNIT_SPACING;
+        draw_call_button(
+            font,
+            pass_x,
+            base_y,
+            btn_w,
+            btn_h,
+            tr.get(Key::Pass),
+            CallBtnKind::Pass,
+        );
+        if clicked && result.is_none() && hit_rect(mx, my, pass_x, base_y, btn_w, btn_h) {
+            result = Some(OverlayClick::PassSelfCall);
         }
     }
 
