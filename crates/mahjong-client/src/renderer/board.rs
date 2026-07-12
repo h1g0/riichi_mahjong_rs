@@ -273,6 +273,11 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
 
         set_camera(&make_board_camera(rotation));
 
+        // 手番プレイヤー側の辺を発光させる（テキストより先に描いて重なりを避ける）
+        if state.turn_player == Some(display_wind) {
+            draw_turn_indicator_edge(BOARD_CENTER_X - half, BOARD_CENTER_Y + half, panel_size);
+        }
+
         // 風（ゴールド）＋得点（千点単位）を中心の各方向に描画
         theme::draw_text_centered(
             font,
@@ -331,6 +336,28 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         21,
         theme::TEXT_BR,
     );
+}
+
+/// 中央パネルの手番プレイヤー側の辺に、ゆっくり明滅するゴールドのグローを描く。
+///
+/// `(x, y)` は辺の左端、`w` は辺の長さ。各プレイヤーの回転カメラ内で
+/// 手前側（下辺）に描かれる前提なので、呼び出し側で回転を切り替える。
+fn draw_turn_indicator_edge(x: f32, y: f32, w: f32) {
+    // 約2秒周期でゆるやかに明滅させる（強すぎない範囲で強弱をつける）
+    let pulse = 0.775 + 0.225 * (get_time() * std::f64::consts::TAU / 2.0).sin() as f32;
+
+    // パネルの角丸（半径5）にかからないよう辺の内側に収める
+    let inset = 6.0;
+    let (x, w) = (x + inset, w - 2.0 * inset);
+
+    // 中心線から外側へ薄くなる帯を重ねてグローを表現する
+    for i in 0..4 {
+        let spread = 2.0 + i as f32 * 2.0;
+        let alpha = 0.16 * pulse / (i as f32 + 1.0);
+        draw_rectangle(x, y - spread, w, spread * 2.0, theme::rgba(0xffd84a, alpha));
+    }
+    // 中心の明るいライン
+    draw_rectangle(x, y - 1.5, w, 3.0, theme::rgba(0xffe066, 0.95 * pulse));
 }
 
 pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {

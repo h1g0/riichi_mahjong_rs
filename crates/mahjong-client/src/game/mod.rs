@@ -211,6 +211,8 @@ pub struct GameState {
     pub win_result_index: usize,
     /// 自分の手番か
     pub is_my_turn: bool,
+    /// 現在手番のプレイヤーの席風（ツモ・鳴きイベントで更新。局の開始・終了で None）
+    pub turn_player: Option<Wind>,
     /// ゲームフェーズ
     pub phase: GamePhase,
     /// 鳴き可能な選択肢
@@ -346,6 +348,7 @@ impl GameState {
             win_results: Vec::new(),
             win_result_index: 0,
             is_my_turn: false,
+            turn_player: None,
             phase: GamePhase::TopMenu,
             available_calls: Vec::new(),
             call_target_tile: None,

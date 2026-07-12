@@ -1017,3 +1017,62 @@ fn test_sanma_pei_with_drawn_keeps_hand_count() {
     assert_eq!(other.concealed_count, 13);
     assert!(!other.has_drawn);
 }
+
+/// 手番プレイヤー（turn_player）がイベントに追従して更新されること。
+/// 中央パネルの手番インジケーター表示に使う（#307）。
+#[test]
+fn test_turn_player_tracks_events() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    assert_eq!(state.turn_player, None, "局開始直後は手番未確定");
+
+    // 自分（東）のツモで自分の手番になる
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::P2),
+        remaining_tiles: 69,
+        can_tsumo: false,
+        can_riichi: false,
+        is_furiten: false,
+    });
+    assert_eq!(state.turn_player, Some(Wind::East));
+
+    // 打牌後、下家（南）のツモで手番が移る
+    state.handle_event(ServerEvent::TileDiscarded {
+        player: Wind::East,
+        tile: Tile::new(Tile::P2),
+        is_tsumogiri: true,
+        hand_index: None,
+    });
+    state.handle_event(ServerEvent::OtherPlayerDrew {
+        player: Wind::South,
+        remaining_tiles: 68,
+    });
+    assert_eq!(state.turn_player, Some(Wind::South));
+
+    // 南の打牌を西がポン → 手番は西へ飛ぶ
+    let tile = Tile::new(Tile::S5);
+    state.handle_event(ServerEvent::TileDiscarded {
+        player: Wind::South,
+        tile,
+        is_tsumogiri: false,
+        hand_index: None,
+    });
+    state.handle_event(ServerEvent::PlayerCalled {
+        player: Wind::West,
+        call_type: CallType::Pon,
+        called_tile: tile,
+        tiles: vec![tile, tile],
+    });
+    assert_eq!(state.turn_player, Some(Wind::West));
+
+    // 流局で手番表示は消える
+    state.handle_event(ServerEvent::RoundDraw {
+        scores: [25000; 4],
+        reason: mahjong_server::protocol::DrawReason::Exhaustive,
+        tenpai: vec![],
+        riichi_sticks: 0,
+        player_hands: vec![],
+        declarer: None,
+    });
+    assert_eq!(state.turn_player, None, "流局後も手番表示が残っている");
+}
