@@ -356,10 +356,6 @@ pub enum Key {
     NormalPlayHint,
     /// リーチ宣言ボタン
     Riichi,
-    /// 鳴き確認の見出し
-    CallPrompt,
-    /// 自分の手番でのカン確認の見出し
-    SelfCallPrompt,
     /// ポン
     Pon,
     /// カン
@@ -581,14 +577,6 @@ impl Key {
             Key::Riichi => match lang {
                 Lang::Ja => "リーチ",
                 Lang::En => "Riichi",
-            },
-            Key::CallPrompt => match lang {
-                Lang::Ja => "鳴きますか？",
-                Lang::En => "Call?",
-            },
-            Key::SelfCallPrompt => match lang {
-                Lang::Ja => "カンしますか？",
-                Lang::En => "Kan?",
             },
             Key::Pon => match lang {
                 Lang::Ja => "ポン",
