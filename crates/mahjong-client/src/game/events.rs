@@ -206,7 +206,7 @@ impl GameState {
                     CallType::Kakan => MeldFrom::Myself,
                     _ => {
                         if let Some(discarder) = self.call_discarder.or(self.last_discarder) {
-                            Self::compute_meld_direction(player, discarder)
+                            self.compute_meld_direction(player, discarder)
                         } else {
                             MeldFrom::Previous
                         }
