@@ -116,19 +116,137 @@ fn test_final_rankings_sanma_excludes_dummy_seat() {
 }
 
 fn sanma_game_started(seat_wind: Wind) -> ServerEvent {
+    sanma_game_started_at(seat_wind, 0)
+}
+
+fn sanma_game_started_at(seat_wind: Wind, round_number: usize) -> ServerEvent {
     ServerEvent::GameStarted {
         seat_wind,
         hand: vec![Tile::new(Tile::P1); 13],
         scores: [35000, 35000, 35000, 0],
         round_wind: Wind::East,
         dora_indicators: vec![Tile::new(Tile::P5)],
-        round_number: 0,
+        round_number,
         total_rounds: 3,
         honba: 0,
         riichi_sticks: 0,
         three_player: true,
         nuki_dora: true,
     }
+}
+
+#[test]
+fn test_sanma_initial_wind_index_is_fixed_across_rounds() {
+    // 東1局: 自分（座席0）が西家 → 開始時の風インデックスは西（2）
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started_at(Wind::West, 0));
+    assert_eq!(state.my_initial_wind_index(), 2);
+
+    // 東2局: 自分の風は南へ回るが、開始時の風インデックスは変わらない
+    // （描画スロットはこの値で固定され、各家の表示位置が動かない）
+    state.handle_event(sanma_game_started_at(Wind::South, 1));
+    assert_eq!(state.seat_wind, Some(Wind::South));
+    assert_eq!(state.my_initial_wind_index(), 2);
+
+    // 東3局: 自分が親（東家）になっても同様
+    state.handle_event(sanma_game_started_at(Wind::East, 2));
+    assert_eq!(state.my_initial_wind_index(), 2);
+}
+
+/// 三麻の鳴き方向は「東1局開始時の風の差分」で決まること（#311 の回帰テスト）。
+///
+/// 席は東1局開始時の位置で固定表示されるため（#309）、現在の局の風で
+/// mod 4 の差分を取ると、風が回った局で倒す牌の位置が画面上の鳴き元の
+/// 席とずれる。
+#[test]
+fn test_sanma_meld_direction_uses_initial_winds() {
+    // 自分（座席0）が東1局で東家: 下家（開始時南家）は画面右、
+    // 上家（開始時西家）は画面対面に固定表示される。
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started_at(Wind::East, 0));
+    assert_eq!(
+        state.compute_meld_direction(Wind::East, Wind::South),
+        MeldFrom::Following
+    );
+    assert_eq!(
+        state.compute_meld_direction(Wind::East, Wind::West),
+        MeldFrom::Opposite
+    );
+
+    // 東2局: 自分は西家に回り、画面右の相手は東家、画面対面の相手は南家になる。
+    // 現在の風で計算すると右の相手が Opposite・対面の相手が Following になり、
+    // 倒す位置が席と一致しなくなる。
+    state.handle_event(sanma_game_started_at(Wind::West, 1));
+    assert_eq!(
+        state.compute_meld_direction(Wind::West, Wind::East),
+        MeldFrom::Following
+    );
+    assert_eq!(
+        state.compute_meld_direction(Wind::West, Wind::South),
+        MeldFrom::Opposite
+    );
+
+    // 東3局: 自分は南家、画面右は西家、画面対面は東家。
+    state.handle_event(sanma_game_started_at(Wind::South, 2));
+    assert_eq!(
+        state.compute_meld_direction(Wind::South, Wind::West),
+        MeldFrom::Following
+    );
+    assert_eq!(
+        state.compute_meld_direction(Wind::South, Wind::East),
+        MeldFrom::Opposite
+    );
+}
+
+/// 他家同士の鳴きでも、倒す位置が固定表示の席の位置関係と一致すること。
+#[test]
+fn test_sanma_meld_direction_between_opponents() {
+    // 自分が東1局で東家、東2局で西家に回った局面。
+    // 画面右の相手（開始時南家）は東家、画面対面の相手（開始時西家）は南家。
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started_at(Wind::East, 0));
+    state.handle_event(sanma_game_started_at(Wind::West, 1));
+
+    // 画面右の相手が自分から鳴く: 自分（画面下）は右の席から見て上家の位置
+    assert_eq!(
+        state.compute_meld_direction(Wind::East, Wind::West),
+        MeldFrom::Previous
+    );
+    // 画面対面の相手が画面右の相手から鳴く: 対面の席から見て右の席は上家の位置
+    assert_eq!(
+        state.compute_meld_direction(Wind::South, Wind::East),
+        MeldFrom::Previous
+    );
+}
+
+/// 四麻の鳴き方向は従来どおり現在の風の差分で決まること（挙動不変の確認）。
+#[test]
+fn test_4p_meld_direction_uses_current_winds() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    assert_eq!(
+        state.compute_meld_direction(Wind::East, Wind::North),
+        MeldFrom::Previous
+    );
+    assert_eq!(
+        state.compute_meld_direction(Wind::East, Wind::West),
+        MeldFrom::Opposite
+    );
+    assert_eq!(
+        state.compute_meld_direction(Wind::East, Wind::South),
+        MeldFrom::Following
+    );
+
+    // 四麻は風の差分 mod 4 が局によらず不変なので、局が進んでも結果は同じ
+    state.handle_event(game_started_4p(Wind::North, 1));
+    assert_eq!(
+        state.compute_meld_direction(Wind::East, Wind::North),
+        MeldFrom::Previous
+    );
+    assert_eq!(
+        state.compute_meld_direction(Wind::South, Wind::East),
+        MeldFrom::Previous
+    );
 }
 
 #[test]
