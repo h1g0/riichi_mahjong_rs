@@ -68,6 +68,7 @@ impl GameState {
                 ];
                 self.last_discarder = None;
                 self.call_banners = [None; 4];
+                self.turn_player = None;
             }
 
             ServerEvent::TileDrawn {
@@ -82,6 +83,7 @@ impl GameState {
                 self.riichi_auto_discard_at = None;
                 self.remaining_tiles = remaining_tiles;
                 self.is_my_turn = true;
+                self.turn_player = self.seat_wind;
                 self.can_tsumo = can_tsumo;
                 self.can_riichi = can_riichi;
                 self.is_furiten = is_furiten;
@@ -105,6 +107,7 @@ impl GameState {
                 remaining_tiles,
             } => {
                 self.remaining_tiles = remaining_tiles;
+                self.turn_player = Some(player);
                 let relative_idx = self.relative_player_index(player);
                 if relative_idx > 0 {
                     // ツモ牌は手牌の右に張り出して表示する（手牌の枚数には含めない）
@@ -188,6 +191,11 @@ impl GameState {
                 self.available_calls.clear();
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
+
+                // 鳴いたプレイヤーに手番が移る（ロンは局が終わるので対象外）
+                if !matches!(call_type, CallType::Ron) {
+                    self.turn_player = Some(player);
+                }
 
                 // CallType → MeldType 変換
                 let category = Self::call_type_to_meld_type(&call_type);
@@ -493,6 +501,7 @@ impl GameState {
                     self.apply_current_win_result();
                     self.phase = GamePhase::RoundResult;
                     self.is_my_turn = false;
+                    self.turn_player = None;
                     self.available_calls.clear();
                     self.clear_riichi_selection();
                     self.self_kan_options.clear();
@@ -531,6 +540,7 @@ impl GameState {
                 self.result_message = Some(msg);
                 self.phase = GamePhase::RoundResult;
                 self.is_my_turn = false;
+                self.turn_player = None;
                 self.available_calls.clear();
                 self.clear_riichi_selection();
                 self.self_kan_options.clear();
