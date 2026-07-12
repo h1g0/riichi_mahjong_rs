@@ -95,20 +95,21 @@ fn sanma_seat_mapping_wraps_at_three() {
 
 #[test]
 fn sanma_rotation_leaves_north_position_empty() {
-    // 三麻: 四麻の方角に合わせて配置し、「北」の位置が常に空席になる（#309）。
-    // 自分が東家: 南家（下家）=右、西家（上家）=対面、左（北）が空席。
+    // 三麻: 東1局開始時の風で四麻の方角に合わせて席を固定し、
+    // 「北」の位置が常に空席になる（#309）。以降は席固定で風だけが回る。
+    // 東1で自分が東家: 南家（下家）=右、西家（上家）=対面、左（北）が空席。
     assert_eq!(rotation_index(0, 3, 0), 0);
     assert_eq!(rotation_index(1, 3, 0), 1);
     assert_eq!(rotation_index(2, 3, 0), 2);
-    // 自分が南家: 西家（下家）=右、東家（上家）=左、上（北）が空席。
+    // 東1で自分が南家: 西家（下家）=右、東家（上家）=左、上（北）が空席。
     assert_eq!(rotation_index(0, 3, 1), 0);
     assert_eq!(rotation_index(1, 3, 1), 1);
     assert_eq!(rotation_index(2, 3, 1), 3);
-    // 自分が西家: 東家（下家）=対面、南家（上家）=左、右（北）が空席。
+    // 東1で自分が西家: 東家（下家）=対面、南家（上家）=左、右（北）が空席。
     assert_eq!(rotation_index(0, 3, 2), 0);
     assert_eq!(rotation_index(1, 3, 2), 2);
     assert_eq!(rotation_index(2, 3, 2), 3);
-    // 四麻は自分の風にかかわらず恒等写像。
+    // 四麻は開始時の風にかかわらず恒等写像。
     for wind in 0..4 {
         for rel in 0..4 {
             assert_eq!(rotation_index(rel, 4, wind), rel);
