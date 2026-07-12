@@ -258,7 +258,7 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
     );
 
     // 各家の風と得点をそれぞれの向きで描画
-    let my_wind_idx = state.seat_wind.map(|w| w.to_index()).unwrap_or(0);
+    let my_wind_idx = state.my_wind_index();
     let label_dist: f32 = 64.0; // 中心からラベルまでの距離
 
     for rel in 0..state.player_count {
@@ -269,7 +269,7 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         let display_wind =
             mahjong_core::tile::Wind::from_index((my_wind_idx + rel) % state.player_count);
         let score = state.scores[seat];
-        let rotation = PLAYER_ROTATIONS[rotation_index(rel, state.player_count)];
+        let rotation = PLAYER_ROTATIONS[rotation_index(rel, state.player_count, my_wind_idx)];
 
         set_camera(&make_board_camera(rotation));
 
@@ -378,11 +378,11 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
     let start_x = BOARD_CENTER_X - half_width;
     let start_y = BOARD_CENTER_Y + discard_offset;
 
-    let my_wind_idx = state.seat_wind.map(|w| w.to_index()).unwrap_or(0);
+    let my_wind_idx = state.my_wind_index();
 
     for rel in 0..state.player_count {
         let discards = &state.discards[rel];
-        let rotation = PLAYER_ROTATIONS[rotation_index(rel, state.player_count)];
+        let rotation = PLAYER_ROTATIONS[rotation_index(rel, state.player_count, my_wind_idx)];
 
         set_camera(&make_board_camera(rotation));
 

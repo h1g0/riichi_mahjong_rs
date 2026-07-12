@@ -56,7 +56,7 @@ pub(super) fn draw_call_banners(state: &GameState, font: Option<&Font>) {
             continue;
         }
         let alpha = ((CALL_BANNER_SECS - age) / FADE_SECS).clamp(0.0, 1.0) as f32;
-        let slot = rotation_index(rel, state.player_count);
+        let slot = rotation_index(rel, state.player_count, state.my_wind_index());
         draw_banner_bubble(font, slot, tr.get(banner.label), alpha);
     }
 }

@@ -533,7 +533,8 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
         let start_x = BOARD_CENTER_X - total_width / 2.0;
 
         set_camera(&make_board_camera(
-            PLAYER_ROTATIONS[rotation_index(relative_idx, state.player_count)],
+            PLAYER_ROTATIONS
+                [rotation_index(relative_idx, state.player_count, state.my_wind_index())],
         ));
 
         // 進行中の手出しアニメーション（完了していれば無視する）

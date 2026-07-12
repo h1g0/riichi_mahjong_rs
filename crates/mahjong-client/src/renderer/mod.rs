@@ -88,11 +88,13 @@ const PLAYER_ROTATIONS: [f32; 4] = [0.0, -90.0, 180.0, 90.0];
 /// 相対位置を回転テーブル [`PLAYER_ROTATIONS`] のインデックスへ変換する。
 ///
 /// 四麻: そのまま（0=自分, 1=下家=右, 2=対面=上, 3=上家=左）。
-/// 三麻: 相対2が上家になるため、左（90°）の描画パスを再利用する
-/// （自分=下、下家=右、上家=左、上辺は空席）。
-fn rotation_index(relative_idx: usize, player_count: usize) -> usize {
-    if player_count == 3 && relative_idx == 2 {
-        3
+/// 三麻: 四麻の方角に合わせ、自分の風から見た風の差分（mod 4）で
+/// スロットを決める。存在しない「北」の位置が常に空席になる
+/// （例: 自分が西家なら下家の東家は対面＝上に描かれ、右が空席）。
+fn rotation_index(relative_idx: usize, player_count: usize, my_wind_idx: usize) -> usize {
+    if player_count == 3 && relative_idx > 0 {
+        let their_wind_idx = (my_wind_idx + relative_idx) % 3;
+        (their_wind_idx + 4 - my_wind_idx) % 4
     } else {
         relative_idx
     }

@@ -457,8 +457,13 @@ impl GameState {
         rankings
     }
 
+    /// 自分の座席の風インデックスを返す（未設定時は0）。
+    pub fn my_wind_index(&self) -> usize {
+        self.seat_wind.map(|w| w.to_index()).unwrap_or(0)
+    }
+
     fn relative_player_index(&self, wind: Wind) -> usize {
-        let my_idx = self.seat_wind.map(|w| w.to_index()).unwrap_or(0);
+        let my_idx = self.my_wind_index();
         let their_idx = wind.to_index();
         // 三麻では風インデックスは0〜2で循環する
         (their_idx + self.player_count - my_idx) % self.player_count
