@@ -116,19 +116,41 @@ fn test_final_rankings_sanma_excludes_dummy_seat() {
 }
 
 fn sanma_game_started(seat_wind: Wind) -> ServerEvent {
+    sanma_game_started_at(seat_wind, 0)
+}
+
+fn sanma_game_started_at(seat_wind: Wind, round_number: usize) -> ServerEvent {
     ServerEvent::GameStarted {
         seat_wind,
         hand: vec![Tile::new(Tile::P1); 13],
         scores: [35000, 35000, 35000, 0],
         round_wind: Wind::East,
         dora_indicators: vec![Tile::new(Tile::P5)],
-        round_number: 0,
+        round_number,
         total_rounds: 3,
         honba: 0,
         riichi_sticks: 0,
         three_player: true,
         nuki_dora: true,
     }
+}
+
+#[test]
+fn test_sanma_initial_wind_index_is_fixed_across_rounds() {
+    // 東1局: 自分（座席0）が西家 → 開始時の風インデックスは西（2）
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started_at(Wind::West, 0));
+    assert_eq!(state.my_initial_wind_index(), 2);
+
+    // 東2局: 自分の風は南へ回るが、開始時の風インデックスは変わらない
+    // （描画スロットはこの値で固定され、各家の表示位置が動かない）
+    state.handle_event(sanma_game_started_at(Wind::South, 1));
+    assert_eq!(state.seat_wind, Some(Wind::South));
+    assert_eq!(state.my_initial_wind_index(), 2);
+
+    // 東3局: 自分が親（東家）になっても同様
+    state.handle_event(sanma_game_started_at(Wind::East, 2));
+    assert_eq!(state.my_initial_wind_index(), 2);
 }
 
 #[test]

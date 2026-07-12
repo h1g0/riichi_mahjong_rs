@@ -457,8 +457,21 @@ impl GameState {
         rankings
     }
 
+    /// 自分の座席の風インデックスを返す（未設定時は0）。
+    pub fn my_wind_index(&self) -> usize {
+        self.seat_wind.map(|w| w.to_index()).unwrap_or(0)
+    }
+
+    /// 東1局開始時の自分の風インデックスを返す。
+    ///
+    /// 三麻の描画スロットはこの値で固定するため、局が進んで風が
+    /// 回っても各家の表示位置は動かない。
+    pub fn my_initial_wind_index(&self) -> usize {
+        (self.my_seat + self.player_count - self.initial_dealer_seat) % self.player_count
+    }
+
     fn relative_player_index(&self, wind: Wind) -> usize {
-        let my_idx = self.seat_wind.map(|w| w.to_index()).unwrap_or(0);
+        let my_idx = self.my_wind_index();
         let their_idx = wind.to_index();
         // 三麻では風インデックスは0〜2で循環する
         (their_idx + self.player_count - my_idx) % self.player_count
