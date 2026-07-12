@@ -41,11 +41,11 @@ const CALL_PANEL_BOTTOM_Y_NO_RON: f32 = 672.0;
 /// ノーロン時：鳴きパネルのボタン基準 Y 座標
 const CALL_BTN_BASE_Y_NO_RON: f32 = 624.0;
 /// 鳴きオーバーレイパネルの高さ
-const CALL_OVERLAY_PANEL_H: f32 = 96.0;
+const CALL_OVERLAY_PANEL_H: f32 = 60.0;
 
 // ─── 自分の手番のカン／北抜きパネル定数 ──────────────────────────────────────
-/// セルフカン・北抜きパネルの下端 Y 座標（ツモ・リーチボタンより上に置く）
-const SELF_CALL_PANEL_BOTTOM_Y: f32 = 556.0;
+/// セルフカン・北抜きパネルとツモ・リーチボタンの間隔
+const SELF_CALL_PANEL_GAP: f32 = 8.0;
 /// 各カン牌スプライトとそのボタンの間隔
 const SELF_CALL_TILE_GAP: f32 = 8.0;
 /// カン／北抜きボタン（牌＋ボタンのまとまり）どうしの間隔
@@ -58,6 +58,11 @@ const AGARI_BTN_H: f32 = 60.0;
 const AGARI_BTN_X: f32 = CALL_PANEL_RIGHT_X_NO_RON - AGARI_BTN_W; // 780
 const AGARI_BTN_Y: f32 = CALL_PANEL_BOTTOM_Y_NO_RON - AGARI_BTN_H; // 612
 const AGARI_BTN_GAP: f32 = 8.0;
+
+// ─── リーチボタン定数 ────────────────────────────────────────────────────────
+
+const RIICHI_BTN_W: f32 = 80.0;
+const RIICHI_BTN_H: f32 = 40.0;
 
 // ─── ヒット判定ヘルパー ───────────────────────────────────────────────────────
 
@@ -221,8 +226,6 @@ pub(super) fn draw_action_buttons(
 
     // リーチボタン
     if state.can_riichi {
-        const RIICHI_BTN_W: f32 = 80.0;
-        const RIICHI_BTN_H: f32 = 40.0;
         // ツモボタンと重ならないよう、ツモボタンがある場合は上にずらす
         let riichi_y = if state.can_tsumo {
             AGARI_BTN_Y - RIICHI_BTN_H - AGARI_BTN_GAP
@@ -390,15 +393,6 @@ fn draw_call_overlay(
         8.0,
         theme::rgba(0x050e08, 0.95),
         theme::GOLD_DK,
-    );
-
-    draw_jp_text(
-        font,
-        tr.get(Key::CallPrompt),
-        panel_x + pad,
-        panel_y + 30.0,
-        FONT_SIZE,
-        theme::GOLD_LT,
     );
 
     // 捨て牌アイコン
@@ -571,12 +565,20 @@ fn draw_self_call_overlay(
         0.0
     };
 
+    // ツモ・リーチボタンが表示されているときはその上に置き、
+    // どちらも無ければ鳴きパネルと同じ高さに揃える。
+    let panel_bottom_y = match (state.can_tsumo, state.can_riichi) {
+        (true, true) => AGARI_BTN_Y - RIICHI_BTN_H - AGARI_BTN_GAP - SELF_CALL_PANEL_GAP,
+        (true, false) | (false, true) => AGARI_BTN_Y - SELF_CALL_PANEL_GAP,
+        (false, false) => CALL_PANEL_BOTTOM_Y_NO_RON,
+    };
+
     let panel_w = units_w + pass_w + pad * 2.0;
     let panel_h = CALL_OVERLAY_PANEL_H;
     let panel_x = CALL_PANEL_RIGHT_X_NO_RON - panel_w;
-    let panel_y = SELF_CALL_PANEL_BOTTOM_Y - panel_h;
+    let panel_y = panel_bottom_y - panel_h;
     // ボタン下端をパネル下端から 8px 上げ（鳴きパネルと同じ余白）。
-    let base_y = SELF_CALL_PANEL_BOTTOM_Y - 8.0 - btn_h;
+    let base_y = panel_bottom_y - 8.0 - btn_h;
     let base_x = panel_x + pad;
 
     // パネル背景
@@ -588,15 +590,6 @@ fn draw_self_call_overlay(
         8.0,
         theme::rgba(0x050e08, 0.95),
         theme::GOLD_DK,
-    );
-
-    draw_jp_text(
-        font,
-        tr.get(Key::SelfCallPrompt),
-        panel_x + pad,
-        panel_y + 30.0,
-        FONT_SIZE,
-        theme::GOLD_LT,
     );
 
     let mut result = None;
