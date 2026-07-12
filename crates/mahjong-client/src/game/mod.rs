@@ -477,6 +477,11 @@ impl GameState {
         (their_idx + self.player_count - my_idx) % self.player_count
     }
 
+    /// 現在の局の風から、そのプレイヤーの東1局開始時の風インデックスを返す。
+    fn initial_wind_index(&self, wind: Wind) -> usize {
+        (self.my_initial_wind_index() + self.relative_player_index(wind)) % self.player_count
+    }
+
     /// CallType → MeldType 変換
     fn call_type_to_meld_type(call_type: &CallType) -> MeldType {
         match call_type {
@@ -489,9 +494,21 @@ impl GameState {
     }
 
     /// 鳴いたプレイヤー(caller)から見て、鳴き元(discarder)がどの位置かを返す
-    fn compute_meld_direction(caller: Wind, discarder: Wind) -> MeldFrom {
-        let caller_idx = caller.to_index();
-        let discarder_idx = discarder.to_index();
+    ///
+    /// 三麻では席が東1局開始時の位置で固定表示されるため（#309）、現在の局の
+    /// 風ではなく開始時の風の差分で判定する（#311）。現在の風のままだと風が
+    /// 0〜2で回る三麻では mod 4 の差分が局ごとに変わり、倒す牌の位置が画面上の
+    /// 鳴き元の席と一致しない局が生じる。四麻は風の差分 mod 4 が局によらず
+    /// 不変なので、現在の風をそのまま使う（挙動は従来どおり）。
+    fn compute_meld_direction(&self, caller: Wind, discarder: Wind) -> MeldFrom {
+        let (caller_idx, discarder_idx) = if self.player_count == 3 {
+            (
+                self.initial_wind_index(caller),
+                self.initial_wind_index(discarder),
+            )
+        } else {
+            (caller.to_index(), discarder.to_index())
+        };
         let rel = (discarder_idx + 4 - caller_idx) % 4;
         match rel {
             3 => MeldFrom::Previous,  // 上家
