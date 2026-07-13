@@ -7,35 +7,29 @@ use crate::hand_info::status::Status;
 use crate::tile::{Dragon, Tile, TileType, Wind, suit_rank};
 use crate::winning_hand::name::Form;
 
-/// 符計算の結果
+/// Result of a minipoints (fu / 符) calculation.
 #[derive(Debug, PartialEq, Eq)]
 pub struct FuResult {
-    /// 合計符（10符単位に切り上げ済み）
+    /// Total fu, already rounded up to the next 10
     pub total: u32,
-    /// 符の内訳
+    /// Itemized breakdown
     pub details: Vec<FuDetail>,
 }
 
-/// 符の内訳を表す構造体
+/// One item of the fu breakdown.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FuDetail {
-    /// 符の名称
+    /// Display name of the item
     pub name: &'static str,
-    /// 符の値
+    /// Fu awarded
     pub fu: u32,
 }
 
-/// 符を計算する
+/// Calculates minipoints (fu).
 ///
-/// # Arguments
-/// * `analyzer` - 手牌解析結果
-/// * `hand` - 手牌
-/// * `status` - 局の状態
-///
-/// # Returns
-/// 符計算の結果（切り上げ済み合計 + 内訳）
+/// Returns the rounded-up total together with the itemized breakdown.
 pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Result<FuResult> {
-    // 七対子は固定25符
+    // Seven Pairs is always exactly 25 fu.
     if analyzer.form == Form::SevenPairs {
         return Ok(FuResult {
             total: 25,
@@ -46,7 +40,7 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
         });
     }
 
-    // 国士無双は符計算なし（便宜上30符）
+    // Thirteen Orphans has no fu calculation; 30 is used by convention.
     if analyzer.form == Form::ThirteenOrphans {
         return Ok(FuResult {
             total: 30,
@@ -59,30 +53,25 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
 
     let mut details: Vec<FuDetail> = Vec::new();
 
-    // 副底（基本符）：20符
+    // Base fu (futei / 副底).
     details.push(FuDetail {
         name: "副底",
         fu: 20,
     });
 
-    // 面子の符
     calculate_mentsu_fu(analyzer, hand, status, &mut details)?;
 
-    // 雀頭の符
     calculate_jantou_fu(analyzer, status, &mut details)?;
 
-    // 待ちの符
     calculate_machi_fu(analyzer, hand, &mut details)?;
 
-    // ツモ符
     calculate_tsumo_fu(analyzer, status, &mut details)?;
 
-    // 門前ロン加符
     calculate_menzen_ron_fu(status, &mut details)?;
 
     let raw_total: u32 = details.iter().map(|d| d.fu).sum();
 
-    // 平和ツモは20符固定
+    // Pinfu + tsumo is fixed at 20 fu (the tsumo 2 fu does not apply).
     if is_pinfu(analyzer, hand, status) && status.is_self_drawn {
         return Ok(FuResult {
             total: 20,
@@ -93,23 +82,23 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
         });
     }
 
-    // 鳴き平和形（副底のみ）のロンは30符
+    // An open pinfu-shaped hand won by ron would be a bare 20 fu;
+    // it is bumped to 30 by convention.
     let total = if raw_total == 20 && !status.is_self_drawn && status.has_claimed_open {
         30
     } else {
-        // 10符単位に切り上げ
         round_up_to_10(raw_total)
     };
 
     Ok(FuResult { total, details })
 }
 
-/// 10符単位に切り上げる
+/// Rounds fu up to the next multiple of 10.
 fn round_up_to_10(fu: u32) -> u32 {
     fu.div_ceil(10) * 10
 }
 
-/// 平和判定（簡易版：符計算用）
+/// Simplified pinfu test, used only to decide the fixed-fu cases above.
 fn is_pinfu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> bool {
     if status.has_claimed_open {
         return false;
@@ -120,14 +109,14 @@ fn is_pinfu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> bool {
     if analyzer.sequential3.len() != 4 || analyzer.same2.len() != 1 {
         return false;
     }
-    // 雀頭が役牌でないこと
+    // The pair must not be a value honour (yakuhai).
     for head in &analyzer.same2 {
         let tile = head.get()[0];
         if is_yakuhai_tile(tile, status) {
             return false;
         }
     }
-    // 両面待ちであること
+    // Pinfu requires a two-sided wait.
     if let Some(winning_tile) = hand.drawn() {
         for seq in &analyzer.sequential3 {
             if seq.is_two_sided_wait(winning_tile.get()) {
@@ -139,31 +128,29 @@ fn is_pinfu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> bool {
     false
 }
 
-/// 役牌かどうかを判定する
+/// Whether the tile is a value honour (yakuhai / 役牌).
 fn is_yakuhai_tile(tile: TileType, status: &Status) -> bool {
-    // 三元牌
     if Dragon::is_tile_type(tile).is_some() {
         return true;
     }
-    // 自風牌
     if Wind::is_tile_type(tile) == Some(status.seat_wind) {
         return true;
     }
-    // 場風牌
     if Wind::is_tile_type(tile) == Some(status.round_wind) {
         return true;
     }
     false
 }
 
-/// 面子（刻子・槓子・順子）の符を計算する
+/// Fu from groups (triplets, quads, sequences).
 fn calculate_mentsu_fu(
     analyzer: &HandAnalyzer,
     hand: &Hand,
     status: &Status,
     details: &mut Vec<FuDetail>,
 ) -> Result<()> {
-    // 副露面子の牌種を収集（analyzer.same3 との重複排除用）
+    // Tile kinds of melded triplets/quads: analyzer.same3 also contains
+    // melded groups, so these must not be counted twice.
     let opened_triplet_tiles: Vec<TileType> = hand
         .melds()
         .iter()
@@ -171,18 +158,17 @@ fn calculate_mentsu_fu(
         .map(|o| o.tiles[0].get())
         .collect();
 
-    // 門前手の刻子（暗刻）
+    // Concealed triplets.
     for same in &analyzer.same3 {
         let tile = same.get()[0];
 
-        // 副露面子として既にカウントされる刻子はスキップ
         if opened_triplet_tiles.contains(&tile) {
             continue;
         }
 
         let is_terminal_or_honour = Tile::new(tile).is_1_9_honour();
 
-        // 和了牌を含む刻子がロン和了の場合は明刻扱い
+        // A triplet completed by a ron tile counts as open.
         let is_concealed = if !status.is_self_drawn {
             if let Some(drawn) = hand.drawn() {
                 drawn.get() != tile
@@ -216,7 +202,6 @@ fn calculate_mentsu_fu(
         details.push(FuDetail { name, fu });
     }
 
-    // 副露面子
     for open in hand.melds() {
         match open.category {
             MeldType::Pon => {
@@ -253,7 +238,7 @@ fn calculate_mentsu_fu(
                 details.push(FuDetail { name, fu });
             }
             MeldType::Chi => {
-                // チーの順子は0符
+                // Sequences score no fu.
             }
         }
     }
@@ -261,7 +246,7 @@ fn calculate_mentsu_fu(
     Ok(())
 }
 
-/// 雀頭の符を計算する
+/// Fu from the pair.
 fn calculate_jantou_fu(
     analyzer: &HandAnalyzer,
     status: &Status,
@@ -270,7 +255,6 @@ fn calculate_jantou_fu(
     for head in &analyzer.same2 {
         let tile = head.get()[0];
 
-        // 三元牌の雀頭：2符
         if Dragon::is_tile_type(tile).is_some() {
             details.push(FuDetail {
                 name: "三元牌雀頭",
@@ -278,7 +262,6 @@ fn calculate_jantou_fu(
             });
         }
 
-        // 自風牌の雀頭：2符
         if Wind::is_tile_type(tile) == Some(status.seat_wind) {
             details.push(FuDetail {
                 name: "自風牌雀頭",
@@ -286,7 +269,6 @@ fn calculate_jantou_fu(
             });
         }
 
-        // 場風牌の雀頭：2符
         if Wind::is_tile_type(tile) == Some(status.round_wind) {
             details.push(FuDetail {
                 name: "場風牌雀頭",
@@ -298,7 +280,7 @@ fn calculate_jantou_fu(
     Ok(())
 }
 
-/// 待ちの形による符を計算する
+/// Fu from the wait shape.
 fn calculate_machi_fu(
     analyzer: &HandAnalyzer,
     hand: &Hand,
@@ -307,7 +289,7 @@ fn calculate_machi_fu(
     if let Some(winning_tile) = hand.drawn() {
         let wt = winning_tile.get();
 
-        // 単騎待ち: 雀頭で待っていた場合
+        // Pair wait (tanki / 単騎).
         for head in &analyzer.same2 {
             if head.get()[0] == wt {
                 details.push(FuDetail {
@@ -318,10 +300,9 @@ fn calculate_machi_fu(
             }
         }
 
-        // 嵌張待ち・辺張待ち
         for seq in &analyzer.sequential3 {
             let tiles = seq.get();
-            // 嵌張待ち: 真ん中の牌で待っていた
+            // Closed wait (kanchan / 嵌張): won on the middle tile.
             if wt == tiles[1] {
                 details.push(FuDetail {
                     name: "嵌張待ち",
@@ -329,7 +310,7 @@ fn calculate_machi_fu(
                 });
                 return Ok(());
             }
-            // 辺張待ち: 123の3待ち or 789の7待ち
+            // Edge wait (penchan / 辺張): 3 completing 1-2, or 7 completing 8-9.
             if wt == tiles[2] && suit_rank(tiles[2]) == Some(3) {
                 details.push(FuDetail {
                     name: "辺張待ち",
@@ -346,19 +327,20 @@ fn calculate_machi_fu(
             }
         }
 
-        // 両面待ちや双碰待ちは0符
+        // Two-sided and dual-pair waits score no fu.
     }
 
     Ok(())
 }
 
-/// ツモの符を計算する
+/// Fu from winning by self-draw.
 fn calculate_tsumo_fu(
     _analyzer: &HandAnalyzer,
     status: &Status,
     details: &mut Vec<FuDetail>,
 ) -> Result<()> {
-    // ツモ和了は2符（ただし平和ツモの場合は別途処理するため、ここでは常に加算）
+    // Always added here; the pinfu + tsumo case discards the whole
+    // breakdown afterwards, so no exception is needed.
     if status.is_self_drawn {
         details.push(FuDetail {
             name: "自摸",
@@ -369,9 +351,8 @@ fn calculate_tsumo_fu(
     Ok(())
 }
 
-/// 門前ロンの加符を計算する
+/// The 10-fu bonus for winning by ron with a closed hand.
 fn calculate_menzen_ron_fu(status: &Status, details: &mut Vec<FuDetail>) -> Result<()> {
-    // 門前でロン和了した場合は10符加算
     if !status.has_claimed_open && !status.is_self_drawn {
         details.push(FuDetail {
             name: "門前加符",
@@ -390,7 +371,6 @@ mod tests {
     use crate::hand_info::status::Status;
     use crate::tile::Wind;
 
-    /// 平和ツモは20符
     #[test]
     fn test_pinfu_tsumo() {
         let hand = Hand::from("123456m234p6799s 5s");
@@ -403,7 +383,6 @@ mod tests {
         assert_eq!(result.total, 20);
     }
 
-    /// 平和ロンは30符
     #[test]
     fn test_pinfu_ron() {
         let hand = Hand::from("123456m234p6799s 5s");
@@ -413,11 +392,10 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 門前加符10 = 30
+        // base 20 + closed ron 10 = 30
         assert_eq!(result.total, 30);
     }
 
-    /// 七対子は25符固定
     #[test]
     fn test_seven_pairs() {
         let hand = Hand::from("1122m3344p5566s7z 7z");
@@ -427,11 +405,8 @@ mod tests {
         assert_eq!(result.total, 25);
     }
 
-    /// 中張牌暗刻のみの手（順子+暗刻+雀頭、ツモ）
     #[test]
     fn test_concealed_triplet_simple() {
-        // 222m 123p 789s 456s 33m: ツモ和了
-        // 手牌: 222m123p456789s3m ツモ3m
         let hand = Hand::from("222m123p456789s3m 3m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
@@ -439,14 +414,12 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 中張牌暗刻4(222m) + 単騎待ち2(3m) + ツモ2 = 28 -> 30
+        // base 20 + concealed inside triplet 4 (222m) + pair wait 2 + tsumo 2 = 28 -> 30
         assert_eq!(result.total, 30);
     }
 
-    /// 么九牌暗刻を含む手（ロン和了）
     #[test]
     fn test_concealed_triplet_terminal() {
-        // 111m 456p 789s 234m 55m: ロン5m（単騎）
         let hand = Hand::from("111m456p789s2345m 5m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
@@ -454,14 +427,12 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 門前加符10 + 么九牌暗刻8(111m) + 単騎待ち2 = 40
+        // base 20 + closed ron 10 + concealed terminal triplet 8 (111m) + pair wait 2 = 40
         assert_eq!(result.total, 40);
     }
 
-    /// ポンした明刻（中張牌）: 2符
     #[test]
     fn test_open_triplet_simple() {
-        // 123p 789s 456s 33m + ポン222m + ツモ3m
         let hand = Hand::from("123p456789s3m 222m 3m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
@@ -470,14 +441,12 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 中張牌明刻2(222m) + 単騎待ち2(3m) + ツモ2 = 26 -> 30
+        // base 20 + open inside triplet 2 (222m) + pair wait 2 + tsumo 2 = 26 -> 30
         assert_eq!(result.total, 30);
     }
 
-    /// ポンした明刻（么九牌）: 4符
     #[test]
     fn test_open_triplet_terminal() {
-        // 123p 456s 789s 33m + ポン111m + ツモ3m
         let hand = Hand::from("123p456789s3m 111m 3m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
@@ -486,14 +455,12 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 么九牌明刻4(111m) + 単騎待ち2(3m) + ツモ2 = 28 -> 30
+        // base 20 + open terminal triplet 4 (111m) + pair wait 2 + tsumo 2 = 28 -> 30
         assert_eq!(result.total, 30);
     }
 
-    /// 明槓（中張牌）: 8符
     #[test]
     fn test_open_kan_simple() {
-        // 123p 789s 456s 33m + 明槓2222m + ツモ3m
         let hand = Hand::from("123p456789s3m 2222m 3m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
@@ -502,12 +469,11 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // from=Unknownなので明槓扱い
-        // 副底20 + 中張牌明槓8 + 単騎待ち2(3m) + ツモ2 = 32 -> 40
+        // from=Unknown counts as a called quad:
+        // base 20 + open inside quad 8 + pair wait 2 + tsumo 2 = 32 -> 40
         assert_eq!(result.total, 40);
     }
 
-    /// 三元牌の雀頭: 2符
     #[test]
     fn test_dragon_pair() {
         let hand = Hand::from("123456m234p789s5z 5z");
@@ -517,11 +483,10 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 門前加符10 + 三元牌雀頭2 + 単騎待ち2 = 34 -> 40
+        // base 20 + closed ron 10 + dragon pair 2 + pair wait 2 = 34 -> 40
         assert_eq!(result.total, 40);
     }
 
-    /// 自風牌の雀頭: 2符
     #[test]
     fn test_player_wind_pair() {
         let hand = Hand::from("123456m234p789s1z 1z");
@@ -531,11 +496,10 @@ mod tests {
         status.seat_wind = Wind::East;
         status.round_wind = Wind::South;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 門前加符10 + 自風牌雀頭2 + 単騎待ち2 = 34 -> 40
+        // base 20 + closed ron 10 + seat wind pair 2 + pair wait 2 = 34 -> 40
         assert_eq!(result.total, 40);
     }
 
-    /// 場風牌の雀頭: 2符
     #[test]
     fn test_prevailing_wind_pair() {
         let hand = Hand::from("123456m234p789s1z 1z");
@@ -545,11 +509,11 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 門前加符10 + 場風牌雀頭2 + 単騎待ち2 = 34 -> 40
+        // base 20 + closed ron 10 + round wind pair 2 + pair wait 2 = 34 -> 40
         assert_eq!(result.total, 40);
     }
 
-    /// 連風牌の雀頭（自風=場風=東）: 4符
+    /// A double-wind pair (seat wind == round wind) scores 2 + 2 fu.
     #[test]
     fn test_double_wind_pair() {
         let hand = Hand::from("123456m234p789s1z 1z");
@@ -559,11 +523,10 @@ mod tests {
         status.seat_wind = Wind::East;
         status.round_wind = Wind::East;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 門前加符10 + 自風牌雀頭2 + 場風牌雀頭2 + 単騎待ち2 = 36 -> 40
+        // base 20 + closed ron 10 + seat wind pair 2 + round wind pair 2 + pair wait 2 = 36 -> 40
         assert_eq!(result.total, 40);
     }
 
-    /// 嵌張待ち: 2符
     #[test]
     fn test_kanchan_wait() {
         let hand = Hand::from("123456m234p79s11z 8s");
@@ -573,11 +536,10 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::South;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 門前加符10 + 嵌張待ち2 = 32 -> 40
+        // base 20 + closed ron 10 + closed wait 2 = 32 -> 40
         assert_eq!(result.total, 40);
     }
 
-    /// 辺張待ち（12の3待ち）: 2符
     #[test]
     fn test_penchan_wait_low() {
         let hand = Hand::from("12m456m234p789s1z 3m");
@@ -587,13 +549,11 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::South;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 門前加符10 + 辺張待ち2 + 場風牌雀頭2(南=2z? いや1z=東) = 32 -> 40
-        // 1z=東、場風南なので雀頭加符なし
-        // 副底20 + 門前加符10 + 辺張待ち2 = 32 -> 40
+        // base 20 + closed ron 10 + edge wait 2 = 32 -> 40
+        // (the 1z pair is East, not the South round wind, so no pair fu)
         assert_eq!(result.total, 40);
     }
 
-    /// 辺張待ち（89の7待ち）: 2符
     #[test]
     fn test_penchan_wait_high() {
         let hand = Hand::from("123m456m234p89s1z 7s");
@@ -603,11 +563,10 @@ mod tests {
         status.seat_wind = Wind::South;
         status.round_wind = Wind::South;
         let result = calculate_fu(&analyzer, &hand, &status).unwrap();
-        // 副底20 + 門前加符10 + 辺張待ち2 = 32 -> 40
+        // base 20 + closed ron 10 + edge wait 2 = 32 -> 40
         assert_eq!(result.total, 40);
     }
 
-    /// 10符単位の切り上げ
     #[test]
     fn test_round_up_to_10() {
         assert_eq!(round_up_to_10(20), 20);
@@ -619,7 +578,7 @@ mod tests {
         assert_eq!(round_up_to_10(32), 40);
     }
 
-    /// 鳴き平和形のロンは30符
+    /// An open pinfu-shaped ron must be bumped from 20 to 30 fu.
     #[test]
     fn test_open_pinfu_ron() {
         let hand = Hand::from("456m789s33z 123p 234s 3z");

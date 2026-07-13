@@ -6,7 +6,7 @@ use crate::hand_info::status::*;
 use crate::settings::*;
 use crate::winning_hand::name::*;
 
-/// 清一色
+/// Perfect Flush (Chin'itsu / 清一色)
 pub fn check_perfect_flush(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -20,7 +20,6 @@ pub fn check_perfect_flush(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 清一色: 1種類の数牌のみで構成される（字牌なし）
     let mut has_honour = false;
     let mut has_character = false;
     let mut has_circle = false;
@@ -66,7 +65,6 @@ pub fn check_perfect_flush(
         }
     }
 
-    // 字牌があったら清一色ではない
     if has_honour {
         return Ok((name, false, 0));
     }
@@ -84,13 +82,11 @@ pub fn check_perfect_flush(
     }
 }
 
-/// ユニットテスト
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hand::*;
     #[test]
-    /// 清一色で和了った
     fn test_perfect_flush_closed() {
         let test_str = "1113456677778m 5m";
         let test = Hand::from(test_str);
@@ -103,8 +99,8 @@ mod tests {
             ("清一色", true, 6)
         );
     }
+    /// Open hands score one han less (6 → 5).
     #[test]
-    /// 清一色で和了った（食い下がり5翻）
     fn test_perfect_flush_open() {
         let test_str = "1234569p 789p 111p 9p";
         let test = Hand::from(test_str);

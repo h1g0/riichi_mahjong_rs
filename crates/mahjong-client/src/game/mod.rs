@@ -1,6 +1,5 @@
-//! ゲーム状態管理
-//!
-//! サーバから受信したイベントに基づいてクライアント側の状態を管理する。
+//! Client-side game state, driven by the events received from the
+//! server.
 
 use std::collections::VecDeque;
 
@@ -30,35 +29,37 @@ pub use setup::{GameMode, OnlineUiState, RoomViewUi, SetupState};
 
 use labels::*;
 
-/// 鳴き・リーチ宣言バナー表示後、後続イベントの適用を保留する時間（秒）
+/// Seconds later events stay held after a call/riichi banner appears.
 pub const CALL_HOLD_SECS: f64 = 0.9;
-/// ロン・ツモ・九種九牌の宣言バナー表示から結果画面表示までの保留時間（秒）
+/// Seconds between a win/nine-terminals banner and the result screen.
 pub const WIN_HOLD_SECS: f64 = 1.2;
-/// 宣言バナーの表示時間（秒）
+/// Seconds a declaration banner stays visible.
 pub const CALL_BANNER_SECS: f64 = 1.5;
-/// リーチ中の自動ツモ切りまでの待ち時間（秒）。ツモ牌を見せてから捨てる。
+/// Delay before the automatic riichi tsumogiri, so the drawn tile is
+/// visible first.
 pub const RIICHI_AUTO_DISCARD_SECS: f64 = 1.0;
 
-/// 鳴き・リーチなどの宣言バナー（発声の代わりに画面へ表示する吹き出し）
+/// A declaration banner (the on-screen stand-in for calling out).
 #[derive(Debug, Clone, Copy)]
 pub struct CallBanner {
-    /// 表示する文言（ポン・チー・カン・リーチ・ロン・ツモなど）
+    /// The text to show (pon, chii, kan, riichi, ron, tsumo, ...)
     pub label: Key,
-    /// 表示開始時刻（[`GameState::process_events`] に渡された now と同じ時計）
+    /// Display start time, on the clock passed to
+    /// [`GameState::process_events`]
     pub shown_at: f64,
 }
 
-/// 宣言イベントの表示内容（`declaration_for` が返す）
+/// What a declaration event displays (returned by `declaration_for`).
 struct Declaration {
-    /// バナーを出すプレイヤーと文言（ダブロン時は複数）
+    /// Banner player(s) and text; several on a multiple ron
     banners: Vec<(Wind, Key)>,
-    /// 後続イベントの適用を保留する時間（秒）
+    /// Seconds to hold later events
     hold_secs: f64,
-    /// true ならイベント自体の適用も保留する（ロン・ツモ・九種九牌）
+    /// Whether the event itself is also held (wins, nine terminals)
     before_apply: bool,
 }
 
-/// 1人分の和了結果（結果画面の1ページ分）
+/// One winner's result (one page of the result screen).
 #[derive(Debug, Clone)]
 pub struct WinResult {
     pub win_hand: Vec<Tile>,
@@ -67,63 +68,64 @@ pub struct WinResult {
     pub win_is_tsumo: bool,
     pub uradora_indicators: Vec<Tile>,
     pub result_message: String,
-    /// 和了者の表示名（例: 「東家」「あなた」）
+    /// The winner's display name
     pub winner_name: String,
-    /// 放銃者の表示名（ツモの場合は None）
+    /// The deal-in player's display name; None on tsumo
     pub loser_name: Option<String>,
-    /// 成立した役の一覧（役名, 翻数）
+    /// Awarded yaku as (name, han) pairs
     pub yaku: Vec<(String, u32)>,
-    /// 翻数
+    /// Han
     pub han: u32,
-    /// 符
+    /// Fu
     pub fu: u32,
-    /// 和了点
+    /// Points won
     pub score_points: i32,
-    /// 点数等級名（満貫・跳満など。通常は空）
+    /// Score rank name (mangan etc.; usually empty)
     pub rank_name: String,
-    /// この和了で受け取った供託リーチ棒の本数
+    /// Riichi deposits collected with this win
     pub riichi_sticks: usize,
 }
 
-/// 捨て牌の表示情報
+/// Display info for one discard.
 #[derive(Debug, Clone)]
 pub struct DiscardInfo {
     pub tile: Tile,
     pub is_tsumogiri: bool,
-    /// リーチ宣言牌かどうか（横向きに表示）
+    /// Whether this was the riichi declaration tile (drawn sideways)
     pub is_riichi: bool,
-    /// 他家に鳴かれた牌かどうか（薄く表示する）
+    /// Whether another player called it (drawn dimmed)
     pub is_called: bool,
 }
 
-/// 他家の手出し打牌の詰めアニメーション状態
+/// Gap-closing animation state for an opponent's hand discard.
 ///
-/// 実卓で「手牌のどこから切ったか」が見えるのと同様に、抜かれた位置へ
-/// 一瞬空白を見せてから右側の牌を左へ詰める演出に使う。
+/// As at a real table, where everyone sees which part of the hand a
+/// discard came from, the vacated slot shows briefly before the tiles to
+/// its right slide left.
 #[derive(Debug, Clone, Copy)]
 pub struct TedashiAnim {
-    /// 打牌前のソート済み手牌（ツモ牌を除く）内で牌が抜かれた位置（0始まり）
+    /// 0-based position the tile left, within the sorted pre-discard hand
     pub gap_index: usize,
-    /// 打牌時にツモ牌が張り出していたか（ツモ牌が手牌右端へ滑り込む演出用）
+    /// Whether a drawn tile was hanging out (it slides into the hand)
     pub had_drawn: bool,
-    /// アニメーション開始時刻（[`GameState::process_events`] に渡された now と同じ時計）
+    /// Animation start time, on the process_events clock
     pub started_at: f64,
 }
 
-/// 他プレイヤーの手牌表示情報（相対インデックスで管理）
+/// Display info for an opponent's hand, indexed relative to us.
 #[derive(Debug, Clone)]
 pub struct OtherPlayerHand {
-    /// 手牌（公開時のみ設定。非公開時は空）
+    /// Tiles; set only when revealed
     pub hand: Vec<Tile>,
-    /// 副露（鳴き）一覧
+    /// Melds
     pub melds: Vec<Meld>,
-    /// 手牌が公開されているか（和了時・テンパイ時）
+    /// Whether the hand is revealed (wins, tenpai at a draw)
     pub revealed: bool,
-    /// 非公開時の手牌枚数（ツモ牌を除く。裏向き表示用）
+    /// Hidden-hand tile count (excluding the drawn tile), for face-down display
     pub concealed_count: usize,
-    /// ツモ牌が手牌の右に張り出しているか（ツモ後〜打牌・北抜きまで）
+    /// Whether a drawn tile hangs to the right (from draw to discard/pei)
     pub has_drawn: bool,
-    /// 直近の手出し打牌の詰めアニメーション状態
+    /// Gap-closing animation of the latest hand discard
     pub tedashi_anim: Option<TedashiAnim>,
 }
 
@@ -139,10 +141,11 @@ impl OtherPlayerHand {
         }
     }
 
-    /// 手牌＋ツモ牌から n 枚が消費された（打牌・副露・北抜き）ときの表示枚数更新。
+    /// Updates the displayed count after n tiles leave the hand + drawn
+    /// tile (discard, meld, pei).
     ///
-    /// ツモ牌が張り出していた場合、残りは手牌へ組み入れられたとみなす
-    /// （サーバの `Player::try_discard` などと同じ挙動）。
+    /// A hanging drawn tile is considered merged into the hand, matching
+    /// the server's `Player::try_discard`.
     fn consume_tiles(&mut self, n: usize) {
         let total = self.concealed_count + usize::from(self.has_drawn);
         self.concealed_count = total.saturating_sub(n);
@@ -150,170 +153,173 @@ impl OtherPlayerHand {
     }
 }
 
-/// クライアント側のゲーム状態
+/// The client-side game state.
 pub struct GameState {
-    /// 自分の座席の風
+    /// Our seat wind
     pub seat_wind: Option<Wind>,
-    /// 自分の手牌
+    /// Our hand
     pub hand: Vec<Tile>,
-    /// ツモ牌（直近にツモった牌）
+    /// The drawn tile
     pub drawn: Option<Tile>,
-    /// 各プレイヤーの捨て牌（自分=0, 下家=1, 対面=2, 上家=3）
+    /// Discards per player (0 = self, 1 = right, 2 = across, 3 = left)
     pub discards: [Vec<DiscardInfo>; 4],
-    /// 各プレイヤーの点数
+    /// Scores
     pub scores: [i32; 4],
-    /// 場風
+    /// Round wind
     pub round_wind: Option<Wind>,
-    /// ドラ表示牌
+    /// Dora indicators
     pub dora_indicators: Vec<Tile>,
-    /// 裏ドラ表示牌（リーチ和了時のみ公開）
+    /// Ura dora indicators (revealed only on a riichi win)
     pub uradora_indicators: Vec<Tile>,
-    /// 和了時の手牌情報（結果画面表示用）
+    /// The winning hand, for the result screen
     pub win_hand: Vec<Tile>,
-    /// 和了時の副露
+    /// The winning hand's melds
     pub win_melds: Vec<Meld>,
-    /// 和了牌
+    /// The winning tile
     pub win_tile: Option<Tile>,
-    /// ツモ和了かロン和了か（true=ツモ）
+    /// Whether the win was by tsumo
     pub win_is_tsumo: bool,
-    /// 山の残り枚数
+    /// Tiles left in the wall
     pub remaining_tiles: usize,
-    /// 選択中の牌のインデックス
+    /// Index of the selected tile
     pub selected_tile: Option<usize>,
-    /// ツモ牌が選択中か
+    /// Whether the drawn tile is selected
     pub selected_drawn: bool,
-    /// ツモ和了可能か
+    /// Whether tsumo is possible
     pub can_tsumo: bool,
-    /// リーチ宣言可能か
+    /// Whether riichi may be declared
     pub can_riichi: bool,
-    /// 自分の手番で暗カン可能な牌
+    /// Tiles we could declare a concealed kan on this turn
     pub self_kan_options: Vec<Tile>,
-    /// 自分がリーチ中か
+    /// Whether we are in riichi
     pub is_riichi: bool,
-    /// リーチ中の自動ツモ切りを実行する時刻（ツモ牌を見せる待機中のみ Some）
+    /// When the automatic riichi tsumogiri fires; Some only while the
+    /// drawn tile is being shown
     riichi_auto_discard_at: Option<f64>,
-    /// リーチ宣言のための打牌選択中か
+    /// Whether we are choosing the riichi declaration discard
     pub riichi_selection_mode: bool,
-    /// リーチ可能な手牌インデックス
+    /// Hand indices that keep tenpai for riichi
     pub riichi_selectable_tiles: Vec<usize>,
-    /// ツモ牌切りでリーチ可能か
+    /// Whether tsumogiri also keeps tenpai for riichi
     pub riichi_selectable_drawn: bool,
-    /// 喰い替え禁止により、鳴き直後の打牌で捨てられない牌種
-    /// （チー・ポン直後にのみ設定され、打牌・ツモで解除される）
+    /// Tile kinds the swap-calling rule forbids on the post-call discard;
+    /// set right after a chii/pon and cleared by discarding or drawing
     pub forbidden_discards: Vec<TileType>,
-    /// 喰い替え禁止牌を選択しようとしたか（「喰い替えです！」警告の表示用）
+    /// Whether a forbidden tile was clicked, to show the warning
     pub selected_forbidden_swap: bool,
-    /// 局の結果メッセージ
+    /// The hand's result message
     pub result_message: Option<String>,
-    /// 和了結果一覧（ダブロン・トリロン時は複数）
+    /// Win results; several on a multiple ron
     pub win_results: Vec<WinResult>,
-    /// 現在表示中の和了結果インデックス
+    /// Index of the win result being shown
     pub win_result_index: usize,
-    /// 自分の手番か
+    /// Whether it is our turn
     pub is_my_turn: bool,
-    /// 現在手番のプレイヤーの席風（ツモ・鳴きイベントで更新。局の開始・終了で None）
+    /// Seat wind of the player to act; None between hands
     pub turn_player: Option<Wind>,
-    /// ゲームフェーズ
+    /// Game phase
     pub phase: GamePhase,
-    /// 鳴き可能な選択肢
+    /// Available calls
     pub available_calls: Vec<AvailableCall>,
-    /// 鳴き対象の牌
+    /// The tile the calls are on
     pub call_target_tile: Option<Tile>,
-    /// 鳴き対象の捨てたプレイヤー
+    /// Who discarded that tile
     pub call_discarder: Option<Wind>,
-    /// 自分の副露（鳴き）一覧
+    /// Our melds
     pub melds: Vec<Meld>,
-    /// 局番号（0=東1局, 1=東2局, ...）
+    /// Hand number (0 = East 1, ...)
     pub round_number: usize,
-    /// 本場数
+    /// Continuance counter (honba)
     pub honba: usize,
-    /// 場に出ている供託リーチ棒の本数
+    /// Riichi deposits on the table
     pub riichi_sticks: usize,
-    /// フリテン状態か
+    /// Whether we are furiten
     pub is_furiten: bool,
-    /// 選択中の牌を捨てるとフリテンになるか
+    /// Whether discarding the selected tile would leave us furiten
     pub selected_would_cause_furiten: bool,
-    /// 他プレイヤーの手牌情報（下家=0, 対面=1, 上家=2）
+    /// Opponents' hands (0 = right, 1 = across, 2 = left)
     pub other_players: [OtherPlayerHand; 3],
-    /// リーチ宣言済みで次の打牌がリーチ宣言牌となるプレイヤーの風（一時フラグ）
+    /// Wind of a player whose next discard is their riichi declaration
+    /// tile (transient)
     pending_riichi_player: Option<Wind>,
-    /// 直前に捨て牌したプレイヤーの風（鳴き元の判定に使用）
+    /// Wind of the last discarder, used to attribute calls
     last_discarder: Option<Wind>,
-    /// チーの組み合わせ選択UI表示中か（複数の選択肢がある場合）
+    /// Whether the chii option picker is open
     pub chi_option_selecting: bool,
-    /// チー選択UIに表示する選択肢（手牌から使う2枚の牌）
+    /// Chii options (the two hand tiles per option)
     pub chi_pending_options: Vec<[Tile; 2]>,
-    /// ポンの組み合わせ選択UI表示中か（赤ドラの有無で選択肢が分かれる場合）
+    /// Whether the pon option picker is open (red-five split)
     pub pon_option_selecting: bool,
-    /// ポン選択UIに表示する選択肢（手牌から使う2枚の牌）
+    /// Pon options (the two hand tiles per option)
     pub pon_pending_options: Vec<[Tile; 2]>,
-    /// 九種九牌の宣言選択中か
+    /// Whether the nine-terminals choice is open
     pub nine_terminals_pending: bool,
-    /// 対局開始前設定
+    /// Pre-game setup state
     pub setup_state: SetupState,
-    /// オンライン対戦UIの状態
+    /// Online UI state
     pub online_state: OnlineUiState,
-    /// 各座席のプレイヤー種別（座席インデックス順 = scores と同じ並び）
+    /// Player types per seat, in the same order as `scores`
     pub player_labels: [PlayerLabel; 4],
-    /// 自分の座席インデックス（ローカルは常に0、オンラインは your_seat）
+    /// Our seat index (0 locally; your_seat online)
     pub my_seat: usize,
-    /// 起家の座席インデックス（GameStarted から逆算して更新される）
+    /// The starting dealer's seat, recovered from GameStarted.
     ///
-    /// 起家はランダムで決まるため座席0とは限らない。最終順位の
-    /// 同点判定（起家に近い席が上位）に使う。
+    /// The starting dealer is random, so it need not be seat 0; used to
+    /// break final-standings ties (closer to the starting dealer wins).
     pub initial_dealer_seat: usize,
-    /// プレイヤー人数（四麻=4、三麻=3。GameStarted で設定される）
+    /// Player count (4 or 3), set by GameStarted
     pub player_count: usize,
-    /// 北抜きドラが有効か（三麻のみ true になり得る）
+    /// Whether pei dora is enabled (three-player only)
     pub nuki_dora: bool,
-    /// 各プレイヤーの北抜き枚数（風のインデックス順: 東=0, 南=1, 西=2）
+    /// Extracted North count per player, indexed by wind
     pub pei_counts: [u8; 4],
-    /// 北抜き可能か（自分の手番で手牌・ツモ牌に北がある場合）
+    /// Whether pei is possible on our turn
     pub can_pei: bool,
-    /// 各プレイヤーの宣言バナー（相対位置順: 自分=0, 下家=1, 対面=2, 上家=3）
+    /// Declaration banners per player (relative order)
     pub call_banners: [Option<CallBanner>; 4],
-    /// 未適用のサーバイベント（宣言演出中は適用を保留する）
+    /// Server events not yet applied (held during declaration effects)
     pending_events: VecDeque<ServerEvent>,
-    /// この時刻まで後続イベントの適用を保留する
+    /// Later events stay held until this time
     event_hold_until: f64,
-    /// キュー先頭イベントの宣言バナーを表示済みか（適用前保留の管理用）
+    /// Whether the front event's banner has been shown (pre-apply hold)
     head_announced: bool,
-    /// 直近に [`process_events`](Self::process_events) へ渡された時刻。
-    /// イベント適用時のアニメーション開始時刻として使う。
+    /// The time last passed to [`process_events`](Self::process_events);
+    /// used as the animation start time when applying events.
     clock: f64,
-    /// 表示言語
+    /// Display language
     pub lang: Lang,
 }
 
-/// モード選択・CPU設定画面の遷移元（戻り先と確定時の動作を決める）
+/// Where the mode/CPU screens were opened from; decides the back
+/// target and the confirm action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuOrigin {
-    /// CPU対戦（トップ画面 → モード選択 → CPU設定 → 対局開始）
+    /// Local CPU play (title -> mode -> CPU setup -> start)
     Local,
-    /// オンライン対戦（ルーム作成前のモード選択／ロビーからのCPU設定）
+    /// Online play (mode before room creation / CPU setup from the lobby)
     Online,
 }
 
-/// ゲームフェーズ
+/// Game phase.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GamePhase {
-    /// トップ画面（CPU対戦・オンライン対戦・設定・言語設定）
+    /// Title screen
     TopMenu,
-    /// 対局モード選択（四人東風〜三人半荘・北抜きドラ）
+    /// Game-mode selection
     ModeSelect(MenuOrigin),
-    /// CPU設定画面（強さ・性格。ローカルは対局開始、オンラインは決定）
+    /// CPU setup (level/personality; starts locally, confirms online)
     CpuSetup(MenuOrigin),
-    /// オンライン対戦メニュー（名前・ルームコード入力）
+    /// Online menu (name and room-code entry)
     OnlineMenu,
-    /// オンラインロビー（メンバー待ち）
+    /// Online lobby (waiting for members)
     OnlineLobby,
-    /// ゲーム開始前
+    /// Before the game starts
     WaitingForStart,
-    /// 対局中
+    /// In game
     Playing,
-    /// 局終了（結果表示中）
+    /// Hand over (result showing)
     RoundResult,
-    /// ゲーム終了
+    /// Game over
     GameOver,
 }
 
@@ -400,23 +406,23 @@ impl GameState {
             event_hold_until: 0.0,
             head_announced: false,
             clock: 0.0,
-            // 保存された表示言語を読み込む（未保存なら日本語）。
-            // 「もう一度」などで new() が再生成されても選択を保つ。
+            // Load the saved display language (Japanese when unsaved) so
+            // the choice survives new() being rebuilt on "play again".
             lang: crate::persistence::load_lang().unwrap_or(Lang::Ja),
         }
     }
 
-    /// 三麻かどうか
+    /// Whether this is a three-player game.
     pub fn is_three_player(&self) -> bool {
         self.player_count == 3
     }
 
-    /// 現在の表示言語の [`Translator`](crate::i18n::Translator) を返す。
+    /// The [`Translator`](crate::i18n::Translator) for the current language.
     pub fn tr(&self) -> crate::i18n::Translator {
         crate::i18n::Translator::new(self.lang)
     }
 
-    /// ローカル対局のプレイヤー種別を設定する（自分=座席0, CPU=座席1〜3）
+    /// Sets local-play player types: us at seat 0, CPUs at 1-3.
     pub fn set_local_players(&mut self, cpu_configs: &[CpuConfig; 3]) {
         self.my_seat = 0;
         self.player_labels = [
@@ -427,18 +433,17 @@ impl GameState {
         ];
     }
 
-    /// オンライン対局のプレイヤー種別を設定する
-    ///
-    /// `seats` は座席インデックス順、`your_seat` は自分の座席。
+    /// Sets online player types; `seats` is in seat order and
+    /// `your_seat` is our own.
     pub fn set_online_players(&mut self, seats: &[PlayerLabel; 4], your_seat: usize) {
         self.my_seat = your_seat;
         self.player_labels = seats.clone();
     }
 
-    /// 最終順位（座席インデックス, 点数）を上位から並べて返す
+    /// Final standings as (seat, score) from first to last.
     ///
-    /// 同点の場合は起家に近い席が上位になる。三麻ではダミー席（シート3）を
-    /// 除外する。
+    /// Ties go to the seat closer to the starting dealer; the dummy seat
+    /// is excluded in three-player games.
     pub fn final_rankings(&self) -> Vec<(usize, i32)> {
         let n = self.player_count;
         let mut rankings: Vec<(usize, i32)> = self
@@ -457,15 +462,10 @@ impl GameState {
         rankings
     }
 
-    /// 自分の座席の風インデックスを返す（未設定時は0）。
     pub fn my_wind_index(&self) -> usize {
         self.seat_wind.map(|w| w.to_index()).unwrap_or(0)
     }
 
-    /// 東1局開始時の自分の風インデックスを返す。
-    ///
-    /// 三麻の描画スロットはこの値で固定するため、局が進んで風が
-    /// 回っても各家の表示位置は動かない。
     pub fn my_initial_wind_index(&self) -> usize {
         (self.my_seat + self.player_count - self.initial_dealer_seat) % self.player_count
     }
@@ -473,33 +473,24 @@ impl GameState {
     fn relative_player_index(&self, wind: Wind) -> usize {
         let my_idx = self.my_wind_index();
         let their_idx = wind.to_index();
-        // 三麻では風インデックスは0〜2で循環する
+        // Wind indices cycle over 0-2 in three-player games.
         (their_idx + self.player_count - my_idx) % self.player_count
     }
 
-    /// 現在の局の風から、そのプレイヤーの東1局開始時の風インデックスを返す。
     fn initial_wind_index(&self, wind: Wind) -> usize {
         (self.my_initial_wind_index() + self.relative_player_index(wind)) % self.player_count
     }
 
-    /// CallType → MeldType 変換
     fn call_type_to_meld_type(call_type: &CallType) -> MeldType {
         match call_type {
             CallType::Chi => MeldType::Chi,
             CallType::Pon => MeldType::Pon,
             CallType::Ankan | CallType::Daiminkan => MeldType::Kan,
             CallType::Kakan => MeldType::Kakan,
-            CallType::Ron => MeldType::Pon, // フォールバック（使われない）
+            CallType::Ron => MeldType::Pon, // Unused fallback.
         }
     }
 
-    /// 鳴いたプレイヤー(caller)から見て、鳴き元(discarder)がどの位置かを返す
-    ///
-    /// 三麻では席が東1局開始時の位置で固定表示されるため（#309）、現在の局の
-    /// 風ではなく開始時の風の差分で判定する（#311）。現在の風のままだと風が
-    /// 0〜2で回る三麻では mod 4 の差分が局ごとに変わり、倒す牌の位置が画面上の
-    /// 鳴き元の席と一致しない局が生じる。四麻は風の差分 mod 4 が局によらず
-    /// 不変なので、現在の風をそのまま使う（挙動は従来どおり）。
     fn compute_meld_direction(&self, caller: Wind, discarder: Wind) -> MeldFrom {
         let (caller_idx, discarder_idx) = if self.player_count == 3 {
             (
@@ -511,29 +502,30 @@ impl GameState {
         };
         let rel = (discarder_idx + 4 - caller_idx) % 4;
         match rel {
-            3 => MeldFrom::Previous,  // 上家
-            2 => MeldFrom::Opposite,  // 対面
-            1 => MeldFrom::Following, // 下家
-            _ => MeldFrom::Myself,    // 自家（通常ここには来ない）
+            3 => MeldFrom::Previous,
+            2 => MeldFrom::Opposite,
+            1 => MeldFrom::Following,
+            _ => MeldFrom::Myself, // Not normally reachable.
         }
     }
 
-    /// サーバイベントを受信キューへ積む。適用は [`process_events`](Self::process_events) が行う。
+    /// Queues a server event; [`process_events`](Self::process_events)
+    /// applies it.
     pub fn queue_event(&mut self, event: ServerEvent) {
         self.pending_events.push_back(event);
     }
 
-    /// キュー内のイベントを順に適用する。毎フレーム呼ぶこと。
+    /// Applies queued events in order; call every frame.
     ///
-    /// 宣言（鳴き・リーチ・北抜き・和了・九種九牌）を伴うイベントでは
-    /// 宣言バナーを表示し、[`CALL_HOLD_SECS`]（和了系は [`WIN_HOLD_SECS`]）の間
-    /// 後続イベントの適用を保留する。これにより「発声 → 実際の挙動」の順に
-    /// 見え、プレイヤーが宣言に気付きやすくなる。和了・九種九牌はイベント
-    /// 自体の適用（結果画面への遷移）も保留する。
+    /// Declaration events (calls, riichi, pei, wins, nine terminals) show
+    /// a banner and hold later events for [`CALL_HOLD_SECS`]
+    /// ([`WIN_HOLD_SECS`] for wins), so the "call-out" is seen before its
+    /// effect and players notice the declaration. Wins and nine terminals
+    /// also hold the event itself (the result-screen transition).
     pub fn process_events(&mut self, now: f64) {
         self.clock = now;
 
-        // 表示時間を過ぎたバナーを片付ける
+        // Retire banners past their display time.
         for slot in &mut self.call_banners {
             if slot.is_some_and(|b| now - b.shown_at >= CALL_BANNER_SECS) {
                 *slot = None;
@@ -557,8 +549,9 @@ impl GameState {
                 }
                 self.event_hold_until = now + decl.hold_secs;
                 if decl.before_apply {
-                    // 宣言だけ見せて、イベントの適用は保留が明けてから行う。
-                    // 保留中に古い操作UI（ロン・ツモボタン等）が残らないよう畳む。
+                    // Show the declaration now; apply the event when the
+                    // hold ends. Collapse stale action UI (ron/tsumo
+                    // buttons) so it cannot linger through the hold.
                     self.head_announced = true;
                     self.available_calls.clear();
                     self.can_tsumo = false;
@@ -566,9 +559,10 @@ impl GameState {
                 } else {
                     let event = self.pending_events.pop_front().expect("front checked");
                     self.handle_event(event);
-                    // 自分の鳴きでは PlayerCalled の直後に HandUpdated が届く。
-                    // これを保留すると、保留中の打牌が保留明けの HandUpdated で
-                    // 巻き戻されて手牌がサーバと食い違うため、同時に適用する。
+                    // Our own call is followed immediately by HandUpdated.
+                    // Holding it would let a discard made during the hold
+                    // be rolled back by the late HandUpdated, desyncing the
+                    // hand - so apply both together.
                     if matches!(
                         self.pending_events.front(),
                         Some(ServerEvent::HandUpdated { .. })
@@ -586,7 +580,7 @@ impl GameState {
         }
     }
 
-    /// イベントが宣言（発声）を伴う場合、その表示内容を返す。
+    /// The declaration display for an event, when it has one.
     fn declaration_for(&self, event: &ServerEvent) -> Option<Declaration> {
         match event {
             ServerEvent::PlayerCalled {
@@ -596,7 +590,8 @@ impl GameState {
                     CallType::Pon => Key::Pon,
                     CallType::Chi => Key::Chi,
                     CallType::Ankan | CallType::Daiminkan | CallType::Kakan => Key::Kan,
-                    // ロンは RoundWon 側で宣言する（サーバは通常送らない）
+                    // Ron is declared via RoundWon; the server does not
+                    // normally send this.
                     CallType::Ron => return None,
                 };
                 Some(Declaration {
@@ -616,8 +611,8 @@ impl GameState {
                 before_apply: false,
             }),
             ServerEvent::RoundWon { .. } if self.phase == GamePhase::Playing => {
-                // ダブロン・トリロンでは RoundWon が連続で届くため、
-                // キュー内の和了者すべてのバナーを同時に表示する。
+                // Multiple rons arrive as consecutive RoundWon events, so
+                // show every queued winner's banner at once.
                 let banners: Vec<(Wind, Key)> = self
                     .pending_events
                     .iter()
@@ -651,7 +646,8 @@ impl GameState {
         }
     }
 
-    /// 和了者・放銃者などに使う席名（日本語は「東家」、英語は「East」）。
+    /// Seat name for winners and deal-in players
+    /// (Japanese 「東家」, English "East").
     fn wind_to_name(&self, wind: Wind) -> String {
         match self.lang {
             Lang::Ja => format!("{}家", wind.name(Lang::Ja)),
@@ -659,7 +655,7 @@ impl GameState {
         }
     }
 
-    /// 和了結果などに使うプレイヤー名（例:「CPU2」）。席名ではなくプレイヤー名を表示する。
+    /// Player name (e.g. "CPU2") for results, instead of the seat name.
     fn player_display_name(&self, wind: Wind) -> String {
         let rel = self.relative_player_index(wind);
         let seat = (self.my_seat + rel) % self.player_count;

@@ -37,7 +37,7 @@ extra = (
     '七対々暗刻混全帯純老頭小元二大四字緑国士無双蓮宝燈槓子喜天地人流'
     '海底撈月河魚嶺上開花搶単騎待満跳倍荒局連打種散了供託本符飜点'
     'ドラ裏枚残東南西北家面下上'
-    '…'  # 名前省略（char リテラルのため文字列抽出に乗らない）
+    '…'  # ellipsis for truncated names (a char literal, so the string scan misses it)
 )
 for ch in extra:
     chars.add(ch)

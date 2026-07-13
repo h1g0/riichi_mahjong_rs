@@ -86,6 +86,15 @@ Both commands must complete without errors or warnings.
   - Types: `fix` (bug fix), `feat` (new feature), `misc` (other)
   - Example: `fix/#87-hide-dora-on-draw-result`
 
+### Comments
+
+Follow the maxim: code says **How**, tests say **What**, commit logs say **Why**, and code comments say **Why not** (design constraints, rejected alternatives, non-obvious pitfalls).
+
+- Write all comments in English. For mahjong terms, use the English terms from `docs/glossary.md` (WRC 2025 names); append the Japanese in parentheses where it aids recognition, e.g. `liability payment (pao / 包)`.
+- Non-doc comments (`//`) must explain **why** or **why not** — a constraint, a bug being avoided (cite the issue number, e.g. `#294`), or a rejected simpler approach. Delete comments that restate what the code plainly does.
+- Doc comments (`///`, `//!`) document the API: purpose, invariants, units, and edge cases. Keep them even when short.
+- Do not translate or alter Japanese inside string literals (UI text, i18n strings, test data).
+
 ## Deployment
 
 Vercel deployment is pre-configured via `vercel.json`. The build runs `scripts/vercel-install.sh` then `scripts/vercel-build.sh`, placing web assets under `public/`.

@@ -1,5 +1,5 @@
-/// 符計算
+/// Minipoints (fu / 符) calculation
 pub mod fu;
 
-/// 点数計算
+/// Score calculation
 pub mod score;

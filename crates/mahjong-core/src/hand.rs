@@ -3,38 +3,34 @@ use crate::tile::*;
 use std::collections::VecDeque;
 use std::fmt::{self, Write};
 
-/// 手牌
+/// A player's hand (tehai / 手牌).
 #[derive(Debug, Clone)]
 pub struct Hand {
-    /// 現在の手牌（副露がなければ13枚）
+    /// Concealed tiles (13 when no melds have been called)
     tiles: Vec<Tile>,
-    /// 副露
+    /// Melded (open) groups
     melds: Vec<Meld>,
-    /// ツモってきた牌
+    /// The tile just drawn, if any
     drawn: Option<Tile>,
 }
 impl Hand {
-    /// 手牌の参照を返す
     pub fn tiles(&self) -> &[Tile] {
         &self.tiles
     }
 
-    /// 手牌の可変参照を返す
     pub fn tiles_mut(&mut self) -> &mut Vec<Tile> {
         &mut self.tiles
     }
 
-    /// ツモ牌をセットする
     pub fn set_drawn(&mut self, tile: Option<Tile>) {
         self.drawn = tile;
     }
 
-    /// 副露を追加する
     pub fn add_meld(&mut self, open: Meld) {
         self.melds.push(open);
     }
 
-    /// 指定インデックスの牌を手牌から除去する
+    /// Removes the tiles at the given indices from the concealed hand.
     pub fn remove_tiles_by_indices(&mut self, indices: &mut [usize]) {
         indices.sort_unstable_by(|a, b| b.cmp(a));
         for &idx in indices.iter() {
@@ -55,45 +51,38 @@ impl Hand {
         }
     }
 
-    /// ツモった牌を返す
     pub fn drawn(&self) -> Option<Tile> {
         self.drawn
     }
 
-    /// 副露を返す
     pub fn melds(&self) -> &[Meld] {
         &self.melds
     }
 
-    /// 副露の可変参照を返す
     pub fn melds_mut(&mut self) -> &mut Vec<Meld> {
         &mut self.melds
     }
 
-    /// 手牌をソートする
     pub fn sort(&mut self) {
         self.tiles.sort();
     }
-    /// 種類別に各牌の数をカウントする
+    /// Counts the tiles of each kind, including melds and the drawn tile.
     pub fn summarize_tiles(&self) -> TileSummarize {
         let mut result: TileSummarize = [0; Tile::LEN];
 
-        // 通常の手牌をカウント
         for i in 0..self.tiles.len() {
             result[self.tiles[i].get() as usize] += 1;
         }
 
-        // 鳴いている牌があればカウント
-        //
-        // 解析用途では副露は常に1面子として扱う。槓子の4枚目まで数えると
-        // 「4面子1雀頭に加えて孤立牌が1枚ある」手を和了形と誤認しうる。
+        // For analysis a meld always counts as one group of three: counting
+        // the fourth tile of a quad could make a hand with four groups, a
+        // pair, and one floating tile look like a winning shape.
         for i in 0..self.melds.len() {
             for j in 0..self.melds[i].tiles.len() {
                 result[self.melds[i].tiles[j].get() as usize] += 1;
             }
         }
 
-        // ツモった牌があればカウント
         if let Some(t) = self.drawn {
             result[t.get() as usize] += 1;
         }
@@ -101,7 +90,7 @@ impl Hand {
         result
     }
 
-    /// 絵文字として出力する
+    /// Renders the hand as Unicode mahjong-tile glyphs.
     pub fn to_emoji(&self) -> String {
         let mut result = String::new();
         for tile in &self.tiles {
@@ -121,7 +110,7 @@ impl Hand {
         result
     }
 
-    /// `Vec<Tile>`から連続した牌の種類を圧縮した文字列を返す
+    /// Renders tiles in compact notation, merging runs of the same suit ("123m").
     fn make_short_str(mut tiles: Vec<Tile>) -> String {
         if tiles.is_empty() {
             return String::new();
@@ -161,9 +150,9 @@ impl Hand {
         char::from(b'1' + zero_based_rank as u8)
     }
 
-    /// 文字列として出力する
+    /// Renders the hand as a string.
     ///
-    /// `to_string`と違い、こちらは連続した牌の種類は省略して`123m123p...`と出力する。
+    /// Unlike `to_string`, runs in the same suit are compacted: `123m123p...`.
     pub fn to_short_string(&self) -> String {
         let tiles = self.tiles.clone();
         let mut result = Hand::make_short_str(tiles);
@@ -178,7 +167,7 @@ impl Hand {
         result
     }
 
-    /// 文字列から`Vec<Tile>`を返す
+    /// Parses tile notation ("123m4z" etc.) into tiles.
     fn str_to_tiles(hand_str: &str) -> Vec<Tile> {
         let mut result: Vec<Tile> = Vec::new();
         let mut stack: VecDeque<char> = VecDeque::new();
@@ -187,7 +176,7 @@ impl Hand {
                 stack.push_back(c);
             } else if matches!(c, 'm' | 'p' | 's' | 'z') {
                 while let Some(t) = stack.pop_front() {
-                    // 字牌の場合は`8z`と`9z`は存在しない
+                    // Honours only go up to 7z: "8z" and "9z" do not exist.
                     if (matches!(c, 'm' | 'p' | 's') || (c == 'z' && matches!(t, '1'..='7')))
                         && let Some(t) = Tile::from(&format!("{t}{c}"))
                     {
@@ -254,9 +243,10 @@ impl Hand {
     }
 }
 
-/// 文字列として出力する
+/// Renders the hand as a string.
 ///
-/// `to_short_string`と違い、こちらは牌の種類を省略せずに`1m2m3m1p2p3p...`と必ず2文字単位で出力する。
+/// Unlike `to_short_string`, every tile is written as a full two-character
+/// pair: `1m2m3m1p2p3p...`.
 impl fmt::Display for Hand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for tile in &self.tiles {

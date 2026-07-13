@@ -11,50 +11,49 @@ use crate::settings::{Lang, Settings};
 use crate::winning_hand::checker;
 use crate::winning_hand::name::Kind;
 
-/// 点数計算の結果
+/// Result of a score calculation.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ScoreResult {
-    /// 翻数
+    /// Han
     pub han: u32,
-    /// 符
+    /// Fu (minipoints)
     pub fu: u32,
-    /// 点数等級名称
+    /// Score rank (mangan and above)
     pub rank: ScoreRank,
-    /// 親の場合のロン和了点
+    /// Points for a dealer win by ron
     pub dealer_ron: u32,
-    /// 親の場合のツモ和了点（各子の支払い）
+    /// Points for a dealer win by tsumo (paid by each non-dealer)
     pub dealer_tsumo_all: u32,
-    /// 子の場合のロン和了点
+    /// Points for a non-dealer win by ron
     pub non_dealer_ron: u32,
-    /// 子の場合のツモ和了点（親の支払い）
+    /// Points for a non-dealer win by tsumo (paid by the dealer)
     pub non_dealer_tsumo_dealer: u32,
-    /// 子の場合のツモ和了点（子の支払い）
+    /// Points for a non-dealer win by tsumo (paid by each non-dealer)
     pub non_dealer_tsumo_non_dealer: u32,
-    /// 成立した役・ドラの一覧（各項目, 翻数）
+    /// Awarded yaku and dora, as (item, han) pairs
     pub yaku_list: Vec<(ScoreItem, u32)>,
-    /// 副露しているか（役名の喰い下がり表記を再構築するために保持する）
+    /// Whether the hand was open; kept so the "(Open)" suffix on yaku
+    /// names can be reconstructed on display
     pub has_opened: bool,
-    /// 符の内訳
+    /// Fu breakdown
     pub fu_result: FuResult,
 }
 
-/// リザルトに表示する得点内訳の項目（役またはドラ）
+/// One line of the score breakdown shown on the result screen.
 ///
-/// 役名やドラ名を整形済み文字列で持つのではなく、種別を表す値として保持する。
-/// これにより表示側（クライアント）が任意の言語へローカライズできる。
+/// Held as a typed value rather than a pre-formatted string so the
+/// displaying client can localize it into any language.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize)]
 pub enum ScoreItem {
-    /// 役
     Yaku(Kind),
-    /// ドラ（通常・赤・裏）
     Dora(DoraLabel),
 }
 
 impl ScoreItem {
-    /// 項目の表示名を返す
+    /// Returns the display name.
     ///
-    /// * `has_opened` - 副露しているか（役の喰い下がり表記に用いる。ドラでは無視される）
-    /// * `lang` - 言語
+    /// `has_opened` selects the "(Open)" form of yaku names that lose han
+    /// when open; it is ignored for dora.
     pub fn name(&self, has_opened: bool, lang: Lang) -> &'static str {
         match self {
             ScoreItem::Yaku(kind) => crate::winning_hand::name::get(*kind, has_opened, lang),
@@ -63,27 +62,27 @@ impl ScoreItem {
     }
 }
 
-/// 点数の等級
+/// Score rank.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum ScoreRank {
-    /// 通常（満貫未満）
+    /// Below mangan
     Normal,
-    /// 満貫（5翻以上、または役満以外で3翻60符以上・4翻30符以上）
+    /// Mangan (満貫): 5 han, or 4 han 30+ fu / 3 han 60+ fu
     Mangan,
-    /// 跳満（6～7翻）
+    /// Haneman (跳満): 6-7 han
     Haneman,
-    /// 倍満（8～10翻）
+    /// Baiman (倍満): 8-10 han
     Baiman,
-    /// 三倍満（11～12翻）
+    /// Sanbaiman (三倍満): 11-12 han
     Sanbaiman,
-    /// 役満（13翻以上）
+    /// Yakuman (役満): a yakuman hand or 13+ han
     Yakuman,
 }
 
 impl ScoreRank {
-    /// 点数等級の表示名を返す（`Normal` は空文字列）
+    /// Returns the display name; empty for `Normal`.
     ///
-    /// 英語名は WRC Rules 2025 準拠（docs/glossary.md を参照）。
+    /// English names follow WRC Rules 2025 (see docs/glossary.md).
     pub fn name(&self, lang: Lang) -> &'static str {
         match lang {
             Lang::En => match self {
@@ -106,25 +105,24 @@ impl ScoreRank {
     }
 }
 
-/// ドラの種別（リザルト画面で役と並べて翻数を表示するために用いる）
+/// Kind of dora, listed next to yaku on the result screen.
 ///
-/// 翻数を生む通常の役ではないが、和了結果の内訳として役と同様に扱う。
+/// Dora is not a yaku, but it contributes han and is displayed the same way.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize)]
 pub enum DoraLabel {
-    /// ドラ
     Dora,
-    /// 赤ドラ
+    /// Red five (赤ドラ)
     RedDora,
-    /// 裏ドラ
+    /// Ura dora (裏ドラ), revealed only on a riichi win
     UraDora,
-    /// 北ドラ（三麻の北抜き。抜いた北風牌1枚につき1翻）
+    /// Pei dora (北ドラ): in three-player games, one han per extracted North tile
     PeiDora,
 }
 
 impl DoraLabel {
-    /// ドラ種別の表示名を返す
+    /// Returns the display name.
     ///
-    /// 英語名は WRC Rules 2025 準拠（docs/glossary.md を参照）。
+    /// English names follow WRC Rules 2025 (see docs/glossary.md).
     pub fn name(&self, lang: Lang) -> &'static str {
         match lang {
             Lang::En => match self {
@@ -143,49 +141,34 @@ impl DoraLabel {
     }
 }
 
-/// 点数を計算する
+/// Calculates the score of a winning hand.
 ///
-/// # Arguments
-/// * `analyzer` - 手牌解析結果
-/// * `hand` - 手牌
-/// * `status` - 局の状態
-/// * `settings` - ルール設定
-///
-/// # Returns
-/// 点数計算の結果。役がない場合はNone。
+/// Returns `None` when the hand has no yaku.
 pub fn calculate_score(
     analyzer: &HandAnalyzer,
     hand: &Hand,
     status: &Status,
     settings: &Settings,
 ) -> Result<Option<ScoreResult>> {
-    // 役判定
     let yaku_result = checker::check(analyzer, hand, status, settings)?;
 
-    // 成立した役を抽出
     let yaku_list = extract_yaku_list(&yaku_result);
 
     if yaku_list.is_empty() {
         return Ok(None);
     }
 
-    // 翻数の合計
     let han: u32 = yaku_list.iter().map(|(_, h)| h).sum();
 
-    // 役満判定
     let has_yakuman = yaku_list.iter().any(|(_, h)| *h >= 13);
 
-    // 符計算
     let fu_result = calculate_fu(analyzer, hand, status)?;
     let fu = fu_result.total;
 
-    // 等級を決定
     let rank = determine_rank(han, fu, has_yakuman);
 
-    // 基本点を計算
     let base_points = calculate_base_points(han, fu, rank);
 
-    // 各支払い額を計算
     let dealer_ron = round_up_to_100(base_points * 6);
     let dealer_tsumo_all = round_up_to_100(base_points * 2);
     let non_dealer_ron = round_up_to_100(base_points * 4);
@@ -207,14 +190,13 @@ pub fn calculate_score(
     }))
 }
 
-/// 役判定結果から成立した役のリストを抽出する
+/// Extracts the awarded yaku from the checker result.
 fn extract_yaku_list(
     yaku_result: &HashMap<Kind, (&'static str, bool, u32)>,
 ) -> Vec<(ScoreItem, u32)> {
     let mut list: Vec<(&Kind, u32)> = Vec::new();
     let mut has_yakuman = false;
 
-    // まず役満があるか確認
     for (_, is_valid, han) in yaku_result.values() {
         if *is_valid && *han >= 13 {
             has_yakuman = true;
@@ -224,7 +206,7 @@ fn extract_yaku_list(
 
     for (kind, (_name, is_valid, han)) in yaku_result {
         if *is_valid && *han > 0 {
-            // 役満がある場合は通常役を除外
+            // A yakuman supersedes all ordinary yaku.
             if has_yakuman && *han < 13 {
                 continue;
             }
@@ -232,14 +214,16 @@ fn extract_yaku_list(
         }
     }
 
-    // 翻数の昇順でソートし、同じ翻数の場合はKind列挙型の定義順でソート
+    // Sort by ascending han, then by Kind declaration order,
+    // which fixes the display order on the result screen.
     list.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(b.0)));
     list.into_iter()
         .map(|(kind, han)| (ScoreItem::Yaku(*kind), han))
         .collect()
 }
 
-/// 等級を決定する
+/// Determines the score rank, including mangan rounding up
+/// (4 han 30 fu / 3 han 60 fu count as mangan).
 pub fn determine_rank(han: u32, fu: u32, has_yakuman: bool) -> ScoreRank {
     if has_yakuman || han >= 13 {
         ScoreRank::Yakuman
@@ -256,7 +240,7 @@ pub fn determine_rank(han: u32, fu: u32, has_yakuman: bool) -> ScoreRank {
     }
 }
 
-/// 基本点を計算する
+/// Calculates the base points.
 pub fn calculate_base_points(han: u32, fu: u32, rank: ScoreRank) -> u32 {
     match rank {
         ScoreRank::Yakuman => 8000,
@@ -265,15 +249,15 @@ pub fn calculate_base_points(han: u32, fu: u32, rank: ScoreRank) -> u32 {
         ScoreRank::Haneman => 3000,
         ScoreRank::Mangan => 2000,
         ScoreRank::Normal => {
-            // 基本点 = 符 × 2^(翻+2)
+            // base points = fu x 2^(han+2)
             let base = fu * (1 << (han + 2));
-            // 満貫を超えないようにする
+            // Cap at mangan.
             if base > 2000 { 2000 } else { base }
         }
     }
 }
 
-/// 100点単位に切り上げる
+/// Rounds points up to the next multiple of 100.
 pub fn round_up_to_100(points: u32) -> u32 {
     points.div_ceil(100) * 100
 }
@@ -287,7 +271,7 @@ mod tests {
     use crate::settings::Settings;
     use crate::tile::Wind;
 
-    /// 満貫の子ロン: 8000点
+    /// Mangan, non-dealer ron: 8000 points.
     #[test]
     fn test_mangan_non_dealer_ron() {
         let rank = ScoreRank::Mangan;
@@ -296,7 +280,7 @@ mod tests {
         assert_eq!(round_up_to_100(base * 4), 8000);
     }
 
-    /// 満貫の親ロン: 12000点
+    /// Mangan, dealer ron: 12000 points.
     #[test]
     fn test_mangan_dealer_ron() {
         let rank = ScoreRank::Mangan;
@@ -305,7 +289,7 @@ mod tests {
         assert_eq!(round_up_to_100(base * 6), 12000);
     }
 
-    /// 跳満の子ロン: 12000点
+    /// Haneman, non-dealer ron: 12000 points.
     #[test]
     fn test_haneman_non_dealer_ron() {
         let rank = ScoreRank::Haneman;
@@ -314,7 +298,7 @@ mod tests {
         assert_eq!(round_up_to_100(base * 4), 12000);
     }
 
-    /// 倍満の子ロン: 16000点
+    /// Baiman, non-dealer ron: 16000 points.
     #[test]
     fn test_baiman_non_dealer_ron() {
         let rank = ScoreRank::Baiman;
@@ -323,7 +307,7 @@ mod tests {
         assert_eq!(round_up_to_100(base * 4), 16000);
     }
 
-    /// 三倍満の子ロン: 24000点
+    /// Sanbaiman, non-dealer ron: 24000 points.
     #[test]
     fn test_sanbaiman_non_dealer_ron() {
         let rank = ScoreRank::Sanbaiman;
@@ -332,7 +316,7 @@ mod tests {
         assert_eq!(round_up_to_100(base * 4), 24000);
     }
 
-    /// 役満の子ロン: 32000点
+    /// Yakuman, non-dealer ron: 32000 points.
     #[test]
     fn test_yakuman_non_dealer_ron() {
         let rank = ScoreRank::Yakuman;
@@ -341,81 +325,70 @@ mod tests {
         assert_eq!(round_up_to_100(base * 4), 32000);
     }
 
-    /// 1翻30符の子ロン: 1000点
+    /// 1 han 30 fu, non-dealer ron: 1000 points.
     #[test]
     fn test_1han_30fu_non_dealer_ron() {
         let rank = determine_rank(1, 30, false);
         assert_eq!(rank, ScoreRank::Normal);
         let base = calculate_base_points(1, 30, rank);
-        // 30 * 2^3 = 240
         assert_eq!(base, 240);
-        // 240 * 4 = 960 -> 切り上げ 1000
         assert_eq!(round_up_to_100(base * 4), 1000);
     }
 
-    /// 1翻40符の子ロン: 1300点
+    /// 1 han 40 fu, non-dealer ron: 1300 points.
     #[test]
     fn test_1han_40fu_non_dealer_ron() {
         let rank = determine_rank(1, 40, false);
         assert_eq!(rank, ScoreRank::Normal);
         let base = calculate_base_points(1, 40, rank);
-        // 40 * 2^3 = 320
         assert_eq!(base, 320);
-        // 320 * 4 = 1280 -> 切り上げ 1300
         assert_eq!(round_up_to_100(base * 4), 1300);
     }
 
-    /// 2翻30符の子ロン: 2000点
+    /// 2 han 30 fu, non-dealer ron: 2000 points.
     #[test]
     fn test_2han_30fu_non_dealer_ron() {
         let rank = determine_rank(2, 30, false);
         assert_eq!(rank, ScoreRank::Normal);
         let base = calculate_base_points(2, 30, rank);
-        // 30 * 2^4 = 480
         assert_eq!(base, 480);
-        // 480 * 4 = 1920 -> 切り上げ 2000
         assert_eq!(round_up_to_100(base * 4), 2000);
     }
 
-    /// 3翻30符の子ロン: 3900点
+    /// 3 han 30 fu, non-dealer ron: 3900 points.
     #[test]
     fn test_3han_30fu_non_dealer_ron() {
         let rank = determine_rank(3, 30, false);
         assert_eq!(rank, ScoreRank::Normal);
         let base = calculate_base_points(3, 30, rank);
-        // 30 * 2^5 = 960
         assert_eq!(base, 960);
-        // 960 * 4 = 3840 -> 切り上げ 3900
         assert_eq!(round_up_to_100(base * 4), 3900);
     }
 
-    /// 3翻60符の子ロンは満貫: 8000点
+    /// 3 han 60 fu rounds up to mangan.
     #[test]
     fn test_3han_60fu_is_mangan() {
         let rank = determine_rank(3, 60, false);
         assert_eq!(rank, ScoreRank::Mangan);
     }
 
-    /// 4翻30符の子ロンは満貫: 8000点
+    /// 4 han 30 fu rounds up to mangan.
     #[test]
     fn test_4han_30fu_is_mangan() {
         let rank = determine_rank(4, 30, false);
         assert_eq!(rank, ScoreRank::Mangan);
     }
 
-    /// 4翻25符は通常計算（七対子）: 子ロン6400点
+    /// 4 han 25 fu (Seven Pairs) stays below mangan: non-dealer ron 6400.
     #[test]
     fn test_4han_25fu_is_normal() {
         let rank = determine_rank(4, 25, false);
         assert_eq!(rank, ScoreRank::Normal);
         let base = calculate_base_points(4, 25, rank);
-        // 25 * 2^6 = 1600
         assert_eq!(base, 1600);
-        // 1600 * 4 = 6400
         assert_eq!(round_up_to_100(base * 4), 6400);
     }
 
-    /// 100点単位の切り上げ
     #[test]
     fn test_round_up_to_100() {
         assert_eq!(round_up_to_100(100), 100);
@@ -425,7 +398,6 @@ mod tests {
         assert_eq!(round_up_to_100(3840), 3900);
     }
 
-    /// 等級の判定
     #[test]
     fn test_determine_rank() {
         assert_eq!(determine_rank(1, 30, false), ScoreRank::Normal);
@@ -445,7 +417,7 @@ mod tests {
         assert_eq!(determine_rank(13, 30, true), ScoreRank::Yakuman);
     }
 
-    /// 満貫の子ツモ: 親4000 + 子2000×2 = 8000
+    /// Mangan, non-dealer tsumo: dealer 4000 + 2000 from each non-dealer.
     #[test]
     fn test_mangan_non_dealer_tsumo() {
         let base = calculate_base_points(5, 30, ScoreRank::Mangan);
@@ -455,7 +427,7 @@ mod tests {
         assert_eq!(non_dealer_pay, 2000);
     }
 
-    /// 満貫の親ツモ: 子4000×3 = 12000
+    /// Mangan, dealer tsumo: 4000 from every non-dealer.
     #[test]
     fn test_mangan_dealer_tsumo() {
         let base = calculate_base_points(5, 30, ScoreRank::Mangan);
@@ -463,7 +435,6 @@ mod tests {
         assert_eq!(each_pay, 4000);
     }
 
-    /// 立直のみ（門前ロン）: 1翻30符 -> 子ロン1000点
     #[test]
     fn test_calculate_score_riichi_only() {
         let hand = Hand::from("123456m234p6799s 5s");
@@ -477,13 +448,12 @@ mod tests {
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()
             .unwrap();
-        // 平和 + 立直 = 2翻, 30符
+        // Pinfu + Riichi = 2 han, 30 fu
         assert_eq!(result.han, 2);
         assert_eq!(result.fu, 30);
         assert_eq!(result.non_dealer_ron, 2000);
     }
 
-    /// ツモで和了（門前清自摸和 + 平和）: 2翻20符 -> 子ツモ: 親700 + 子400×2
     #[test]
     fn test_calculate_score_tsumo_pinfu() {
         let hand = Hand::from("123456m234p6799s 5s");
@@ -496,16 +466,14 @@ mod tests {
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()
             .unwrap();
-        // 門前清自摸和 + 平和 = 2翻, 20符
+        // Fully Concealed Hand + Pinfu = 2 han, 20 fu
         assert_eq!(result.han, 2);
         assert_eq!(result.fu, 20);
-        // 基本点 = 20 * 2^4 = 320
-        // 子ツモ: 親700(640->700) + 子400(320->400)×2
+        // base 20 * 2^4 = 320: dealer pays 640 -> 700, others 320 -> 400
         assert_eq!(result.non_dealer_tsumo_dealer, 700);
         assert_eq!(result.non_dealer_tsumo_non_dealer, 400);
     }
 
-    /// 役がない手は None を返す
     #[test]
     fn test_calculate_score_no_yaku() {
         let hand = Hand::from("123456m234p789s3z 3z");
@@ -520,7 +488,6 @@ mod tests {
         assert!(result.is_none());
     }
 
-    /// 役満（国士無双）: 子ロン32000点
     #[test]
     fn test_calculate_score_yakuman() {
         let hand = Hand::from("19m19p19s1234567z 1m");
@@ -538,41 +505,35 @@ mod tests {
         assert_eq!(result.dealer_ron, 48000);
     }
 
-    /// 2翻40符の親ロン: 2600点
+    /// 2 han 40 fu, dealer ron: 3900 points.
     #[test]
     fn test_2han_40fu_dealer_ron() {
         let rank = determine_rank(2, 40, false);
         let base = calculate_base_points(2, 40, rank);
-        // 40 * 2^4 = 640
         assert_eq!(base, 640);
-        // 640 * 6 = 3840 -> 切り上げ 3900
         assert_eq!(round_up_to_100(base * 6), 3900);
     }
 
-    /// 1翻30符の親ツモ: 各子500点
+    /// 1 han 30 fu, dealer tsumo: 500 from each non-dealer.
     #[test]
     fn test_1han_30fu_dealer_tsumo() {
         let base = calculate_base_points(1, 30, ScoreRank::Normal);
-        // 30 * 2^3 = 240
         assert_eq!(base, 240);
-        // 240 * 2 = 480 -> 切り上げ 500
         assert_eq!(round_up_to_100(base * 2), 500);
     }
 
-    /// 1翻30符の子ツモ: 親500点, 子300点
+    /// 1 han 30 fu, non-dealer tsumo: dealer 500, non-dealers 300.
     #[test]
     fn test_1han_30fu_non_dealer_tsumo() {
         let base = calculate_base_points(1, 30, ScoreRank::Normal);
-        // 親: 240 * 2 = 480 -> 500
         assert_eq!(round_up_to_100(base * 2), 500);
-        // 子: 240 * 1 = 240 -> 300
         assert_eq!(round_up_to_100(base), 300);
     }
 
-    /// 役リストは翻数昇順に並ぶ: 断么九(1翻)が七対子(2翻)より先
+    /// The yaku list is sorted by ascending han:
+    /// All Inside (1 han) before Seven Pairs (2 han).
     #[test]
     fn test_yaku_list_order_han_ascending() {
-        // 2244668m224466p + ロン8m = 七対子(2翻) + 断么九(1翻)
         let hand = Hand::from("2244668m224466p 8m");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
@@ -583,15 +544,14 @@ mod tests {
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()
             .unwrap();
-        // 翻数昇順: 断么九(1翻) → 七対子(2翻)
         assert_eq!(result.yaku_list[0], (ScoreItem::Yaku(Kind::AllInside), 1));
         assert_eq!(result.yaku_list[1], (ScoreItem::Yaku(Kind::SevenPairs), 2));
     }
 
-    /// 同翻の役はKind列挙型の定義順に並ぶ: 立直(Riichi)が平和(Pinfu)より先
+    /// Equal-han yaku are sorted by Kind declaration order:
+    /// Riichi before Pinfu.
     #[test]
     fn test_yaku_list_order_same_han_uses_kind_order() {
-        // 立直(1翻) + 平和(1翻): Kind定義順でRiichi < Pinfu
         let hand = Hand::from("123456m234p6799s 5s");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
         let mut status = Status::new();
@@ -612,10 +572,9 @@ mod tests {
             .iter()
             .position(|&i| i == ScoreItem::Yaku(Kind::Pinfu))
             .unwrap();
-        assert!(riichi_pos < pinfu_pos, "立直はKind定義順で平和より先に来る");
+        assert!(riichi_pos < pinfu_pos);
     }
 
-    /// 点数等級名（日本語）
     #[test]
     fn rank_name_ja() {
         assert_eq!(ScoreRank::Normal.name(Lang::Ja), "");
@@ -626,7 +585,6 @@ mod tests {
         assert_eq!(ScoreRank::Yakuman.name(Lang::Ja), "役満");
     }
 
-    /// 点数等級名（英語、WRC 準拠）
     #[test]
     fn rank_name_en() {
         assert_eq!(ScoreRank::Normal.name(Lang::En), "");
@@ -637,7 +595,6 @@ mod tests {
         assert_eq!(ScoreRank::Yakuman.name(Lang::En), "Yakuman");
     }
 
-    /// ドラ種別名（日本語）
     #[test]
     fn dora_label_name_ja() {
         assert_eq!(DoraLabel::Dora.name(Lang::Ja), "ドラ");
@@ -646,7 +603,6 @@ mod tests {
         assert_eq!(DoraLabel::PeiDora.name(Lang::Ja), "北ドラ");
     }
 
-    /// ドラ種別名（英語）
     #[test]
     fn dora_label_name_en() {
         assert_eq!(DoraLabel::Dora.name(Lang::En), "Dora");

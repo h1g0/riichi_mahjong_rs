@@ -1,14 +1,15 @@
-//! CPU設定画面の描画と入力処理
+//! CPU-setup screen rendering and input.
 //!
-//! CPU対戦では「対局開始」、オンライン対戦（ホストがロビーから開く）では
-//! 「決定」で確定する。対局モードはモード選択画面（menu.rs）で選ぶ。
+//! Local play confirms with "start game"; online (opened by the host
+//! from the lobby) with "confirm". The game mode is chosen on the mode
+//! screen (menu.rs).
 
 use super::*;
 use crate::game::MenuOrigin;
 
-// ========== CPU設定画面 ==========
+// ========== CPU-setup screen ==========
 
-/// 設定画面のボタン領域
+/// Button areas of the setup screen.
 pub(super) struct SetupButton {
     x: f32,
     y: f32,
@@ -22,7 +23,7 @@ impl SetupButton {
     }
 }
 
-// 設定画面のレイアウト定数（描画と入力判定で共有する）
+// Layout constants shared by rendering and hit testing.
 pub(super) const SETUP_PANEL_W: f32 = 980.0;
 pub(super) const SETUP_PANEL_Y: f32 = 56.0;
 pub(super) const SETUP_PANEL_H: f32 = 612.0;
@@ -78,7 +79,7 @@ pub(super) fn setup_back_rect() -> SetupButton {
     }
 }
 
-/// 設定画面のオプションボタンを 1 個描画する。
+/// Draws one option button.
 pub(super) fn draw_setup_option(
     font: Option<&Font>,
     btn: &SetupButton,
@@ -99,17 +100,16 @@ pub(super) fn draw_setup_option(
     draw_jp_text(font, label, btn.x + 12.0, btn.y + 18.0, 13, text_color);
 }
 
-/// CPU設定画面を描画する
+/// Draws the CPU-setup screen.
 ///
-/// `origin` により確定ボタンの文言が変わる
-/// （ローカル=対局開始、オンライン=決定）。
+/// `origin` picks the confirm label: "start game" locally,
+/// "confirm" online.
 pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOrigin) {
     draw_setup_background();
     let setup = &state.setup_state;
     let tr = state.tr();
     let panel_x = setup_panel_x();
 
-    // パネル背景
     theme::draw_panel(
         panel_x,
         SETUP_PANEL_Y,
@@ -120,7 +120,7 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
         theme::PANEL_BORDER,
     );
 
-    // タイトル（選択中の対局モードを添える）
+    // Title, with the selected mode appended.
     let cx = DESIGN_W / 2.0;
     theme::draw_text_centered(
         font,
@@ -139,7 +139,7 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
         theme::GOLD_LT,
     );
 
-    // CPU カード（三麻はCPU2人）
+    // CPU cards (two in three-player games).
     let card_w = setup_card_w();
     for cpu_idx in 0..setup.cpu_count() {
         let card_x = setup_card_x(cpu_idx);
@@ -161,8 +161,8 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
             theme::BORDER,
         );
 
-        // ヘッダー：番号リング＋名前（席順は対局開始時にランダムで決まるため、
-        // 風・相対位置ではなく CPU 番号で表示する）
+        // Header: numbered ring plus name. Seats are randomized at game
+        // start, so CPUs show numbers rather than winds/positions.
         let ring_cx = card_x + 16.0 + 18.0;
         let ring_cy = SETUP_CARD_Y + 16.0 + 18.0;
         draw_circle(ring_cx, ring_cy, 18.0, theme::rgba(0x9a7a1a, 0.30));
@@ -184,7 +184,6 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
             theme::TEXT,
         );
 
-        // 強さ
         draw_jp_text(
             font,
             tr.get(Key::CpuStrengthLabel),
@@ -203,7 +202,6 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
             );
         }
 
-        // 性格
         draw_jp_text(
             font,
             tr.get(Key::CpuPersonalityLabel),
@@ -223,7 +221,6 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
         }
     }
 
-    // 確定ボタン（ゴールド。ローカル=対局開始、オンライン=決定）
     let confirm_key = match origin {
         MenuOrigin::Local => Key::StartGame,
         MenuOrigin::Online => Key::Confirm,
@@ -249,24 +246,23 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
         theme::GOLD_LT,
     );
 
-    // 戻るボタン
     let b = setup_back_rect();
     theme::draw_rounded_rect(b.x, b.y, b.w, b.h, 6.0, theme::rgba(0xffffff, 0.05));
     theme::draw_rounded_rect_lines(b.x, b.y, b.w, b.h, 6.0, 1.0, theme::rgba(0xc8a227, 0.3));
     theme::draw_text_centered(font, tr.get(Key::Back), cx, b.y + 24.0, 14, theme::TEXT);
 }
 
-/// CPU設定画面での操作
+/// CPU-setup screen actions.
 pub enum SetupAction {
-    /// ローカル対局を開始する
+    /// Start a local game
     StartLocal([CpuConfig; 3]),
-    /// CPU設定を確定してロビーへ戻る（オンラインのホストのみ）
+    /// Confirm the CPU setup and return to the lobby (online host)
     ApplyOnline,
-    /// 前の画面へ戻る（ローカル=モード選択、オンライン=ロビー）
+    /// Back (mode selection locally, lobby online)
     Back,
 }
 
-/// CPU設定画面の入力を処理する。ボタンが押された場合 Some(action) を返す。
+/// Handles setup-screen input, returning any pressed action.
 pub fn handle_setup_input(
     state: &mut GameState,
     _font: Option<&Font>,
@@ -280,14 +276,12 @@ pub fn handle_setup_input(
     let setup = &mut state.setup_state;
 
     for cpu_idx in 0..setup.cpu_count() {
-        // 強さボタン
         for level_idx in 0..SetupState::level_count() {
             if setup_opt_rect(cpu_idx, SETUP_STR_OFFSET, level_idx).contains(mx, my) {
                 setup.cpu_levels[cpu_idx] = level_idx;
                 return None;
             }
         }
-        // 性格ボタン
         for pers_idx in 0..SetupState::personality_count() {
             if setup_opt_rect(cpu_idx, SETUP_PERS_OFFSET, pers_idx).contains(mx, my) {
                 setup.cpu_personalities[cpu_idx] = pers_idx;
@@ -296,7 +290,6 @@ pub fn handle_setup_input(
         }
     }
 
-    // 確定ボタン（ローカル=対局開始、オンライン=決定）
     if setup_start_rect().contains(mx, my) {
         return match origin {
             MenuOrigin::Local => {
@@ -308,7 +301,6 @@ pub fn handle_setup_input(
         };
     }
 
-    // 戻るボタン
     if setup_back_rect().contains(mx, my) {
         return Some(SetupAction::Back);
     }

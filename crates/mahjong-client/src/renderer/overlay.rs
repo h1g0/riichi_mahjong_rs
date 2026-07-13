@@ -1,6 +1,7 @@
-//! 鳴き・和了選択オーバーレイの描画とクリック判定
+//! Call/win overlay rendering and hit testing.
 //!
-//! 各関数が描画とクリック判定を同時に行い、クリックされた場合に `Some(OverlayClick)` を返す。
+//! Each function draws and hit-tests at once, returning
+//! `Some(OverlayClick)` when clicked.
 
 use macroquad::prelude::*;
 use mahjong_core::settings::Lang;
@@ -14,10 +15,11 @@ use super::{
 use crate::game::GameState;
 use crate::i18n::Key;
 
-/// 手牌の下に表示する状態ヒントの Y 座標（中央の捨て牌と重ならないよう手牌より下）。
+/// Y of the status hint under the hand, kept below the hand so it never
+/// overlaps the center discards.
 const HINT_Y: f32 = 772.0;
 
-// ─── チー／ポン選択UI定数 ─────────────────────────────────────────────────────
+// --- Chii/pon option-picker constants ---
 
 const CHI_SEL_TILE_W: f32 = 44.0;
 const CHI_SEL_TILE_H: f32 = 62.0;
@@ -25,7 +27,7 @@ const CHI_SEL_TILE_GAP: f32 = 2.0;
 const CHI_SEL_OPT_SPACING: f32 = 24.0;
 const CHI_SEL_PANEL_H: f32 = 180.0;
 
-// ─── 鳴きパネル定数 ──────────────────────────────────────────────────────────
+// --- Call panel constants ---
 
 const CALL_BTN_W: f32 = 100.0;
 const CALL_BTN_H: f32 = 40.0;
@@ -33,25 +35,20 @@ const CALL_BTN_SPACING: f32 = 10.0;
 const CALL_PANEL_PAD: f32 = 14.0;
 const CALL_PANEL_TILE_W: f32 = 44.0;
 const CALL_PANEL_TILE_H: f32 = 62.0;
-/// ノーロン時：鳴き・和了ボタン群の右端 X 座標。
-/// 盤面を画面中央に揃えたため、中央の捨て牌（右端 ≈724）と重ならないよう右側に置く。
+/// Right X of the call/win buttons when no ron is offered; pushed right
+/// so the centered discard pool (right edge ~724) stays clear.
 const CALL_PANEL_RIGHT_X_NO_RON: f32 = 980.0;
-/// ノーロン時：鳴きパネル下端 Y 座標（手牌 y=680 のわずか上）
+/// Bottom Y of the call panel (just above the hand at y = 680).
 const CALL_PANEL_BOTTOM_Y_NO_RON: f32 = 672.0;
-/// ノーロン時：鳴きパネルのボタン基準 Y 座標
+/// Button baseline Y inside the call panel.
 const CALL_BTN_BASE_Y_NO_RON: f32 = 624.0;
-/// 鳴きオーバーレイパネルの高さ
 const CALL_OVERLAY_PANEL_H: f32 = 60.0;
 
-// ─── 自分の手番のカン／北抜きパネル定数 ──────────────────────────────────────
-/// セルフカン・北抜きパネルとツモ・リーチボタンの間隔
 const SELF_CALL_PANEL_GAP: f32 = 8.0;
-/// 各カン牌スプライトとそのボタンの間隔
 const SELF_CALL_TILE_GAP: f32 = 8.0;
-/// カン／北抜きボタン（牌＋ボタンのまとまり）どうしの間隔
 const SELF_CALL_UNIT_SPACING: f32 = 12.0;
 
-// ─── 和了ボタン定数 ──────────────────────────────────────────────────────────
+// --- Win button constants ---
 
 const AGARI_BTN_W: f32 = 200.0;
 const AGARI_BTN_H: f32 = 60.0;
@@ -59,18 +56,14 @@ const AGARI_BTN_X: f32 = CALL_PANEL_RIGHT_X_NO_RON - AGARI_BTN_W; // 780
 const AGARI_BTN_Y: f32 = CALL_PANEL_BOTTOM_Y_NO_RON - AGARI_BTN_H; // 612
 const AGARI_BTN_GAP: f32 = 8.0;
 
-// ─── リーチボタン定数 ────────────────────────────────────────────────────────
-
 const RIICHI_BTN_W: f32 = 80.0;
 const RIICHI_BTN_H: f32 = 40.0;
-
-// ─── ヒット判定ヘルパー ───────────────────────────────────────────────────────
 
 fn hit_rect(mx: f32, my: f32, x: f32, y: f32, w: f32, h: f32) -> bool {
     mx >= x && mx <= x + w && my >= y && my <= y + h
 }
 
-/// 鳴きボタンの種類ごとの配色。
+/// Colors per call-button kind.
 enum CallBtnKind {
     Pon,
     Chi,
@@ -79,7 +72,7 @@ enum CallBtnKind {
     Pass,
 }
 
-/// 鳴き／パスボタンを 1 個描画する。
+/// Draws one call/pass button.
 fn draw_call_button(
     font: Option<&Font>,
     x: f32,
@@ -127,31 +120,32 @@ fn draw_call_button(
     );
 }
 
-// ─── 公開型 ──────────────────────────────────────────────────────────────────
+// --- Public types ---
 
-/// オーバーレイボタンのクリック結果
+/// The result of an overlay button click.
 pub enum OverlayClick {
-    /// サーバに送信するアクション
+    /// An action to send to the server
     Action(ClientAction),
-    /// リーチモードを切り替える
+    /// Toggle riichi mode
     ToggleRiichi,
-    /// チー選択UIを表示する（複数の組み合わせがある場合）
+    /// Open the chii option picker (multiple options)
     ShowChiSelection { options: Vec<[Tile; 2]> },
-    /// ポン選択UIを表示する（複数の組み合わせがある場合）
+    /// Open the pon option picker (red-five split)
     ShowPonSelection { options: Vec<[Tile; 2]> },
-    /// 選択UIをキャンセルして鳴きパネルに戻る
+    /// Cancel the picker, back to the call panel
     CancelMeldSelection,
-    /// カン／北抜きパネルを見送る（リーチ中の北抜き打診でツモ切りを選ぶ）
+    /// Decline the kan/pei panel (tsumogiri on a riichi pei offer)
     PassSelfCall,
-    /// 九種九牌を宣言して流局する
+    /// Declare the nine-terminals draw
     NineTerminalsDeclare,
-    /// 九種九牌を宣言せず続行する
+    /// Decline nine terminals and continue
     NineTerminalsPass,
 }
 
-// ─── エントリポイント ─────────────────────────────────────────────────────────
+// --- Entry point ---
 
-/// アクションボタン群を描画し、クリックされたボタンを返す。mod.rs の draw_game から呼ばれる。
+/// Draws the action buttons and returns any click; called from
+/// mod.rs's draw_game.
 pub(super) fn draw_action_buttons(
     state: &GameState,
     font: Option<&Font>,
@@ -161,12 +155,11 @@ pub(super) fn draw_action_buttons(
     let (mx, my) = super::mouse_position_design();
     let tr = state.tr();
 
-    // 九種九牌選択オーバーレイ
     if state.nine_terminals_pending {
         return draw_nine_terminals_overlay(font, state.lang, clicked, mx, my);
     }
 
-    // 選択オーバーレイ表示中は call_overlay の代わりに選択UIを右下に表示
+    // While a picker is open it replaces the call panel.
     if state.chi_option_selecting {
         return draw_chi_selection_overlay(state, font, tile_textures, clicked, mx, my);
     }
@@ -213,7 +206,6 @@ pub(super) fn draw_action_buttons(
 
     let mut result = None;
 
-    // 和了ボタン（ツモ）
     if state.can_tsumo {
         draw_agari_button(font, AGARI_BTN_X, AGARI_BTN_Y, tr.get(Key::Win));
         if clicked
@@ -224,9 +216,7 @@ pub(super) fn draw_action_buttons(
         }
     }
 
-    // リーチボタン
     if state.can_riichi {
-        // ツモボタンと重ならないよう、ツモボタンがある場合は上にずらす
         let riichi_y = if state.can_tsumo {
             AGARI_BTN_Y - RIICHI_BTN_H - AGARI_BTN_GAP
         } else {
@@ -272,7 +262,6 @@ pub(super) fn draw_action_buttons(
         }
     }
 
-    // 暗カン・加カン／北抜きパネル（チー・ポンと同じ鳴きパネル調のUI）
     if result.is_none()
         && let Some(click) = draw_self_call_overlay(state, font, tile_textures, clicked, mx, my)
     {
@@ -293,9 +282,9 @@ pub(super) fn draw_action_buttons(
     result
 }
 
-// ─── 和了ボタン ───────────────────────────────────────────────────────────────
+// --- Win button ---
 
-/// 和了ボタンを描画する（ロン・ツモ共通）。x/y は左上座標。
+/// Draws the win button (ron and tsumo); x/y is the top-left.
 fn draw_agari_button(font: Option<&Font>, x: f32, y: f32, label: &str) {
     theme::draw_gradient_button(
         x,
@@ -318,7 +307,7 @@ fn draw_agari_button(font: Option<&Font>, x: f32, y: f32, label: &str) {
     );
 }
 
-// ─── 鳴き確認オーバーレイ ────────────────────────────────────────────────────
+// --- Call confirmation overlay ---
 
 fn draw_call_overlay(
     state: &GameState,
@@ -339,7 +328,7 @@ fn draw_call_overlay(
         .any(|c| !matches!(c, AvailableCall::Ron));
 
     if !has_non_ron {
-        // ロンのみ：和了ボタンを右下に単独表示
+        // Ron only: the lone win button sits at the bottom right.
         if has_ron {
             draw_agari_button(font, AGARI_BTN_X, AGARI_BTN_Y, tr.get(Key::Win));
             if clicked && hit_rect(mx, my, AGARI_BTN_X, AGARI_BTN_Y, AGARI_BTN_W, AGARI_BTN_H) {
@@ -375,7 +364,7 @@ fn draw_call_overlay(
 
     let mut result = None;
 
-    // ロン＋鳴き同時：和了ボタンをパネルの上に表示
+    // Ron plus other calls: the win button rides above the panel.
     if has_ron {
         let agari_y = panel_y - AGARI_BTN_GAP - AGARI_BTN_H;
         draw_agari_button(font, AGARI_BTN_X, agari_y, tr.get(Key::Win));
@@ -384,7 +373,6 @@ fn draw_call_overlay(
         }
     }
 
-    // パネル背景
     theme::draw_panel(
         panel_x,
         panel_y,
@@ -395,7 +383,6 @@ fn draw_call_overlay(
         theme::GOLD_DK,
     );
 
-    // 捨て牌アイコン
     let tile_x = base_x - tile_area_w;
     let tile_y = base_y + (btn_h - tile_h) / 2.0;
     if let Some(target) = state.call_target_tile {
@@ -490,7 +477,6 @@ fn draw_call_overlay(
         btn_idx += 1;
     }
 
-    // パスボタン
     let pass_x = base_x + btn_idx as f32 * (btn_w + btn_spacing);
     draw_call_button(
         font,
@@ -508,10 +494,11 @@ fn draw_call_overlay(
     result
 }
 
-// ─── 自分の手番のカン／北抜きパネル ──────────────────────────────────────────
+// --- Own-turn kan/pei panel ---
 
-/// 自分の手番で可能な暗カン・加カン／北抜きを、チー・ポンと同じ鳴きパネル調の
-/// UI で描画する。牌はスプライトで示し、ボタンには役名のみを表示する。
+/// Draws the own-turn concealed/promoted kan and pei options in the
+/// same panel style as chii/pon: tiles as sprites, buttons with the
+/// action names.
 fn draw_self_call_overlay(
     state: &GameState,
     font: Option<&Font>,
@@ -522,7 +509,6 @@ fn draw_self_call_overlay(
 ) -> Option<OverlayClick> {
     let tr = state.tr();
 
-    // 表示する各ユニット（牌スプライト＋ボタン）を組み立てる。
     let mut units: Vec<(Tile, &'static str, CallBtnKind, ClientAction)> = Vec::new();
     for tile in &state.self_kan_options {
         units.push((
@@ -552,12 +538,12 @@ fn draw_self_call_overlay(
     let tile_h = CALL_PANEL_TILE_H;
     let pad = CALL_PANEL_PAD;
 
-    // 1 ユニット = 牌スプライト＋間隔＋ボタン
+    // One unit = sprite + gap + button.
     let unit_w = tile_w + SELF_CALL_TILE_GAP + btn_w;
     let units_w = units.len() as f32 * unit_w + (units.len() - 1) as f32 * SELF_CALL_UNIT_SPACING;
 
-    // リーチ中は手牌クリックで打牌できないため、北抜きを見送って
-    // ツモ切りするためのパスボタンを添える。
+    // Under riichi hand clicks cannot discard, so a pass button lets the
+    // player decline pei and tsumogiri instead.
     let show_pass = state.is_riichi;
     let pass_w = if show_pass {
         SELF_CALL_UNIT_SPACING + btn_w
@@ -565,8 +551,6 @@ fn draw_self_call_overlay(
         0.0
     };
 
-    // ツモ・リーチボタンが表示されているときはその上に置き、
-    // どちらも無ければ鳴きパネルと同じ高さに揃える。
     let panel_bottom_y = match (state.can_tsumo, state.can_riichi) {
         (true, true) => AGARI_BTN_Y - RIICHI_BTN_H - AGARI_BTN_GAP - SELF_CALL_PANEL_GAP,
         (true, false) | (false, true) => AGARI_BTN_Y - SELF_CALL_PANEL_GAP,
@@ -577,11 +561,9 @@ fn draw_self_call_overlay(
     let panel_h = CALL_OVERLAY_PANEL_H;
     let panel_x = CALL_PANEL_RIGHT_X_NO_RON - panel_w;
     let panel_y = panel_bottom_y - panel_h;
-    // ボタン下端をパネル下端から 8px 上げ（鳴きパネルと同じ余白）。
     let base_y = panel_bottom_y - 8.0 - btn_h;
     let base_x = panel_x + pad;
 
-    // パネル背景
     theme::draw_panel(
         panel_x,
         panel_y,
@@ -595,7 +577,7 @@ fn draw_self_call_overlay(
     let mut result = None;
     for (idx, (tile, label, kind, action)) in units.into_iter().enumerate() {
         let unit_x = base_x + idx as f32 * (unit_w + SELF_CALL_UNIT_SPACING);
-        // 牌スプライト（ボタンと縦中央を揃える）
+        // Sprite vertically centered against the button.
         let tile_y = base_y + (btn_h - tile_h) / 2.0;
         draw_tile_sprite(
             tile_textures.for_tile(&tile),
@@ -631,7 +613,7 @@ fn draw_self_call_overlay(
     result
 }
 
-// ─── チー／ポン選択オーバーレイ ──────────────────────────────────────────────
+// --- Chii/pon option picker ---
 
 fn draw_chi_selection_overlay(
     state: &GameState,
@@ -681,7 +663,7 @@ fn draw_pon_selection_overlay(
     )
 }
 
-/// チー／ポン選択オーバーレイの共通描画処理。描画しながらクリックを判定する。
+/// Shared picker rendering; hit-tests while drawing.
 struct ClickState {
     clicked: bool,
     mx: f32,
@@ -802,7 +784,6 @@ fn draw_meld_selection_overlay(
         }
     }
 
-    // キャンセルボタン
     let cancel_w = 120.0_f32;
     let cancel_h = 36.0_f32;
     let cancel_x = panel_x + (panel_w - cancel_w) / 2.0;
@@ -831,7 +812,7 @@ fn draw_meld_selection_overlay(
     result
 }
 
-// ─── 九種九牌オーバーレイ ──────────────────────────────────────────────────────
+// --- Nine-terminals overlay ---
 
 fn draw_nine_terminals_overlay(
     font: Option<&Font>,

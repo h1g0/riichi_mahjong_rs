@@ -1,8 +1,6 @@
-//! ゲームアダプター
-//!
-//! クライアントUIとサーバロジックの間の抽象境界。
-//! ローカル対戦（サーバ内蔵）とオンライン対戦（ネットワーク経由）を
-//! 同じインターフェースで扱えるようにする。
+//! Game adapters: the abstraction boundary between the client UI and the
+//! server logic, letting local play (embedded server) and online play
+//! (over the network) share one interface.
 
 mod local;
 mod remote;
@@ -13,32 +11,32 @@ pub use remote::{ConnStatus, RemoteAdapter, RoomView, error_code_message};
 use mahjong_core::settings::Lang;
 use mahjong_server::protocol::{ClientAction, ServerEvent};
 
-/// クライアントUIから見たゲームサーバへのインターフェース
+/// The game server as seen from the client UI.
 ///
-/// メインループはこのトレイト経由でアクション送信とイベント取得を行い、
-/// 接続先がローカルかリモートかを意識しない。
+/// The main loop sends actions and drains events through this trait
+/// without knowing whether the server is local or remote.
 pub trait GameAdapter {
-    /// プレイヤーのアクションを送信する
+    /// Sends a player action.
     fn send_action(&mut self, action: ClientAction);
 
-    /// 自分宛てのイベントを取得する
+    /// Drains the events addressed to this player.
     fn poll_events(&mut self) -> Vec<ServerEvent>;
 
-    /// ゲームを1ティック進める
+    /// Advances the game one tick.
     fn tick(&mut self);
 
-    /// 局結果画面を確認し、次の局への進行を要求する
+    /// Acknowledges the result screen and requests the next hand.
     fn request_next_round(&mut self);
 
-    /// ゲームが終了しているか
+    /// Whether the game is over.
     fn is_game_over(&self) -> bool;
 
-    /// 接続状態などの表示用テキスト（問題がなければ None）
+    /// Status text (connection issues etc.); None when all is well.
     fn status_text(&self, _lang: Lang) -> Option<String> {
         None
     }
 
-    /// 手番の制限時間の残り秒数（制限がなければ None）
+    /// Seconds left on the turn timer; None when unlimited.
     fn turn_remaining_secs(&self) -> Option<u32> {
         None
     }

@@ -1,11 +1,10 @@
-//! プリセット性格定義
-//!
-//! 各性格タイプに対応するパラメータのプリセットを定義する。
+//! Preset personality definitions: the parameter set for each
+//! personality type.
 
 use super::client::{CpuConfig, CpuLevel, CpuPersonality, PersonalityParams};
 
 impl PersonalityParams {
-    /// 性格からパラメータを生成する
+    /// Builds the parameter set for a personality.
     pub fn from_personality(personality: CpuPersonality) -> Self {
         match personality {
             CpuPersonality::Balanced => PersonalityParams {
@@ -40,24 +39,18 @@ impl PersonalityParams {
     }
 }
 
-/// プリセットCPU設定を取得する
+/// Returns the preset CPU configurations.
 pub fn preset_configs() -> Vec<CpuConfig> {
     vec![
-        // 弱いバランス型
         CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced),
-        // 普通の速攻型
         CpuConfig::new(CpuLevel::Normal, CpuPersonality::Speedy),
-        // 強い高打点型
         CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue),
-        // 強い守備型
         CpuConfig::new(CpuLevel::Strong, CpuPersonality::Defensive),
     ]
 }
 
-/// デフォルトの3人CPUプレイヤー設定を返す
-///
-/// 人間プレイヤー以外の3人分の設定。
-/// バランスの取れた混合構成。
+/// Default configurations for the three CPU opponents:
+/// a balanced mix of personalities.
 pub fn default_cpu_configs() -> [CpuConfig; 3] {
     [
         CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced),

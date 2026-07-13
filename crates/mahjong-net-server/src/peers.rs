@@ -1,14 +1,15 @@
-//! ピア（同一アプリの他マシン）の発見と照会
+//! Peer (same-app machines) discovery and lookup.
 //!
-//! 複数マシン構成では、ルームは生成されたマシンのメモリ上にのみ存在する。
-//! 他マシンが持つルームコードで接続要求を受けたときは、各ピアの内部リスナー
-//! （`GET /internal/rooms/{code}`）へ照会して所持マシンの ID を特定し、
-//! `fly-replay` ヘッダで Fly Proxy にそのマシンへ転送させる。
+//! In a multi-machine setup a room exists only in its creating machine's
+//! memory. When a connection arrives with another machine's room code,
+//! each peer's internal listener (`GET /internal/rooms/{code}`) is
+//! queried for the owner's ID, and a `fly-replay` header makes the Fly
+//! proxy forward the connection there.
 //!
-//! ピアの発見方法は環境変数で決まる:
-//! - `MAHJONG_PEERS` — カンマ区切りの `host:port` 固定リスト（ローカル・テスト用）
-//! - `FLY_APP_NAME` — Fly.io 内部 DNS（`<app>.internal` の AAAA レコード）
-//! - どちらも無ければピアなし（単一マシン運用）
+//! Discovery is chosen by environment variables:
+//! - `MAHJONG_PEERS` - fixed comma-separated `host:port` list (local/tests)
+//! - `FLY_APP_NAME` - Fly.io internal DNS (`<app>.internal` AAAA records)
+//! - neither: no peers (single machine)
 
 use std::net::IpAddr;
 use std::time::Duration;
@@ -16,41 +17,41 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-/// 内部リスナーのデフォルトポート
+/// Default internal-listener port.
 pub const DEFAULT_INTERNAL_PORT: u16 = 8081;
 
-/// ピア照会のタイムアウト（接続 + 応答の合計）
+/// Peer-query timeout (connect + response combined).
 const QUERY_TIMEOUT: Duration = Duration::from_millis(500);
 
-/// ルーム作成時にピア衝突で引き直す最大回数
+/// Maximum redraws on peer collisions during room creation.
 ///
-/// ピアが誤って常に「所持している」と答え続けても、ルーム作成が
-/// 無限ループしないための上限。上限に達したらローカルの一意性のみで確定する。
+/// Bounds the loop even if a broken peer keeps claiming ownership;
+/// past the cap, local uniqueness alone decides.
 const CREATE_COLLISION_RETRIES: usize = 4;
 
-/// ピアの発見方法
+/// How peers are discovered.
 #[derive(Clone)]
 enum PeerSource {
-    /// ピアなし（単一マシン・ローカル開発）
+    /// No peers (single machine, local development)
     None,
-    /// 固定リスト（`MAHJONG_PEERS`）
+    /// Fixed list (`MAHJONG_PEERS`)
     Static(Vec<String>),
-    /// Fly.io 内部 DNS（`<app>.internal` の AAAA レコード）
+    /// Fly.io internal DNS (`<app>.internal` AAAA records)
     FlyDns { app_name: String, port: u16 },
 }
 
-/// ピア一覧と自マシンの識別情報
+/// The peer set plus this machine's identity.
 #[derive(Clone)]
 pub struct Peers {
-    /// 自マシンの ID（`FLY_MACHINE_ID`）。`fly-replay: instance=` に使う
+    /// This machine's ID (`FLY_MACHINE_ID`), used in `fly-replay: instance=`
     machine_id: Option<String>,
-    /// 自マシンの 6PN アドレス（DNS 結果から自分を除外するのに使う）
+    /// This machine's 6PN address, used to exclude ourselves from DNS results
     private_ip: Option<IpAddr>,
     source: PeerSource,
 }
 
 impl Peers {
-    /// ピアなしの構成（単一マシン運用・既存テスト用）
+    /// Peer-less configuration (single machine; legacy tests).
     pub fn none() -> Self {
         Peers {
             machine_id: None,
@@ -59,7 +60,7 @@ impl Peers {
         }
     }
 
-    /// 環境変数から構成を読み取る
+    /// Reads the configuration from environment variables.
     pub fn from_env() -> Self {
         let machine_id = std::env::var("FLY_MACHINE_ID")
             .ok()
@@ -91,7 +92,7 @@ impl Peers {
         }
     }
 
-    /// 固定ピアリストで構成する（テスト用）
+    /// Configuration with a fixed peer list (for tests).
     pub fn with_static(machine_id: Option<&str>, peers: Vec<String>) -> Self {
         Peers {
             machine_id: machine_id.map(String::from),
@@ -100,15 +101,15 @@ impl Peers {
         }
     }
 
-    /// 自マシンの ID
+    /// This machine's ID.
     pub fn machine_id(&self) -> Option<&str> {
         self.machine_id.as_deref()
     }
 
-    /// ルームコードを所持しているピアを探し、そのマシン ID を返す
+    /// Finds the peer owning the room code and returns its machine ID.
     ///
-    /// 全ピアへ同時に照会し、最初に見つかったものを返す。
-    /// 照会失敗（接続不可・タイムアウト）は「所持していない」として扱う。
+    /// Queries every peer concurrently and returns the first hit;
+    /// failures (unreachable, timeout) count as "not owning".
     pub async fn find_room(&self, code: &str) -> Option<String> {
         let addrs = self.peer_addrs().await;
         if addrs.is_empty() {
@@ -122,10 +123,10 @@ impl Peers {
             .next()
     }
 
-    /// ルーム作成の候補コードが他マシンと衝突しないか確認しつつ生成する
+    /// Generates a room code while checking peers for collisions.
     ///
-    /// `generate` が返す候補（ローカルでは未使用のもの）をピアに照会し、
-    /// 衝突しないコードを返す。照会の上限回数を超えたら最後の候補で確定する。
+    /// Each locally unused candidate from `generate` is checked against
+    /// the peers; past the retry cap the last candidate wins.
     pub async fn pick_unused_code(&self, mut generate: impl FnMut() -> String) -> String {
         for _ in 0..CREATE_COLLISION_RETRIES {
             let candidate = generate();
@@ -134,12 +135,13 @@ impl Peers {
             }
             tracing::warn!(code = candidate, "room code collides with a peer; retrying");
         }
-        // ピアの応答が信用できない場合でもルーム作成は継続する
+        // Room creation proceeds even when peer answers are
+        // untrustworthy.
         tracing::warn!("giving up peer collision check; using locally unique code");
         generate()
     }
 
-    /// ピア一覧（`host:port`）を得る
+    /// The peer list as `host:port` entries.
     async fn peer_addrs(&self) -> Vec<String> {
         match &self.source {
             PeerSource::None => Vec::new(),
@@ -161,7 +163,7 @@ impl Peers {
     }
 }
 
-/// 内部リスナーのポートを環境変数 `INTERNAL_PORT` から読む
+/// Internal-listener port from `INTERNAL_PORT`.
 pub fn internal_port_from_env() -> u16 {
     std::env::var("INTERNAL_PORT")
         .ok()
@@ -169,10 +171,10 @@ pub fn internal_port_from_env() -> u16 {
         .unwrap_or(DEFAULT_INTERNAL_PORT)
 }
 
-/// 1つのピアへルーム所持を照会する
+/// Queries one peer for room ownership.
 ///
-/// 応答が単純（Content-Length 付き・非チャンク）になるよう HTTP/1.0 で
-/// リクエストし、200 ならボディ（所持マシンの ID）を返す。
+/// Sent as HTTP/1.0 so the response stays simple (Content-Length, no
+/// chunking); a 200 yields the body (the owner's machine ID).
 async fn query_peer(addr: &str, code: &str) -> Option<String> {
     let result = tokio::time::timeout(QUERY_TIMEOUT, async {
         let mut stream = TcpStream::connect(addr).await.ok()?;
@@ -186,7 +188,8 @@ async fn query_peer(addr: &str, code: &str) -> Option<String> {
     result.ok().flatten()
 }
 
-/// HTTP 応答からマシン ID を取り出す（200 以外・不正な形式は None）
+/// Extracts the machine ID from the HTTP response; non-200 or
+/// malformed yields None.
 fn parse_response(raw: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(raw).ok()?;
     let (head, body) = text.split_once("\r\n\r\n")?;
@@ -195,7 +198,8 @@ fn parse_response(raw: &[u8]) -> Option<String> {
         return None;
     }
     let id = body.trim();
-    // fly-replay ヘッダにそのまま埋め込むため、マシン ID の形式を検証する
+    // The ID lands verbatim in a fly-replay header, so validate its
+    // format.
     (!id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric())).then(|| id.to_string())
 }
 
@@ -217,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_parse_response_rejects_invalid_machine_id() {
-        // ヘッダインジェクションになりうる文字は拒否する
+        // Reject characters that could inject headers.
         let raw = b"HTTP/1.0 200 OK\r\n\r\nbad;id=x";
         assert_eq!(parse_response(raw), None);
         let empty = b"HTTP/1.0 200 OK\r\n\r\n";
@@ -237,7 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_room_unreachable_peer_is_ignored() {
-        // 接続できないピアは「所持していない」として扱う
+        // An unreachable peer counts as not owning.
         let peers = Peers::with_static(Some("self1"), vec!["127.0.0.1:1".to_string()]);
         assert_eq!(peers.find_room("ABCDEF").await, None);
     }

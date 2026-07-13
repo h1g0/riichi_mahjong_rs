@@ -1,4 +1,4 @@
-//! リーチ宣言とツモ和了
+//! Riichi declaration and tsumo wins.
 
 use mahjong_core::hand_info::hand_analyzer;
 use mahjong_core::tile::Tile;
@@ -42,18 +42,19 @@ impl Round {
         hand_analyzer::calc_shanten_number(&hand).is_ready()
     }
 
-    /// プレイヤーがリーチ宣言可能か判定する
+    /// Whether the player may declare riichi.
     ///
-    /// 条件:
-    /// - 門前（鳴いていない）
-    /// - 持ち点が1000点以上
-    /// - まだリーチしていない
-    /// - 山に1枚以上残っている（打牌後に少なくとも1回はツモが行われる）
-    /// - 14枚の手牌から、聴牌を維持する打牌が1つ以上ある
+    /// Requirements:
+    /// - closed hand
+    /// - at least 1000 points (for the deposit)
+    /// - has not already declared riichi
+    /// - at least one tile left in the wall, so at least one more draw
+    ///   happens after the declaration discard
+    /// - at least one discard from the 14 tiles keeps the hand tenpai
     pub(super) fn can_player_riichi(&self, player_idx: usize) -> bool {
         let player = &self.players[player_idx];
 
-        // デバッグビルドでは人間プレイヤー(idx=0)の却下理由を診断ログに残す
+        // In debug builds, log why the human player's riichi was rejected.
         let log_reject = |detail: std::fmt::Arguments| {
             if cfg!(debug_assertions) && player_idx == 0 {
                 eprintln!("[riichi-reject] {detail}");
@@ -99,11 +100,10 @@ impl Round {
             .any(|tile| self.can_player_riichi_with_discard(player_idx, Some(tile)))
     }
 
-    /// リーチ宣言を実行する
+    /// Declares riichi.
     ///
-    /// リーチ宣言 + 打牌を同時に行う。
-    /// tile で指定した牌を捨てた後、手牌が聴牌であることを確認する。
-    /// tile が None の場合はツモ切りリーチ。
+    /// Declaration and discard happen together: the hand must be tenpai
+    /// after discarding `tile`. `None` discards the drawn tile.
     pub fn do_riichi(&mut self, tile: Option<Tile>) -> bool {
         if self.phase != TurnPhase::WaitForDiscard {
             return false;
@@ -111,7 +111,6 @@ impl Round {
 
         let player_idx = self.current_player;
 
-        // リーチ条件チェック
         if !self.can_player_riichi(player_idx) {
             return false;
         }
@@ -119,20 +118,14 @@ impl Round {
             return false;
         }
 
-        // ダブルリーチ判定（第一ツモかつ副露による中断なし）
+        // Double riichi requires the very first draw with no interrupting call.
         let is_double = self.players[player_idx].is_first_turn
             && !self.players[player_idx].first_turn_interrupted;
 
-        // リーチ宣言
         self.players[player_idx].declare_riichi(is_double);
         self.riichi_sticks += 1;
 
-        // リーチ宣言牌を打牌
-        // （declare_riichi内でippatsu=trueが設定されるが、
-        //   直後のdiscardでippatsu=falseにされてしまう。
-        //   これを防ぐため、一時的にippatsuを保護する）
         let is_tsumogiri = tile.is_none();
-        // 手出しなら打牌前のソート済み手牌内での位置を控える（他家の手牌演出用）
         let hand_index = self.discard_hand_index(player_idx, tile);
         let Some(discarded) = self.players[player_idx].try_discard(tile) else {
             self.players[player_idx].is_riichi = false;
@@ -142,15 +135,14 @@ impl Round {
             self.riichi_sticks = self.riichi_sticks.saturating_sub(1);
             return false;
         };
-        // リーチ宣言直後の打牌なのでippatsuを復元
+        // try_discard() clears the ippatsu flag on every discard, but the
+        // riichi declaration discard must keep it; restore it here.
         self.players[player_idx].is_ippatsu = true;
 
-        // 打牌をリーチ宣言牌としてマーク
         if let Some(last_discard) = self.players[player_idx].discards.last_mut() {
             last_discard.is_riichi_declaration = true;
         }
 
-        // 全プレイヤーにリーチ通知
         let seat_wind = self.players[player_idx].seat_wind;
         let scores = self.get_scores();
         for i in 0..self.player_count {
@@ -169,7 +161,7 @@ impl Round {
         true
     }
 
-    /// 現在のプレイヤーがツモ和了できるか判定する
+    /// Whether the current player can win by tsumo.
     pub fn can_tsumo(&self) -> bool {
         if self.phase != TurnPhase::WaitForDiscard {
             return false;
@@ -187,8 +179,7 @@ impl Round {
         result.is_win
     }
 
-    /// ツモ和了を実行する
-    /// 点数移動を行い、局を終了させる
+    /// Executes a tsumo win: applies the payments and ends the hand.
     pub fn do_tsumo(&mut self) -> bool {
         if self.phase != TurnPhase::WaitForDiscard {
             return false;
@@ -218,7 +209,6 @@ impl Round {
         };
         let winner_is_dealer = self.players[winner].is_dealer();
 
-        // ドラ・赤ドラ・裏ドラを加算
         let dora_indicators = self.wall.dora_indicators();
         let uradora_indicators = if self.players[winner].is_riichi {
             self.wall.uradora_indicators()
@@ -235,7 +225,8 @@ impl Round {
             self.settings.three_player,
         );
 
-        // 点数移動を計算（三麻はツモ損: いない北家分は貰えない）
+        // Three-player games use tsumo loss: the absent player's share
+        // is simply not received.
         let mut deltas = scoring::calculate_tsumo_score_deltas(
             winner,
             &score_result,
@@ -244,13 +235,13 @@ impl Round {
             self.honba,
             self.player_count,
         );
-        // 包（責任払い）: 対象役満が成立していれば包のプレイヤーが全額を支払う
+        // Liability payment (pao / 包): the liable player pays the full
+        // amount when a qualifying yakuman was completed.
         if let Some(pao_player) = self.pao_player_for_win(winner, &score_result.yaku_list) {
             scoring::apply_pao_to_tsumo_deltas(&mut deltas, winner, pao_player);
         }
         let riichi_sticks = self.riichi_sticks;
 
-        // 点数を適用
         for (player, &delta) in self.players.iter_mut().zip(deltas.iter()) {
             player.score += delta;
         }
@@ -262,19 +253,17 @@ impl Round {
         let scores = self.get_scores();
         let winner_wind = self.players[winner].seat_wind;
 
-        // 役情報を構築
         let yaku_list = score_result.yaku_list.clone();
         let rank = score_result.rank;
         let has_opened = score_result.has_opened;
         let player_hands = self.build_player_hands();
 
-        // 全プレイヤーに和了イベントを送信
         for i in 0..self.player_count {
             self.events.push((
                 i,
                 ServerEvent::RoundWon {
                     winner: winner_wind,
-                    loser: None, // ツモなのでloserなし
+                    loser: None,
                     winning_tile,
                     scores,
                     yaku_list: yaku_list.clone(),

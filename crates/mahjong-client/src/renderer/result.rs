@@ -1,10 +1,10 @@
-//! 局結果・対局終了オーバーレイの描画
+//! Result and game-over overlay rendering.
 
 use super::*;
 
-/// 局結果オーバーレイ。和了は構造化パネル、流局はメッセージパネルを描画する。
+/// The result overlay: a structured panel for wins, a message panel
+/// for draws.
 pub(super) fn draw_result(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
-    // 全面を暗くする
     draw_rectangle(
         0.0,
         0.0,
@@ -20,7 +20,8 @@ pub(super) fn draw_result(state: &GameState, font: Option<&Font>, tile_textures:
     }
 }
 
-/// 角丸ゴールド枠のオーバーレイパネルを描き、内側コンテンツ用の左端・右端を返す。
+/// Draws the gold-framed overlay panel and returns the content's
+/// left/right bounds.
 pub(super) fn draw_overlay_panel(panel_w: f32, panel_h: f32) -> (f32, f32, f32) {
     let panel_x = (DESIGN_W - panel_w) / 2.0;
     let panel_y = ((DESIGN_H - panel_h) / 2.0).max(24.0);
@@ -36,7 +37,7 @@ pub(super) fn draw_overlay_panel(panel_w: f32, panel_h: f32) -> (f32, f32, f32) 
     (panel_x, panel_y, panel_x + panel_w)
 }
 
-/// 結果パネル下部の「次へ」誘導ボタンを描画する。
+/// Draws the "next" prompt at the panel bottom.
 pub(super) fn draw_result_next_button(
     state: &GameState,
     font: Option<&Font>,
@@ -56,7 +57,7 @@ pub(super) fn draw_result_next_button(
     theme::draw_text_centered(font, label, cx, y + 25.0, 14, theme::GOLD_LT);
 }
 
-/// 横一列の表示牌を描く（ドラ／裏ドラ用）。
+/// Draws a horizontal row of indicator tiles (dora / ura dora).
 pub(super) fn draw_indicator_row(
     tiles: &[Tile],
     x: f32,
@@ -73,7 +74,7 @@ pub(super) fn draw_indicator_row(
     cx
 }
 
-/// 和了結果パネル。
+/// The win-result panel.
 pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
     let wr = match state.current_win_result() {
         Some(w) => w,
@@ -89,7 +90,6 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     let content_r = panel_right - 40.0;
     let mut y = panel_y + 28.0;
 
-    // 種別（ツモ / ロン）
     let type_label = if wr.win_is_tsumo {
         tr.get(Key::Tsumo)
     } else {
@@ -98,7 +98,7 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     theme::draw_text_centered(font, type_label, cx, y, 12, theme::GOLD);
     y += 22.0;
 
-    // 和了者（ロンは放銃者を併記）
+    // The winner; a ron also names the deal-in player.
     let winner_line = match &wr.loser_name {
         Some(loser) => format!("{} ← {}", wr.winner_name, loser),
         None => wr.winner_name.clone(),
@@ -106,7 +106,7 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     theme::draw_text_centered(font, &winner_line, cx, y, 21, theme::TEXT_BR);
     y += 24.0;
 
-    // 手牌＋和了牌（センタリング）
+    // The hand plus the winning tile, centered.
     let tw = 26.0;
     let th = 36.0;
     let win_gap = 14.0;
@@ -150,7 +150,6 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     }
     y = hand_y + th + 20.0;
 
-    // ドラ・裏ドラ
     let dw = 20.0;
     let dh = 28.0;
     let dora_text = DoraLabel::Dora.name(state.lang);
@@ -177,7 +176,7 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     }
     y += dh + 16.0;
 
-    // 役一覧（上に区切り線）
+    // The yaku list, separated by a rule.
     draw_rectangle(content_l, y, content_r - content_l, 1.0, theme::BORDER);
     y += 8.0;
     for (name, han) in &wr.yaku {
@@ -206,7 +205,7 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     }
     y += 8.0;
 
-    // 合計（左に飜符の小さな表示、右に等級名＋大きな点数）
+    // Totals: small han/fu on the left, rank + big score on the right.
     let mut hanfu = tr.han_fu(wr.han, wr.fu);
     if wr.riichi_sticks > 0 {
         hanfu.push_str("  ");
@@ -214,13 +213,12 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     }
     draw_jp_text(font, &hanfu, content_l, y + 24.0, 13, theme::TEXT_DIM);
 
-    // 大きな点数（右寄せ）
     let pts = tr.points(&format_score(wr.score_points));
     let pw = theme::measure_scaled(font, &pts, 28).width;
     let pts_x = content_r - pw;
     draw_jp_text(font, &pts, pts_x, y + 28.0, 28, theme::GOLD_LT);
 
-    // 満貫以上の等級名は点数と同じ大きさ・色で点数の左に表示
+    // Mangan-and-up rank names match the score's size and color.
     if !wr.rank_name.is_empty() {
         let rw = theme::measure_scaled(font, &wr.rank_name, 28).width;
         draw_jp_text(
@@ -237,7 +235,7 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     draw_result_next_button(state, font, cx, y, panel_w - 80.0);
 }
 
-/// 流局パネル。
+/// The draw panel.
 pub(super) fn draw_draw_panel(state: &GameState, font: Option<&Font>) {
     let tr = state.tr();
     let lines: Vec<&str> = state
@@ -295,10 +293,11 @@ pub(super) fn draw_game_over(state: &GameState, font: Option<&Font>) {
         theme::TEXT_BR,
     );
 
-    // 最終順位（同点は起家に近い席が上位。三麻はダミー席を除外）
+    // Final standings; ties favor the seat nearer the starting dealer,
+    // and three-player games skip the dummy seat.
     let rankings = state.final_rankings();
 
-    // 順位の色（金・銀・銅・その他）
+    // Rank colors: gold, silver, bronze, rest.
     let rank_colors = [
         theme::rgb_pub(0xe8c84a),
         theme::rgb_pub(0xb8c4cc),
@@ -327,7 +326,6 @@ pub(super) fn draw_game_over(state: &GameState, font: Option<&Font>) {
         theme::draw_rounded_rect(row_x, ry, row_w, row_h, 6.0, fill);
         theme::draw_rounded_rect_lines(row_x, ry, row_w, row_h, 6.0, 1.0, border);
 
-        // 順位
         draw_jp_text(
             font,
             &format!("{}", rank + 1),
@@ -338,12 +336,11 @@ pub(super) fn draw_game_over(state: &GameState, font: Option<&Font>) {
         );
         draw_jp_text(font, tr.place_suffix(rank), row_x + 34.0, ry + 32.0, 11, rc);
 
-        // 名前（CPU 番号は得点チップと同じ自分からの相対位置）
+        // Names; CPU numbers match the score chips' relative order.
         let cpu_number = (*player_idx + state.player_count - state.my_seat) % state.player_count;
         let name = state.player_labels[*player_idx].name(cpu_number, state.lang);
         draw_jp_text(font, &name, row_x + 64.0, ry + 30.0, 14, theme::TEXT);
 
-        // 得点
         let pts = tr.points(&format_score(*score));
         let pw = theme::measure_scaled(font, &pts, 17).width;
         draw_jp_text(font, &pts, row_x + row_w - pw - 8.0, ry + 32.0, 17, rc);
@@ -351,7 +348,6 @@ pub(super) fn draw_game_over(state: &GameState, font: Option<&Font>) {
         ry += row_h + row_gap;
     }
 
-    // もう一度ボタン
     let btn_w = 200.0;
     let btn_h = 50.0;
     let btn_x = cx - btn_w / 2.0;

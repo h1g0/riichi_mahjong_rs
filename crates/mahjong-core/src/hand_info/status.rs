@@ -2,38 +2,38 @@ use serde::{Deserialize, Serialize};
 
 use crate::tile::Wind;
 
-/// 手牌の（牌以外の）状態
+/// Hand state other than the tiles themselves.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
-    /// 立直したか
+    /// Has declared riichi
     pub has_claimed_riichi: bool,
-    /// 鳴いたか
+    /// Has called a meld (open hand)
     pub has_claimed_open: bool,
-    /// 自摸しているか
+    /// Won by self-draw (tsumo)
     pub is_self_drawn: bool,
-    /// 一発が有効な間立てるフラグ
+    /// Set while Unbroken (ippatsu / 一発) is still possible
     pub is_unbroken: bool,
-    /// 自風
+    /// Seat wind (jikaze / 自風)
     pub seat_wind: Wind,
-    /// 場風
+    /// Round wind (bakaze / 場風)
     pub round_wind: Wind,
-    /// 海底（最後のツモ牌）か
+    /// Won on the last live-wall draw (haitei / 海底)
     pub is_last_tile_draw: bool,
-    /// 河底（最後の捨て牌）か
+    /// Won on the final discard (hōtei / 河底)
     pub is_last_tile_claim: bool,
-    /// 嶺上開花か
+    /// Won on the replacement tile after a quad (rinshan / 嶺上開花)
     pub is_after_a_quad: bool,
-    /// 搶槓か
+    /// Won by robbing a quad (chankan / 搶槓)
     pub is_robbing_a_quad: bool,
-    /// ダブル立直か
+    /// Declared riichi on the first discard (double riichi)
     pub is_double_riichi: bool,
-    /// 親（東家）か
+    /// Is the dealer (East player)
     pub is_dealer: bool,
-    /// 第一ツモか（天和・地和の判定用）
+    /// First draw of the hand, for Blessing of Heaven/Earth (天和・地和)
     pub is_first_turn: bool,
-    /// 流し満貫か
+    /// Qualifies for Nagashi Mangan (流し満貫)
     pub is_nagashi_mangan: bool,
-    /// 槓子の数
+    /// Number of quads declared
     pub kan_count: u32,
 }
 

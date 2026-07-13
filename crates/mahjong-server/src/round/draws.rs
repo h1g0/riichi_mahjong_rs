@@ -1,4 +1,4 @@
-//! 流局処理（荒牌流局・途中流局）
+//! Draw handling: exhaustive draws and abortive draws.
 
 use mahjong_core::tile::Wind;
 
@@ -8,9 +8,8 @@ use crate::scoring;
 use super::{Round, RoundResult, TurnPhase};
 
 impl Round {
-    /// 荒牌流局を処理する（ノーテン罰符を含む）
+    /// Handles an exhaustive draw, including the noten penalty.
     pub(super) fn do_exhaustive_draw(&mut self) {
-        // テンパイ判定
         let mut tenpai_players = Vec::new();
         let mut noten_players = Vec::new();
 
@@ -22,7 +21,8 @@ impl Round {
             }
         }
 
-        // ノーテン罰符の計算（テンパイ者と非テンパイ者がいる場合のみ）
+        // The 3000-point noten penalty applies only when both tenpai and
+        // noten players exist.
         if !tenpai_players.is_empty() && !noten_players.is_empty() {
             let total_penalty = 3000i32;
             let tenpai_count = tenpai_players.len() as i32;
@@ -66,38 +66,31 @@ impl Round {
         }
     }
 
-    /// 特殊流局をチェックする（四風連打、四家立直）
+    /// Checks for abortive draws: four winds (四風連打) and four riichi (四家立直).
     pub(super) fn check_special_draws(&mut self) {
-        // 四風連打チェック: 全員が1枚ずつ捨てて、全て同じ風牌
         if self.settings.four_winds_draw && self.check_four_winds_draw() {
             self.declare_special_draw(DrawReason::FourWinds, None);
             return;
         }
 
-        // 四家立直チェック: 全員がリーチ宣言済み
         if self.settings.four_riichi_draw && self.check_four_riichi_draw() {
             self.declare_special_draw(DrawReason::FourRiichi, None);
         }
     }
 
-    /// 四風連打を判定する
-    ///
-    /// 条件: 各プレイヤーがちょうど1枚ずつ捨てており、
-    /// 全て同じ風牌で、鳴きが発生していない
+    /// Whether the four-winds abortive draw applies: every player has
+    /// discarded exactly one tile, all the same wind, with no calls made.
     pub(super) fn check_four_winds_draw(&self) -> bool {
-        // 全プレイヤー（三麻は3人）がちょうど1枚捨てていること
         let players = &self.players[..self.player_count];
         for player in players {
             if player.discards.len() != 1 {
                 return false;
             }
-            // 鳴かれていたら不成立
             if player.discards[0].is_called {
                 return false;
             }
         }
 
-        // 全て同じ風牌であること
         let first_tile = players[0].discards[0].tile;
         if !first_tile.is_wind() {
             return false;
@@ -108,22 +101,19 @@ impl Round {
             .all(|p| p.discards[0].tile.get() == first_tile.get())
     }
 
-    /// 四家立直を判定する
-    ///
-    /// 条件: 全プレイヤー（三麻は3人）がリーチ宣言済み
+    /// Whether the four-riichi abortive draw applies: every active player
+    /// has declared riichi.
     pub(super) fn check_four_riichi_draw(&self) -> bool {
         self.players[..self.player_count]
             .iter()
             .all(|p| p.is_riichi)
     }
 
-    /// 九種九牌の宣言条件を判定する
-    ///
-    /// 条件: 現在のプレイヤーが一度も捨牌しておらず、
-    /// 手牌＋ツモ牌に9種類以上のヤオ九牌（老頭牌・字牌）がある
+    /// Whether the current player may declare a nine-terminals abortive
+    /// draw: no discard made yet, and the hand plus the drawn tile holds
+    /// nine or more distinct terminal/honour kinds.
     pub(super) fn check_nine_terminals(&self) -> bool {
         let player = &self.players[self.current_player];
-        // 初回ツモのみ（捨牌済みなら宣言不可）
         if !player.discards.is_empty() {
             return false;
         }
@@ -141,10 +131,10 @@ impl Round {
         tile_types.len() >= 9
     }
 
-    /// 九種九牌の宣言を処理する
+    /// Handles the nine-terminals declaration.
     ///
-    /// - `declare=true`: 流局を宣言する
-    /// - `declare=false`: 続行する（通常の打牌フェーズへ移行）
+    /// - `declare=true`: abort the hand.
+    /// - `declare=false`: continue, moving on to the normal discard phase.
     pub fn do_nine_terminals(&mut self, player_idx: usize, declare: bool) -> bool {
         if self.phase != TurnPhase::WaitForNineTerminals {
             return false;
@@ -158,10 +148,10 @@ impl Round {
         } else {
             self.phase = TurnPhase::WaitForDiscard;
 
-            // 続行を選んだプレイヤーに TileDrawn を再送して打牌を促す。
-            // 最初の TileDrawn への応答（打牌）は WaitForNineTerminals
-            // フェーズで拒否されているため、再送しないとクライアントが
-            // 打牌の機会を得られず局が進行しなくなる。
+            // Re-send TileDrawn to prompt the discard: the response to the
+            // first TileDrawn was rejected while in the WaitForNineTerminals
+            // phase, so without a re-send the client never gets a chance to
+            // discard and the hand stalls.
             if let Some(drawn) = self.players[player_idx].hand.drawn() {
                 let can_tsumo = self.can_tsumo();
                 let can_riichi = self.can_player_riichi(player_idx);
@@ -181,15 +171,14 @@ impl Round {
         true
     }
 
-    /// 場全体のカン回数を返す
+    /// Total number of quads declared by all players.
     pub(super) fn total_kan_count(&self) -> usize {
         self.players.iter().map(|p| p.kan_count()).sum()
     }
 
-    /// 四槓散了を判定する
-    ///
-    /// 条件: 場全体で4回カンが成立し、かつ2人以上がカンしている
-    /// （1人が4回カンした場合は四槓子の可能性があるため続行）
+    /// Whether the four-quads abortive draw applies: four quads declared by
+    /// two or more players. A single player holding all four quads may be
+    /// heading for the Four Quads yakuman, so play continues.
     pub(super) fn check_four_kans_draw(&self) -> bool {
         if self.total_kan_count() < 4 {
             return false;
@@ -198,7 +187,7 @@ impl Round {
         players_with_kan >= 2
     }
 
-    /// 特殊流局を宣言する
+    /// Declares an abortive draw.
     pub(super) fn declare_special_draw(&mut self, reason: DrawReason, declarer: Option<Wind>) {
         let scores = self.get_scores();
         let player_hands = self.build_player_hands();

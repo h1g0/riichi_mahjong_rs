@@ -1,6 +1,4 @@
-//! 描画モジュール
-//!
-//! 埋め込みPNGを使って麻雀牌を描画する。
+//! Rendering: draws the tiles from embedded PNGs.
 
 mod banners;
 mod board;
@@ -46,52 +44,47 @@ const FONT_SIZE: u16 = 20;
 const SMALL_FONT: u16 = 16;
 const AGARI_FONT: u16 = 32;
 
-/// アプリ全体で実際に使われている基準フォントサイズ（`draw_text`/`draw_text_centered`
-/// 呼び出しの `base_size` 引数を網羅した一覧。新しいサイズを使う描画を追加したら
-/// ここにも追加すること）。
+/// Every base font size actually used in the app (the `base_size`
+/// arguments of `draw_text`/`draw_text_centered`; add new sizes here
+/// when introducing them).
 ///
-/// [`prewarm_fonts`] と `cache_dynamic_text` はこの一覧のサイズだけを事前キャッシュする。
-/// かつては `8..=AGARI_FONT`（25通り）を無差別に総当たりしていたが、実際に使うのは
-/// この16通りだけであり、無駄な水増しがフォントアトラスの肥大化を招いていた
-/// （下記コメント参照）。
+/// [`prewarm_fonts`] and `cache_dynamic_text` precache exactly these.
+/// Brute-forcing `8..=AGARI_FONT` (25 sizes) used to bloat the font
+/// atlas for the 16 sizes really in use (see the comment below).
 const USED_FONT_SIZES: [u16; 16] = [
     9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 24, 26, 28, 32,
 ];
 
-/// 設計上の基準解像度。すべての UI 座標はこの仮想キャンバス上で定義され、
-/// 実際のウィンドウ／キャンバスサイズに合わせて一様に拡大・縮小される。
-/// （HTML 側でキャンバスのアスペクト比を DESIGN_W:DESIGN_H に固定しているため歪まない）
+/// Design resolution. All UI coordinates live on this virtual canvas and
+/// scale uniformly to the real window; the HTML fixes the canvas aspect
+/// ratio to DESIGN_W:DESIGN_H, so nothing distorts.
 pub const DESIGN_W: f32 = 1280.0;
 pub const DESIGN_H: f32 = 800.0;
 
-/// 盤面の中心点 — 捨て牌・他家手牌の回転の軸（画面横中央に合わせる）
+/// Board center: the rotation axis for discard pools and opponents'
+/// hands, aligned to the horizontal middle.
 const BOARD_CENTER_X: f32 = DESIGN_W / 2.0;
 const BOARD_CENTER_Y: f32 = 380.0;
 
-/// 自分の手牌の Y 座標（上端）
+/// Top Y of our hand.
 pub const HAND_Y: f32 = 680.0;
-/// ツモ牌を手牌の右に離して置くときの間隔
+/// Gap between the hand and the drawn tile to its right.
 pub const DRAWN_GAP: f32 = 20.0;
 
-/// 自分の手牌（伏せ牌 `hand_len` 枚）を画面中央に揃えるための左端 X を返す。
+/// Left X that centers our `hand_len`-tile hand on screen.
 ///
-/// ツモ牌は中央寄せの基準には含めず、手牌の右側に張り出す（一般的な配置）。
-/// 描画（[`draw_hand`]）とクリック判定（`GameState::handle_input`）で共有する。
+/// The drawn tile is excluded from centering and hangs to the right, as
+/// is conventional. Shared by rendering ([`draw_hand`]) and hit testing
+/// (`GameState::handle_input`).
 pub fn player_hand_start_x(hand_len: usize) -> f32 {
     let hand_w = hand_len as f32 * TILE_W;
     (DESIGN_W - hand_w) / 2.0
 }
 
-/// Camera2D の回転角度（度）— 自分(0°)、下家(-90°)、対面(180°)、上家(90°)
+/// Camera2D rotations in degrees: self 0, right -90, across 180, left 90.
 const PLAYER_ROTATIONS: [f32; 4] = [0.0, -90.0, 180.0, 90.0];
 
-/// 相対位置を回転テーブル [`PLAYER_ROTATIONS`] のインデックスへ変換する。
-///
-/// 四麻: そのまま（0=自分, 1=下家=右, 2=対面=上, 3=上家=左）。
-/// 三麻: 東1局開始時の風の差分（mod 4）で四麻の方角に合わせて
-/// スロットを決め、存在しない「北」の位置を空席にする
-/// （例: 東1で自分が西家なら下家の東家は対面＝上に描かれ、右が空席）。
-/// 開始時の風で固定するため、局が進んで風が回っても席は動かない。
+/// Maps a relative position to a [`PLAYER_ROTATIONS`] index.
 fn rotation_index(relative_idx: usize, player_count: usize, my_initial_wind_idx: usize) -> usize {
     if player_count == 3 && relative_idx > 0 {
         let their_wind_idx = (my_initial_wind_idx + relative_idx) % 3;
@@ -101,19 +94,21 @@ fn rotation_index(relative_idx: usize, player_count: usize, my_initial_wind_idx:
     }
 }
 
-/// 自分から見た相対位置(0=自分,1=下家,2=対面,3=上家)を固定の座席インデックスへ変換する。
-/// `scores` や `player_labels` は座席インデックス順に並ぶため、画面の各向きへ描画する際は
-/// この変換を通す（オンライン非ホストで自分の座席が0以外でも正しい席に表示される）。
+/// Maps a relative position (0 self, 1 right, 2 across, 3 left) to the
+/// fixed seat index. `scores` and `player_labels` are seat-ordered, so
+/// every per-direction draw goes through this - keeping seats right even
+/// when a non-host sits somewhere other than seat 0 online.
 fn seat_at_relative_position(my_seat: usize, relative_idx: usize, player_count: usize) -> usize {
     (my_seat + relative_idx) % player_count
 }
 
-/// 設計座標 (0,0)-(DESIGN_W,DESIGN_H) をキャンバス全体に写すカメラ。
-/// 実バッファ解像度に依存しないため、ウィンドウサイズが変わっても
-/// レイアウトはそのまま拡大・縮小される。
+/// Camera mapping design space (0,0)-(DESIGN_W,DESIGN_H) onto the whole
+/// canvas, independent of the real buffer resolution, so layout scales
+/// with the window.
 ///
-/// 画面へ直接描画する場合、`Camera2D::from_display_rect`（zoom.y が負）だと
-/// 上下反転してしまうため、盤面カメラと同じく zoom.y を正にして上向きに合わせる。
+/// `Camera2D::from_display_rect` (negative zoom.y) would flip vertically
+/// when drawing straight to the screen, so zoom.y stays positive like
+/// the board camera.
 fn design_camera() -> Camera2D {
     Camera2D {
         target: vec2(DESIGN_W / 2.0, DESIGN_H / 2.0),
@@ -122,26 +117,26 @@ fn design_camera() -> Camera2D {
     }
 }
 
-/// フレーム冒頭やオーバーレイ描画で使う、設計座標系のデフォルトカメラを適用する。
+/// Applies the default design-space camera (frame start, overlays).
 pub fn set_design_camera() {
     set_camera(&design_camera());
 }
 
-/// 設計座標 → 実バッファ座標の拡大率。キャンバスはアスペクト比固定なので
-/// 横・縦どちらで割っても同じ値になる（横を採用）。
+/// Design-to-buffer scale factor; the fixed aspect ratio makes width and
+/// height equivalent (width used).
 fn design_scale() -> f32 {
     screen_width() / DESIGN_W
 }
 
-/// マウス座標を実バッファ座標から設計座標へ変換して返す。
-/// クリック判定はすべて設計座標で行うため、入力側もここで合わせる。
+/// Mouse position converted from buffer to design coordinates, where all
+/// hit testing happens.
 pub fn mouse_position_design() -> (f32, f32) {
     let (mx, my) = mouse_position();
     let scale = design_scale();
     (mx / scale, my / scale)
 }
 
-/// 盤面中心を軸に回転する Camera2D を生成する
+/// Camera2D rotating about the board center.
 fn make_board_camera(rotation_deg: f32) -> Camera2D {
     Camera2D {
         target: vec2(BOARD_CENTER_X, BOARD_CENTER_Y),
@@ -155,7 +150,7 @@ fn make_board_camera(rotation_deg: f32) -> Camera2D {
     }
 }
 
-/// 牌の表面PNG（インデックスは [`Tile`] の種別値と一致）。
+/// Tile-face PNGs, indexed by [`Tile`] kind value.
 const TILE_PNGS: [&[u8]; Tile::LEN] = [
     include_bytes!("../../../../assets/images/tiles/1m.png"),
     include_bytes!("../../../../assets/images/tiles/2m.png"),
@@ -195,7 +190,8 @@ const TILE_PNGS: [&[u8]; Tile::LEN] = [
 
 pub struct TileTextures {
     standard_tiles: Vec<Texture2D>,
-    /// 英語UI用: 右上にインデックスラベルを焼き込んだ牌（[`labels`] 参照）
+    /// English-UI set with index labels baked into the corner
+    /// (see [`labels`])
     labeled_tiles: Vec<Texture2D>,
     red_5m: Texture2D,
     red_5p: Texture2D,
@@ -207,13 +203,14 @@ pub struct TileTextures {
     stick1000: Texture2D,
     stick100: Texture2D,
     logo: Texture2D,
-    /// ラベル付きセットを使うか（言語設定から毎フレーム更新される）
+    /// Whether the labeled set is active (refreshed from the language
+    /// every frame)
     labels_enabled: std::cell::Cell<bool>,
 }
 
 impl TileTextures {
-    /// 全テクスチャを読み込む。`font_bytes` はラベル焼き込みに使う TTF
-    /// （読めない場合はラベルなしのテクスチャで代替する）。
+    /// Loads every texture. `font_bytes` is the TTF used to bake labels;
+    /// when unavailable the unlabeled set stands in.
     pub fn load(font_bytes: &[u8]) -> Self {
         let label_font =
             fontdue::Font::from_bytes(font_bytes, fontdue::FontSettings::default()).ok();
@@ -257,13 +254,13 @@ impl TileTextures {
         }
     }
 
-    /// トップ画面ロゴのテクスチャ
+    /// The title-screen logo texture.
     pub fn logo(&self) -> &Texture2D {
         &self.logo
     }
 
-    /// ラベル付きセットを使うかを切り替える（[`draw_game`] が言語設定から
-    /// 毎フレーム設定するため、実行中の言語切替にも即応する）。
+    /// Switches the labeled set on or off; [`draw_game`] sets it from the
+    /// language every frame, so runtime language switches apply at once.
     fn set_labels_enabled(&self, enabled: bool) {
         self.labels_enabled.set(enabled);
     }
@@ -301,8 +298,8 @@ fn texture_from_image(img: &Image) -> Texture2D {
     texture
 }
 
-/// 牌画像へインデックスラベルを焼き込んでテクスチャ化する。
-/// フォントがない場合はラベルなしでテクスチャ化する。
+/// Bakes index labels into the tile images and uploads textures;
+/// without a font the plain images are uploaded.
 fn labeled_texture(
     mut img: Image,
     tile_type: mahjong_core::tile::TileType,
@@ -325,31 +322,31 @@ fn draw_jp_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16,
     theme::draw_text(font, text, x, y, font_size, color);
 }
 
-/// 起動時にフォントアトラスを必要なグリフ・サイズで作り切る（ネイティブ専用）。
+/// Builds the font atlas to its final size at startup (native only).
 ///
-/// ネイティブ(OpenGL)では、回転カメラ下のテキスト描画中にフォントアトラスが
-/// 拡張されると、アトラステクスチャが delete→再生成され、未フラッシュの描画
-/// バッチが壊れて文字が黒い■に化ける（対局画面はカメラを切り替えながら描く
-/// ため発症する）。描画を伴わない `measure` で事前にアトラスを最終サイズまで
-/// 構築しておけば、フレーム途中での拡張が起きず発症しない。
+/// On native (OpenGL), if the atlas grows while text is being drawn
+/// under a rotated camera, the atlas texture is deleted and recreated,
+/// corrupting the unflushed batch and rendering glyphs as black squares
+/// (the game screen hits this because it switches cameras mid-frame).
+/// Pre-building the atlas with draw-less `measure` calls prevents any
+/// mid-frame growth.
 ///
-/// WASM では呼ばない（`#[cfg(not(target_arch = "wasm32"))]`）。一度に大量の
-/// グリフ×サイズをキャッシュしようとすると、macroquad 0.4.15 のフォント
-/// アトラスが grow を繰り返し、wasm32 では usize が 32bit のため
-/// `Image::gen_image_color` の `width as usize * height as usize * 4` が
-/// 32768×32768 でちょうど 2^32 に達してオーバーフローし、0 バイトのバッファを
-/// 確保してしまって直後の書き込みで境界チェックパニックが発生する（macroquad
-/// 側の既存バグ）。この成長は内部で `HashMap` の反復順に依存して非決定的な
-/// ため、キャッシュするグリフ数・サイズ数を減らしても確率が下がるだけで
-/// 根絶はできない。WASM では prewarm を行わず、実際に画面へ現れた文字を
-/// その都度キャッシュさせることで、一度に大量の再パッキングが必要になる
-/// 事態そのものを避ける（黒■化はネイティブ限定の問題であり、WASM で
-/// prewarm を省いても発生しないことを実機で確認済み）。
+/// Never call this on WASM (`#[cfg(not(target_arch = "wasm32"))]`).
+/// Caching many glyph/size combinations at once makes macroquad
+/// 0.4.15's atlas grow repeatedly, and on wasm32 (32-bit usize)
+/// `Image::gen_image_color`'s `width * height * 4` hits exactly 2^32 at
+/// 32768x32768, overflows to a zero-length buffer, and the next write
+/// panics on the bounds check (a macroquad bug). The growth depends on
+/// `HashMap` iteration order and is nondeterministic, so trimming the
+/// glyph/size set only lowers the odds. Skipping the prewarm lets WASM
+/// cache glyphs one at a time as they appear, avoiding mass repacking
+/// entirely (the black-square issue is native-only; verified absent on
+/// WASM without the prewarm).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn prewarm_fonts(font: Option<&Font>) {
-    // UI に現れる全グリフ（生成スクリプト: scripts/extract_glyphs.py）
+    // Every glyph the UI shows (generated by scripts/extract_glyphs.py).
     let mut glyphs: String = include_str!("../../glyphs.txt").to_string();
-    // ASCII（数字・記号・CPU などのラテン文字）も網羅する
+    // ASCII too: digits, punctuation, Latin text like "CPU".
     for c in 0x20u8..0x7f {
         glyphs.push(c as char);
     }
@@ -358,15 +355,17 @@ pub fn prewarm_fonts(font: Option<&Font>) {
     }
 }
 
-/// 動的テキスト（対戦相手の名前・入力欄・接続状態・ルームコードなど、外部由来で
-/// 任意のグリフを含み得る文字列）を、このフレームの描画前に事前キャッシュする。
+/// Precaches dynamic text (opponent names, input fields, connection
+/// status, room codes - external strings that may contain any glyph)
+/// before this frame draws.
 ///
-/// [`prewarm_fonts`] は固定 UI 文言しか網羅できないため、こうした文字は毎フレーム
-/// measure してアトラスへ載せておく。これにより、描画途中（特に対局画面のカメラ
-/// 切り替え中）にアトラスが拡張されて文字が黒い■に化けるのを防ぐ。
+/// [`prewarm_fonts`] only covers fixed UI strings, so these are measured
+/// into the atlas every frame, preventing mid-draw atlas growth (and the
+/// black-square glyphs) especially during the game screen's camera
+/// switches.
 ///
-/// キャッシュするサイズは [`prewarm_fonts`] と同様 [`USED_FONT_SIZES`] のみに限定する
-/// （理由も同関数のコメントを参照）。
+/// Sizes are limited to [`USED_FONT_SIZES`], as in [`prewarm_fonts`]
+/// (see that function's comment for why).
 pub fn cache_dynamic_text(font: Option<&Font>, state: &GameState) {
     use crate::game::PlayerLabel;
     let cache = |s: &str| {
@@ -395,7 +394,8 @@ pub fn cache_dynamic_text(font: Option<&Font>, state: &GameState) {
         }
     }
 
-    // 局結果（役名・等級名・和了者名・流局メッセージ）も外部由来なので備える
+    // Round results (yaku names, ranks, winner names, draw messages)
+    // are external too.
     if let Some(message) = &state.result_message {
         cache(message);
     }
@@ -416,7 +416,7 @@ pub fn draw_game(
     font: Option<&Font>,
     tile_textures: &TileTextures,
 ) -> Option<OverlayClick> {
-    // 英語UIでは牌の右上にインデックスラベル付きのテクスチャを使う
+    // The English UI uses the corner-labeled tile set.
     tile_textures.set_labels_enabled(state.tr().lang() == Lang::En);
 
     match state.phase {
@@ -475,7 +475,8 @@ pub fn draw_game(
             draw_hand(state, font, tile_textures);
             draw_top_bar(state, font, tile_textures);
             draw_result(state, font, tile_textures);
-            // 結果画面へ切り替わった直後もフェード中のロン・ツモ宣言を出し切る
+            // Let fading win declarations finish even right after the
+            // result screen appears.
             banners::draw_call_banners(state, font);
             online::draw_connection_banner(state, font);
             None

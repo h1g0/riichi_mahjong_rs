@@ -1,4 +1,4 @@
-//! ローカル対局の入力処理（打牌・リーチ・カン・鳴き応答）
+//! Input handling for local play: discards, riichi, kan, call responses.
 
 use super::*;
 
@@ -48,7 +48,7 @@ impl GameState {
             .iter()
             .map(|meld| {
                 let mut m = meld.clone();
-                // HandAnalyzer は3枚で解析するため、カンの場合は3枚に切り詰める
+                // HandAnalyzer expects three-tile melds; truncate quads.
                 if m.category.is_kan() && m.tiles.len() > 3 {
                     m.tiles.truncate(3);
                 }
@@ -70,29 +70,22 @@ impl GameState {
         self.riichi_selectable_drawn = self.can_discard_for_riichi(None);
     }
 
-    /// 指定の牌を捨てた場合にフリテンになるかを判定する
-    ///
-    /// 捨てた後の手牌がテンパイで、待ち牌が自分の捨て牌に含まれていればフリテン。
-    /// tile: Some(牌) = 手牌から捨てる, None = ツモ切り
+    /// Whether discarding the tile would leave us furiten: the remaining
+    /// hand is tenpai and one of its waits appears in our own discards.
+    /// `Some(tile)` discards from the hand, `None` the drawn tile.
     pub(super) fn would_discard_cause_furiten(&self, tile: Option<Tile>) -> bool {
         let mut hand_tiles = self.hand.clone();
-        match tile {
-            Some(target) => {
-                let Some(idx) = hand_tiles.iter().position(|t| *t == target) else {
-                    return false;
-                };
-                hand_tiles.remove(idx);
-                if let Some(drawn) = self.drawn {
-                    hand_tiles.push(drawn);
-                    hand_tiles.sort();
-                }
-            }
-            None => {
-                // ツモ切り: drawnを使わない
+        if let Some(target) = tile {
+            let Some(idx) = hand_tiles.iter().position(|t| *t == target) else {
+                return false;
+            };
+            hand_tiles.remove(idx);
+            if let Some(drawn) = self.drawn {
+                hand_tiles.push(drawn);
+                hand_tiles.sort();
             }
         }
 
-        // 手牌13枚でテンパイか確認
         let hand = Hand::new_with_melds(hand_tiles, self.melds_for_analysis(), None);
         let analyzer = match HandAnalyzer::new(&hand) {
             Ok(a) => a,
@@ -102,7 +95,6 @@ impl GameState {
             return false;
         }
 
-        // 待ち牌を求める
         let mut waiting: Vec<TileType> = Vec::new();
         for tile_type in 0..Tile::LEN as u32 {
             let mut test_hand = hand.clone();
@@ -118,14 +110,13 @@ impl GameState {
             return false;
         }
 
-        // 待ち牌が自分の捨て牌に含まれていればフリテン
         let my_discards = &self.discards[0];
         for &wt in &waiting {
             if my_discards.iter().any(|d| d.tile.get() == wt) {
                 return true;
             }
         }
-        // 捨てようとしている牌自体も捨て牌に加わるので、それも含めて判定
+        // The tile being discarded joins the pool too, so include it.
         let discard_tile_type = match tile {
             Some(t) => t.get(),
             None => match self.drawn {
@@ -141,16 +132,16 @@ impl GameState {
         false
     }
 
-    /// 北抜き可能かを更新する（三麻+北抜きあり時のみ）
+    /// Updates whether pei is possible (three-player with pei dora only).
     ///
-    /// リーチ中はツモった牌が北の場合のみ可能。
+    /// Under riichi only a drawn North can be extracted.
     pub(super) fn refresh_can_pei(&mut self) {
         self.can_pei = false;
         if !self.is_three_player() || !self.nuki_dora {
             return;
         }
-        // 生牌山が空（海底ツモ）では補充ツモができず北抜き不可。
-        // サーバも却下するため、押しても無反応なボタンを出さない（#296）。
+        // With the live wall empty no replacement draw exists and the
+        // server rejects pei; never show a dead button (#296).
         if self.remaining_tiles == 0 {
             return;
         }
@@ -206,7 +197,7 @@ impl GameState {
         discarded_tile
     }
 
-    /// 入力処理: オーバーレイのクリック結果と手牌クリックを処理してアクションを返す
+    /// Input handling: turns overlay clicks and hand clicks into actions.
     pub fn handle_input(
         &mut self,
         overlay_click: Option<crate::renderer::OverlayClick>,
@@ -218,16 +209,17 @@ impl GameState {
             return None;
         }
 
-        // 未適用のサーバイベントが残っている間（宣言バナーの保留中など）は
-        // 入力を受け付けない。画面は古い状態のままなので、それに基づく操作は
-        // サーバの状態と食い違うため。
+        // Refuse input while unapplied server events remain (e.g. a
+        // pending declaration banner): the screen still shows stale state,
+        // so actions based on it would contradict the server.
         if !self.pending_events.is_empty() {
             return None;
         }
 
-        // リーチ中はツモ切り自動処理（マウス入力不要）。
-        // ツモ牌をプレイヤーが確認できるよう、表示してから一定時間待って捨てる（#291）。
-        // ツモ和了・北抜きが可能な間は保留し、プレイヤーに選ばせる。
+        // Under riichi the discard is automatic. The drawn tile is shown
+        // for a moment before being discarded so the player can see it
+        // (#291); while tsumo or pei is available the discard is held so
+        // the player can choose.
         if self.is_my_turn
             && self.is_riichi
             && self.drawn.is_some()
@@ -245,7 +237,7 @@ impl GameState {
             return Some(ClientAction::Discard { tile: None });
         }
 
-        // オーバーレイのクリック判定（draw_game が返した結果を処理）
+        // Overlay clicks, as reported by draw_game.
         if let Some(click) = overlay_click {
             if self.nine_terminals_pending {
                 match click {
@@ -318,11 +310,11 @@ impl GameState {
                 return None;
             }
 
-            // 自分のターン：ツモ・リーチ・暗カン
             match click {
                 OverlayClick::Action(action) => return Some(action),
                 OverlayClick::PassSelfCall => {
-                    // リーチ中の北抜き打診を見送る: 通常のリーチ中と同様ツモ切りする
+                    // Declining the pei offer under riichi falls back to
+                    // the usual automatic tsumogiri.
                     if self.is_riichi && self.drawn.is_some() {
                         self.can_pei = false;
                         self.drawn.take();
@@ -342,17 +334,16 @@ impl GameState {
             }
         }
 
-        // リーチ中は手牌クリックによる打牌はできない
+        // Hand clicks cannot discard while in riichi.
         if self.is_riichi {
             return None;
         }
 
-        // オーバーレイがクリックされていない場合は手牌のクリックを処理
         if !self.is_my_turn || !is_mouse_button_pressed(MouseButton::Left) {
             return None;
         }
 
-        // 九種九牌・チー・ポン・鳴きパネル表示中は手牌クリックを無視
+        // Ignore hand clicks while a decision panel is open.
         if self.nine_terminals_pending
             || self.chi_option_selecting
             || self.pon_option_selecting
@@ -363,7 +354,7 @@ impl GameState {
 
         let (mx, my) = crate::renderer::mouse_position_design();
 
-        // 手牌クリック（描画と同じ中央寄せ基準を使う）
+        // Hand clicks use the same centering as the renderer.
         let hand_len = self.hand.len();
         let hand_start_x = crate::renderer::player_hand_start_x(hand_len);
         let hand_y = crate::renderer::HAND_Y;
@@ -377,8 +368,9 @@ impl GameState {
                     return None;
                 }
 
-                // 喰い替え禁止牌は打牌できない。選択された見た目（少し上に表示）に
-                // しつつ「喰い替えです！」警告を出し、打牌アクションは発行しない。
+                // Swap-calling-forbidden tiles cannot be discarded: keep
+                // the selected (raised) look and show the warning, but
+                // do not emit a discard.
                 if self.forbidden_discards.contains(&self.hand[i].get()) {
                     self.selected_tile = Some(i);
                     self.selected_drawn = false;

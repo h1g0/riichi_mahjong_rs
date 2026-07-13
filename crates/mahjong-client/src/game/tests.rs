@@ -1,4 +1,4 @@
-//! ゲーム状態のユニットテスト
+//! Unit tests for the game state.
 
 use super::*;
 use mahjong_server::table::GameLength;
@@ -77,13 +77,13 @@ fn game_started_4p(seat_wind: Wind, round_number: usize) -> ServerEvent {
 
 #[test]
 fn test_initial_dealer_seat_derived_from_game_started() {
-    // 東1局: 自分（座席0）が南家なら起家は座席3
+    // East 1: if we (seat 0) are South, the starting dealer is seat 3.
     let mut state = GameState::new();
     state.handle_event(game_started_4p(Wind::South, 0));
     assert_eq!(state.initial_dealer_seat, 3);
 
-    // 東3局（round_number=2）: 座席1の自分が西家なら現在の親は座席3、
-    // 2局巻き戻して起家は座席1
+    // East 3 (round_number 2): we at seat 1 as West puts the current
+    // dealer at seat 3; rewinding two hands gives starting dealer seat 1.
     let mut state = GameState::new();
     state.my_seat = 1;
     state.handle_event(game_started_4p(Wind::West, 2));
@@ -92,14 +92,15 @@ fn test_initial_dealer_seat_derived_from_game_started() {
 
 #[test]
 fn test_final_rankings_tie_breaks_by_dealer_proximity() {
-    // 全員同点なら起家から反時計回りの順になる
+    // With equal scores the order runs counter-clockwise from the
+    // starting dealer.
     let mut state = GameState::new();
-    state.handle_event(game_started_4p(Wind::West, 0)); // 起家は座席2
+    state.handle_event(game_started_4p(Wind::West, 0)); // starting dealer: seat 2
     state.scores = [25000; 4];
     let order: Vec<usize> = state.final_rankings().iter().map(|r| r.0).collect();
     assert_eq!(order, vec![2, 3, 0, 1]);
 
-    // 点数が異なる場合は点数順が優先される
+    // Differing scores outrank the seat order.
     state.scores = [30000, 20000, 25000, 25000];
     let order: Vec<usize> = state.final_rankings().iter().map(|r| r.0).collect();
     assert_eq!(order, vec![0, 2, 3, 1]);
@@ -107,9 +108,10 @@ fn test_final_rankings_tie_breaks_by_dealer_proximity() {
 
 #[test]
 fn test_final_rankings_sanma_excludes_dummy_seat() {
-    // 三麻: 起家が座席1のとき、同点ならダミー席を除いて 1, 2, 0 の順
+    // Three-player: starting dealer at seat 1 and equal scores give
+    // 1, 2, 0, skipping the dummy.
     let mut state = GameState::new();
-    state.handle_event(sanma_game_started(Wind::West)); // 西家=自分(座席0)なら起家は座席1
+    state.handle_event(sanma_game_started(Wind::West)); // we as West puts the dealer at seat 1
     state.scores = [35000, 35000, 35000, 0];
     let order: Vec<usize> = state.final_rankings().iter().map(|r| r.0).collect();
     assert_eq!(order, vec![1, 2, 0]);
@@ -263,7 +265,7 @@ fn test_sanma_game_started_sets_player_count() {
 #[test]
 fn test_sanma_relative_player_index_wraps_at_three() {
     let mut state = GameState::new();
-    // 自分が西家（インデックス2）の場合、東家は下家（相対1）になる
+    // With us as West, East sits to our right (relative 1).
     state.handle_event(sanma_game_started(Wind::West));
 
     state.handle_event(ServerEvent::TileDiscarded {
@@ -283,7 +285,6 @@ fn test_sanma_relative_player_index_wraps_at_three() {
 fn test_sanma_pei_declared_updates_counts() {
     let mut state = GameState::new();
     state.handle_event(sanma_game_started(Wind::East));
-    // 他家（南家）の手牌枚数を通常の13枚にしておく
     state.other_players[0].concealed_count = 13;
 
     state.handle_event(ServerEvent::PeiDeclared {
@@ -292,7 +293,7 @@ fn test_sanma_pei_declared_updates_counts() {
     });
 
     assert_eq!(state.pei_counts, [0, 1, 0, 0]);
-    // 北を抜いた分、南家の伏せ牌は一時的に1枚減って見える
+    // The extracted North briefly leaves South one hidden tile short.
     assert_eq!(state.other_players[0].concealed_count, 12);
 }
 
@@ -311,7 +312,7 @@ fn test_sanma_can_pei_with_north_in_hand() {
     });
     assert!(state.can_pei, "手牌に北があるのに北抜き不可");
 
-    // リーチ中は手牌の北だけでは抜けない
+    // Under riichi a North in the hand alone is not extractable.
     state.is_riichi = true;
     state.handle_event(ServerEvent::TileDrawn {
         tile: Tile::new(Tile::P2),
@@ -322,7 +323,7 @@ fn test_sanma_can_pei_with_north_in_hand() {
     });
     assert!(!state.can_pei, "リーチ中の手牌北で北抜き可になっている");
 
-    // リーチ中でもツモった牌が北なら抜ける
+    // A drawn North is.
     state.handle_event(ServerEvent::TileDrawn {
         tile: Tile::new(Tile::Z4),
         remaining_tiles: 48,
@@ -333,9 +334,9 @@ fn test_sanma_can_pei_with_north_in_hand() {
     assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
 }
 
-/// リーチ中にツモった北は自動ツモ切りせず、北抜きを選べること（回帰テスト）。
-/// 以前は自動ツモ切りが北抜きの可否を見ずに先へ発火し、
-/// 北抜きボタンが表示されてもクリックできなかった。
+/// Regression: a North drawn under riichi must offer pei instead of
+/// being auto-discarded. The auto-tsumogiri used to fire without
+/// checking pei, leaving the pei button visible but unclickable.
 #[test]
 fn test_riichi_drawn_north_holds_auto_discard_for_pei() {
     let mut state = GameState::new();
@@ -351,7 +352,8 @@ fn test_riichi_drawn_north_holds_auto_discard_for_pei() {
     });
     assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
 
-    // 北抜き可能な間は、自動ツモ切りの待ち時間（#291）が過ぎても保留し続ける
+    // While pei is available the auto-discard stays held even past
+    // its delay (#291).
     assert!(state.handle_input(None, 100.0).is_none());
     assert!(
         state
@@ -360,7 +362,6 @@ fn test_riichi_drawn_north_holds_auto_discard_for_pei() {
     );
     assert!(state.drawn.is_some(), "自動ツモ切りが発火した");
 
-    // 北抜きボタンのクリックで Pei アクションが発行される
     let action = state.handle_input(
         Some(crate::renderer::OverlayClick::Action(ClientAction::Pei)),
         100.0 + RIICHI_AUTO_DISCARD_SECS * 2.0,
@@ -368,7 +369,8 @@ fn test_riichi_drawn_north_holds_auto_discard_for_pei() {
     assert!(matches!(action, Some(ClientAction::Pei)));
 }
 
-/// リーチ中の北抜き打診でパスを選ぶと、通常のリーチ中と同様ツモ切りされること
+/// Passing the pei offer under riichi falls back to the usual
+/// automatic tsumogiri.
 #[test]
 fn test_riichi_pei_pass_discards_drawn_north() {
     let mut state = GameState::new();
@@ -384,22 +386,22 @@ fn test_riichi_pei_pass_discards_drawn_north() {
     });
     assert!(state.can_pei);
 
-    // パスは待ち時間なしで即座にツモ切りされる
+    // The pass discards immediately, with no delay.
     let action = state.handle_input(Some(crate::renderer::OverlayClick::PassSelfCall), 100.0);
     assert!(matches!(action, Some(ClientAction::Discard { tile: None })));
     assert!(state.drawn.is_none(), "ツモ切り後もツモ牌が残っている");
     assert!(!state.can_pei);
 }
 
-/// 海底ツモ（山残り0）では北抜きボタンを出さないこと（#296 の回帰テスト）。
-/// サーバは補充ツモ不能で北抜きを却下するため、表示しても無反応になる。
+/// Regression (#296): no pei button on the last draw (empty wall).
+/// The server rejects pei without a replacement draw, so the button
+/// would be dead.
 #[test]
 fn test_sanma_no_pei_on_last_draw() {
     let mut state = GameState::new();
     state.handle_event(sanma_game_started(Wind::East));
     state.hand = vec![Tile::new(Tile::Z4)];
 
-    // 海底牌のツモ: 北を持っていても北抜き不可
     state.handle_event(ServerEvent::TileDrawn {
         tile: Tile::new(Tile::Z4),
         remaining_tiles: 0,
@@ -432,7 +434,7 @@ fn test_setup_state_build_game_settings() {
     assert_eq!(setup.cpu_count(), 2);
 }
 
-/// 対局モードと（三麻フラグ・対局の長さ）の相互変換
+/// Round-trip between game mode and (three-player flag, length).
 #[test]
 fn test_game_mode_parts_roundtrip() {
     let expected = [
@@ -441,7 +443,7 @@ fn test_game_mode_parts_roundtrip() {
         (GameMode::ThreeEast, true, GameLength::EastOnly),
         (GameMode::ThreeHanchan, true, GameLength::Hanchan),
     ];
-    // ALL はモードトグルの表示順と一致する
+    // ALL matches the mode toggle's display order.
     assert_eq!(GameMode::ALL.map(|m| m), expected.map(|(m, _, _)| m));
     for (mode, three_player, length) in expected {
         assert_eq!(mode.three_player(), three_player, "{mode:?}");
@@ -456,7 +458,7 @@ fn test_called_tile_is_marked_in_river() {
     state.seat_wind = Some(Wind::East);
     let tile = Tile::new(Tile::P3);
 
-    // 南家が捨てる（河に積まれ、まだ鳴かれていない）
+    // South discards; the tile joins the pool uncalled.
     state.handle_event(ServerEvent::TileDiscarded {
         player: Wind::South,
         tile,
@@ -466,7 +468,7 @@ fn test_called_tile_is_marked_in_river() {
     assert_eq!(state.discards[1].len(), 1);
     assert!(!state.discards[1][0].is_called);
 
-    // 西家がポン → 南家の河の該当牌が鳴かれた扱いになる
+    // West's pon marks the tile in South's pool as called.
     state.handle_event(ServerEvent::PlayerCalled {
         player: Wind::West,
         call_type: CallType::Pon,
@@ -480,18 +482,18 @@ fn test_called_tile_is_marked_in_river() {
 fn test_called_tile_marked_despite_stale_call_offer() {
     let mut state = GameState::new();
     state.seat_wind = Some(Wind::East);
-    // 過去の鳴き打診で call_discarder が残っている状況（パスした後など）
+    // A stale call_discarder from an earlier offer (after passing).
     state.call_discarder = Some(Wind::North);
 
     let tile = Tile::new(Tile::S5);
-    // 下家（南）が捨てる
     state.handle_event(ServerEvent::TileDiscarded {
         player: Wind::South,
         tile,
         is_tsumogiri: false,
         hand_index: None,
     });
-    // 対面（西）がチー → 古い call_discarder ではなく直前の打牌者を鳴き元とする
+    // West's chii must attribute to the latest discarder,
+    // not the stale call_discarder.
     state.handle_event(ServerEvent::PlayerCalled {
         player: Wind::West,
         call_type: CallType::Chi,
@@ -507,7 +509,7 @@ fn test_self_chi_sets_forbidden_swap_discards_and_clears_on_discard() {
     state.seat_wind = Some(Wind::East);
     state.last_discarder = Some(Wind::North);
 
-    // 上家が捨てた 3m を 4m,5m でチー（順子 3-4-5）
+    // Chii the left player's 3m with 4m/5m (sequence 3-4-5).
     state.handle_event(ServerEvent::PlayerCalled {
         player: Wind::East,
         call_type: CallType::Chi,
@@ -519,11 +521,11 @@ fn test_self_chi_sets_forbidden_swap_discards_and_clears_on_discard() {
         ],
     });
 
-    // 現物(3m)とスジ(6m)が打牌禁止になる
+    // Both the called kind (3m) and the suji tile (6m) become forbidden.
     assert!(state.forbidden_discards.contains(&Tile::M3));
     assert!(state.forbidden_discards.contains(&Tile::M6));
 
-    // 打牌が完了すると制限が解除される
+    // Completing a discard lifts the restriction.
     state.handle_event(ServerEvent::TileDiscarded {
         player: Wind::East,
         tile: Tile::new(Tile::P1),
@@ -622,7 +624,7 @@ fn test_can_discard_for_riichi_after_ankan_uses_opened_melds() {
     assert!(state.can_discard_for_riichi(Some(Tile::new(Tile::M7))));
 }
 
-// ─── 宣言バナー（鳴き・リーチ・和了の発声表示）のテスト ──────────────────────
+// --- Declaration banners ---
 
 fn queued_pon(player: Wind) -> ServerEvent {
     let tile = Tile::new(Tile::P3);
@@ -692,7 +694,7 @@ fn test_call_banner_shown_and_following_events_held() {
     let mut state = GameState::new();
     state.handle_event(game_started_4p(Wind::East, 0));
 
-    // 下家（南）のポン → バナー表示・ポン自体は即適用
+    // South's pon shows a banner; the pon itself applies at once.
     state.queue_event(queued_pon(Wind::South));
     state.queue_event(ServerEvent::OtherPlayerDrew {
         player: Wind::South,
@@ -708,10 +710,10 @@ fn test_call_banner_shown_and_following_events_held() {
         })
     ));
     assert_eq!(state.other_players[0].melds.len(), 1);
-    // 後続の OtherPlayerDrew は保留され、残り枚数は未更新
+    // The following OtherPlayerDrew is held; the count is stale.
     assert_eq!(state.remaining_tiles, 70);
 
-    // 保留明けに適用される
+    // It applies once the hold ends.
     state.process_events(100.0 + CALL_HOLD_SECS);
     assert_eq!(state.remaining_tiles, 60);
 }
@@ -734,7 +736,8 @@ fn test_riichi_banner_holds_declaration_discard() {
     });
     state.process_events(100.0);
 
-    // リーチは即適用（点数・供託が更新）、宣言牌の打牌は保留
+    // Riichi applies at once (scores, deposits); the declaration
+    // discard is held.
     assert!(matches!(
         state.call_banners[2],
         Some(CallBanner {
@@ -758,7 +761,7 @@ fn test_round_won_deferred_until_banner_hold_elapses() {
     state.queue_event(round_won_tsumo(Wind::South));
     state.process_events(100.0);
 
-    // ツモ宣言バナーだけ表示され、結果画面への遷移は保留される
+    // Only the tsumo banner shows; the result transition is held.
     assert!(matches!(
         state.call_banners[1],
         Some(CallBanner {
@@ -768,11 +771,11 @@ fn test_round_won_deferred_until_banner_hold_elapses() {
     ));
     assert_eq!(state.phase, GamePhase::Playing);
 
-    // 保留中は再処理しても遷移しない
+    // Reprocessing during the hold must not transition.
     state.process_events(100.0 + WIN_HOLD_SECS / 2.0);
     assert_eq!(state.phase, GamePhase::Playing);
 
-    // 保留明けに結果画面へ
+    // The result screen appears once the hold ends.
     state.process_events(100.0 + WIN_HOLD_SECS);
     assert_eq!(state.phase, GamePhase::RoundResult);
 }
@@ -786,7 +789,7 @@ fn test_double_ron_shows_banners_for_all_winners() {
     state.queue_event(round_won_ron(Wind::West, Wind::East));
     state.process_events(100.0);
 
-    // 2人分のロンバナーが同時に表示される
+    // Both ron banners show together.
     assert!(matches!(
         state.call_banners[1],
         Some(CallBanner {
@@ -803,7 +806,7 @@ fn test_double_ron_shows_banners_for_all_winners() {
     ));
     assert_eq!(state.phase, GamePhase::Playing);
 
-    // 保留明けに両方の RoundWon が適用される（2ページ分の結果）
+    // Both RoundWon events apply after the hold: two result pages.
     state.process_events(100.0 + WIN_HOLD_SECS);
     assert_eq!(state.phase, GamePhase::RoundResult);
     assert_eq!(state.win_results.len(), 2);
@@ -836,16 +839,16 @@ fn test_banners_cleared_on_new_round() {
     assert!(state.call_banners[1].is_none());
 }
 
-/// 自分の鳴き（PlayerCalled）の直後に届く HandUpdated は、宣言バナーの
-/// 保留を待たず同一フレームで適用されること（回帰テスト）。
-/// 保留すると、その間の打牌が保留明けの HandUpdated で巻き戻され、
-/// 手牌がサーバと恒久的に食い違う（捨てた牌が手牌に復活する）。
+/// Regression: the HandUpdated right after our own PlayerCalled must
+/// apply in the same frame, not wait out the banner hold. Holding it
+/// let a discard made meanwhile be rolled back by the late HandUpdated,
+/// permanently desyncing the hand (the discarded tile resurrected).
 #[test]
 fn test_own_call_applies_hand_update_in_same_frame() {
     let mut state = GameState::new();
     state.handle_event(game_started_4p(Wind::East, 0));
 
-    // 自分（東）のポン: サーバは PlayerCalled → HandUpdated の順で送る
+    // Our own pon: the server sends PlayerCalled then HandUpdated.
     state.queue_event(queued_pon(Wind::East));
     let new_hand = vec![Tile::new(Tile::M1); 11];
     state.queue_event(ServerEvent::HandUpdated {
@@ -857,30 +860,30 @@ fn test_own_call_applies_hand_update_in_same_frame() {
     });
     state.process_events(100.0);
 
-    // ポンと手牌更新が同一フレームで適用され、手牌は最新になる
+    // Both apply in one frame; the hand is current.
     assert_eq!(state.melds.len(), 1);
     assert_eq!(state.hand, new_hand);
     assert!(state.is_my_turn);
 
-    // 宣言バナーの保留自体は維持され、さらに後続のイベントは適用されない
+    // The banner hold itself remains; further events stay held.
     assert_eq!(state.remaining_tiles, 70);
     state.process_events(100.0 + CALL_HOLD_SECS);
     assert_eq!(state.remaining_tiles, 60);
 }
 
-/// 未適用のサーバイベントが残っている間は入力を受け付けないこと
-/// （回帰テスト）。画面が古い状態のまま打牌すると、その打牌が
-/// 後続イベントの適用で巻き戻されてサーバと食い違う。
+/// Regression: input must be refused while unapplied events remain.
+/// A discard made against the stale screen would be rolled back by the
+/// pending events and desync from the server.
 #[test]
 fn test_input_blocked_while_events_pending() {
     let mut state = GameState::new();
     state.handle_event(game_started_4p(Wind::East, 0));
-    // リーチ中のツモ切り自動打牌はマウス入力なしで発火する
+    // The riichi auto-discard fires without mouse input.
     state.is_my_turn = true;
     state.is_riichi = true;
     state.drawn = Some(Tile::new(Tile::M1));
 
-    // 未適用イベントが残っている間は入力（自動打牌含む）を受け付けない
+    // No input (including the auto-discard) while events are queued.
     state.queue_event(ServerEvent::OtherPlayerDrew {
         player: Wind::South,
         remaining_tiles: 60,
@@ -888,7 +891,7 @@ fn test_input_blocked_while_events_pending() {
     assert!(state.handle_input(None, 100.0).is_none());
     assert!(state.drawn.is_some());
 
-    // キューを消化すれば打牌できる（待ち時間経過後）
+    // Draining the queue re-enables the discard (after its delay).
     state.process_events(100.0);
     assert!(state.handle_input(None, 100.0).is_none());
     assert!(matches!(
@@ -897,8 +900,8 @@ fn test_input_blocked_while_events_pending() {
     ));
 }
 
-/// リーチ中の自動ツモ切りはツモ牌を表示したまま一定時間待ってから発火する
-/// （#291 回帰テスト）。以前は即時に打牌されツモ牌を確認できなかった。
+/// Regression (#291): the riichi auto-discard waits with the drawn tile
+/// visible before firing; it used to discard instantly, hiding the tile.
 #[test]
 fn test_riichi_auto_discard_waits_before_firing() {
     let mut state = GameState::new();
@@ -912,7 +915,7 @@ fn test_riichi_auto_discard_waits_before_firing() {
         is_furiten: false,
     });
 
-    // 待ち時間中は打牌されず、ツモ牌が表示されたまま
+    // During the delay no discard happens and the tile stays visible.
     assert!(state.handle_input(None, 100.0).is_none());
     assert!(state.drawn.is_some());
     assert!(
@@ -922,7 +925,7 @@ fn test_riichi_auto_discard_waits_before_firing() {
     );
     assert!(state.drawn.is_some());
 
-    // 待ち時間が経過したら自動でツモ切りする
+    // Past the delay the tsumogiri fires.
     assert!(matches!(
         state.handle_input(None, 100.0 + RIICHI_AUTO_DISCARD_SECS),
         Some(ClientAction::Discard { tile: None })
@@ -930,8 +933,9 @@ fn test_riichi_auto_discard_waits_before_firing() {
     assert!(state.drawn.is_none());
 }
 
-/// 自動ツモ切りの待ち時間は新しいツモのたびに取り直されること。
-/// 前巡の待機時刻が残ると、次のツモが即時に切られてしまう。
+/// The auto-discard delay must restart on every draw; a leftover
+/// deadline from the previous turn would discard the next draw
+/// instantly.
 #[test]
 fn test_riichi_auto_discard_timer_resets_on_new_draw() {
     let mut state = GameState::new();
@@ -945,7 +949,7 @@ fn test_riichi_auto_discard_timer_resets_on_new_draw() {
         is_furiten: false,
     });
 
-    // 1巡目: 待機開始 → 発火
+    // First turn: wait, then fire.
     assert!(state.handle_input(None, 100.0).is_none());
     assert!(
         state
@@ -953,7 +957,7 @@ fn test_riichi_auto_discard_timer_resets_on_new_draw() {
             .is_some()
     );
 
-    // 2巡目のツモ: 待ち時間が取り直され、即時には切られない
+    // Second draw: the delay restarts; no instant discard.
     state.handle_event(ServerEvent::TileDrawn {
         tile: Tile::new(Tile::M2),
         remaining_tiles: 56,
@@ -978,7 +982,7 @@ fn test_win_announcement_collapses_stale_action_ui() {
     state.available_calls = vec![AvailableCall::Ron];
     state.can_tsumo = true;
 
-    // ロン宣言の保留中は古いロン・ツモボタンを畳む
+    // Stale ron/tsumo buttons collapse during the ron hold.
     state.queue_event(round_won_ron(Wind::East, Wind::South));
     state.process_events(100.0);
     assert!(state.available_calls.is_empty());
@@ -986,10 +990,10 @@ fn test_win_announcement_collapses_stale_action_ui() {
     assert_eq!(state.phase, GamePhase::Playing);
 }
 
-// ── 他家の手牌表示（ツモ牌の張り出しと手出しの詰め演出） ──────────────────
+// --- Opponent hand display (drawn-tile overhang, gap animation) ---
 
-/// 他家のツモは手牌の枚数を変えず、ツモ牌の張り出しだけを立てる
-/// （中央ぞろえで手牌全体が動かないようにするための回帰テスト）
+/// An opponent's draw must only set the overhang flag, not change the
+/// tile count - keeping the centered hand from shifting (regression).
 #[test]
 fn test_other_player_draw_marks_drawn_without_moving_hand() {
     let mut state = GameState::new();
@@ -1005,7 +1009,7 @@ fn test_other_player_draw_marks_drawn_without_moving_hand() {
     assert_eq!(other.concealed_count, 13, "ツモ牌は手牌の枚数に含めない");
 }
 
-/// ツモ切りでは手牌が動かず、詰め演出も発生しない
+/// A tsumogiri leaves the hand untouched, with no gap animation.
 #[test]
 fn test_other_player_tsumogiri_keeps_hand_untouched() {
     let mut state = GameState::new();
@@ -1028,8 +1032,8 @@ fn test_other_player_tsumogiri_keeps_hand_untouched() {
     assert!(other.tedashi_anim.is_none(), "ツモ切りでは詰め演出をしない");
 }
 
-/// 手出しではツモ牌が手牌へ組み入れられ（枚数は変わらない）、
-/// 抜かれた位置の詰め演出が開始される
+/// A hand discard merges the drawn tile in (count unchanged) and starts
+/// the gap animation at the vacated slot.
 #[test]
 fn test_other_player_tedashi_starts_gap_animation() {
     let mut state = GameState::new();
@@ -1055,14 +1059,14 @@ fn test_other_player_tedashi_starts_gap_animation() {
     assert_eq!(anim.started_at, 100.0);
 }
 
-/// 鳴き直後の打牌（ツモ牌なしの手出し）では手牌が1枚減る
+/// A post-call discard (no drawn tile) shrinks the hand by one.
 #[test]
 fn test_other_player_tedashi_after_call_decrements_count() {
     let mut state = GameState::new();
     state.handle_event(game_started_4p(Wind::East, 0));
     state.last_discarder = Some(Wind::East);
 
-    // 南家がポン（手牌13→11）してから打牌（→10）
+    // South pons (13 -> 11 tiles), then discards (-> 10).
     state.handle_event(ServerEvent::PlayerCalled {
         player: Wind::South,
         call_type: CallType::Pon,
@@ -1084,8 +1088,9 @@ fn test_other_player_tedashi_after_call_decrements_count() {
     assert!(!anim.had_drawn);
 }
 
-/// 他家の暗カンではツモ牌込みで4枚が副露へ移る
-/// （回帰: 以前はツモ分を差し引かず、1枚多く表示されていた）
+/// An opponent's concealed kan moves four tiles including the drawn one
+/// into the meld (regression: the drawn tile used not to be deducted,
+/// showing one tile too many).
 #[test]
 fn test_other_player_ankan_consumes_four_tiles() {
     let mut state = GameState::new();
@@ -1106,7 +1111,7 @@ fn test_other_player_ankan_consumes_four_tiles() {
     assert_eq!(other.concealed_count, 10, "13枚＋ツモ1枚から4枚が副露へ");
     assert!(!other.has_drawn);
 
-    // 嶺上ツモで再びツモ牌が張り出す
+    // The replacement draw restores the overhang.
     state.handle_event(ServerEvent::OtherPlayerDrew {
         player: Wind::South,
         remaining_tiles: 68,
@@ -1115,8 +1120,8 @@ fn test_other_player_ankan_consumes_four_tiles() {
     assert_eq!(state.other_players[0].concealed_count, 10);
 }
 
-/// ツモ牌がある状態の北抜きでは手牌の枚数が変わらない
-/// （北はツモ牌または手牌から抜かれ、ツモ牌は手牌へ組み入れられる）
+/// A pei with a drawn tile present keeps the hand count: the North
+/// leaves the drawn tile or the hand, and the drawn tile merges in.
 #[test]
 fn test_sanma_pei_with_drawn_keeps_hand_count() {
     let mut state = GameState::new();
@@ -1136,15 +1141,15 @@ fn test_sanma_pei_with_drawn_keeps_hand_count() {
     assert!(!other.has_drawn);
 }
 
-/// 手番プレイヤー（turn_player）がイベントに追従して更新されること。
-/// 中央パネルの手番インジケーター表示に使う（#307）。
+/// turn_player must track the events; it drives the center panel's
+/// turn indicator (#307).
 #[test]
 fn test_turn_player_tracks_events() {
     let mut state = GameState::new();
     state.handle_event(game_started_4p(Wind::East, 0));
     assert_eq!(state.turn_player, None, "局開始直後は手番未確定");
 
-    // 自分（東）のツモで自分の手番になる
+    // Our own draw makes it our turn.
     state.handle_event(ServerEvent::TileDrawn {
         tile: Tile::new(Tile::P2),
         remaining_tiles: 69,
@@ -1154,7 +1159,7 @@ fn test_turn_player_tracks_events() {
     });
     assert_eq!(state.turn_player, Some(Wind::East));
 
-    // 打牌後、下家（南）のツモで手番が移る
+    // After our discard, South's draw moves the turn.
     state.handle_event(ServerEvent::TileDiscarded {
         player: Wind::East,
         tile: Tile::new(Tile::P2),
@@ -1167,7 +1172,7 @@ fn test_turn_player_tracks_events() {
     });
     assert_eq!(state.turn_player, Some(Wind::South));
 
-    // 南の打牌を西がポン → 手番は西へ飛ぶ
+    // West pons South's discard, taking the turn.
     let tile = Tile::new(Tile::S5);
     state.handle_event(ServerEvent::TileDiscarded {
         player: Wind::South,
@@ -1183,7 +1188,7 @@ fn test_turn_player_tracks_events() {
     });
     assert_eq!(state.turn_player, Some(Wind::West));
 
-    // 流局で手番表示は消える
+    // The draw clears the indicator.
     state.handle_event(ServerEvent::RoundDraw {
         scores: [25000; 4],
         reason: mahjong_server::protocol::DrawReason::Exhaustive,

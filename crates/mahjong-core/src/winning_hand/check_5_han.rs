@@ -5,7 +5,7 @@ use crate::hand_info::status::*;
 use crate::settings::*;
 use crate::winning_hand::name::*;
 
-/// 流し満貫
+/// Nagashi Mangan (流し満貫)
 pub fn check_nagashi_mangan(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -19,7 +19,8 @@ pub fn check_nagashi_mangan(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 流し満貫は状態フラグで判定する
+    // Nagashi Mangan depends on the discard history, not the hand shape,
+    // so it is decided by a status flag set by the server.
     if status.is_nagashi_mangan {
         Ok((name, true, 5))
     } else {
@@ -27,6 +28,5 @@ pub fn check_nagashi_mangan(
     }
 }
 
-/// ユニットテスト
 #[cfg(test)]
 mod tests {}

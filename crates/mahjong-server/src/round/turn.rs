@@ -1,4 +1,4 @@
-//! ターン進行（ツモ・打牌・カン・北抜き）
+//! Turn flow: draws, discards, kans, and North extraction.
 
 use mahjong_core::tile::{Tile, TileType};
 
@@ -7,17 +7,16 @@ use crate::protocol::{CallType, DrawReason, ServerEvent};
 use super::{Round, TurnPhase};
 
 impl Round {
-    /// ツモフェーズを実行する
-    /// 山から1枚引いて現在のプレイヤーに配る
+    /// Runs the draw phase: takes one tile from the wall for the
+    /// current player.
     pub fn do_draw(&mut self) -> bool {
         if self.phase != TurnPhase::Draw {
             return false;
         }
 
-        // 同巡フリテンを解除（自分のツモ番が来たので）
+        // Temporary furiten lasts only until the player's own next draw.
         self.players[self.current_player].is_temporary_furiten = false;
 
-        // 牌山が空なら流局
         if self.wall.is_empty() {
             self.do_exhaustive_draw();
             return true;
@@ -33,7 +32,7 @@ impl Round {
 
         self.push_draw_events(self.current_player, tile, "draw");
 
-        // 九種九牌チェック: 初回ツモかつ条件を満たす場合に選択を促す
+        // Offer the nine-terminals abortive draw when eligible.
         if self.settings.nine_terminals_draw && self.check_nine_terminals() {
             self.phase = TurnPhase::WaitForNineTerminals;
             self.events
@@ -43,25 +42,21 @@ impl Round {
         true
     }
 
-    /// 打牌を実行する
-    ///
-    /// - `tile`: 捨てる牌（Noneならツモ切り）
-    ///
-    /// 打牌後、他プレイヤーの鳴き候補をチェックし、
-    /// 鳴き候補があれば WaitForCalls フェーズに移行する。
+    /// Discards a tile (`None` discards the drawn tile), then checks the
+    /// other players' call options and moves to the WaitForCalls phase
+    /// when any exist.
     pub fn do_discard(&mut self, tile: Option<Tile>) -> bool {
         if self.phase != TurnPhase::WaitForDiscard {
             return false;
         }
 
-        // 手出しなら打牌前のソート済み手牌内での位置を控える（他家の手牌演出用）
         let hand_index = self.discard_hand_index(self.current_player, tile);
         let Some(discarded) = self.players[self.current_player].try_discard(tile) else {
             return false;
         };
 
-        // 一発フラグは try_discard() 内で解除済み。
-        // リーチ宣言牌の打牌は do_riichi() が別途処理し、そこでフラグを復元する。
+        // try_discard() already cleared the ippatsu flag; the riichi
+        // declaration discard goes through do_riichi(), which restores it.
         self.announce_discard_and_check_calls(
             discarded,
             self.current_player,
@@ -72,7 +67,7 @@ impl Round {
         true
     }
 
-    /// 暗カン/加カンを実行する
+    /// Executes a concealed or promoted kan.
     pub fn do_kan(&mut self, tile_type: TileType) -> bool {
         if self.phase != TurnPhase::WaitForDiscard {
             return false;
@@ -83,7 +78,6 @@ impl Round {
             return false;
         }
 
-        // 場全体で4回カン済みなら追加のカン不可
         if self.total_kan_count() >= 4 {
             return false;
         }
@@ -102,7 +96,8 @@ impl Round {
         } else {
             return false;
         }
-        // ankan 確定時のみこの行以降が実行される（kakan/不可の場合は early return 済み）
+        // Only the ankan path reaches this line; kakan and rejections
+        // returned early above.
         self.invalidate_first_turn_flags();
 
         let caller_wind = self.players[player_idx].seat_wind;
@@ -134,13 +129,14 @@ impl Round {
         true
     }
 
-    /// 北抜きを実行する（三麻の抜きドラ）
+    /// Extracts a North tile as pei dora (three-player games).
     ///
-    /// - 手番アクション（鳴きではない）のため、一発・第一巡フラグは中断しない
-    /// - 新しいドラ表示牌は公開されない（カンとは異なる）
-    /// - 補充は生牌山の末尾から行う（王牌は補充しない既存の簡略化に合わせる。
-    ///   `remaining()`/海底の計算は自動で整合する）
-    /// - 補充ツモでの和了は嶺上開花にならない
+    /// - A turn action, not a call, so ippatsu and first-turn flags survive.
+    /// - Unlike a kan, no new dora indicator is revealed.
+    /// - The replacement comes from the live wall's tail (the dead wall is
+    ///   never replenished in this codebase; `remaining()` and haitei
+    ///   bookkeeping stay consistent for free).
+    /// - Winning on the replacement draw is not After a Quad (嶺上開花).
     pub fn do_pei(&mut self) -> bool {
         if !(self.settings.three_player && self.settings.nuki_dora) {
             return false;
@@ -148,7 +144,6 @@ impl Round {
         if self.phase != TurnPhase::WaitForDiscard {
             return false;
         }
-        // 補充する牌がない（生牌山が空）なら北抜き不可
         if self.wall.is_empty() {
             return false;
         }
@@ -158,7 +153,7 @@ impl Round {
             return false;
         }
 
-        // 全プレイヤーに北抜きを通知（各家の枚数は風のインデックス順）
+        // Counts are indexed by wind so clients need no seat mapping.
         let declarer_wind = self.players[player_idx].seat_wind;
         let mut pei_counts = [0u8; 4];
         for p in self.players.iter().take(self.player_count) {
@@ -174,7 +169,7 @@ impl Round {
             ));
         }
 
-        // 手牌から抜いた場合に備えて本人へ手牌同期
+        // The North may have come from the hand, so resync it.
         self.events.push((
             player_idx,
             ServerEvent::HandUpdated {
@@ -182,7 +177,6 @@ impl Round {
             },
         ));
 
-        // 生牌山の末尾から補充ツモ（is_empty チェック済みのため必ず成功する）
         let Some(tile) = self.wall.draw_replacement_from_tail() else {
             return false;
         };
@@ -192,10 +186,11 @@ impl Round {
         true
     }
 
-    /// 手出し打牌が手牌（ツモ牌を除く・ソート済み）の何枚目かを返す
+    /// Returns the 0-based position of a hand discard within the sorted
+    /// hand (excluding the drawn tile).
     ///
-    /// `Player::try_discard` と同じ検索（完全一致の先頭位置）を打牌前に行う。
-    /// ツモ切り（`tile` が None）や手牌に存在しない牌では None。
+    /// Uses the same lookup as `Player::try_discard` (first exact match),
+    /// run before the discard. None on tsumogiri or when the tile is absent.
     pub(super) fn discard_hand_index(
         &self,
         player_idx: usize,
@@ -209,15 +204,15 @@ impl Round {
             .position(|t| *t == target)
     }
 
-    /// 指定プレイヤーの最後の捨て牌を「鳴かれた」としてマークする
+    /// Marks the player's latest discard as claimed by a call.
     pub(super) fn mark_last_discard_as_called(&mut self, discarder: usize) {
         if let Some(last_discard) = self.players[discarder].discards.last_mut() {
             last_discard.is_called = true;
         }
     }
 
-    /// 鳴き・カンなどにより全プレイヤーの一発フラグと
-    /// 第1巡フラグ（四風連打の判定用）を無効化する
+    /// A call or kan breaks every player's ippatsu and interrupts the
+    /// first go-around (which also cancels the four-winds abortive draw).
     pub(super) fn invalidate_first_turn_flags(&mut self) {
         for player in &mut self.players {
             player.is_ippatsu = false;
@@ -239,13 +234,14 @@ impl Round {
     }
 
     pub(super) fn draw_after_kan(&mut self, player_idx: usize) {
-        // 四槓散了チェック: 4回目のカン直後に判定（設定がありの場合のみ）
+        // The four-quads abortive draw is checked right after the fourth kan.
         if self.settings.four_kans_draw && self.check_four_kans_draw() {
             self.declare_special_draw(DrawReason::FourKans, None);
             return;
         }
 
-        // 同巡フリテンを解除（嶺上ツモも自分のツモ番）
+        // A replacement draw is still the player's own draw,
+        // so temporary furiten ends here too.
         self.players[player_idx].is_temporary_furiten = false;
 
         let Some(tile) = self.wall.draw_rinshan() else {
@@ -261,13 +257,15 @@ impl Round {
         self.push_draw_events(player_idx, tile, "kan_draw");
     }
 
-    /// 却下した打牌・リーチ宣言の送り主に正しい手牌を送り返して再同期させる
+    /// Sends the authoritative hand back to a player whose discard or
+    /// riichi was rejected.
     ///
-    /// クライアントは打牌をローカルの手牌へ楽観的に適用してから送信するため、
-    /// サーバが黙って却下するとクライアントの手牌が食い違ったままになり、
-    /// 以降その牌の打牌が却下され続けて進行が止まって見える（#294）。
-    /// `HandUpdated` で手牌を戻し、手番でツモ牌があれば `TileDrawn` も
-    /// 再送して打牌をやり直させる（本人のみ。`OtherPlayerDrew` は送らない）。
+    /// Clients apply discards to their local hand optimistically before
+    /// sending, so a silent rejection leaves the client's hand out of sync;
+    /// every later discard of that tile then keeps getting rejected and the
+    /// game appears frozen (#294). `HandUpdated` restores the hand, and if
+    /// it is the player's turn with a drawn tile, `TileDrawn` is re-sent so
+    /// they can discard again (to that player only; no `OtherPlayerDrew`).
     pub(crate) fn resync_hand(&mut self, player_idx: usize) {
         if player_idx >= self.player_count {
             return;
@@ -300,10 +298,8 @@ impl Round {
         }
     }
 
-    /// ツモ直後の通知イベントを積む
-    ///
-    /// 本人には牌と可能アクションを含む `TileDrawn`、
-    /// 他プレイヤーには `OtherPlayerDrew` を送る。
+    /// Queues the post-draw notifications: `TileDrawn` with the tile and
+    /// available actions to the drawer, `OtherPlayerDrew` to everyone else.
     fn push_draw_events(&mut self, player_idx: usize, tile: Tile, diag_label: &str) {
         let remaining = self.wall.remaining();
         let can_tsumo = self.can_tsumo();

@@ -1,8 +1,9 @@
-//! 対局画面の盤面描画（背景・上部バー・ドラ表示・中央パネル・捨て牌）
+//! Board rendering: background, top bar, dora display, center panel,
+//! and discard pools.
 
 use super::*;
 
-/// 対局画面の背景（中央が明るい放射状のフェルト）。
+/// Game background: radial felt, brighter at the center.
 pub(super) fn draw_felt_background() {
     theme::draw_radial_bg(
         DESIGN_W,
@@ -16,7 +17,7 @@ pub(super) fn draw_felt_background() {
     );
 }
 
-/// 設定・終了画面の背景（やや明るい緑から暗緑へ）。
+/// Setup/end-screen background: light green fading to dark.
 pub(super) fn draw_setup_background() {
     theme::draw_radial_bg(
         DESIGN_W,
@@ -30,10 +31,11 @@ pub(super) fn draw_setup_background() {
     );
 }
 
-/// 画面上部のバー（ドラ表示・局/残り枚数・各家の得点チップ）を描画する。
+/// Draws the top bar: dora display, hand/remaining counters, and
+/// per-player score chips.
 pub(super) fn draw_top_bar(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
     const BAR_H: f32 = 50.0;
-    // バー背景＋下境界線
+
     draw_rectangle(0.0, 0.0, DESIGN_W, BAR_H, Color::new(0.0, 0.0, 0.0, 0.48));
     draw_rectangle(0.0, BAR_H - 1.0, DESIGN_W, 1.0, theme::BORDER);
 
@@ -42,7 +44,7 @@ pub(super) fn draw_top_bar(state: &GameState, font: Option<&Font>, tile_textures
     draw_score_chips(state, font, BAR_H);
 }
 
-/// 上部バー左側：ドラ表示牌＋供託リーチ棒＋本場。
+/// Top-bar left: dora indicators, riichi deposits, honba.
 pub(super) fn draw_dora_panel(
     state: &GameState,
     font: Option<&Font>,
@@ -68,7 +70,6 @@ pub(super) fn draw_dora_panel(
         theme::rgba(0xc9a227, 0.18),
     );
 
-    // 「ドラ」ラベル
     draw_jp_text(
         font,
         DoraLabel::Dora.name(state.lang),
@@ -95,7 +96,7 @@ pub(super) fn draw_dora_panel(
         }
     }
 
-    // 供託リーチ棒（上段）／本場（下段）
+    // Deposits on the upper row, honba on the lower.
     draw_tile_sprite(
         &tile_textures.stick1000,
         sticks_x,
@@ -130,7 +131,7 @@ pub(super) fn draw_dora_panel(
     );
 }
 
-/// 上部バー中央：ルール（人数＋東風/半荘）・局・本場の表示。
+/// Top-bar center: rules (players + length), hand, honba.
 pub(super) fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f32) {
     let tr = state.tr();
     let rule_text = tr.get(state.setup_state.mode.label_key()).to_string();
@@ -170,7 +171,7 @@ pub(super) fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f
     }
 }
 
-/// 上部バー右側：各家の得点チップ（自分を強調）。
+/// Top-bar right: per-player score chips, ours highlighted.
 pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f32) {
     const CHIP_W: f32 = 70.0;
     const CHIP_H: f32 = 38.0;
@@ -211,7 +212,7 @@ pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f3
     }
 }
 
-/// 得点チップ用の短いプレイヤー名。
+/// Short player name for the score chips.
 pub(super) fn short_player_name(
     label: &crate::game::PlayerLabel,
     rel: usize,
@@ -220,7 +221,7 @@ pub(super) fn short_player_name(
     label.short_name(rel, lang)
 }
 
-/// 桁区切り付きの得点表記。
+/// Score text with digit grouping.
 pub(super) fn format_score(score: i32) -> String {
     let neg = score < 0;
     let mut n = score.unsigned_abs();
@@ -233,7 +234,6 @@ pub(super) fn format_score(score: i32) -> String {
         n /= 1000;
     }
     parts.reverse();
-    // 先頭の余分なゼロを除去
     let mut joined = parts.join(",");
     joined = joined.trim_start_matches('0').to_string();
     if joined.starts_with(',') {
@@ -242,9 +242,10 @@ pub(super) fn format_score(score: i32) -> String {
     if neg { format!("-{}", joined) } else { joined }
 }
 
-/// 盤面中央の情報パネル（半透明の黒い四角＋各家の風と得点＋局情報）を描画する
+/// Draws the center info panel: translucent square with each player's
+/// wind and score plus the hand info.
 pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
-    // 捨て牌の内側に収まる角丸のゴールド枠パネル
+    // A gold-framed panel sized to fit inside the discard pools.
     let panel_size: f32 = 160.0;
     let half = panel_size / 2.0;
     theme::draw_panel(
@@ -257,15 +258,14 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         theme::PANEL_BORDER,
     );
 
-    // 各家の風と得点をそれぞれの向きで描画
     let my_wind_idx = state.my_wind_index();
     let my_initial_wind_idx = state.my_initial_wind_index();
-    let label_dist: f32 = 64.0; // 中心からラベルまでの距離
+    let label_dist: f32 = 64.0;
 
     for rel in 0..state.player_count {
-        // rel は自分から見た相対位置(0=自分,1=下家,2=対面,3=上家)。
-        // scores / player_labels は固定の座席インデックス順なので、相対位置を
-        // 絶対座席へ変換してから引く(オンライン非ホストで自分の座席が0以外でもずれない)。
+        // rel is the position relative to us. scores/player_labels are
+        // seat-ordered, so convert to the absolute seat first - keeping
+        // things straight when a non-host sits off seat 0 online.
         let seat = seat_at_relative_position(state.my_seat, rel, state.player_count);
         let display_wind =
             mahjong_core::tile::Wind::from_index((my_wind_idx + rel) % state.player_count);
@@ -275,12 +275,12 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
 
         set_camera(&make_board_camera(rotation));
 
-        // 手番プレイヤー側の辺を発光させる（テキストより先に描いて重なりを避ける）
+        // Glow the acting player's edge; drawn before the text to
+        // avoid overlap.
         if state.turn_player == Some(display_wind) {
             draw_turn_indicator_edge(BOARD_CENTER_X - half, BOARD_CENTER_Y + half, panel_size);
         }
 
-        // 風（ゴールド）＋得点（千点単位）を中心の各方向に描画
         theme::draw_text_centered(
             font,
             display_wind.name(state.lang),
@@ -299,8 +299,8 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
             theme::TEXT_DIM,
         );
 
-        // CPU の強さ・性格（または相手の名前）を風・得点の下に表示する。
-        // rel は自分からの相対位置で、得点チップの CPU 番号と一致する。
+        // Show the CPU's level/personality (or the opponent's name) under
+        // the wind and score; rel matches the score chips' CPU numbering.
         if let Some(detail) = state.player_labels[seat].detail(rel, state.lang) {
             theme::draw_text_centered(
                 font,
@@ -315,13 +315,13 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         set_design_camera();
     }
 
-    // 局情報（プレイヤー＝自分に読める方向で描画）
+    // The hand info, oriented for us to read.
     let round_text = state
         .tr()
         .round_label(state.round_number, state.player_count);
     let remaining_text = state.tr().wall_remaining(state.remaining_tiles);
 
-    // 局表示は小さく、残数表示を大きく強調する
+    // Hand label small; remaining-tile count emphasized.
     theme::draw_text_centered(
         font,
         &round_text,
@@ -340,40 +340,42 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
     );
 }
 
-/// 中央パネルの手番プレイヤー側の辺に、ゆっくり明滅するゴールドのグローを描く。
+/// Draws a slowly pulsing gold glow along the acting player's edge of
+/// the center panel.
 ///
-/// `(x, y)` は辺の左端、`w` は辺の長さ。各プレイヤーの回転カメラ内で
-/// 手前側（下辺）に描かれる前提なので、呼び出し側で回転を切り替える。
+/// `(x, y)` is the edge's left end, `w` its length. Drawn on the near
+/// (bottom) edge inside each player's rotated camera, so the caller
+/// switches the rotation.
 fn draw_turn_indicator_edge(x: f32, y: f32, w: f32) {
-    // 約2秒周期でゆるやかに明滅させる（強すぎない範囲で強弱をつける）
+    // Pulse gently on a ~2-second cycle.
     let pulse = 0.775 + 0.225 * (get_time() * std::f64::consts::TAU / 2.0).sin() as f32;
 
-    // パネルの角丸（半径5）にかからないよう辺の内側に収める
+    // Inset from the panel's rounded corners (radius 5).
     let inset = 6.0;
     let (x, w) = (x + inset, w - 2.0 * inset);
 
-    // 中心線から外側へ薄くなる帯を重ねてグローを表現する
+    // Stack bands fading outward from the center line for the glow.
     for i in 0..4 {
         let spread = 2.0 + i as f32 * 2.0;
         let alpha = 0.16 * pulse / (i as f32 + 1.0);
         draw_rectangle(x, y - spread, w, spread * 2.0, theme::rgba(0xffd84a, alpha));
     }
-    // 中心の明るいライン
     draw_rectangle(x, y - 1.5, w, 3.0, theme::rgba(0xffe066, 0.95 * pulse));
 }
 
 pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
-    let dtw: f32 = 32.0; // 牌の自然な幅
-    let dth: f32 = 44.0; // 牌の自然な高さ
-    let col_step: f32 = dtw; // 列方向（隙間なし）
-    let row_step: f32 = dth; // 行方向（隙間なし）
+    let dtw: f32 = 32.0; // natural tile width
+    let dth: f32 = 44.0; // natural tile height
+    let col_step: f32 = dtw; // columns touch
+    let row_step: f32 = dth; // rows touch
 
-    // 正規化された配置パラメータ（「自分」視点: 左→右、行は下方向）
-    let half_width = 3.0 * col_step; // 6枚分の半幅 = 108px
-    let stick_offset: f32 = 108.0; // 中心からリーチ棒までの距離
-    let discard_offset: f32 = 130.0; // 中心から捨て牌開始までの距離（リーチ棒分のスペース確保）
+    // Normalized layout in our own view: left-to-right, rows downward.
+    let half_width = 3.0 * col_step; // half of six tiles = 108px
+    let stick_offset: f32 = 108.0; // center to the riichi stick
+    let discard_offset: f32 = 130.0; // center to the first discard row
+    // (leaves room for the stick)
 
-    // リーチ棒の描画サイズ（元画像は約800×117px → 横向きで縮小）
+    // Riichi stick draw size (source ~800x117px, shrunk horizontal).
     let stick_w: f32 = 100.0;
     let stick_h: f32 = 14.0;
 
@@ -390,7 +392,8 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
 
         set_camera(&make_board_camera(rotation));
 
-        // 北抜き牌（三麻）: 捨て牌エリアの右横に小さく並べる
+        // Extracted North tiles (three-player) line up small to the
+        // right of the discard area.
         if state.is_three_player() {
             let wind_idx = (my_wind_idx + rel) % state.player_count;
             let pei = state.pei_counts[wind_idx] as usize;
@@ -409,7 +412,6 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
             }
         }
 
-        // リーチ棒描画（リーチ宣言済みの場合のみ）
         let has_riichi = discards.iter().any(|d| d.is_riichi);
         if has_riichi {
             draw_tile_sprite(
@@ -422,8 +424,8 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
             );
         }
 
-        // 捨て牌描画（正規化された配置: 左→右、行は下方向）
-        // カメラ回転により各家の向きに自動変換される
+        // Discards in normalized layout; the camera rotation orients
+        // them per player.
         let mut col_offset: f32 = 0.0;
         let mut current_row: usize = 0;
 
@@ -434,7 +436,7 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
             } else {
                 WHITE
             };
-            // 鳴かれた牌はごく薄い半透明で描く
+            // Called tiles draw almost transparent.
             if discard.is_called {
                 tint.a = 0.28;
             }
@@ -445,7 +447,7 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
             }
 
             if discard.is_riichi {
-                // リーチ牌: 90°回転（横倒し）
+                // The riichi tile lies sideways.
                 let x = start_x + col_offset;
                 let y = start_y + row as f32 * row_step + (dth - dtw) / 2.0;
                 draw_tile_sprite_rotated(
@@ -457,7 +459,7 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
                     tint,
                     -std::f32::consts::FRAC_PI_2,
                 );
-                col_offset += dth; // 横倒し牌の幅 = dth（隙間なし）
+                col_offset += dth; // A sideways tile is dth wide.
             } else {
                 let x = start_x + col_offset;
                 let y = start_y + row as f32 * row_step;
@@ -470,7 +472,8 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
     }
 }
 
-/// 手牌の上に表示する状態バッジ（ピル）を描画し、次のバッジの x を返す。
+/// Draws a status badge (pill) above the hand and returns the next
+/// badge's x.
 pub(super) fn draw_badge(
     font: Option<&Font>,
     x: f32,

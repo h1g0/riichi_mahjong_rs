@@ -1,41 +1,41 @@
-//! 牌山の管理
+//! The wall (haiyama / 牌山).
 //!
-//! 四麻: 136枚の牌（各34種×4枚、うち赤ドラ3枚）を管理する。
-//! 三麻: 萬子2〜8を除いた108枚（うち赤ドラ2枚）を管理する。
-//! 王牌（14枚）・ドラ表示牌・嶺上牌の分離も行う。
+//! Four-player: 136 tiles (34 kinds x 4, incl. 3 red fives).
+//! Three-player: 108 tiles with 2m-8m removed (incl. 2 red fives).
+//! Also splits off the 14-tile dead wall with its dora indicators and
+//! replacement tiles.
 
 use std::collections::VecDeque;
 
 use mahjong_core::tile::{Tile, TileType};
 use rand::seq::SliceRandom;
 
-/// 牌山
+/// The wall.
 pub struct Wall {
-    /// ツモ牌（通常の山）: 先頭からツモる
+    /// Live wall; draws come from the front
     tiles: VecDeque<Tile>,
-    /// 王牌（14枚）
+    /// Dead wall (14 tiles)
     dead_wall: Vec<Tile>,
-    /// 嶺上牌のうち次にツモる位置（dead_wall 内のインデックス）
+    /// Index into dead_wall of the next replacement tile
     rinshan_index: usize,
-    /// ドラ表示牌の公開枚数（初期1枚、カンするたびに増加、最大5枚）
+    /// Number of revealed dora indicators (starts at 1, +1 per quad, max 5)
     dora_indicator_count: usize,
 }
 
 impl Wall {
-    /// 全ての牌を生成する
+    /// Creates the full tile set.
     ///
-    /// 四麻: 136枚（34種×4枚、赤ドラは5m/5p/5sの3枚）
-    /// 三麻: 108枚（萬子2〜8を除外した27種×4枚、赤ドラは5p/5sの2枚）
+    /// Four-player: 136 tiles with red fives in 5m/5p/5s.
+    /// Three-player: 108 tiles (2m-8m removed) with red fives in 5p/5s only.
     fn create_all_tiles(three_player: bool) -> Vec<Tile> {
         let mut tiles = Vec::with_capacity(136);
 
         for tile_type in 0..Tile::LEN as TileType {
-            // 三麻では萬子2〜8を使用しない
             if three_player && (Tile::M2..=Tile::M8).contains(&tile_type) {
                 continue;
             }
             for copy in 0..4u8 {
-                // 赤ドラ: 5m, 5p, 5s の各1枚目を赤にする（三麻では5mが存在しないため5p/5sのみ）
+                // The first copy of each five becomes the red five.
                 let is_red = copy == 0
                     && (tile_type == Tile::M5 || tile_type == Tile::P5 || tile_type == Tile::S5);
 
@@ -50,16 +50,15 @@ impl Wall {
         tiles
     }
 
-    /// 牌山を生成してシャッフルする
+    /// Creates a shuffled wall.
     pub fn new(three_player: bool) -> Self {
         let mut tiles = Self::create_all_tiles(three_player);
         tiles.shuffle(&mut rand::rng());
         Self::from_shuffled(tiles)
     }
 
-    /// 固定シードで牌山を生成する（再現性のある乱数）
-    ///
-    /// シミュレーション・再現性のあるテストに使用する。
+    /// Creates a wall from a fixed seed, for simulations and
+    /// reproducible tests.
     pub fn new_with_seed(seed: u64, three_player: bool) -> Self {
         use rand::SeedableRng;
         let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
@@ -68,13 +67,13 @@ impl Wall {
         Self::from_shuffled(tiles)
     }
 
-    /// テスト用：指定した牌列で牌山を生成する（シャッフルなし）
+    /// Test helper: builds a wall from a fixed tile order, unshuffled.
     #[cfg(test)]
     pub fn from_tiles(tiles: Vec<Tile>) -> Self {
         Self::from_shuffled(tiles)
     }
 
-    /// 並び順確定済みの136枚から、末尾14枚を王牌として分離して牌山を作る
+    /// Splits the last 14 tiles off as the dead wall.
     fn from_shuffled(mut tiles: Vec<Tile>) -> Self {
         let dead_wall: Vec<Tile> = tiles.split_off(tiles.len() - 14);
         Wall {
@@ -85,31 +84,32 @@ impl Wall {
         }
     }
 
-    /// 通常のツモを行う（山の先頭から1枚引く）
+    /// Draws from the front of the live wall.
     pub fn draw(&mut self) -> Option<Tile> {
         self.tiles.pop_front()
     }
 
-    /// 嶺上牌をツモる（王牌の嶺上牌位置から1枚引く）
+    /// Draws a replacement tile (rinshan / 嶺上牌) from the dead wall.
     pub fn draw_rinshan(&mut self) -> Option<Tile> {
         if self.rinshan_index >= 4 {
-            return None; // 嶺上牌は最大4枚
+            return None; // Only four replacement tiles exist.
         }
         let tile = self.dead_wall[self.rinshan_index];
         self.rinshan_index += 1;
         Some(tile)
     }
 
-    /// カン時にドラ表示牌を追加で公開する
+    /// Reveals one more dora indicator after a quad.
     pub fn add_dora_indicator(&mut self) {
         if self.dora_indicator_count < 5 {
             self.dora_indicator_count += 1;
         }
     }
 
-    /// 現在公開されているドラ表示牌を返す
-    /// 王牌の配置: [嶺上0, 嶺上1, 嶺上2, 嶺上3, ドラ表示0, ?, ドラ表示1, ?, ドラ表示2, ?, ドラ表示3, ?, ドラ表示4, ?]
-    /// ドラ表示牌は dead_wall[4], dead_wall[6], dead_wall[8], dead_wall[10], dead_wall[12]
+    /// Returns the currently revealed dora indicators.
+    ///
+    /// Dead wall layout: [rinshan 0-3, then indicator/ura pairs], so the
+    /// indicators sit at dead_wall[4], [6], [8], [10], [12].
     pub fn dora_indicators(&self) -> Vec<Tile> {
         let mut result = Vec::with_capacity(self.dora_indicator_count);
         for i in 0..self.dora_indicator_count {
@@ -121,8 +121,8 @@ impl Wall {
         result
     }
 
-    /// 裏ドラ表示牌を返す（和了時のみ公開される）
-    /// dead_wall[5], dead_wall[7], dead_wall[9], dead_wall[11], dead_wall[13]
+    /// Returns the ura dora indicators (revealed only on a riichi win):
+    /// dead_wall[5], [7], [9], [11], [13].
     pub fn uradora_indicators(&self) -> Vec<Tile> {
         let mut result = Vec::with_capacity(self.dora_indicator_count);
         for i in 0..self.dora_indicator_count {
@@ -134,26 +134,28 @@ impl Wall {
         result
     }
 
-    /// 山の残り枚数を返す
+    /// Number of tiles left in the live wall.
     pub fn remaining(&self) -> usize {
         self.tiles.len()
     }
 
-    /// 山が空かどうか（流局判定用）
+    /// Whether the live wall is exhausted (exhaustive draw check).
     pub fn is_empty(&self) -> bool {
         self.tiles.is_empty()
     }
 
-    /// 山の末尾から1枚引く（三麻の北抜きの補充用）
+    /// Draws from the back of the live wall (replacement for a North
+    /// extraction in three-player games).
     ///
-    /// 王牌は補充しないという既存の簡略化に合わせて、補充は生牌山の末尾から行う。
-    /// これにより `remaining()` と海底の計算が自動的に整合する。
+    /// The dead wall is deliberately never replenished in this codebase, so
+    /// the replacement comes from the live wall's tail; `remaining()` and
+    /// the last-tile (haitei) bookkeeping then stay consistent for free.
     pub fn draw_replacement_from_tail(&mut self) -> Option<Tile> {
         self.tiles.pop_back()
     }
 
-    /// 配牌を行う（4枚×3回+1枚 = 13枚を各プレイヤーに配る）
-    /// 戻り値: 4人分の手牌（各13枚）。三麻ではシート3は空のまま。
+    /// Deals starting hands: three rounds of four tiles plus one, 13 each.
+    /// Returns four hands; in three-player games seat 3 stays empty.
     pub fn deal(&mut self, player_count: usize) -> [Vec<Tile>; 4] {
         let mut hands: [Vec<Tile>; 4] = [
             Vec::with_capacity(13),
@@ -162,7 +164,6 @@ impl Wall {
             Vec::with_capacity(13),
         ];
 
-        // 4枚ずつ3回配る
         for _ in 0..3 {
             for hand in hands.iter_mut().take(player_count) {
                 for _ in 0..4 {
@@ -173,7 +174,6 @@ impl Wall {
             }
         }
 
-        // 1枚ずつ配る
         for hand in hands.iter_mut().take(player_count) {
             if let Some(tile) = self.draw() {
                 hand.push(tile);
@@ -199,17 +199,14 @@ mod tests {
         let tiles = Wall::create_all_tiles(false);
         assert_eq!(tiles.len(), 136);
 
-        // 各種類が4枚ずつあることを確認
         for tile_type in 0..Tile::LEN as TileType {
             let count = tiles.iter().filter(|t| t.get() == tile_type).count();
             assert_eq!(count, 4, "Tile type {} should have 4 copies", tile_type);
         }
 
-        // 赤ドラが3枚あることを確認
         let red_count = tiles.iter().filter(|t| t.is_red_dora()).count();
         assert_eq!(red_count, 3);
 
-        // 赤ドラがそれぞれ5m, 5p, 5sであることを確認
         let red_5m = tiles
             .iter()
             .filter(|t| t.get() == Tile::M5 && t.is_red_dora())
@@ -230,10 +227,9 @@ mod tests {
     #[test]
     fn test_create_all_tiles_three_player() {
         let tiles = Wall::create_all_tiles(true);
-        // 108枚（(34 - 7)種 × 4枚）
+        // (34 - 7) kinds x 4 copies
         assert_eq!(tiles.len(), 108);
 
-        // 萬子2〜8が存在しないことを確認
         for tile_type in Tile::M2..=Tile::M8 {
             let count = tiles.iter().filter(|t| t.get() == tile_type).count();
             assert_eq!(
@@ -243,7 +239,6 @@ mod tests {
             );
         }
 
-        // 1m・9mと萬子以外は4枚ずつあることを確認
         for tile_type in 0..Tile::LEN as TileType {
             if (Tile::M2..=Tile::M8).contains(&tile_type) {
                 continue;
@@ -252,7 +247,7 @@ mod tests {
             assert_eq!(count, 4, "Tile type {} should have 4 copies", tile_type);
         }
 
-        // 赤ドラは5p/5sの2枚のみ
+        // Only the 5p and 5s red fives exist in three-player games.
         let red_count = tiles.iter().filter(|t| t.is_red_dora()).count();
         assert_eq!(red_count, 2);
         assert!(!tiles.iter().any(|t| t.get() == Tile::M5 && t.is_red_dora()));
@@ -261,9 +256,8 @@ mod tests {
     #[test]
     fn test_wall_new_three_player() {
         let wall = Wall::new(true);
-        // 94枚が通常山（108 - 14 = 94）
+        // 108 - 14 dead wall = 94
         assert_eq!(wall.tiles.len(), 94);
-        // 14枚が王牌
         assert_eq!(wall.dead_wall.len(), 14);
     }
 
@@ -272,13 +266,12 @@ mod tests {
         let mut wall = Wall::new(true);
         let hands = wall.deal(3);
 
-        // シート0〜2は13枚、シート3は空
         for (i, hand) in hands.iter().enumerate().take(3) {
             assert_eq!(hand.len(), 13, "Player {} should have 13 tiles", i);
         }
         assert!(hands[3].is_empty());
 
-        // 配牌後の山の残り枚数: 94 - 39 = 55
+        // 94 - 3 x 13 = 55
         assert_eq!(wall.remaining(), 55);
     }
 
@@ -287,26 +280,22 @@ mod tests {
         let mut wall = Wall::new(true);
         let before = wall.remaining();
 
-        // 末尾からの補充ツモで残り枚数が減る
         let tile = wall.draw_replacement_from_tail();
         assert!(tile.is_some());
         assert_eq!(wall.remaining(), before - 1);
 
-        // 通常のツモ（先頭）とは別の牌を引いている
+        // Front draws and tail draws must both shrink the same count.
         let head = wall.draw().unwrap();
         assert_eq!(wall.remaining(), before - 2);
-        // 先頭と末尾は独立して減る（枚数勘定のみ確認）
         let _ = head;
     }
 
     #[test]
     fn test_wall_new() {
         let wall = Wall::new(false);
-        // 122枚が通常山（136 - 14 = 122）
+        // 136 - 14 dead wall = 122
         assert_eq!(wall.tiles.len(), 122);
-        // 14枚が王牌
         assert_eq!(wall.dead_wall.len(), 14);
-        // ドラ表示牌は1枚
         assert_eq!(wall.dora_indicator_count, 1);
         assert_eq!(wall.dora_indicators().len(), 1);
     }
@@ -316,12 +305,11 @@ mod tests {
         let mut wall = Wall::new(false);
         let hands = wall.deal(4);
 
-        // 各プレイヤー13枚
         for (i, hand) in hands.iter().enumerate() {
             assert_eq!(hand.len(), 13, "Player {} should have 13 tiles", i);
         }
 
-        // 配牌後の山の残り枚数: 122 - 52 = 70
+        // 122 - 4 x 13 = 70
         assert_eq!(wall.remaining(), 70);
     }
 
@@ -339,13 +327,12 @@ mod tests {
     fn test_draw_rinshan() {
         let mut wall = Wall::new(false);
 
-        // 嶺上牌は4枚まで引ける
         for i in 0..4 {
             let tile = wall.draw_rinshan();
             assert!(tile.is_some(), "Rinshan draw {} should succeed", i);
         }
 
-        // 5枚目はNone
+        // The fifth replacement draw must fail.
         let tile = wall.draw_rinshan();
         assert!(tile.is_none());
     }
@@ -361,7 +348,7 @@ mod tests {
         assert_eq!(wall.dora_indicators().len(), 2);
         assert_eq!(wall.uradora_indicators().len(), 2);
 
-        // 最大5枚まで
+        // Capped at five indicators.
         for _ in 0..10 {
             wall.add_dora_indicator();
         }

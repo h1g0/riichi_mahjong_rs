@@ -1,7 +1,5 @@
-//! 卓の状態管理
-//!
-//! 半荘（東風戦/東南戦）を通した状態を管理する。
-//! 局の生成・進行・終了判定を行う。
+//! Table state across a whole game (East-only or hanchan):
+//! creating hands, advancing them, and deciding when the game ends.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,22 +9,22 @@ use mahjong_core::tile::{Tile, Wind};
 use crate::protocol::{ClientAction, ServerEvent};
 use crate::round::{CallResponse, Round, RoundResult, TurnPhase};
 
-/// 対局の長さ（東風戦か半荘戦か）
+/// Game length.
 ///
-/// 半荘戦は東風戦（東入り）に南入りを加えたもの。総局数は
-/// [`GameLength::wind_count`] × プレイヤー人数で決まる
-/// （四麻: 東風戦=4局・半荘戦=8局、三麻: 東風戦=3局・半荘戦=6局）。
+/// A hanchan adds the South round to the East round. The total hand count
+/// is [`GameLength::wind_count`] x player count: 4/8 hands in four-player
+/// games, 3/6 in three-player games.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum GameLength {
-    /// 東風戦（東のみ）
+    /// East round only (tonpuusen / 東風戦)
     #[default]
     EastOnly,
-    /// 半荘戦（東 + 南）
+    /// East + South rounds (hanchan / 半荘)
     Hanchan,
 }
 
 impl GameLength {
-    /// プレイする場風の数（東風戦=1, 半荘戦=2）
+    /// Number of round winds played.
     fn wind_count(self) -> usize {
         match self {
             GameLength::EastOnly => 1,
@@ -35,14 +33,14 @@ impl GameLength {
     }
 }
 
-/// ゲームの設定
+/// Game settings.
 #[derive(Debug, Clone)]
 pub struct GameSettings {
-    /// 初期持ち点
+    /// Starting score
     pub initial_score: i32,
-    /// 対局の長さ（東風戦か半荘戦か）
+    /// Game length
     pub length: GameLength,
-    /// ルール設定
+    /// Rule settings
     pub rules: Settings,
 }
 
@@ -57,10 +55,9 @@ impl Default for GameSettings {
 }
 
 impl GameSettings {
-    /// ルール設定から標準の持ち点でゲーム設定を作る
-    ///
-    /// 持ち点はルールから決まる（四麻25000点・三麻35000点）。
-    /// ルーム作成（`CreateRoom`）やローカル対局設定からの変換に使う。
+    /// Builds game settings with the standard starting score for the rules
+    /// (25000 four-player, 35000 three-player). Used when converting from
+    /// `CreateRoom` or the local game setup.
     pub fn with_rules(length: GameLength, rules: Settings) -> Self {
         let initial_score = if rules.three_player { 35000 } else { 25000 };
         GameSettings {
@@ -70,10 +67,10 @@ impl GameSettings {
         }
     }
 
-    /// 三麻の標準設定を返す（35000点持ち・東風戦）
+    /// Standard three-player settings: 35000 points, East-only.
     pub fn sanma_default() -> Self {
         Self::with_rules(
-            GameLength::EastOnly, // 東風戦（東1〜3局）
+            GameLength::EastOnly,
             Settings {
                 three_player: true,
                 ..Settings::new()
@@ -82,34 +79,33 @@ impl GameSettings {
     }
 }
 
-/// 卓の状態
+/// Table state.
 pub struct Table {
-    /// ゲーム設定
+    /// Game settings
     pub settings: GameSettings,
-    /// 現在の局
+    /// The hand in progress
     pub round: Option<Round>,
-    /// 場風
+    /// Round wind
     pub round_wind: Wind,
-    /// 局番号（0-based: 東1局=0, 東2局=1, ...）
+    /// Hand number, 0-based (East 1 = 0, East 2 = 1, ...)
     pub round_number: usize,
-    /// 本場数
+    /// Continuance counter (honba / 本場)
     pub honba: usize,
-    /// 場に出ている供託リーチ棒の本数
+    /// Riichi deposits on the table
     pub riichi_sticks: usize,
-    /// 親のプレイヤーインデックス（0-3）
+    /// Dealer's player index (0-3)
     pub dealer: usize,
-    /// 各プレイヤーの点数
+    /// Scores
     pub scores: [i32; 4],
-    /// ゲームが終了したか
+    /// Whether the game is over
     pub is_game_over: bool,
 }
 
 impl Table {
-    /// 新しい卓を作成する
     pub fn new(settings: GameSettings) -> Self {
         let initial_score = settings.initial_score;
         let player_count = settings.rules.player_count();
-        // 三麻ではダミー席（シート3）の点数は常に0
+        // The dummy seat in three-player games always has zero points.
         let scores = std::array::from_fn(|i| if i < player_count { initial_score } else { 0 });
         Table {
             settings,
@@ -124,29 +120,26 @@ impl Table {
         }
     }
 
-    /// 起家（最初の親）をランダムに選ぶ
+    /// Picks the starting dealer at random.
     ///
-    /// 対局開始前（東1局を始める前）に呼ぶこと。三麻ではダミー席（シート3）が
-    /// 親にならないよう、実プレイヤー数の範囲から選ぶ。
+    /// Call before East 1. Drawn from the real player range so the dummy
+    /// seat in three-player games can never be the dealer.
     pub fn randomize_dealer(&mut self) {
         use rand::RngExt;
         self.dealer = rand::rng().random_range(0..self.player_count());
     }
 
-    /// ゲーム全体の局数を返す
-    ///
-    /// 四麻: 東風戦=4, 東南戦=8
-    /// 三麻: 東風戦=3, 東南戦=6
+    /// Total number of hands in the game
+    /// (4/8 four-player, 3/6 three-player).
     fn total_rounds(&self) -> usize {
         self.settings.length.wind_count() * self.player_count()
     }
 
-    /// プレイヤー人数を返す（四麻=4、三麻=3）
     fn player_count(&self) -> usize {
         self.settings.rules.player_count()
     }
 
-    /// 新しい局を開始する
+    /// Starts a new hand.
     pub fn start_round(&mut self) {
         let round = Round::new(
             self.round_wind,
@@ -161,9 +154,8 @@ impl Table {
         self.round = Some(round);
     }
 
-    /// シード値を指定して新しい局を開始する
-    ///
-    /// 牌山が決定的になるため、シミュレーション・テストでの再現に使用する。
+    /// Starts a new hand with a seeded, deterministic wall, for
+    /// simulations and reproducible tests.
     pub fn start_round_with_seed(&mut self, seed: u64) {
         let round = Round::new_with_seed(
             seed,
@@ -179,17 +171,14 @@ impl Table {
         self.round = Some(round);
     }
 
-    /// 現在の局への参照を取得する
     pub fn current_round(&self) -> Option<&Round> {
         self.round.as_ref()
     }
 
-    /// 現在の局への可変参照を取得する
     pub fn current_round_mut(&mut self) -> Option<&mut Round> {
         self.round.as_mut()
     }
 
-    /// イベントを取り出す
     pub fn drain_events(&mut self) -> Vec<(usize, ServerEvent)> {
         match self.round.as_mut() {
             Some(round) => round.drain_events(),
@@ -197,7 +186,7 @@ impl Table {
         }
     }
 
-    /// クライアントアクションを処理する
+    /// Handles a client action; returns whether it was accepted.
     pub fn handle_action(&mut self, player_idx: usize, action: ClientAction) -> bool {
         let round = match self.round.as_mut() {
             Some(r) => r,
@@ -205,14 +194,14 @@ impl Table {
         };
 
         match action {
-            // === 手番アクション（current_player のみ） ===
+            // Turn actions: current player only.
             ClientAction::Discard { tile } => {
                 let accepted = round.current_player == player_idx
                     && round.phase == TurnPhase::WaitForDiscard
                     && round.do_discard(tile);
                 if !accepted {
-                    // クライアントは打牌をローカル適用済みのため、黙殺すると
-                    // 手牌が食い違ったままになる。正しい手牌を送り返す（#294）
+                    // Clients apply discards locally before sending, so a
+                    // silent rejection would desync their hand (#294).
                     round.resync_hand(player_idx);
                 }
                 accepted
@@ -226,13 +215,14 @@ impl Table {
             ClientAction::Riichi { tile } => {
                 let accepted = round.current_player == player_idx && round.do_riichi(tile);
                 if !accepted {
-                    // リーチ宣言牌もクライアントでローカル適用済み（#294）
+                    // The riichi declaration discard is also applied locally
+                    // by the client (#294).
                     round.resync_hand(player_idx);
                 }
                 accepted
             }
 
-            // === 鳴きアクション（WaitForCalls フェーズで対象プレイヤーのみ） ===
+            // Call responses: eligible players during WaitForCalls only.
             ClientAction::Ron => round.respond_to_call(player_idx, CallResponse::Ron),
             ClientAction::Pon { tiles } => round.respond_to_call(
                 player_idx,
@@ -263,7 +253,6 @@ impl Table {
                 }
             }
 
-            // === 北抜きアクション（三麻のみ） ===
             ClientAction::Pei => {
                 if round.current_player != player_idx {
                     return false;
@@ -271,12 +260,10 @@ impl Table {
                 round.do_pei()
             }
 
-            // === 九種九牌アクション ===
             ClientAction::NineTerminals { declare } => round.do_nine_terminals(player_idx, declare),
         }
     }
 
-    /// 自動プレイヤーのターンを進める
     pub fn advance_auto_player(&mut self) -> bool {
         match self.round.as_mut() {
             Some(round) => round.advance_auto_player(),
@@ -284,8 +271,8 @@ impl Table {
         }
     }
 
-    /// 局が終了した場合に後処理を行う
-    /// 点数更新、親交代、局の進行を処理する
+    /// Post-hand bookkeeping: applies scores, rotates the dealer,
+    /// and advances the hand counter.
     pub fn finish_round(&mut self) {
         let (result, scores, riichi_sticks) = {
             let round = match self.round.as_ref() {
@@ -302,7 +289,7 @@ impl Table {
         self.scores = scores;
         self.riichi_sticks = riichi_sticks;
 
-        // 誰かが箱割れしていたらその時点でゲーム終了（0点は許容）
+        // A negative score ends the game immediately; exactly zero is fine.
         if self.scores.iter().any(|&score| score < 0) {
             self.is_game_over = true;
             self.round = None;
@@ -312,16 +299,16 @@ impl Table {
         match result {
             Some(RoundResult::ExhaustiveDraw { dealer_tenpai }) => {
                 self.honba += 1;
-                if dealer_tenpai {
-                    // 親がテンパイなら連荘（親交代しない、局も進めない）
-                } else {
-                    // 親がノーテンなら親交代して局を進める
+                // A tenpai dealer keeps the deal; otherwise the deal
+                // rotates and the hand counter advances.
+                if !dealer_tenpai {
                     self.dealer = (self.dealer + 1) % self.player_count();
                     self.advance_round_number();
                 }
             }
             Some(RoundResult::SpecialDraw) => {
-                // 途中流局: 本場を増やし、局は進めない（連荘扱い）
+                // Abortive draws count as a continuation: honba goes up
+                // and the hand does not advance.
                 self.honba += 1;
             }
             Some(RoundResult::Tsumo { winner, .. }) => {
@@ -334,7 +321,8 @@ impl Table {
                 }
             }
             Some(RoundResult::Ron { winners, .. }) => {
-                // 和了者の中に親がいれば連荘（1人ロンでも複数ロンでも共通）
+                // The dealer keeps the deal if they are among the winners,
+                // whether single or multiple ron.
                 if winners.contains(&self.dealer) {
                     self.honba += 1;
                 } else {
@@ -349,14 +337,13 @@ impl Table {
         self.round = None;
     }
 
-    /// 局番号を進める
     fn advance_round_number(&mut self) {
         self.round_number += 1;
         if self.round_number >= self.total_rounds() {
             self.is_game_over = true;
         }
 
-        // 場風を更新（三麻は3局ごと、四麻は4局ごとに進む）
+        // The round wind advances every player_count hands.
         self.round_wind = Wind::from_index(self.round_number / self.player_count());
     }
 }
@@ -367,11 +354,10 @@ mod tests {
     use crate::player::Player;
     use mahjong_core::hand::Hand;
 
-    /// 却下された打牌が本人へ HandUpdated + TileDrawn の再同期を送ること（#294）
-    ///
-    /// クライアントは打牌をローカル適用してから送信するため、黙殺すると
-    /// 手牌が食い違ったままになり、以降の打牌が却下され続けて
-    /// フリーズしたように見えていた。
+    /// A rejected discard must resync the sender with HandUpdated +
+    /// TileDrawn (#294): clients apply discards locally before sending,
+    /// so a silent rejection left the hand desynced and the game
+    /// appeared frozen.
     #[test]
     fn test_rejected_discard_resyncs_hand() {
         let mut table = Table::new(GameSettings::default());
@@ -387,7 +373,7 @@ mod tests {
             round.drain_events();
         }
 
-        // 手牌に存在しない牌（東）の打牌は却下される
+        // Discarding a tile not in the hand (East) must be rejected.
         let accepted = table.handle_action(
             0,
             ClientAction::Discard {
@@ -396,7 +382,6 @@ mod tests {
         );
         assert!(!accepted);
 
-        // サーバの状態は変わらない
         let expected_hand = {
             let round = table.current_round().unwrap();
             assert_eq!(round.phase, TurnPhase::WaitForDiscard);
@@ -404,7 +389,7 @@ mod tests {
             round.players[0].hand.tiles().to_vec()
         };
 
-        // 本人にだけ HandUpdated + TileDrawn（同じツモ牌）が届く
+        // Only the sender receives HandUpdated + TileDrawn (same tile).
         let events = table.drain_events();
         assert!(
             events.iter().any(|(seat, e)| *seat == 0
@@ -422,7 +407,8 @@ mod tests {
         );
     }
 
-    /// ツモ牌が無い打牌待ち（鳴き直後）での却下は HandUpdated のみ送ること
+    /// A rejection while no tile is drawn (right after a call) must send
+    /// HandUpdated only.
     #[test]
     fn test_rejected_discard_without_drawn_resyncs_hand_only() {
         let mut table = Table::new(GameSettings::default());
@@ -434,7 +420,7 @@ mod tests {
             round.drain_events();
         }
 
-        // ツモ牌が無いのでツモ切り指定は却下される
+        // Tsumogiri with no drawn tile must be rejected.
         let accepted = table.handle_action(0, ClientAction::Discard { tile: None });
         assert!(!accepted);
 
@@ -453,10 +439,8 @@ mod tests {
         );
     }
 
-    /// 却下されたリーチ宣言も再同期を送ること（#294）
-    ///
-    /// リーチ宣言牌もクライアントでローカル適用済みのため、黙殺すると
-    /// 打牌の場合と同じ手牌不整合になる。
+    /// A rejected riichi must resync too (#294): the declaration discard
+    /// is applied locally by the client just like a normal discard.
     #[test]
     fn test_rejected_riichi_resyncs_hand() {
         let mut table = Table::new(GameSettings::default());
@@ -464,7 +448,7 @@ mod tests {
         {
             let round = table.current_round_mut().unwrap();
             let seat_wind = round.players[0].seat_wind;
-            // テンパイしていない手（リーチ不可）
+            // Not tenpai, so riichi is impossible.
             let hand = Hand::from("1m4m7m2p5p8p3s6s9s1z2z3z4z 5z");
             round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
             round.players[0].draw(hand.drawn().unwrap());
@@ -476,7 +460,6 @@ mod tests {
         let accepted = table.handle_action(0, ClientAction::Riichi { tile: None });
         assert!(!accepted);
 
-        // リーチは成立していない
         {
             let round = table.current_round().unwrap();
             assert!(!round.players[0].is_riichi);
@@ -510,14 +493,13 @@ mod tests {
 
     #[test]
     fn test_randomize_dealer_stays_in_player_range() {
-        // 四麻: 起家は座席0〜3の範囲
         let mut table = Table::new(GameSettings::default());
         for _ in 0..50 {
             table.randomize_dealer();
             assert!(table.dealer < 4);
         }
 
-        // 三麻: ダミー席（シート3）は起家にならない
+        // The dummy seat must never become the starting dealer.
         let mut table = Table::new(GameSettings::sanma_default());
         for _ in 0..50 {
             table.randomize_dealer();
@@ -527,7 +509,7 @@ mod tests {
 
     #[test]
     fn test_randomize_dealer_varies() {
-        // 100回試行して起家が1種類しか出ない確率は (1/4)^99 で事実上ゼロ
+        // Odds of a single dealer in 100 tries are (1/4)^99: effectively zero.
         let mut table = Table::new(GameSettings::default());
         let mut seen = std::collections::HashSet::new();
         for _ in 0..100 {
@@ -539,7 +521,6 @@ mod tests {
 
     #[test]
     fn test_start_round_with_random_dealer() {
-        // ランダムに選ばれた起家が局に正しく反映される
         let mut table = Table::new(GameSettings::default());
         table.randomize_dealer();
         let dealer = table.dealer;
@@ -567,7 +548,6 @@ mod tests {
         let mut table = Table::new(GameSettings::default());
         table.start_round();
 
-        // 全員ツモ切りで局を最後まで進める
         let round = table.current_round_mut().unwrap();
         round.play_to_end();
 
@@ -575,7 +555,7 @@ mod tests {
 
         table.finish_round();
         assert!(table.round.is_none());
-        assert_eq!(table.honba, 1); // 流局なので本場が増える
+        assert_eq!(table.honba, 1); // Draws increment the honba counter.
     }
 
     #[test]
@@ -601,17 +581,15 @@ mod tests {
         table.start_round();
         table.drain_events();
 
-        // ツモフェーズ
         {
             let round = table.current_round_mut().unwrap();
             round.do_draw();
         }
         table.drain_events();
 
-        // プレイヤー0がツモ切り
         assert!(table.handle_action(0, ClientAction::Discard { tile: None }));
 
-        // WaitForCallsの場合は全員パスさせる
+        // Pass everyone through a possible WaitForCalls phase.
         {
             let round = table.current_round_mut().unwrap();
             if round.phase == TurnPhase::WaitForCalls {
@@ -628,7 +606,6 @@ mod tests {
             }
         }
 
-        // 手番がプレイヤー1に移る
         let round = table.current_round().unwrap();
         assert_eq!(round.current_player, 1);
     }
@@ -644,7 +621,6 @@ mod tests {
             round.do_draw();
         }
 
-        // プレイヤー1は手番ではないのでfalse
         assert!(!table.handle_action(1, ClientAction::Discard { tile: None }));
     }
 
@@ -652,11 +628,12 @@ mod tests {
     fn test_table_east_wind_game() {
         let mut table = Table::new(GameSettings {
             initial_score: 25000,
-            length: GameLength::EastOnly, // 東風戦（4局）
+            length: GameLength::EastOnly,
             ..Default::default()
         });
 
-        // 4局連続でノーテン流局（親交代あり）させてゲーム終了を確認する
+        // Four consecutive noten draws rotate the deal through everyone
+        // and must end the game.
         for _ in 0..4 {
             table.start_round();
             let round = table.current_round_mut().unwrap();
@@ -672,7 +649,6 @@ mod tests {
 
     #[test]
     fn test_game_settings_with_rules() {
-        // ルール構造体を丸ごと引き継ぎ、持ち点はルールから決まる
         let rules = Settings {
             three_player: true,
             nuki_dora: false,
@@ -691,7 +667,6 @@ mod tests {
     #[test]
     fn test_sanma_table_new() {
         let table = Table::new(GameSettings::sanma_default());
-        // 35000点持ち・ダミー席3は0点
         assert_eq!(table.scores, [35000, 35000, 35000, 0]);
         assert_eq!(table.round_wind, Wind::East);
         assert!(!table.is_game_over);
@@ -701,7 +676,8 @@ mod tests {
     fn test_sanma_east_wind_game_is_three_rounds() {
         let mut table = Table::new(GameSettings::sanma_default());
 
-        // 3局連続でノーテン流局（親交代あり）させてゲーム終了を確認する
+        // Three consecutive noten draws must end a three-player
+        // East-only game.
         for i in 0..3 {
             assert!(
                 !table.is_game_over,
@@ -723,7 +699,7 @@ mod tests {
     #[test]
     fn test_sanma_dealer_rotation_wraps_at_three() {
         let mut table = Table::new(GameSettings {
-            length: GameLength::Hanchan, // 東南戦（6局）にして親が一周するのを確認
+            length: GameLength::Hanchan,
             ..GameSettings::sanma_default()
         });
 
@@ -739,13 +715,12 @@ mod tests {
             table.finish_round();
         }
 
-        // 親は 0→1→2→0 と3人で循環する
+        // The deal cycles through the three players, then South begins.
         assert_eq!(dealers, vec![0, 1, 2, 0]);
-        // 東1〜3局の後は南入する
         assert_eq!(table.round_wind, Wind::South);
     }
 
-    /// 指定した設定の卓をノーテン流局で回しゲーム終了までの局数を数える
+    /// Runs a table through noten draws and counts hands until game over.
     fn count_rounds_until_game_over(settings: GameSettings, max_rounds: usize) -> usize {
         let mut table = Table::new(settings);
         for i in 0..max_rounds {
@@ -767,7 +742,7 @@ mod tests {
         max_rounds
     }
 
-    /// 四麻半荘は8局（東1〜南4）で終了する（#271）
+    /// A four-player hanchan is eight hands, East 1 - South 4 (#271).
     #[test]
     fn test_hanchan_game_is_eight_rounds() {
         let settings = GameSettings {
@@ -777,7 +752,7 @@ mod tests {
         assert_eq!(count_rounds_until_game_over(settings, 8), 8);
     }
 
-    /// 三麻半荘は6局（東1〜南3）で終了する（#271）
+    /// A three-player hanchan is six hands, East 1 - South 3 (#271).
     #[test]
     fn test_sanma_hanchan_game_is_six_rounds() {
         let settings = GameSettings {

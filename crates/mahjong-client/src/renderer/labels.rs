@@ -1,33 +1,35 @@
-//! 英語UI向けの牌インデックスラベル
+//! Tile index labels for the English UI.
 //!
-//! 漢字が読めないプレイヤーでも牌を識別できるよう、牌画像の右上に
-//! 小さな色付きの数字・文字を焼き込む。描画時に毎フレーム文字を
-//! 重ねるのではなく、起動時に CPU 側で牌テクスチャの元画像
-//! （[`Image`]）へ合成しておく（[`TileTextures`](super::TileTextures) が
-//! ラベル付き・なしの両テクスチャセットを保持し、言語設定で切り替える）。
+//! Small colored digits/letters are baked into the tiles' corners so
+//! players who cannot read kanji can identify them. Rather than
+//! overlaying text every frame, the labels are composited into the
+//! source [`Image`]s on the CPU at startup;
+//! [`TileTextures`](super::TileTextures) keeps both the labeled and
+//! plain sets and switches by language.
 //!
-//! GPU やフォントアトラスに依存しないため、回転描画でも牌と一緒に
-//! ラベルが回り、ヘッドレスの単体テストも可能。
+//! With no GPU or font-atlas dependency, labels rotate with the tiles
+//! and headless unit tests are possible.
 
 use macroquad::prelude::{Color, Image, WHITE};
 use mahjong_core::tile::{Tile, TileType};
 
 use super::theme;
 
-/// 萬子の数字色（赤）。
+/// Characters digit color (red).
 pub(super) const LABEL_RED: Color = theme::rgb_pub(0xc22a2a);
-/// 筒子の数字色（青）。
+/// Circles digit color (blue).
 pub(super) const LABEL_BLUE: Color = theme::rgb_pub(0x1d55b0);
-/// 索子の数字色（緑）。
+/// Bamboos digit color (green).
 pub(super) const LABEL_GREEN: Color = theme::rgb_pub(0x1e7d32);
-/// 風牌・白のラベル色（黒）。
+/// Label color for winds and the White dragon (black).
 pub(super) const LABEL_BLACK: Color = theme::rgb_pub(0x202020);
 
-/// 牌種別ごとのラベル文字と色を返す。
+/// The label character and color for each tile kind.
 ///
-/// 数牌は数字（萬子=赤・筒子=青・索子=緑）、風牌は E/S/W/N（黒）、
-/// 三元牌は輸出用麻雀牌の伝統的表記 P（白）/ F（發）/ C（中）を使う。
-/// F は緑・C は赤と、牌自体の色に合わせる。
+/// Suit tiles use digits (characters red, circles blue, bamboos green);
+/// winds use E/S/W/N in black; dragons use the traditional export-set
+/// letters P (White), F (Green), C (Red), with F green and C red to
+/// match the tiles.
 pub(super) fn tile_index_label(tile_type: TileType) -> (&'static str, Color) {
     const DIGITS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
     match tile_type {
@@ -45,10 +47,11 @@ pub(super) fn tile_index_label(tile_type: TileType) -> (&'static str, Color) {
     }
 }
 
-/// 牌画像の右上へインデックスラベル（白い角丸バッジ＋色付き文字）を焼き込む。
+/// Bakes an index label (white rounded badge plus colored character)
+/// into the tile image's top-right corner.
 ///
-/// バッジ・文字とも画像サイズに比例した大きさで配置するため、
-/// 元画像の解像度が変わってもレイアウトは保たれる。
+/// Badge and glyph scale with the image, so the layout survives source
+/// resolution changes.
 pub(super) fn bake_label(img: &mut Image, label: &str, color: Color, font: &fontdue::Font) {
     let Some(ch) = label.chars().next() else {
         return;
@@ -56,14 +59,15 @@ pub(super) fn bake_label(img: &mut Image, label: &str, color: Color, font: &font
 
     let tile_w = img.width as f32;
 
-    // バッジの配置（111px 幅の牌でバッジ約47px・余白約4px）
+    // Badge placement: ~47px badge with ~4px margin on a 111px tile.
     let badge = (tile_w * 0.42).round();
     let margin = (tile_w * 0.04).round();
     let bx = tile_w - margin - badge;
     let by = margin;
     let radius = badge * 0.24;
 
-    // 枠（ラベル色）→ 内側（白）の順に塗って色付きリングを作る
+    // Paint the frame in the label color, then the inside in white,
+    // leaving a colored ring.
     let border = 2.5;
     let ring = Color::new(color.r, color.g, color.b, 0.8);
     fill_rounded_rect(img, bx, by, badge, badge, radius, ring);
@@ -77,8 +81,9 @@ pub(super) fn bake_label(img: &mut Image, label: &str, color: Color, font: &font
         Color::new(WHITE.r, WHITE.g, WHITE.b, 0.92),
     );
 
-    // 文字をバッジ中央へ。カバレッジを縦横に膨張させて擬似太字にする
-    // （1pxずらしの二重描画より線が均一に太り、縮小描画でも潰れにくい）。
+    // Center the glyph on the badge, dilating its coverage for faux
+    // bold: strokes thicken more evenly than a 1px double draw and
+    // survive downscaling better.
     let px_size = badge * 0.92;
     let (metrics, bitmap) = font.rasterize(ch, px_size);
     let (bitmap, glyph_w, glyph_h) = dilate(&bitmap, metrics.width, metrics.height, 2, 2);
@@ -87,8 +92,8 @@ pub(super) fn bake_label(img: &mut Image, label: &str, color: Color, font: &font
     blit_glyph(img, gx, gy, glyph_w, glyph_h, &bitmap, color);
 }
 
-/// グリフのカバレッジを右方向 `dx`・下方向 `dy` ピクセル分膨張させ、
-/// ストロークを太らせた新しいビットマップと寸法を返す。
+/// Dilates glyph coverage by `dx` px rightward and `dy` px downward,
+/// returning the thickened bitmap and its dimensions.
 fn dilate(bitmap: &[u8], w: usize, h: usize, dx: usize, dy: usize) -> (Vec<u8>, usize, usize) {
     let (nw, nh) = (w + dx, h + dy);
     let mut out = vec![0u8; nw * nh];
@@ -109,7 +114,7 @@ fn dilate(bitmap: &[u8], w: usize, h: usize, dx: usize, dy: usize) -> (Vec<u8>, 
     (out, nw, nh)
 }
 
-/// ラスタライズ済みグリフを画像へアルファ合成する。
+/// Alpha-composites a rasterized glyph onto the image.
 fn blit_glyph(img: &mut Image, gx: i32, gy: i32, w: usize, h: usize, bitmap: &[u8], color: Color) {
     for row in 0..h {
         for col in 0..w {
@@ -119,7 +124,7 @@ fn blit_glyph(img: &mut Image, gx: i32, gy: i32, w: usize, h: usize, bitmap: &[u
     }
 }
 
-/// 角丸矩形を SDF ベースのカバレッジでアンチエイリアス付きに塗る。
+/// Fills a rounded rectangle with SDF-based antialiased coverage.
 fn fill_rounded_rect(img: &mut Image, x: f32, y: f32, w: f32, h: f32, radius: f32, color: Color) {
     let (cx, cy) = (x + w / 2.0, y + h / 2.0);
     let (hx, hy) = (w / 2.0 - radius, h / 2.0 - radius);
@@ -129,7 +134,7 @@ fn fill_rounded_rect(img: &mut Image, x: f32, y: f32, w: f32, h: f32, radius: f3
     let y1 = (y + h).ceil() as i32;
     for py in y0..=y1 {
         for px in x0..=x1 {
-            // ピクセル中心での角丸矩形の符号付き距離
+            // Signed distance of the rounded rect at the pixel center.
             let qx = (px as f32 + 0.5 - cx).abs() - hx;
             let qy = (py as f32 + 0.5 - cy).abs() - hy;
             let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
@@ -140,11 +145,11 @@ fn fill_rounded_rect(img: &mut Image, x: f32, y: f32, w: f32, h: f32, radius: f3
     }
 }
 
-/// 1ピクセルをアルファ合成する。
+/// Alpha-composites one pixel.
 ///
-/// 合成率には元ピクセルのアルファも掛けるため、牌画像の角丸の外
-/// （透明部分）にはラベルがはみ出さず、牌のシルエットが保たれる。
-/// 出力アルファは元の値を維持する。
+/// The blend factor is multiplied by the destination alpha, so labels
+/// never bleed outside the tile's rounded silhouette; the output alpha
+/// keeps its original value.
 fn blend_pixel(img: &mut Image, x: i32, y: i32, color: Color, coverage: f32) {
     if x < 0 || y < 0 || x >= img.width as i32 || y >= img.height as i32 {
         return;

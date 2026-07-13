@@ -9,7 +9,7 @@ use crate::settings::*;
 use crate::tile::{Dragon, Tile};
 use crate::winning_hand::name::*;
 
-/// 七対子
+/// Seven Pairs (Chiitoitsu / 七対子)
 pub fn check_seven_pairs(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -30,7 +30,7 @@ pub fn check_seven_pairs(
     }
 }
 
-/// 三色同順
+/// Mixed Sequences (Sanshoku Dōjun / 三色同順)
 pub fn check_mixed_sequences(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -44,7 +44,6 @@ pub fn check_mixed_sequences(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 順子が3つ以上なければ三色同順はありえない
     if hand_analyzer.sequential3.len() < 3 {
         return Ok((name, false, 0));
     }
@@ -54,7 +53,8 @@ pub fn check_mixed_sequences(
                 let a = hand_analyzer.sequential3[i].get();
                 let b = hand_analyzer.sequential3[j].get();
                 let c = hand_analyzer.sequential3[k].get();
-                // 3つの順子の開始牌が同じ数字（mod 9）で、かつ異なる色であること
+                // The three sequences must start on the same number (mod 9)
+                // in three different suits.
                 let a_num = a[0] % 9;
                 let b_num = b[0] % 9;
                 let c_num = c[0] % 9;
@@ -81,7 +81,7 @@ pub fn check_mixed_sequences(
     }
     Ok((name, false, 0))
 }
-/// 一気通貫
+/// Full Straight (Ittsū / 一気通貫)
 pub fn check_full_straight(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -124,7 +124,7 @@ pub fn check_full_straight(
     }
     Ok((name, false, 0))
 }
-/// 対々和
+/// All Triplets (Toitoi / 対々和)
 pub fn check_all_triplets(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -143,7 +143,7 @@ pub fn check_all_triplets(
     }
     Ok((name, false, 0))
 }
-/// 三暗刻
+/// Three Concealed Triplets (San'ankō / 三暗刻)
 pub fn check_three_concealed_triplets(
     hand_analyzer: &HandAnalyzer,
     hand: &Hand,
@@ -194,7 +194,7 @@ pub fn check_three_concealed_triplets(
         Ok((name, false, 0))
     }
 }
-/// 三色同刻
+/// Mixed Triplets (Sanshoku Dōkō / 三色同刻)
 pub fn check_mixed_triplets(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -208,7 +208,6 @@ pub fn check_mixed_triplets(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 刻子が3つ以上なければ三色同刻はありえない
     if hand_analyzer.same3.len() < 3 {
         return Ok((name, false, 0));
     }
@@ -218,11 +217,12 @@ pub fn check_mixed_triplets(
                 let a = hand_analyzer.same3[i].get()[0];
                 let b = hand_analyzer.same3[j].get()[0];
                 let c = hand_analyzer.same3[k].get()[0];
-                // 数牌のみ（字牌は三色同刻にならない）
+                // Honour triplets never qualify: the yaku is suit tiles only.
                 if a > Tile::S9 || b > Tile::S9 || c > Tile::S9 {
                     continue;
                 }
-                // 同じ数字（mod 9）で異なる色であること
+                // The three triplets must be the same number (mod 9)
+                // in three different suits.
                 let a_num = a % 9;
                 let b_num = b % 9;
                 let c_num = c % 9;
@@ -239,7 +239,7 @@ pub fn check_mixed_triplets(
     }
     Ok((name, false, 0))
 }
-/// 混全帯么九
+/// Common Ends (Chanta / 混全帯么九)
 pub fn check_common_ends(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -254,18 +254,17 @@ pub fn check_common_ends(
         return Ok((name, false, 0));
     }
 
-    // 混老頭とは複合しないため、必ず順子が含まれる
+    // A hand with no sequences would be Common Terminals (混老頭) instead;
+    // the two yaku never combine, so require at least one sequence.
     if hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
 
     let mut no_1_9_honour = false;
-    // 純全帯么九とは複合しないため、必ず三元牌が含まれる
+    // Without an honour the hand would be Perfect Ends (純全帯么九) instead;
+    // the two yaku never combine.
     let mut has_honour = false;
 
-    // 面子
-
-    // 刻子
     for same in &hand_analyzer.same3 {
         if !same.has_1_or_9()? && !same.has_honour()? {
             no_1_9_honour = true;
@@ -275,14 +274,12 @@ pub fn check_common_ends(
             has_honour = true;
         }
     }
-    // 順子
     for seq in &hand_analyzer.sequential3 {
         if !seq.has_1_or_9()? {
             no_1_9_honour = true;
         }
     }
 
-    // 雀頭
     for head in &hand_analyzer.same2 {
         if !head.has_1_or_9()? && !head.has_honour()? {
             no_1_9_honour = true;
@@ -300,7 +297,7 @@ pub fn check_common_ends(
     }
     Ok((name, true, 2))
 }
-/// 混老頭
+/// Common Terminals (Honrōtō / 混老頭)
 pub fn check_common_terminals(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -314,14 +311,14 @@ pub fn check_common_terminals(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 混老頭は全ての面子・雀頭が么九牌（1,9）または字牌で構成される
-    // 順子が含まれていてはいけない
+    // Every group and the pair must be terminals or honours,
+    // so any sequence disqualifies the hand.
     if !hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
-    // 字牌が含まれていなければ清老頭であり混老頭にはならない
+    // Without an honour the hand is Perfect Terminals (清老頭), and without
+    // a terminal it is All Honours (字一色); neither combines with this yaku.
     let mut has_honour = false;
-    // 数牌（1,9）が含まれていなければ字一色であり混老頭にはならない
     let mut has_terminal = false;
 
     for same in &hand_analyzer.same3 {
@@ -348,7 +345,7 @@ pub fn check_common_terminals(
         Ok((name, false, 0))
     }
 }
-/// 小三元
+/// Little Dragons (Shōsangen / 小三元)
 pub fn check_little_dragons(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -362,7 +359,7 @@ pub fn check_little_dragons(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 小三元: 三元牌のうち2つが刻子、1つが雀頭
+    // Two dragon triplets plus a dragon pair.
     let mut dragon_triplet_count = 0;
     let mut dragon_pair = false;
     for same in &hand_analyzer.same3 {
@@ -387,7 +384,7 @@ pub fn check_little_dragons(
         Ok((name, false, 0))
     }
 }
-/// 三槓子
+/// Three Quads (Sankantsu / 三槓子)
 pub fn check_three_quads(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -401,7 +398,7 @@ pub fn check_three_quads(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 三槓子: 槓子がちょうど3つ（4つの場合は四槓子となるため対象外）
+    // Exactly three: four quads score as the yakuman Four Quads instead.
     if status.kan_count == 3 {
         Ok((name, true, 2))
     } else {
@@ -409,14 +406,12 @@ pub fn check_three_quads(
     }
 }
 
-/// ユニットテスト
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hand::*;
     use rstest::rstest;
     #[test]
-    /// 七対子で和了った
     fn test_win_by_seven_pairs() {
         let test_str = "1122m3344p5566s1z 1z";
         let test = Hand::from(test_str);
@@ -429,7 +424,6 @@ mod tests {
         );
     }
     #[test]
-    /// 混全帯么九で和了った
     fn test_common_ends() {
         let test_str = "123999m111p79s44z 8s";
         let test = Hand::from(test_str);
@@ -443,7 +437,6 @@ mod tests {
         );
     }
     #[test]
-    /// 混全帯么九で和了った（食い下がり1翻）
     fn test_common_ends_open() {
         let test_str = "123m111p79s44z 789m 8s";
         let test = Hand::from(test_str);
@@ -457,7 +450,6 @@ mod tests {
         );
     }
     #[test]
-    /// 対々和で和了った
     fn test_all_triplets() {
         let test_str = "777m333p22z 555m 999s";
         let test = Hand::from(test_str);
@@ -471,7 +463,6 @@ mod tests {
     }
 
     #[test]
-    /// 一気通貫で和了った
     fn test_full_straight() {
         let test_str = "123456789m78p22z 9p";
         let test = Hand::from(test_str);
@@ -486,7 +477,6 @@ mod tests {
     }
 
     #[test]
-    /// 一気通貫で和了った（食い下がり1翻）
     fn test_full_straight_open() {
         let test_str = "123m1p123s 456s 789s 1p";
         let test = Hand::from(test_str);
@@ -500,7 +490,6 @@ mod tests {
         );
     }
     #[test]
-    /// 三色同順で和了った
     fn test_mixed_sequences() {
         let test_str = "123m123p123s789m1z 1z";
         let test = Hand::from(test_str);
@@ -514,7 +503,6 @@ mod tests {
         );
     }
     #[test]
-    /// 三色同順で和了った（食い下がり1翻）
     fn test_mixed_sequences_open() {
         let test_str = "123m123p1z 123s 789m 1z";
         let test = Hand::from(test_str);
@@ -557,7 +545,6 @@ mod tests {
     }
 
     #[test]
-    /// 三色同刻で和了った
     fn test_mixed_triplets() {
         let test_str = "111m111p111s789p5z 5z";
         let test = Hand::from(test_str);
@@ -570,7 +557,6 @@ mod tests {
         );
     }
     #[test]
-    /// 混老頭で和了った
     fn test_common_terminals() {
         let test_str = "111m999p1z 111z 999s 1z";
         let test = Hand::from(test_str);
@@ -583,7 +569,6 @@ mod tests {
         );
     }
     #[test]
-    /// 小三元で和了った
     fn test_little_dragons() {
         let test_str = "555666z77z234m78p 9p";
         let test = Hand::from(test_str);
@@ -596,7 +581,6 @@ mod tests {
         );
     }
     #[test]
-    /// 三槓子で和了った（暗槓・明槓・加槓の組み合わせ）
     fn test_three_quads() {
         let test_str = "111333m444s1777z 1z";
         let test = Hand::from(test_str);
@@ -611,7 +595,6 @@ mod tests {
         );
     }
     #[test]
-    /// 槓子が2つでは三槓子は成立しない
     fn test_three_quads_not_win_with_two_kans() {
         let test_str = "111333m444s1777z 1z";
         let test = Hand::from(test_str);
@@ -625,8 +608,9 @@ mod tests {
             ("三槓子", false, 0)
         );
     }
+    /// Four quads must score only as the yakuman Four Quads,
+    /// never double-counted as Three Quads.
     #[test]
-    /// 槓子が4つのときは四槓子のみで三槓子と二重計上しない
     fn test_three_quads_not_win_with_four_kans() {
         let test_str = "111333m444s1777z 1z";
         let test = Hand::from(test_str);

@@ -1,7 +1,5 @@
-//! CPUクライアント
-//!
-//! ServerEvent を受信して ClientAction を返す。
-//! プレイヤーと全く同じプロトコルでサーバとやり取りする。
+//! CPU client: receives ServerEvents and returns ClientActions, speaking
+//! exactly the same protocol as a human player.
 
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{calc_shanten_number, calc_shanten_number_by_form};
@@ -16,22 +14,21 @@ use super::evaluator;
 use super::heuristics;
 use super::state::CpuGameState;
 
-/// CPUの強さレベル
+/// CPU skill level.
 ///
-/// `Weak < Normal < Strong` の順序を持つ。
-/// 定石（heuristics）の「弱以上」「中以上」などの有効化判定に使用する。
+/// Ordered `Weak < Normal < Strong`; heuristics use the ordering for
+/// their "weak and up" / "normal and up" activation thresholds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CpuLevel {
-    /// 初心者: 向聴数のみ考慮、防御なし、ミスあり
+    /// Beginner: shanten only, no defense, makes mistakes
     Weak,
-    /// 中級者: 有効牌数考慮、基本防御
+    /// Intermediate: tile acceptance, basic defense
     Normal,
-    /// 上級者: 打点考慮、筋/壁/現物の高度な防御
+    /// Advanced: value estimation and suji/wall/genbutsu defense
     Strong,
 }
 
 impl CpuLevel {
-    /// 表示用の名称
     pub fn display_name(&self) -> &'static str {
         match self {
             CpuLevel::Weak => "Weak",
@@ -40,42 +37,40 @@ impl CpuLevel {
         }
     }
 
-    /// 有効牌数を考慮するか
+    /// Whether tile acceptance is considered.
     pub fn uses_acceptance_count(&self) -> bool {
         matches!(self, CpuLevel::Normal | CpuLevel::Strong)
     }
 
-    /// 打点推定を使うか
+    /// Whether hand value estimation is used.
     pub fn uses_value_estimation(&self) -> bool {
         matches!(self, CpuLevel::Strong)
     }
 
-    /// 防御戦略を使うか
+    /// Whether defensive play is used.
     pub fn uses_defense(&self) -> bool {
         matches!(self, CpuLevel::Normal | CpuLevel::Strong)
     }
 
-    /// ミスをするか（最善手以外を選ぶ可能性）
+    /// Whether deliberate mistakes (non-best discards) may occur.
     pub fn should_make_mistake(&self) -> bool {
         matches!(self, CpuLevel::Weak)
     }
 }
 
-/// CPUの性格（攻撃スタイル）
+/// CPU personality (playing style).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CpuPersonality {
-    /// バランス型
     Balanced,
-    /// 速攻型（タンヤオ・ピンフ等の早い和了り重視）
+    /// Rushes cheap fast wins (tanyao, pinfu, ...)
     Speedy,
-    /// 高打点型（面前リーチ・役牌・ドラ重視）
+    /// Chases value: closed riichi, value honours, dora
     HighValue,
-    /// 守備型（安全打優先、放銃回避重視）
+    /// Prioritizes safe tiles and avoiding deal-ins
     Defensive,
 }
 
 impl CpuPersonality {
-    /// 表示用の名称
     pub fn display_name(&self) -> &'static str {
         match self {
             CpuPersonality::Balanced => "Balanced",
@@ -86,39 +81,35 @@ impl CpuPersonality {
     }
 }
 
-/// 性格ごとのパラメータ
+/// Per-personality tuning parameters.
 #[derive(Debug, Clone)]
 pub struct PersonalityParams {
-    /// 鳴き積極度（0.0=鳴かない, 1.0=積極的に鳴く）
+    /// Call eagerness, 0.0 (never calls) to 1.0 (calls eagerly)
     pub call_aggressiveness: f64,
-    /// 打点重み（高いほど打点を重視）
+    /// Weight on hand value
     pub value_weight: f64,
-    /// 速度重み（高いほど早い和了りを重視）
+    /// Weight on winning fast
     pub speed_weight: f64,
-    /// 撤退閾値（高いほど早く撤退する）
+    /// Fold threshold; higher folds earlier
     pub retreat_threshold: f64,
-    /// リーチ積極度（0.0=リーチしない, 1.0=積極的にリーチ）
+    /// Riichi eagerness, 0.0 (never) to 1.0 (eager)
     pub riichi_aggressiveness: f64,
 }
 
-/// CPU設定（性格と強さの組み合わせ）
+/// CPU configuration: level plus personality.
 #[derive(Debug, Clone)]
 pub struct CpuConfig {
-    /// 強さレベル
     pub level: CpuLevel,
-    /// 性格
     pub personality: CpuPersonality,
-    /// 性格パラメータ
     pub params: PersonalityParams,
-    /// 定石（heuristics）を適用するか
+    /// Whether heuristics apply.
     ///
-    /// 通常は true。false にすると定石導入前の挙動になるため、
-    /// シミュレーションでの新旧比較（A/B テスト）に使用する。
+    /// Normally true; false restores the pre-heuristics behaviour for
+    /// A/B comparison in simulations.
     pub heuristics_enabled: bool,
 }
 
 impl CpuConfig {
-    /// 指定した強さと性格で設定を作成する
     pub fn new(level: CpuLevel, personality: CpuPersonality) -> Self {
         let params = PersonalityParams::from_personality(personality);
         CpuConfig {
@@ -129,32 +120,30 @@ impl CpuConfig {
         }
     }
 
-    /// 定石を無効化した設定を返す（シミュレーションでの新旧比較用）
+    /// Returns a copy with heuristics disabled, for A/B simulations.
     pub fn without_heuristics(mut self) -> Self {
         self.heuristics_enabled = false;
         self
     }
 }
 
-/// CPU設定の並び（＝CPUの席順）をランダムに入れ替える
+/// Shuffles CPU configs (i.e. their seat order) in place.
 ///
-/// 席順ランダム化用。実際に対局へ参加するCPU分だけをスライスで渡すこと
-/// （三麻では先頭2つのみ、など）。
+/// Pass only the configs that actually play (e.g. the first two in a
+/// three-player game).
 pub fn shuffle_cpu_configs(configs: &mut [CpuConfig]) {
     use rand::seq::SliceRandom;
     configs.shuffle(&mut rand::rng());
 }
 
-/// CPUクライアント: ServerEvent を処理して ClientAction を返す
+/// CPU client: consumes ServerEvents and produces ClientActions.
 pub struct CpuClient {
-    /// CPU設定
     pub config: CpuConfig,
-    /// ゲーム状態（イベントから構築）
+    /// Game state, reconstructed purely from events
     pub state: CpuGameState,
 }
 
 impl CpuClient {
-    /// 新しいCPUクライアントを作成する
     pub fn new(config: CpuConfig) -> Self {
         CpuClient {
             config,
@@ -162,16 +151,13 @@ impl CpuClient {
         }
     }
 
-    /// ServerEvent を処理し、必要なら ClientAction を返す
+    /// Handles a ServerEvent, returning a ClientAction when one is due.
     ///
-    /// CPUはこのメソッドだけでサーバとやり取りする。
-    /// 人間プレイヤーが画面を見て操作するのと同様に、
-    /// イベントから情報を得て判断する。
+    /// This is the CPU's entire interface to the server: like a human
+    /// watching the screen, it learns only from events.
     pub fn handle_event(&mut self, event: &ServerEvent) -> Option<ClientAction> {
-        // 1. イベントに応じて内部状態を更新
         self.state.update(event);
 
-        // 2. アクションが必要なイベントなら判断して返す
         match event {
             ServerEvent::TileDrawn { .. } => Some(self.decide_on_draw()),
             ServerEvent::CallAvailable { .. } => Some(self.decide_call()),
@@ -188,30 +174,29 @@ impl CpuClient {
         }
     }
 
-    /// ツモ後の判断（ツモ和了/リーチ/北抜き/カン/打牌）
+    /// Post-draw decision: tsumo / riichi / pei / kan / discard.
     fn decide_on_draw(&self) -> ClientAction {
-        // ツモ和了可能なら常に和了する
         if self.state.can_tsumo {
             return ClientAction::Tsumo;
         }
 
-        // 北抜き検討（三麻+北抜きありのみ。リーチ中はツモった北のみ抜ける）
         if let Some(pei_action) = self.consider_pei() {
             return pei_action;
         }
 
-        // リーチ中はツモ切りのみ
+        // Under riichi the hand is locked; only tsumogiri remains.
         if self.state.is_riichi {
             return ClientAction::Discard { tile: None };
         }
 
-        // リーチ可能か検討
-        // 聴牌を維持できる打牌が見つからない場合はリーチせず通常打牌に進む
-        // （不正なリーチ宣言はサーバに拒否され、局が進行不能になる）
+        // Only declare riichi with a tenpai-preserving discard in hand:
+        // an invalid declaration is rejected by the server and would
+        // stall the hand.
         if self.state.can_riichi
             && let Some(tile) = self.select_riichi_tile()
         {
-            // 定石判定（#168〜#172）。Neutral の場合は従来の積極度判断に委ねる
+            // Heuristic judgement (#168-#172); Neutral falls back to the
+            // aggressiveness-based decision.
             let declare = if self.config.heuristics_enabled {
                 let ctx = heuristics::CallContext {
                     state: &self.state,
@@ -230,16 +215,14 @@ impl CpuClient {
             }
         }
 
-        // 暗カン検討
         if let Some(kan_action) = self.consider_ankan() {
             return kan_action;
         }
 
-        // 打牌選択
         self.decide_discard()
     }
 
-    /// 打牌を選択する
+    /// Picks a discard.
     fn decide_discard(&self) -> ClientAction {
         let candidates = evaluator::evaluate_discards(&self.state, &self.config);
 
@@ -247,21 +230,20 @@ impl CpuClient {
         if let Some(tile) =
             evaluator::select_best_discard(&candidates, &self.config, attacking, &self.state)
         {
-            // ツモ牌と同じならツモ切り
             if self.state.my_drawn == Some(tile) {
                 ClientAction::Discard { tile: None }
             } else {
                 ClientAction::Discard { tile: Some(tile) }
             }
         } else {
-            // フォールバック: ツモ切り
             ClientAction::Discard { tile: None }
         }
     }
 
-    /// 鳴き後の打牌を選択する
+    /// Picks the discard right after a call.
     fn decide_discard_after_call(&self) -> ClientAction {
-        // 喰い替え禁止牌（直前の鳴きが対象）。これらは捨てるとサーバに拒否されるため除外する。
+        // Exclude swap-calling-forbidden tiles: the server would reject
+        // them.
         let forbidden = self
             .state
             .my_melds()
@@ -269,7 +251,6 @@ impl CpuClient {
             .map(|meld| meld.forbidden_swap_tiles())
             .unwrap_or_default();
 
-        // 鳴き後はツモ牌がないので、手牌から選ぶ
         let candidates: Vec<_> = evaluator::evaluate_discards(&self.state, &self.config)
             .into_iter()
             .filter(|c| !forbidden.contains(&c.tile.get()))
@@ -293,20 +274,18 @@ impl CpuClient {
         }
     }
 
-    /// 鳴き判断（ロン/ポン/チー/パス）
+    /// Call decision: ron / pon / chii / pass.
     fn decide_call(&self) -> ClientAction {
         let calls = &self.state.pending_calls;
 
-        // ロン可能なら常に和了する
         if calls.iter().any(|c| matches!(c, AvailableCall::Ron)) {
             return ClientAction::Ron;
         }
 
-        // ポン判断
         for call in calls {
             if let AvailableCall::Pon { options } = call {
                 if self.should_pon() {
-                    // 赤ドラを含む組み合わせを優先する
+                    // Prefer the option that spends the red five.
                     let tiles = options
                         .iter()
                         .find(|o| o[0].is_red_dora() || o[1].is_red_dora())
@@ -318,9 +297,8 @@ impl CpuClient {
             }
         }
 
-        // 大明カンは常にパス（ドラ増加リスクがあり、打点メリットが薄い）
-
-        // チー判断
+        // Called quads are always passed: they risk revealing new dora
+        // for little value gain.
         for call in calls {
             if let AvailableCall::Chi { options } = call
                 && let Some(tiles) = self.select_chi_option(options)
@@ -332,13 +310,11 @@ impl CpuClient {
         ClientAction::Pass
     }
 
-    /// リーチすべきか判断する
+    /// Baseline riichi decision from the aggressiveness parameter,
+    /// hedged when opponents have already declared.
     fn should_riichi(&self) -> bool {
         let params = &self.config.params;
 
-        // リーチ積極度に基づく基本判断
-        // 簡易的に: 積極度 0.5 以上ならリーチ
-        // ただしリーチ者が既にいる場合は慎重に
         let riichi_count = self.state.player_riichi.iter().filter(|&&r| r).count();
 
         if riichi_count >= 2 && params.riichi_aggressiveness < 0.8 {
@@ -349,7 +325,6 @@ impl CpuClient {
             return false;
         }
 
-        // 残り山が少ない場合はリーチしない
         if self.state.remaining_tiles < 10 && params.riichi_aggressiveness < 0.9 {
             return false;
         }
@@ -357,23 +332,20 @@ impl CpuClient {
         params.riichi_aggressiveness >= 0.4
     }
 
-    /// リーチ宣言牌を選ぶ
+    /// Picks the riichi declaration discard.
     ///
-    /// 定石有効時は待ち枚数が最大になる宣言牌を選び、同数なら安全度で比較する。
-    /// 定石無効時は従来どおり安全度のみで選ぶ。
+    /// With heuristics on, maximizes the wait count and breaks ties on
+    /// safety; with heuristics off, safety alone decides.
     ///
-    /// 戻り値:
-    /// - `Some(Some(tile))`: tile を手出ししてリーチ
-    /// - `Some(None)`: ツモ切りリーチ
-    /// - `None`: 聴牌を維持できる打牌がない（リーチ不可）
+    /// Returns `Some(Some(tile))` for a hand discard, `Some(None)` for
+    /// tsumogiri, and `None` when no discard preserves tenpai.
     fn select_riichi_tile(&self) -> Option<Option<Tile>> {
-        // テンパイを維持する牌を選ぶ
         let mut all_tiles = self.state.my_hand.clone();
         if let Some(drawn) = self.state.my_drawn {
             all_tiles.push(drawn);
         }
 
-        // 暗カンがある場合も正しく判定できるよう、副露を含めて向聴数を計算する
+        // Include melds so hands with a concealed kan are judged correctly.
         let melds = self.state.my_melds_for_analysis();
         let visible = self.state.visible_tile_counts();
         let mut best: Option<(Tile, u32, f64)> = None;
@@ -382,18 +354,15 @@ impl CpuClient {
             let mut remaining: Vec<Tile> = all_tiles.clone();
             remaining.remove(i);
 
-            // 捨てた後にテンパイを維持するか
             let hand = Hand::new_with_melds(remaining.clone(), melds.clone(), None);
             let shanten = calc_shanten_number(&hand);
 
             if shanten.is_ready() {
-                // 待ち枚数（定石有効時のみ考慮）
                 let waits = if self.config.heuristics_enabled {
                     heuristics::remaining_wait_count(&remaining, &melds, &visible)
                 } else {
                     0
                 };
-                // 安全度で比較
                 let safety = super::defense::evaluate_safety(tile, &self.state, &self.config);
                 let is_better = match best {
                     Some((_, best_waits, best_safety)) => {
@@ -408,7 +377,6 @@ impl CpuClient {
         }
 
         best.map(|(tile, _, _)| {
-            // ツモ牌ならNone（ツモ切りリーチ）
             if self.state.my_drawn == Some(tile) {
                 None
             } else {
@@ -417,18 +385,20 @@ impl CpuClient {
         })
     }
 
-    /// 北抜きを検討する（三麻+北抜きありのみ）
+    /// Considers extracting a North tile (three-player with pei dora only).
     ///
-    /// 手牌・ツモ牌に北風牌があればほぼ常に抜く（1枚=確定1翻+補充ツモ）。
-    /// 例外: 国士無双を狙っている手（国士の向聴数が最良かつ3向聴以内）では北を残す。
-    /// リーチ中はツモった北のみ抜ける。
+    /// A North is almost always extracted: each is a guaranteed han plus a
+    /// replacement draw. Exception: a hand chasing Thirteen Orphans (best
+    /// form and within 3 shanten) keeps its Norths. Under riichi only a
+    /// drawn North may be extracted.
     fn consider_pei(&self) -> Option<ClientAction> {
         if !(self.state.three_player && self.state.nuki_dora) {
             return None;
         }
 
-        // 生牌山が空（海底ツモ後）は補充ツモができずサーバに却下されるため
-        // 宣言しない。却下されたCPUは再打診されず局が停止する（#296）。
+        // With the live wall empty (post-haitei) no replacement draw
+        // exists, so the server rejects pei - and a rejected CPU is never
+        // re-consulted, stalling the hand (#296).
         if self.state.remaining_tiles == 0 {
             return None;
         }
@@ -436,7 +406,6 @@ impl CpuClient {
         let drawn_is_north = self.state.my_drawn.is_some_and(|t| t.get() == Tile::Z4);
 
         if self.state.is_riichi {
-            // リーチ中: ツモった北のみ抜ける（can_tsumo は呼び出し元で判定済み）
             return drawn_is_north.then_some(ClientAction::Pei);
         }
 
@@ -445,7 +414,7 @@ impl CpuClient {
             return None;
         }
 
-        // 国士無双狙いなら北を温存する（門前のみ国士があり得る）
+        // Keep Norths for a Thirteen Orphans chase (closed hands only).
         let melds = self.state.my_melds_for_analysis();
         if melds.is_empty() {
             let hand = Hand::new_with_melds(self.state.my_hand.clone(), melds, self.state.my_drawn);
@@ -459,14 +428,13 @@ impl CpuClient {
         Some(ClientAction::Pei)
     }
 
-    /// 暗カンを検討する
+    /// Considers a concealed kan.
     fn consider_ankan(&self) -> Option<ClientAction> {
         let mut all_tiles = self.state.my_hand.clone();
         if let Some(drawn) = self.state.my_drawn {
             all_tiles.push(drawn);
         }
 
-        // 4枚揃っている牌種を探す
         let mut counts = [0u8; 34];
         for tile in &all_tiles {
             counts[tile.get() as usize] += 1;
@@ -479,21 +447,24 @@ impl CpuClient {
 
         for (tile_type, &count) in counts.iter().enumerate() {
             if count == 4 {
-                // 定石判定（中以上）: 手を壊すカン・他家リーチ後のカンを抑制
+                // Heuristics (normal and up) veto kans that break the hand
+                // or follow an opponent's riichi.
                 if heuristics::judge_ankan(&ctx, tile_type as u32)
                     == heuristics::CallJudgement::Forbid
                 {
                     continue;
                 }
 
-                // 定石無効時の従来動作: Strongのみテンパイ維持を確認
+                // Legacy behaviour with heuristics off: only Strong checks
+                // that the kan preserves tenpai.
                 if !self.config.heuristics_enabled && self.config.level == CpuLevel::Strong {
                     let remaining: Vec<Tile> = all_tiles
                         .iter()
                         .filter(|t| t.get() != tile_type as u32)
                         .copied()
                         .collect();
-                    // カン後の形: 既存の副露 + 新しい槓子（解析用に3枚）を面子として数える
+                    // Post-kan shape: existing melds plus the new quad
+                    // (stored as three tiles for analysis).
                     let mut melds = self.state.my_melds_for_analysis();
                     melds.push(Meld {
                         tiles: vec![Tile::new(tile_type as u32); 3],
@@ -503,7 +474,7 @@ impl CpuClient {
                     });
                     let hand = Hand::new_with_melds(remaining, melds, None);
                     if !calc_shanten_number(&hand).is_ready_or_won() {
-                        continue; // テンパイが崩れるのでカンしない
+                        continue; // The kan would break tenpai.
                     }
                 }
 
@@ -516,11 +487,10 @@ impl CpuClient {
         None
     }
 
-    /// 攻撃続行か撤退かを判断する
+    /// Push or fold decision.
     fn should_attack(&self) -> bool {
         let params = &self.config.params;
 
-        // 自分の向聴数を計算（副露も面子として数える）
         let mut all_tiles = self.state.my_hand.clone();
         if let Some(drawn) = self.state.my_drawn {
             all_tiles.push(drawn);
@@ -528,7 +498,8 @@ impl CpuClient {
         let hand = Hand::new_with_melds(all_tiles, self.state.my_melds_for_analysis(), None);
         let shanten = calc_shanten_number(&hand);
 
-        // 脅威の数: リーチ者 + 定石有効時は3副露以上の他家（#180: 聴牌濃厚）
+        // Threats: riichi players, plus (with heuristics) opponents with
+        // three or more melds, who are very likely tenpai (#180).
         let riichi_count = self.state.player_riichi.iter().filter(|&&r| r).count();
         let threat_count = if self.config.heuristics_enabled {
             let my_idx = CpuGameState::wind_to_index(self.state.my_seat_wind);
@@ -544,14 +515,15 @@ impl CpuClient {
             riichi_count
         };
 
-        // 終盤の遠い手は降りる（#183, 弱以上）:
-        // 残りツモが少ない2向聴以下の手は、脅威の有無や打点によらず押さない
+        // Fold far-from-tenpai hands late in the round (#183, weak and
+        // up): with few draws left, a 2+ shanten hand never pushes,
+        // regardless of threats or value.
         if self.config.heuristics_enabled && self.state.remaining_tiles <= 12 && shanten >= 2 {
             return false;
         }
 
-        // 押し引きの定石判定（#178, 中以上）:
-        // 良形・高打点・親の聴牌は押し、愚形安手の聴牌は降りる
+        // Push/fold heuristics (#178, normal and up): push good-shape,
+        // high-value, or dealer tenpai; fold bad-shape cheap tenpai.
         let ctx = heuristics::CallContext {
             state: &self.state,
             config: &self.config,
@@ -562,29 +534,24 @@ impl CpuClient {
             heuristics::PushJudgement::Neutral => {}
         }
 
-        // テンパイなら基本的に攻撃
         if shanten.is_ready_or_won() {
             return true;
         }
 
-        // 防御を使わないレベルなら常に攻撃
-        // ただし定石有効時は弱レベルでも撤退判断を行う（#173: ベタオリは弱以上）
+        // Levels without defense always push - except that heuristics
+        // give even the weak level a fold decision (#173).
         if !self.config.level.uses_defense() && !self.config.heuristics_enabled {
             return true;
         }
 
-        // 撤退判断
-        // 脅威2人以上 → 撤退寄り
         if threat_count >= 2 && shanten >= 2 {
             return params.retreat_threshold < 0.3;
         }
 
-        // 脅威1人 + 自分が2向聴以上 → 性格次第
         if threat_count >= 1 && shanten >= 2 {
             return params.retreat_threshold < 0.5;
         }
 
-        // 残り山が少ない + 向聴数が高い → 撤退
         if self.state.remaining_tiles < 15 && shanten >= 2 {
             return params.retreat_threshold < 0.4;
         }
@@ -592,14 +559,13 @@ impl CpuClient {
         true
     }
 
-    /// 九種九牌を宣言すべきか判断する
+    /// Whether to declare a nine-terminals abortive draw.
     ///
-    /// 定石有効時は国士無双の見込みで判断する（#158/#159/#160）:
-    /// - 么九牌10種以上なら国士無双を狙って続行
-    /// - 9種でも高打点型、または大きく負けている場合は続行
-    /// - それ以外は流局を宣言する
-    ///
-    /// 定石無効時は従来どおり高打点型のみ続行する。
+    /// With heuristics, judged by Thirteen Orphans potential
+    /// (#158/#159/#160): 10+ orphan kinds always continue; 9 kinds
+    /// continue for the HighValue personality or when far behind;
+    /// otherwise declare the draw. Without heuristics only HighValue
+    /// continues.
     fn decide_nine_terminals(&self) -> ClientAction {
         if self.config.heuristics_enabled {
             let mut counts = [0u8; 34];
@@ -627,7 +593,6 @@ impl CpuClient {
         ClientAction::NineTerminals { declare }
     }
 
-    /// ポンすべきか判断する
     fn should_pon(&self) -> bool {
         let params = &self.config.params;
         let called_tile = match self.state.pending_call_tile {
@@ -635,13 +600,13 @@ impl CpuClient {
             None => return false,
         };
 
-        // 向聴数が下がらないポンはしない（全レベル共通）
+        // Never pon without lowering the shanten (all levels).
         if !self.call_reduces_shanten_pon(called_tile) {
             return false;
         }
 
-        // 定石判定: 役なし鳴き禁止・裸単騎回避・役牌早ポン
-        // （定石無効時は Neutral が返り、従来の判断に進む）
+        // Heuristics: no yakuless calls, avoid going down to a bare pair,
+        // pon value honours early. (Neutral with heuristics off.)
         let ctx = heuristics::CallContext {
             state: &self.state,
             config: &self.config,
@@ -652,30 +617,26 @@ impl CpuClient {
             heuristics::CallJudgement::Neutral => {}
         }
 
-        // Weakレベル: 向聴数が下がるなら鳴く
         if self.config.level == CpuLevel::Weak {
             return true;
         }
 
-        // 鳴き積極度が低ければパス
         if params.call_aggressiveness < 0.3 {
             return false;
         }
 
-        // 鳴いた後に役がありそうか（簡易チェック）
         let tt = called_tile.get();
 
-        // 役牌のポンは積極的に
+        // A value-honour pon secures a yaku, so take it.
         if is_yakuhai(tt, self.state.my_seat_wind, self.state.round_wind) {
             return true;
         }
 
-        // タンヤオ志向: 中張牌のポンは積極的
         if self.config.personality == CpuPersonality::Speedy && is_tanyao_tile(tt) {
             return params.call_aggressiveness >= 0.5;
         }
 
-        // 高打点志向: 門前維持を重視するのでポンは控えめ
+        // HighValue protects the closed hand, so it declines pons.
         if self.config.personality == CpuPersonality::HighValue {
             return false;
         }
@@ -683,16 +644,14 @@ impl CpuClient {
         params.call_aggressiveness >= 0.5
     }
 
-    /// チーの選択肢から最適なものを選ぶ（鳴くべきでなければNone）
+    /// Picks the best chii option, or None to pass.
     fn select_chi_option(&self, options: &[[Tile; 2]]) -> Option<[Tile; 2]> {
         let params = &self.config.params;
 
-        // 高打点志向は基本的にチーしない
         if self.config.personality == CpuPersonality::HighValue {
             return None;
         }
 
-        // 鳴き積極度が低ければパス
         if params.call_aggressiveness < 0.4 {
             return None;
         }
@@ -703,21 +662,18 @@ impl CpuClient {
             config: &self.config,
         };
 
-        // 各選択肢で向聴数が下がるか確認
         for &opt in options {
             if self.call_reduces_shanten_chi(called_tile, opt) {
-                // 定石判定: 役なし鳴き禁止・裸単騎回避
+                // Heuristics: no yakuless calls, avoid a bare pair.
                 match heuristics::judge_chi(&ctx, called_tile, opt) {
                     heuristics::CallJudgement::Forbid => continue,
                     heuristics::CallJudgement::Encourage => return Some(opt),
                     heuristics::CallJudgement::Neutral => {}
                 }
 
-                // Speedy型は積極的にチー
                 if self.config.personality == CpuPersonality::Speedy {
                     return Some(opt);
                 }
-                // 他の型は鳴き積極度で判断
                 if params.call_aggressiveness >= 0.5 {
                     return Some(opt);
                 }
@@ -727,14 +683,14 @@ impl CpuClient {
         None
     }
 
-    /// ポンした場合に向聴数が下がるか
+    /// Whether a pon would lower the shanten.
     fn call_reduces_shanten_pon(&self, called_tile: Tile) -> bool {
-        // 現在の向聴数（既存の副露も含めて計算しないと比較が非対称になる）
+        // Existing melds must count on both sides, or the comparison
+        // is skewed.
         let melds = self.state.my_melds_for_analysis();
         let current_hand = Hand::new_with_melds(self.state.my_hand.clone(), melds.clone(), None);
         let current_shanten = calc_shanten_number(&current_hand);
 
-        // ポン後の手牌（同じ種類の2枚を除去）
         let tt = called_tile.get();
         let mut remaining = self.state.my_hand.clone();
         let mut removed = 0;
@@ -751,7 +707,6 @@ impl CpuClient {
             return false;
         }
 
-        // 既存の副露 + 今回のポンを含めた Hand を作成
         let mut melds = melds;
         melds.push(Meld {
             tiles: vec![called_tile, called_tile, called_tile],
@@ -764,14 +719,15 @@ impl CpuClient {
         calc_shanten_number(&new_hand) < current_shanten
     }
 
-    /// チーした場合に向聴数が下がるか
+    /// Whether a chii would lower the shanten.
     fn call_reduces_shanten_chi(&self, called_tile: Tile, hand_tiles: [Tile; 2]) -> bool {
-        // 現在の向聴数（既存の副露も含めて計算しないと比較が非対称になる）
+        // Existing melds must count on both sides, or the comparison
+        // is skewed.
         let melds = self.state.my_melds_for_analysis();
         let current_hand = Hand::new_with_melds(self.state.my_hand.clone(), melds.clone(), None);
         let current_shanten = calc_shanten_number(&current_hand);
 
-        // チー後の手牌（指定の2枚を除去。赤ドラも区別して一致させる）
+        // Remove the two hand tiles, matching red fives exactly.
         let mut remaining = self.state.my_hand.clone();
         let mut chi_tiles_for_meld = Vec::new();
         for &target in &hand_tiles {
@@ -782,7 +738,6 @@ impl CpuClient {
             }
         }
 
-        // 既存の副露 + 今回のチーを含めた Hand を作成
         let mut melds = melds;
         melds.push(Meld {
             tiles: vec![called_tile, chi_tiles_for_meld[0], chi_tiles_for_meld[1]],
@@ -796,20 +751,21 @@ impl CpuClient {
     }
 }
 
-/// 役牌かどうか判定
+/// Whether the tile kind is a value honour (yakuhai).
 pub(crate) fn is_yakuhai(
     tile_type: u32,
     seat_wind: mahjong_core::tile::Wind,
     round_wind: mahjong_core::tile::Wind,
 ) -> bool {
     use mahjong_core::tile::Tile as T;
-    // 三元牌、または場風・自風（Wind の判別値は対応する牌種と一致する）
+    // Dragons, round wind, or seat wind; Wind discriminants equal the
+    // corresponding tile kinds.
     matches!(tile_type, T::Z5..=T::Z7)
         || tile_type == round_wind as u32
         || tile_type == seat_wind as u32
 }
 
-/// タンヤオ有効牌（中張牌: 2-8）か
+/// Whether the tile kind is an inside tile (2-8), usable for tanyao.
 fn is_tanyao_tile(tile_type: u32) -> bool {
     if tile_type >= 27 {
         return false;
