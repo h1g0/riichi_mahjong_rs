@@ -1,14 +1,12 @@
-//! リモートアダプター
+//! Remote adapter: talks to mahjong-net-server over WebSocket, handling
+//! lobby operations (create/join/start) and relaying in-game events.
 //!
-//! WebSocket 経由で mahjong-net-server と通信する。
-//! ロビー操作（ルーム作成・参加・開始）と対局中のイベント中継を担う。
-//!
-//! 接続〜入室の流れ:
-//! 1. `create_room` / `join_room` でトランスポートを開き、意図を保持する
-//! 2. `Opened` を受けたら `Hello` を送る
-//! 3. `Welcome` を受けたら保持していた `CreateRoom` / `JoinRoom` を送る
-//! 4. `RoomState` で入室完了（`room()` が Some になる）
-//! 5. ホストが `start_game` → `Event(GameStarted)` で対局開始
+//! Connection and join flow:
+//! 1. `create_room` / `join_room` opens the transport and stores the intent
+//! 2. on `Opened`, send `Hello`
+//! 3. on `Welcome`, send the stored `CreateRoom` / `JoinRoom`
+//! 4. `RoomState` completes the join (`room()` becomes Some)
+//! 5. the host calls `start_game`; `Event(GameStarted)` begins play
 
 use mahjong_core::settings::{Lang, Settings};
 use mahjong_server::protocol::net::{
@@ -20,116 +18,116 @@ use mahjong_server::table::GameLength;
 use super::GameAdapter;
 use crate::transport::{Transport, WsEvent};
 
-/// 接続状態
+/// Connection state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnStatus {
-    /// 接続・ハンドシェイク中
+    /// Connecting / handshaking
     Connecting,
-    /// 接続済み
+    /// Connected
     Connected,
-    /// 切断された
+    /// Disconnected
     Disconnected,
 }
 
-/// ルームの表示用スナップショット
+/// Display snapshot of the room.
 #[derive(Debug, Clone)]
 pub struct RoomView {
-    /// ルームコード
+    /// Room code
     pub code: String,
-    /// 各座席の状態
+    /// Seat states
     pub seats: [SeatInfo; 4],
-    /// ホストの座席
+    /// The host's seat
     pub host_seat: usize,
-    /// 自分の座席
+    /// Our seat
     pub your_seat: usize,
-    /// このルームのルール設定
+    /// The room's rule settings
     pub rules: Settings,
-    /// 対局の長さ（東風戦か半荘戦か）
+    /// Game length
     pub length: GameLength,
-    /// 空席を埋めるCPUの強さ・性格（旧サーバでは None）
+    /// CPU configs for empty seats (None from old servers)
     pub cpu_configs: Option<[CpuSpec; 3]>,
 }
 
 impl RoomView {
-    /// 自分がホストか
+    /// Whether we are the host.
     pub fn is_host(&self) -> bool {
         self.your_seat == self.host_seat
     }
 
-    /// 三麻（3人打ち）ルームか
+    /// Whether this is a three-player room.
     pub fn three_player(&self) -> bool {
         self.rules.three_player
     }
 
-    /// プレイヤー人数を返す（四麻=4、三麻=3）
+    /// Player count (4 or 3).
     pub fn player_count(&self) -> usize {
         self.rules.player_count()
     }
 }
 
-/// 直近のエラー
+/// The most recent error.
 #[derive(Debug, Clone)]
 pub struct RemoteError {
-    /// サーバが返したエラーコード（通信層のエラーは None）
+    /// The server's error code; None for transport errors
     pub code: Option<ErrorCode>,
-    /// 技術的な詳細（ログ向け）。UI 表示用の文言は `code` から
-    /// [`error_code_message`] で、`code` が無い場合は汎用の通信エラー文言を
-    /// クライアント側でローカライズして組み立てる。
+    /// Technical detail for logs. User-facing text comes from `code` via
+    /// [`error_code_message`], or a generic localized transport-error
+    /// message when `code` is absent.
     pub message: String,
 }
 
-/// Welcome 受信後に送るロビー操作
+/// The lobby operation to send once Welcome arrives.
 enum LobbyIntent {
     Create { length: GameLength, rules: Settings },
     Join { code: String },
 }
 
-/// 自動再接続のバックオフ間隔（秒）。試行回数で頭打ちにする。
+/// Reconnect backoff steps in seconds, capped by attempt count.
 const RECONNECT_BACKOFF: [f64; 5] = [1.0, 2.0, 4.0, 8.0, 10.0];
 
-/// 新しいトランスポートを生成する関数（再接続で使う）
+/// Factory for new transports, used on reconnection.
 ///
-/// 引数は参加・再接続したいルームのコード。指定すると接続URLに
-/// `?room=CODE` が付き、複数マシン構成のサーバがアップグレード前に
-/// ルームを所持するマシンへ接続を転送できる。
+/// The argument is the room code to join or rejoin. When set, the URL
+/// gains `?room=CODE` so a multi-machine server can forward the
+/// connection to the room's owning machine before the upgrade.
 type Connector = Box<dyn FnMut(Option<&str>) -> Box<dyn Transport>>;
 
-/// 現在時刻（秒）を返す関数
+/// Clock returning the current time in seconds.
 type Clock = Box<dyn Fn() -> f64>;
 
-/// リモートアダプター: ネットワーク越しにサーバとやり取りする
+/// Remote adapter: talks to the server over the network.
 pub struct RemoteAdapter {
     transport: Box<dyn Transport>,
-    /// 再接続用に新しいトランスポートを作る
+    /// Builds new transports for reconnection
     connector: Connector,
-    /// 現在時刻（秒）。再接続のバックオフ計測に使う
+    /// Current time in seconds, for the reconnect backoff
     clock: Clock,
     status: ConnStatus,
     display_name: String,
     session_token: Option<String>,
     pending_intent: Option<LobbyIntent>,
     room: Option<RoomView>,
-    /// 再接続に使うルームコード（RoomState で判明する）
+    /// Room code used to reconnect, learned from RoomState
     room_code: Option<String>,
     events: Vec<ServerEvent>,
     last_error: Option<RemoteError>,
     game_started: bool,
     game_over: bool,
     ready_sent: bool,
-    /// 自動再接続中か
+    /// Whether auto-reconnect is in progress
     reconnecting: bool,
-    /// 次の再接続を試みる時刻
+    /// When the next reconnect attempt fires
     reconnect_at: Option<f64>,
-    /// 再接続の試行回数
+    /// Reconnect attempt count
     reconnect_attempts: u32,
-    /// 各座席の人間プレイヤーの接続状態（None = 人間以外/不明）
+    /// Human players' connection state per seat (None = non-human/unknown)
     peer_connected: [Option<bool>; 4],
-    /// 手番の制限時間の期限（秒, clock 基準）。None なら表示しない
+    /// Turn-timer deadline in clock seconds; None hides the countdown
     turn_deadline: Option<f64>,
 }
 
 impl RemoteAdapter {
-    /// トランスポート・コネクタ・時計を指定して作成する
+    /// Creates the adapter from a transport, connector, and clock.
     fn build(
         transport: Box<dyn Transport>,
         connector: Connector,
@@ -160,10 +158,10 @@ impl RemoteAdapter {
         }
     }
 
-    /// サーバに接続してルームを作成する
+    /// Connects to the server and creates a room.
     ///
-    /// `rules` にはルームのルール設定を丸ごと渡す（三麻・北抜きに限らず、
-    /// 将来ルール選択UIが増えてもこのシグネチャのまま拡張できる）。
+    /// `rules` carries the room's entire rule settings, so future rule
+    /// pickers extend without changing this signature.
     pub fn create_room(url: &str, display_name: &str, length: GameLength, rules: Settings) -> Self {
         let mut connector = Self::connector_for(url);
         let transport = connector(None);
@@ -176,11 +174,12 @@ impl RemoteAdapter {
         )
     }
 
-    /// サーバに接続して既存のルームに参加する
+    /// Connects to the server and joins an existing room.
     pub fn join_room(url: &str, display_name: &str, code: &str) -> Self {
         let code = code.trim().to_ascii_uppercase();
         let mut connector = Self::connector_for(url);
-        // 参加時からコードを付け、最初の接続で所持マシンへ届くようにする
+        // Attach the code from the start so even the first connection
+        // reaches the owning machine.
         let transport = connector(Some(&code));
         Self::build(
             transport,
@@ -191,7 +190,7 @@ impl RemoteAdapter {
         )
     }
 
-    /// 指定URL用のコネクタを作る
+    /// Builds a connector for the given URL.
     fn connector_for(url: &str) -> Connector {
         let url = url.to_string();
         Box::new(move |room| match room {
@@ -200,47 +199,47 @@ impl RemoteAdapter {
         })
     }
 
-    /// 対局を開始する（ホストのみ有効。結果はサーバが判断する）
+    /// Starts the game (host only; the server validates).
     ///
-    /// `cpu_configs` でCPUの強さ・性格を指定する（`None` ならサーバ既定）。
+    /// `cpu_configs` picks the CPU levels/personalities; `None` uses the
+    /// server defaults.
     pub fn start_game(&mut self, cpu_configs: Option<[CpuSpec; 3]>) {
         self.send(&ClientMessage::StartGame { cpu_configs });
     }
 
-    /// 空席を埋めるCPUの強さ・性格を設定する（ホストのみ有効）
-    ///
-    /// サーバが保持して RoomState で全員のロビー表示へ共有する。
+    /// Configures the CPUs filling empty seats (host only). The server
+    /// stores the configs and shares them via RoomState.
     pub fn set_cpu_configs(&mut self, cpu_configs: [CpuSpec; 3]) {
         self.send(&ClientMessage::SetCpuConfigs { cpu_configs });
     }
 
-    /// ルームから退出する
+    /// Leaves the room.
     pub fn leave_room(&mut self) {
         self.send(&ClientMessage::LeaveRoom);
         self.room = None;
     }
 
-    /// 現在の接続状態
+    /// The current connection state.
     pub fn status(&self) -> ConnStatus {
         self.status
     }
 
-    /// 入室中のルーム情報
+    /// The joined room's info.
     pub fn room(&self) -> Option<&RoomView> {
         self.room.as_ref()
     }
 
-    /// 対局が開始したか（GameStarted を受信したか）
+    /// Whether the game has started (GameStarted received).
     pub fn game_started(&self) -> bool {
         self.game_started
     }
 
-    /// 直近のエラーを取り出す（取り出すとクリアされる）
+    /// Takes the most recent error, clearing it.
     pub fn take_error(&mut self) -> Option<RemoteError> {
         self.last_error.take()
     }
 
-    /// 受信を処理して内部状態を更新する
+    /// Processes incoming traffic and updates internal state.
     fn pump(&mut self) {
         self.maybe_reconnect();
         for ws_event in self.transport.poll() {
@@ -268,15 +267,17 @@ impl RemoteAdapter {
         }
     }
 
-    /// 切断・通信エラーを処理する
+    /// Handles disconnects and transport errors.
     ///
-    /// 対局中は自動再接続を試みる（エラーは表に出さず「再接続中」を表示）。
-    /// ロビーや対局終了後は通常の切断として扱う。
+    /// Mid-game the adapter auto-reconnects, showing "reconnecting"
+    /// rather than an error; in the lobby or after the game it is an
+    /// ordinary disconnect.
     fn handle_disconnect(&mut self, message: Option<String>) {
-        // 切断中は手番のカウントダウン表示を止める（再接続後にサーバが再送する）
+        // Hide the turn countdown while disconnected; the server
+        // re-sends it after the reconnect.
         self.turn_deadline = None;
         if self.should_auto_reconnect() {
-            // 一時的な切断: 再接続モードへ（既に再接続中なら継続）
+            // A transient disconnect enters (or stays in) reconnect mode.
             if !self.reconnecting {
                 self.enter_reconnect();
             } else {
@@ -293,12 +294,12 @@ impl RemoteAdapter {
         }
     }
 
-    /// 自動再接続すべき状況か（対局中で終了していない）
+    /// Whether auto-reconnect applies (mid-game, not finished).
     fn should_auto_reconnect(&self) -> bool {
         self.game_started && !self.game_over && self.room_code.is_some()
     }
 
-    /// 自動再接続モードに入る
+    /// Enters auto-reconnect mode.
     fn enter_reconnect(&mut self) {
         self.reconnecting = true;
         self.reconnect_attempts = 0;
@@ -306,7 +307,7 @@ impl RemoteAdapter {
         self.reconnect_at = Some((self.clock)() + RECONNECT_BACKOFF[0]);
     }
 
-    /// 再接続の時刻になっていれば新しい接続を張る
+    /// Opens a new connection once the backoff expires.
     fn maybe_reconnect(&mut self) {
         if !self.reconnecting {
             return;
@@ -318,14 +319,14 @@ impl RemoteAdapter {
             return;
         }
         let Some(code) = self.room_code.clone() else {
-            // ルームコード不明なら再接続できない
+            // Without a room code there is nothing to rejoin.
             self.reconnecting = false;
             self.reconnect_at = None;
             return;
         };
 
-        // 新しいトランスポートを張り、再入室をやり直す。ルームコードを
-        // 付けて接続し、複数マシン構成でも元のルームへ戻れるようにする
+        // Open a fresh transport and redo the join, attaching the room
+        // code so multi-machine setups route back to the original room.
         self.transport = (self.connector)(Some(&code));
         self.status = ConnStatus::Connecting;
         self.pending_intent = Some(LobbyIntent::Join { code });
@@ -335,7 +336,7 @@ impl RemoteAdapter {
         self.reconnect_at = Some((self.clock)() + RECONNECT_BACKOFF[idx]);
     }
 
-    /// 再接続を断念すべき種類のエラーか
+    /// Whether this error kind should abort reconnection.
     fn is_terminal_reconnect_error(code: ErrorCode) -> bool {
         matches!(
             code,
@@ -371,7 +372,7 @@ impl RemoteAdapter {
                 cpu_configs,
             } => {
                 self.room_code = Some(code.clone());
-                // 座席情報から人間プレイヤーの接続状態を取り込む
+                // Pull the humans' connection states from the seats.
                 for (i, info) in seats.iter().enumerate() {
                     self.peer_connected[i] = match info {
                         SeatInfo::Human { connected, .. } if i != your_seat => Some(*connected),
@@ -391,13 +392,15 @@ impl RemoteAdapter {
             ServerMessage::Event(event) => {
                 if matches!(event, ServerEvent::GameStarted { .. }) {
                     self.game_started = true;
-                    // 新しい局が始まったので次局確認を再送可能にする
+                    // A new hand begins; the next-hand ack may be
+                    // sent again.
                     self.ready_sent = false;
                 }
                 self.events.push(event);
             }
             ServerMessage::Resync { events } => {
-                // 現在の局を最初から再生する。再接続が完了したので通常状態へ戻す。
+                // Replay the current hand from the start; the reconnect
+                // is complete, so return to the normal state.
                 self.reconnecting = false;
                 self.reconnect_at = None;
                 self.status = ConnStatus::Connected;
@@ -411,7 +414,7 @@ impl RemoteAdapter {
             }
             ServerMessage::PlayerConnectionChanged { seat, connected } => {
                 if let Some(slot) = self.peer_connected.get_mut(seat) {
-                    // 自分以外の座席のみ追跡する（自分は status で表す）
+                    // Track other seats only; our own state is `status`.
                     let is_self = self.room.as_ref().is_some_and(|r| r.your_seat == seat);
                     if !is_self {
                         *slot = Some(connected);
@@ -428,7 +431,7 @@ impl RemoteAdapter {
             }
             ServerMessage::Error { code, message } => {
                 if self.reconnecting && Self::is_terminal_reconnect_error(code) {
-                    // 再入室できない種類のエラー: 再接続を断念する
+                    // An unrejoinable error aborts the reconnection.
                     self.reconnecting = false;
                     self.reconnect_at = None;
                     self.status = ConnStatus::Disconnected;
@@ -441,12 +444,12 @@ impl RemoteAdapter {
         }
     }
 
-    /// 接続中の他プレイヤーに切断者がいるか
+    /// Whether any other human is currently disconnected.
     fn any_peer_disconnected(&self) -> bool {
         self.peer_connected.iter().any(|p| p == &Some(false))
     }
 
-    /// 手番の制限時間の残り秒数（手番待ちでなければ None）
+    /// Seconds left on the turn timer; None when not awaited.
     pub fn turn_remaining_secs(&self) -> Option<u32> {
         self.turn_deadline.map(|deadline| {
             let remaining = (deadline - (self.clock)()).max(0.0);
@@ -469,7 +472,7 @@ impl RemoteAdapter {
 
 impl GameAdapter for RemoteAdapter {
     fn send_action(&mut self, action: ClientAction) {
-        // 操作したので手番のカウントダウンを止める
+        // Acting stops the turn countdown.
         self.turn_deadline = None;
         self.send(&ClientMessage::Action(action));
     }
@@ -484,7 +487,8 @@ impl GameAdapter for RemoteAdapter {
     }
 
     fn request_next_round(&mut self) {
-        // 多重クリックでの重複送信を防ぐ（次の GameStarted でリセット）
+        // Guard against duplicate sends from double clicks;
+        // reset by the next GameStarted.
         if !self.ready_sent {
             self.send(&ClientMessage::ReadyNextRound);
             self.ready_sent = true;
@@ -514,17 +518,18 @@ impl GameAdapter for RemoteAdapter {
     }
 
     fn turn_remaining_secs(&self) -> Option<u32> {
-        // 固有メソッドへ委譲する（固有メソッドが優先解決されるため再帰しない）
+        // Delegates to the inherent method; inherent resolution wins,
+        // so this does not recurse.
         RemoteAdapter::turn_remaining_secs(self)
     }
 }
 
-/// 本番用の時計（macroquad の経過秒）
+/// Production clock: macroquad's elapsed seconds.
 fn default_clock() -> Clock {
     Box::new(macroquad::time::get_time)
 }
 
-/// エラーコードを表示用の文言に変換する
+/// Maps an error code to display text.
 pub fn error_code_message(code: ErrorCode, lang: Lang) -> &'static str {
     match lang {
         Lang::Ja => match code {
@@ -562,13 +567,13 @@ mod tests {
 
     use super::*;
 
-    /// スクリプト化されたモックトランスポート
+    /// A scripted mock transport.
     struct MockTransport {
         incoming: Rc<RefCell<VecDeque<WsEvent>>>,
         sent: Rc<RefCell<Vec<String>>>,
     }
 
-    /// モックの操作ハンドル（受信の注入と送信内容の検査）
+    /// Mock handle for injecting received messages and inspecting sends.
     struct MockHandle {
         incoming: Rc<RefCell<VecDeque<WsEvent>>>,
         sent: Rc<RefCell<Vec<String>>>,
@@ -612,9 +617,8 @@ mod tests {
         (Box::new(transport), MockHandle { incoming, sent })
     }
 
-    /// 再接続不要なテスト用のアダプターを作る
-    ///
-    /// コネクタは呼ばれない前提（呼ばれたら panic）、時計は常に 0 を返す。
+    /// Builds a test adapter that never reconnects: the connector panics
+    /// if called, the clock always returns 0.
     fn build_test(transport: Box<dyn Transport>, intent: LobbyIntent) -> RemoteAdapter {
         RemoteAdapter::build(
             transport,
@@ -717,8 +721,8 @@ mod tests {
         }
     }
 
-    /// 半荘設定（GameLength::Hanchan）が CreateRoom で送られ、
-    /// RoomState の length がロビー表示用の RoomView に反映されること（#271）
+    /// Hanchan settings must be sent in CreateRoom and RoomState's length
+    /// must reach the lobby's RoomView (#271).
     #[test]
     fn test_hanchan_length_roundtrip() {
         let (transport, handle) = mock_pair();
@@ -740,7 +744,6 @@ mod tests {
             other => panic!("CreateRoomでないメッセージ: {other:?}"),
         }
 
-        // サーバから length=Hanchan の RoomState を受け取ると半荘ルームになる
         let msg = ServerMessage::RoomState {
             code: "ABC234".to_string(),
             seats: [
@@ -801,8 +804,8 @@ mod tests {
         assert!(room.is_host());
     }
 
-    /// set_cpu_configs が SetCpuConfigs を送り、RoomState のCPU設定が
-    /// RoomView に反映されること（#245）
+    /// set_cpu_configs must send SetCpuConfigs, and RoomState's CPU
+    /// configs must reach the RoomView (#245).
     #[test]
     fn test_set_cpu_configs_roundtrip() {
         use mahjong_server::cpu::client::{CpuLevel, CpuPersonality};
@@ -830,7 +833,6 @@ mod tests {
             ClientMessage::SetCpuConfigs { cpu_configs } if cpu_configs == specs
         ));
 
-        // サーバがCPU設定入りの RoomState を返すと RoomView に反映される
         let msg = ServerMessage::RoomState {
             code: "ABC234".to_string(),
             seats: [
@@ -866,7 +868,7 @@ mod tests {
         assert!(adapter.game_started());
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], ServerEvent::GameStarted { .. }));
-        // 取り出したらキューは空になる
+        // Taking the error clears it.
         assert!(adapter.poll_events().is_empty());
     }
 
@@ -930,7 +932,7 @@ mod tests {
             1
         );
 
-        // 次の局が始まったら再送可能になる
+        // The next hand re-enables sending.
         handle.push_msg(&ServerMessage::Event(game_started_event()));
         adapter.tick();
         adapter.request_next_round();
@@ -944,16 +946,17 @@ mod tests {
         );
     }
 
-    /// 実際のトランスポートでローカルサーバに接続し、1ゲーム打ち切るE2Eテスト
+    /// E2E test: connects to a local server over the real transport and
+    /// plays a game to the end.
     ///
-    /// 実行前に `cargo run -p mahjong-net-server` でサーバを起動しておくこと:
+    /// Start the server first with `cargo run -p mahjong-net-server`:
     /// `cargo test -p mahjong-client -- --ignored e2e`
     #[test]
     #[ignore = "要ローカルサーバ (cargo run -p mahjong-net-server)"]
     fn test_e2e_full_game_against_local_server() {
         let url = crate::transport::default_server_url();
-        // 本番の時計は macroquad（ウィンドウ前提）なので、ヘッドレスな
-        // E2E では std の経過秒で代用する
+        // The production clock needs a macroquad window; headless E2E
+        // substitutes std elapsed seconds.
         let mut connector = RemoteAdapter::connector_for(&url);
         let transport = connector(None);
         let clock_start = std::time::Instant::now();
@@ -970,8 +973,8 @@ mod tests {
 
         let start = std::time::Instant::now();
         let mut started = false;
-        // 連続で届くイベント（TileDrawn + NineTerminalsAvailable など）を
-        // まとめて判断するため、50msの静止を待ってから行動する
+        // Wait for 50ms of quiet before acting, so event bursts
+        // (TileDrawn + NineTerminalsAvailable etc.) are judged together.
         let mut pending: Vec<ServerEvent> = Vec::new();
         let mut last_event_at = std::time::Instant::now();
 
@@ -1015,8 +1018,8 @@ mod tests {
             }
 
             let batch = std::mem::take(&mut pending);
-            // 九種九牌の選択があるターンは宣言拒否のみ送る
-            // （拒否するとサーバが TileDrawn を再送して打牌を促す）
+            // Decline any nine-terminals offer; the server re-sends
+            // TileDrawn to prompt the discard.
             let nine_terminals = batch
                 .iter()
                 .any(|e| matches!(e, ServerEvent::NineTerminalsAvailable));
@@ -1060,7 +1063,6 @@ mod tests {
     #[test]
     fn test_resync_replays_events_and_clears_reconnecting() {
         let (mut adapter, handle) = create_adapter();
-        // 再接続中の状態を作る
         adapter.reconnecting = true;
         adapter.status = ConnStatus::Connecting;
 
@@ -1080,12 +1082,13 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(matches!(events[0], ServerEvent::GameStarted { .. }));
         assert!(adapter.game_started());
-        // 再接続が完了して通常状態へ戻る
+        // The reconnect completes and the state returns to normal.
         assert_eq!(adapter.status(), ConnStatus::Connected);
         assert!(adapter.status_text(Lang::Ja).is_none());
     }
 
-    /// 連続するモックを払い出すコネクタと、渡されたルームコードの記録を作る
+    /// Builds a connector yielding successive mocks and recording the
+    /// room codes it was given.
     fn queued_connector(
         transports: Vec<Box<dyn Transport>>,
     ) -> (Connector, Rc<RefCell<Vec<Option<String>>>>) {
@@ -1101,7 +1104,7 @@ mod tests {
 
     #[test]
     fn test_auto_reconnect_after_midgame_disconnect() {
-        // 1本目のトランスポートで対局を開始し、2本目で再接続させる
+        // Start the game on the first transport, reconnect on the second.
         let (t1, h1) = mock_pair();
         let (t2, h2) = mock_pair();
         let now = Rc::new(RefCell::new(0.0_f64));
@@ -1118,7 +1121,6 @@ mod tests {
             },
         );
 
-        // ハンドシェイク → ルーム入室 → 対局開始
         h1.push(WsEvent::Opened);
         h1.push_msg(&welcome());
         h1.push_msg(&room_state(1));
@@ -1127,7 +1129,8 @@ mod tests {
         assert!(adapter.game_started());
         assert_eq!(adapter.status(), ConnStatus::Connected);
 
-        // 対局中に切断: 再接続モードに入り、エラーは表に出さない
+        // A mid-game disconnect enters reconnect mode with no
+        // visible error.
         h1.push(WsEvent::Closed);
         adapter.tick();
         assert_eq!(
@@ -1136,13 +1139,13 @@ mod tests {
         );
         assert!(adapter.take_error().is_none());
 
-        // バックオフ前は再接続しない
+        // No reconnect before the backoff expires.
         *now.borrow_mut() = 0.5;
         adapter.tick();
         assert!(h2.sent().is_empty());
 
-        // バックオフ経過後に2本目で再接続: Hello を送る。
-        // 再接続はルームコード付きで張られる（複数マシン構成での転送用）
+        // Past the backoff the second transport reconnects and sends
+        // Hello; the room code rides along for multi-machine routing.
         *now.borrow_mut() = 1.5;
         h2.push(WsEvent::Opened);
         adapter.tick();
@@ -1159,7 +1162,7 @@ mod tests {
             })
         ));
 
-        // Welcome → JoinRoom（保持していたルームコードで再入室）
+        // Welcome triggers a JoinRoom with the stored room code.
         h2.push_msg(&welcome());
         adapter.tick();
         assert!(
@@ -1168,7 +1171,7 @@ mod tests {
                 .any(|m| matches!(m, ClientMessage::JoinRoom { code } if code == "ABC234"))
         );
 
-        // サーバが RoomState + Resync を返す → 再接続完了
+        // RoomState + Resync complete the reconnection.
         h2.push_msg(&room_state(1));
         h2.push_msg(&ServerMessage::Resync {
             events: vec![game_started_event()],
@@ -1210,7 +1213,7 @@ mod tests {
         h1.push(WsEvent::Closed);
         adapter.tick();
 
-        // 再接続を試みるがルームが消えていた
+        // The reconnect finds the room gone.
         *now.borrow_mut() = 1.5;
         h2.push(WsEvent::Opened);
         h2.push_msg(&welcome());
@@ -1220,7 +1223,7 @@ mod tests {
         });
         adapter.tick();
 
-        // 再接続を断念し、エラーと切断状態を表に出す
+        // Reconnection aborts, surfacing the error and disconnect.
         assert_eq!(adapter.status(), ConnStatus::Disconnected);
         assert_eq!(
             adapter.status_text(Lang::Ja).as_deref(),
@@ -1235,13 +1238,13 @@ mod tests {
         let (mut adapter, handle) = create_adapter();
         handle.push(WsEvent::Opened);
         handle.push_msg(&welcome());
-        // 自分は座席1、座席0（ホスト）が接続中
+        // We sit at seat 1; the host at seat 0 is connected.
         handle.push_msg(&room_state(1));
         handle.push_msg(&ServerMessage::Event(game_started_event()));
         adapter.tick();
         assert!(adapter.status_text(Lang::Ja).is_none());
 
-        // 座席0が切断 → 状態表示が出る
+        // Seat 0 disconnecting shows the notice.
         handle.push_msg(&ServerMessage::PlayerConnectionChanged {
             seat: 0,
             connected: false,
@@ -1252,7 +1255,7 @@ mod tests {
             Some("他のプレイヤーが切断中（CPUが代打ち）")
         );
 
-        // 座席0が再接続 → 表示が消える
+        // Seat 0 reconnecting clears it.
         handle.push_msg(&ServerMessage::PlayerConnectionChanged {
             seat: 0,
             connected: true,
@@ -1277,16 +1280,14 @@ mod tests {
             },
         );
 
-        // 手番タイマー（90秒）を受信
         handle.push_msg(&ServerMessage::TurnTimer { seconds: 90 });
         adapter.tick();
         assert_eq!(adapter.turn_remaining_secs(), Some(90));
 
-        // 30秒経過 → 残り60秒
         *now.borrow_mut() = 130.0;
         assert_eq!(adapter.turn_remaining_secs(), Some(60));
 
-        // 操作するとカウントダウンが消える
+        // Acting clears the countdown.
         adapter.send_action(ClientAction::Discard { tile: None });
         assert_eq!(adapter.turn_remaining_secs(), None);
     }
@@ -1308,14 +1309,14 @@ mod tests {
         );
         handle.push_msg(&ServerMessage::TurnTimer { seconds: 5 });
         adapter.tick();
-        // 期限を過ぎても負にならず 0
+        // Past the deadline the remainder clamps to 0.
         *now.borrow_mut() = 100.0;
         assert_eq!(adapter.turn_remaining_secs(), Some(0));
     }
 
     #[test]
     fn test_lobby_disconnect_does_not_reconnect() {
-        // 対局開始前の切断は通常エラー扱い（再接続しない）
+        // A pre-game disconnect is an ordinary error; no reconnect.
         let (mut adapter, handle) = create_adapter();
         handle.push(WsEvent::Opened);
         handle.push_msg(&welcome());

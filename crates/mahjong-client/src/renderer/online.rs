@@ -1,7 +1,5 @@
-//! オンライン対戦のメニュー・ロビー画面
-//!
-//! 描画と入力処理。ネットワーク操作そのものは行わず、
-//! メインループへアクションを返す。
+//! Online menu and lobby screens: rendering and input only. Network
+//! operations happen in the main loop, which receives the actions.
 
 use macroquad::prelude::*;
 
@@ -9,13 +7,13 @@ use super::{DESIGN_W, draw_jp_text, theme};
 use crate::game::GameState;
 use crate::i18n::Key;
 
-/// パネルのレイアウト（設定画面と揃える）
+/// Panel layout, matching the setup screen.
 const PANEL_X: f32 = 150.0;
 const PANEL_Y: f32 = 50.0;
 const PANEL_W: f32 = 980.0;
 const PANEL_H: f32 = 690.0;
 
-/// ボタン・入力欄の矩形
+/// Button / input-field rectangle.
 struct Rect2 {
     x: f32,
     y: f32,
@@ -33,12 +31,12 @@ impl Rect2 {
     }
 }
 
-/// 表示名の最大文字数
+/// Maximum display-name length.
 const NAME_MAX_CHARS: usize = 12;
-/// ルームコードの文字数
+/// Room-code length.
 const CODE_MAX_CHARS: usize = 6;
 
-// レイアウト定数（ウィンドウ 1280x800）
+// Layout constants for the 1280x800 window.
 const NAME_BOX: Rect2 = Rect2 {
     x: 440.0,
     y: 250.0,
@@ -69,7 +67,7 @@ const BACK_BTN: Rect2 = Rect2 {
     w: 400.0,
     h: 40.0,
 };
-/// ロビーのCPU設定ボタン（ホストのみ表示）
+/// The lobby's CPU-setup button (host only).
 const CPU_SETUP_BTN: Rect2 = Rect2 {
     x: 440.0,
     y: 500.0,
@@ -89,29 +87,29 @@ const LEAVE_BTN: Rect2 = Rect2 {
     h: 40.0,
 };
 
-/// オンラインメニューでの操作
+/// Online-menu actions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnlineMenuAction {
-    /// ルームを作成する
+    /// Create a room
     CreateRoom,
-    /// ルームコードで参加する
+    /// Join by room code
     JoinRoom,
-    /// 設定画面に戻る
+    /// Back
     Back,
 }
 
-/// ロビーでの操作
+/// Lobby actions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnlineLobbyAction {
-    /// CPU設定画面を開く（ホストのみ）
+    /// Open the CPU setup (host only)
     OpenCpuSettings,
-    /// 対局を開始する（ホストのみ）
+    /// Start the game (host only)
     StartGame,
-    /// 退出する
+    /// Leave
     Leave,
 }
 
-/// オンライン画面共通のパネルを描画する（タイトル）。
+/// Draws the shared online panel and title.
 fn draw_online_panel(font: Option<&Font>, title: &str) {
     super::draw_setup_background();
     theme::draw_panel(
@@ -192,7 +190,7 @@ fn draw_input_box(font: Option<&Font>, rect: &Rect2, text: &str, focused: bool) 
         theme::rgba(0xffffff, 0.12)
     };
     theme::draw_rounded_rect_lines(rect.x, rect.y, rect.w, rect.h, 6.0, 1.5, border);
-    // カーソル付きで内容を表示
+    // Contents drawn with a cursor.
     let shown = if focused {
         format!("{text}_")
     } else {
@@ -219,7 +217,7 @@ fn draw_status_line(state: &GameState, font: Option<&Font>, y: f32) {
     }
 }
 
-/// オンラインメニュー画面を描画する
+/// Draws the online menu.
 pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
     let online = &state.online_state;
     let tr = state.tr();
@@ -253,18 +251,18 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
     draw_status_line(state, font, BACK_BTN.y + BACK_BTN.h + 30.0);
 }
 
-/// オンラインメニューの入力を処理する
+/// Handles online-menu input.
 pub fn handle_online_menu_input(state: &mut GameState) -> Option<OnlineMenuAction> {
     let online = &mut state.online_state;
 
-    // 文字入力（フォーカス中の欄へ）
+    // Text entry goes to the focused field.
     while let Some(c) = get_char_pressed() {
         if c.is_control() {
             continue;
         }
         if online.code_focused {
             let c = c.to_ascii_uppercase();
-            // ルームコードの文字種（紛らわしい 0/O/1/I は無い）のみ受け付ける
+            // Accept only room-code characters (no confusable 0/O/1/I).
             if online.code_input.chars().count() < CODE_MAX_CHARS
                 && c.is_ascii_alphanumeric()
                 && !"0O1I".contains(c)
@@ -313,7 +311,7 @@ pub fn handle_online_menu_input(state: &mut GameState) -> Option<OnlineMenuActio
     None
 }
 
-/// ロビー画面を描画する
+/// Draws the lobby.
 pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     let online = &state.online_state;
     let tr = state.tr();
@@ -327,7 +325,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
         return;
     };
 
-    // ルームコード（友人に共有する）
+    // The room code, for sharing.
     theme::draw_text_centered(
         font,
         &tr.room_code(&room.code),
@@ -344,7 +342,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
         12,
         theme::TEXT_DIM,
     );
-    // 対局モード（四人東風/四人半荘/三人東風/三人半荘）を明示する
+    // Spell out the room's game mode.
     theme::draw_text_centered(
         font,
         tr.get(room.mode.label_key()),
@@ -354,7 +352,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
         theme::GOLD_LT,
     );
 
-    // 座席一覧（三麻の未使用席はラベルが空なので描画しない）
+    // Seat list; three-player rooms leave the unused seat blank.
     let row_x = 440.0;
     let row_w = 400.0;
     for (i, label) in room
@@ -401,7 +399,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     draw_status_line(state, font, LEAVE_BTN.y + LEAVE_BTN.h + 28.0);
 }
 
-/// ロビーの入力を処理する
+/// Handles lobby input.
 pub fn handle_online_lobby_input(state: &GameState) -> Option<OnlineLobbyAction> {
     if !is_mouse_button_pressed(MouseButton::Left) {
         return None;
@@ -426,32 +424,31 @@ pub fn handle_online_lobby_input(state: &GameState) -> Option<OnlineLobbyAction>
     None
 }
 
-/// 対局中の接続状態バナーを描画する
+/// Draws the in-game connection banner.
 pub fn draw_connection_banner(state: &GameState, font: Option<&Font>) {
     if let Some(line) = &state.online_state.status_line {
         let w = 440.0;
         let x = (DESIGN_W - w) / 2.0;
-        // 上部バーの直下に角丸の赤いバナーを表示する
+        // A rounded red banner right under the top bar.
         theme::draw_rounded_rect(x, 56.0, w, 30.0, 6.0, theme::rgba(0x7a1010, 0.92));
         theme::draw_rounded_rect_lines(x, 56.0, w, 30.0, 6.0, 1.0, theme::RED);
         theme::draw_text_centered(font, line, DESIGN_W / 2.0, 76.0, 13, WHITE);
     }
 }
 
-/// 自分の手番の制限時間カウントダウンを描画する
-///
-/// オンラインで自分が操作待ちのときだけ表示する。
+/// Draws the turn-timer countdown, shown only while our action is
+/// awaited online.
 pub fn draw_turn_timer(state: &GameState, font: Option<&Font>) {
     let Some(remaining) = state.online_state.turn_remaining else {
         return;
     };
-    // 自分が操作できる場面のみ表示する
+
     let my_turn = state.is_my_turn || !state.available_calls.is_empty();
     if !my_turn {
         return;
     }
 
-    // 残り10秒以下は赤、それ以外はゴールド
+    // Red at ten seconds or less, gold otherwise.
     let (accent, border) = if remaining <= 10 {
         (theme::RED_LT, theme::RED)
     } else {

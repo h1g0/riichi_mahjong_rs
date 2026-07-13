@@ -1,6 +1,4 @@
-//! プレイヤーの状態管理
-//!
-//! 各プレイヤーの手牌、捨て牌、点数、リーチ状態などを管理する。
+//! Per-player state: hand, discards, score, riichi state, and so on.
 
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
@@ -9,52 +7,51 @@ use serde::{Deserialize, Serialize};
 
 use crate::scoring;
 
-/// プレイヤーの状態
+/// A player's state.
 pub struct Player {
-    /// 座席の風
+    /// Seat wind
     pub seat_wind: Wind,
-    /// 手牌
+    /// Hand
     pub hand: Hand,
-    /// 捨て牌（河）
+    /// Discard pool
     pub discards: Vec<Discard>,
-    /// 持ち点
+    /// Score
     pub score: i32,
-    /// リーチしているか
+    /// Has declared riichi
     pub is_riichi: bool,
-    /// ダブルリーチか
+    /// Declared riichi on the first discard (double riichi)
     pub is_double_riichi: bool,
-    /// 一発が有効か
+    /// Ippatsu still possible
     pub is_ippatsu: bool,
-    /// 第一ツモか（天和・地和判定用）
+    /// Still on the first draw, for Blessing of Heaven/Earth
     pub is_first_turn: bool,
-    /// 副露によって一巡目が中断されたか
+    /// Whether a call interrupted the first go-around
     pub first_turn_interrupted: bool,
-    /// リーチ後フリテン（リーチ後にロン見逃し → 局終了まで永続）
+    /// Furiten from passing a ron after riichi (lasts the whole hand)
     pub is_riichi_furiten: bool,
-    /// 同巡フリテン（ロン見逃し → 自分のツモ番で解除）
+    /// Temporary furiten from passing a ron (until the player's next draw)
     pub is_temporary_furiten: bool,
-    /// 喰い替え禁止により、直後の打牌で捨てられない牌種
-    /// （チー・ポン直後にのみ設定され、打牌またはツモで解除される）
+    /// Tile kinds forbidden on the next discard by the swap-calling rule;
+    /// set right after a chii/pon and cleared by discarding or drawing
     forbidden_discards: Vec<TileType>,
-    /// 北抜きで晒した北風牌（三麻の抜きドラ。1枚につき和了時+1翻）
+    /// North tiles extracted as pei dora (three-player only; +1 han each)
     pub pei_tiles: Vec<Tile>,
 }
 
-/// 捨て牌1枚の情報
+/// One discard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Discard {
-    /// 捨てた牌
+    /// The discarded tile
     pub tile: Tile,
-    /// ツモ切りか
+    /// Whether the drawn tile was discarded directly (tsumogiri)
     pub is_tsumogiri: bool,
-    /// リーチ宣言牌か
+    /// Whether this was the riichi declaration discard
     pub is_riichi_declaration: bool,
-    /// 他プレイヤーに鳴かれたか
+    /// Whether another player called it
     pub is_called: bool,
 }
 
 impl Player {
-    /// 新しいプレイヤーを作成する
     pub fn new(seat_wind: Wind, tiles: Vec<Tile>, initial_score: i32) -> Self {
         let hand = Hand::new(tiles, None);
         Player {
@@ -74,9 +71,10 @@ impl Player {
         }
     }
 
-    /// 北抜き可能かを返す（手牌またはツモ牌に北風牌があるか）
+    /// Whether the player may extract a North tile as pei dora.
     ///
-    /// リーチ後はツモった牌が北の場合のみ抜ける（手牌は固定のため）。
+    /// Under riichi the hand is locked, so only a freshly drawn North
+    /// may be extracted.
     pub fn can_pei(&self) -> bool {
         if self.is_riichi {
             return self.hand.drawn().is_some_and(|t| t.get() == Tile::Z4);
@@ -85,23 +83,22 @@ impl Player {
             || self.hand.tiles().iter().any(|t| t.get() == Tile::Z4)
     }
 
-    /// 北抜きを実行する（北風牌1枚を手牌またはツモ牌から取り除いて晒す）
+    /// Extracts one North tile from the hand or the drawn tile.
     ///
-    /// 成功したら true。ツモ牌が北ならツモ牌を優先して抜く。
+    /// Returns true on success. A drawn North is extracted in preference
+    /// to one from the hand.
     pub fn do_pei(&mut self) -> bool {
         if !self.can_pei() {
             return false;
         }
 
         if self.hand.drawn().is_some_and(|t| t.get() == Tile::Z4) {
-            // ツモ牌の北を抜く
             let tile = self.hand.drawn().unwrap();
             self.hand.set_drawn(None);
             self.pei_tiles.push(tile);
             return true;
         }
 
-        // 手牌の北を抜き、ツモ牌があれば手牌に組み入れる
         let drawn = self.hand.drawn();
         let tiles = self.hand.tiles_mut();
         let Some(idx) = tiles.iter().position(|t| t.get() == Tile::Z4) else {
@@ -117,28 +114,26 @@ impl Player {
         true
     }
 
-    /// ツモ牌をセットする
     pub fn draw(&mut self, tile: Tile) {
         self.hand.set_drawn(Some(tile));
-        // ツモ後は喰い替え制限が解除される（鳴き直後の打牌のみが対象のため）
+        // The swap-calling restriction only covers the discard right after
+        // the call, so a draw clears it.
         self.forbidden_discards.clear();
     }
 
-    /// 喰い替え禁止で次の打牌に限り捨てられない牌種を設定する
+    /// Sets the tile kinds forbidden on the next discard (swap-calling rule).
     pub fn set_forbidden_discards(&mut self, tile_types: Vec<TileType>) {
         self.forbidden_discards = tile_types;
     }
 
-    /// 指定牌が喰い替え禁止により打牌できないかを返す
+    /// Whether the swap-calling rule forbids discarding this tile now.
     pub fn is_swap_call_forbidden(&self, tile: Tile) -> bool {
         self.forbidden_discards.contains(&tile.get())
     }
 
-    /// 手牌から指定牌を捨てる
-    /// tile が Some(牌) なら手牌からその牌を探して捨てる（手出し）
-    /// tile が None ならツモ切り
+    /// Discards a tile: `Some` discards that tile from the hand,
+    /// `None` discards the drawn tile.
     pub fn try_discard(&mut self, tile: Option<Tile>) -> Option<Tile> {
-        // 喰い替え禁止: 鳴き直後に禁止された牌種は捨てられない
         if let Some(target) = tile
             && self.is_swap_call_forbidden(target)
         {
@@ -148,13 +143,11 @@ impl Player {
         let drawn = self.hand.drawn();
 
         let (discarded, is_tsumogiri) = match tile {
-            // 手牌からの手出し: 牌の種類で検索して除去
             Some(target) => {
                 let tiles = self.hand.tiles_mut();
                 let idx = tiles.iter().position(|t| *t == target)?;
                 let discarded = tiles.remove(idx);
 
-                // ツモ牌を手牌に加える
                 if let Some(drawn_tile) = drawn {
                     tiles.push(drawn_tile);
                     tiles.sort();
@@ -163,7 +156,6 @@ impl Player {
 
                 (discarded, false)
             }
-            // ツモ切り（ツモった牌をそのまま捨てる）
             None => {
                 let discarded = drawn?;
                 self.hand.set_drawn(None);
@@ -181,16 +173,15 @@ impl Player {
 
         self.is_ippatsu = false;
         self.is_first_turn = false;
-        // 鳴き直後の打牌が完了したので喰い替え制限を解除する
         self.forbidden_discards.clear();
 
         Some(discarded)
     }
 
-    /// 手牌から指定牌を捨てる。
+    /// Discards a tile, panicking when it is not held.
     ///
-    /// 内部処理用の簡易 API。入力検証済みでないクライアントアクションでは
-    /// `try_discard` を使うこと。
+    /// Convenience API for internal use only; unvalidated client actions
+    /// must go through `try_discard`.
     pub fn discard(&mut self, tile: Option<Tile>) -> Tile {
         match self.try_discard(tile) {
             Some(discarded) => discarded,
@@ -198,38 +189,33 @@ impl Player {
         }
     }
 
-    /// ツモ切りを行う（他プレイヤーの自動打牌用）
+    /// Discards the drawn tile (auto-play helper).
     pub fn tsumogiri(&mut self) -> Tile {
         self.discard(None)
     }
 
-    /// 親（東家）かどうか
+    /// Whether the player is the dealer (East).
     pub fn is_dealer(&self) -> bool {
         self.seat_wind == Wind::East
     }
 
-    /// 門前（鳴いていない）かどうか
+    /// Whether the hand is closed; concealed kans do not open the hand.
     pub fn is_menzen(&self) -> bool {
-        self.hand.melds().iter().all(|o| {
-            // 暗カンは門前扱い
-            o.from == MeldFrom::Myself
-        })
+        self.hand.melds().iter().all(|o| o.from == MeldFrom::Myself)
     }
 
-    /// リーチ宣言を行う
     pub fn declare_riichi(&mut self, is_double: bool) {
         self.is_riichi = true;
         self.is_ippatsu = true;
         if is_double {
             self.is_double_riichi = true;
         }
-        // リーチ棒代を引く
         self.score -= 1000;
     }
 
-    // ===== 鳴き判定メソッド =====
+    // ----- Call availability -----
 
-    /// ポン可能か判定する
+    /// Whether the player can pon this tile.
     pub fn can_pon(&self, tile: Tile) -> bool {
         let count = self
             .hand
@@ -240,10 +226,11 @@ impl Player {
         count >= 2
     }
 
-    /// ポン可能な手牌の組み合わせを返す
+    /// Returns the hand-tile pairs usable for a pon.
     ///
-    /// 通常は1通りだが、手牌に赤ドラと通常牌の両方がある場合は
-    /// 「赤ドラを含む刻子」と「赤ドラを含まない刻子」の2通りを返す。
+    /// Usually a single option, but when the hand holds both a red five
+    /// and a normal five, the with-red and without-red pairs are offered
+    /// separately.
     pub fn pon_options(&self, tile: Tile) -> Vec<[Tile; 2]> {
         let tiles_of_type: Vec<Tile> = self
             .hand
@@ -257,7 +244,7 @@ impl Player {
             return vec![];
         }
 
-        // (赤ドラを含むペアか否か) で重複を除いた組み合わせを列挙する
+        // Deduplicate by whether the pair contains the red five.
         let mut has_with_red = false;
         let mut has_without_red = false;
         let mut options = vec![];
@@ -278,10 +265,9 @@ impl Player {
         options
     }
 
-    /// チー可能な組み合わせを返す
+    /// Returns the hand-tile pairs usable for a chii.
     ///
-    /// 各要素は [TileType; 2] で、手牌から使う2枚の牌の種類を表す。
-    /// 字牌はチー不可。
+    /// Honours cannot be called with chii.
     pub fn chi_options(&self, tile: Tile) -> Vec<[Tile; 2]> {
         if tile.is_honour() {
             return vec![];
@@ -291,19 +277,18 @@ impl Player {
         let tiles = self.hand.tiles();
         let mut options = vec![];
 
-        // 同じスーツの範囲を計算
         let suit_start = (tt / 9) * 9;
         let suit_end = suit_start + 9;
 
-        // パターン (a, b) に対して、手牌から実際の牌インスタンスを列挙して選択肢を追加する。
-        // 同じ牌種に赤ドラと通常牌の両方がある場合は別の選択肢として追加する。
+        // For a pattern (a, b), enumerate the actual tile instances so a
+        // red five and a normal five yield distinct options.
         let mut add_pattern = |a: TileType, b: TileType| {
             let tiles_a: Vec<Tile> = tiles.iter().filter(|t| t.get() == a).cloned().collect();
             let tiles_b: Vec<Tile> = tiles.iter().filter(|t| t.get() == b).cloned().collect();
             if tiles_a.is_empty() || tiles_b.is_empty() {
                 return;
             }
-            // (赤ドラか否か, 赤ドラか否か) の組み合わせで重複を除く
+            // Deduplicate on the (is-red, is-red) pair.
             let mut seen = std::collections::HashSet::new();
             for ta in &tiles_a {
                 for tb in &tiles_b {
@@ -315,17 +300,17 @@ impl Player {
             }
         };
 
-        // パターン1: [tt-2, tt-1] + tt （例: 鳴く牌が3m, 手牌に1m2mがある）
+        // [tt-2, tt-1] + tt, e.g. calling 3m while holding 1m2m.
         if tt >= suit_start + 2 {
             add_pattern(tt - 2, tt - 1);
         }
 
-        // パターン2: [tt-1, tt+1] + tt （例: 鳴く牌が5m, 手牌に4m6mがある）
+        // [tt-1, tt+1] + tt, e.g. calling 5m while holding 4m6m.
         if tt > suit_start && tt + 1 < suit_end {
             add_pattern(tt - 1, tt + 1);
         }
 
-        // パターン3: [tt+1, tt+2] + tt （例: 鳴く牌が1m, 手牌に2m3mがある）
+        // [tt+1, tt+2] + tt, e.g. calling 1m while holding 2m3m.
         if tt + 2 < suit_end {
             add_pattern(tt + 1, tt + 2);
         }
@@ -333,7 +318,7 @@ impl Player {
         options
     }
 
-    /// 大明カン可能か判定する
+    /// Whether the player can call a quad on this tile.
     pub fn can_daiminkan(&self, tile: Tile) -> bool {
         let count = self
             .hand
@@ -344,7 +329,7 @@ impl Player {
         count >= 3
     }
 
-    /// 暗カン可能な牌種一覧を返す
+    /// Tile kinds the player can declare a concealed kan on.
     pub fn ankan_options(&self) -> Vec<TileType> {
         let mut counts = [0u8; Tile::LEN];
         for tile in self.hand.tiles() {
@@ -361,7 +346,7 @@ impl Player {
             .collect()
     }
 
-    /// 加カン可能な牌種一覧を返す
+    /// Tile kinds the player can promote to a quad (kakan).
     pub fn kakan_options(&self) -> Vec<TileType> {
         let mut counts = [0u8; Tile::LEN];
         for tile in self.hand.tiles() {
@@ -382,7 +367,7 @@ impl Player {
             .collect()
     }
 
-    /// 加カンで追加する実際の牌を返す（赤ドラも区別する）
+    /// The actual tile a kakan would add (red fives distinct).
     pub fn kakan_added_tile(&self, tile_type: TileType) -> Option<Tile> {
         if let Some(drawn) = self.hand.drawn()
             && drawn.get() == tile_type
@@ -397,18 +382,15 @@ impl Player {
             .find(|tile| tile.get() == tile_type)
     }
 
-    /// フリテン状態か判定する
-    ///
-    /// 以下のいずれかに該当する場合、フリテン（ロン不可・ツモのみ可）:
-    /// 1. 捨て牌フリテン: 自分の待ち牌のいずれかが自分の捨て牌に含まれている
-    /// 2. リーチ後フリテン: リーチ後にロンを見逃した（局終了まで永続）
-    /// 3. 同巡フリテン: ロンを見逃した（自分のツモ番で解除）
+    /// Whether the player is furiten (may win by tsumo only, not ron):
+    /// 1. discard furiten: any waiting tile appears in their own discards
+    /// 2. riichi furiten: passed a ron after riichi (lasts the whole hand)
+    /// 3. temporary furiten: passed a ron (until their next draw)
     pub fn is_furiten(&self) -> bool {
-        // リーチ後フリテン・同巡フリテン（O(1)で早期リターン）
+        // Flag checks are O(1); the waiting-tile scan below is not.
         if self.is_riichi_furiten || self.is_temporary_furiten {
             return true;
         }
-        // 捨て牌フリテン
         let waiting = scoring::get_waiting_tiles(self);
         if waiting.is_empty() {
             return false;
@@ -421,11 +403,10 @@ impl Player {
         false
     }
 
-    // ===== 鳴き実行メソッド =====
+    // ----- Call execution -----
 
-    /// ポンを実行する
-    ///
-    /// 手牌から同じ種類の牌2枚を取り除き、鳴いた牌と合わせて副露に追加する。
+    /// Executes a pon: removes the two hand tiles and melds them with
+    /// the called tile.
     pub fn do_pon(&mut self, called_tile: Tile, hand_tiles: [Tile; 2], from: MeldFrom) {
         let mut indices: Vec<usize> = Vec::new();
         for &target in &hand_tiles {
@@ -453,9 +434,8 @@ impl Player {
         self.is_ippatsu = false;
     }
 
-    /// チーを実行する
-    ///
-    /// 手牌から指定種類の牌2枚を取り除き、鳴いた牌と合わせて副露に追加する。
+    /// Executes a chii: removes the two hand tiles and melds them with
+    /// the called tile.
     pub fn do_chi(&mut self, called_tile: Tile, hand_tiles: [Tile; 2]) {
         let mut indices: Vec<usize> = Vec::new();
         for &target in &hand_tiles {
@@ -472,14 +452,13 @@ impl Player {
 
         self.hand.remove_tiles_by_indices(&mut indices);
 
-        // 順子の牌をソートして副露に追加
         let mut chi_tiles = [t1, t2, called_tile];
         chi_tiles.sort();
 
         self.hand.add_meld(Meld {
             tiles: chi_tiles.to_vec(),
             category: MeldType::Chi,
-            from: MeldFrom::Previous, // チーは常に上家から
+            from: MeldFrom::Previous, // Chii always comes from the left player.
             called_tile: Some(called_tile),
         });
 
@@ -487,7 +466,7 @@ impl Player {
         self.is_ippatsu = false;
     }
 
-    /// 大明カンを実行する
+    /// Executes a called quad (daiminkan).
     pub fn do_daiminkan(&mut self, called_tile: Tile, from: MeldFrom) {
         let tt = called_tile.get();
         let mut indices: Vec<usize> = Vec::new();
@@ -514,7 +493,7 @@ impl Player {
         self.is_ippatsu = false;
     }
 
-    /// 暗カンを実行する
+    /// Executes a concealed kan (ankan).
     pub fn do_ankan(&mut self, tile_type: TileType) {
         let mut indices: Vec<usize> = Vec::new();
         for (i, t) in self.hand.tiles().iter().enumerate() {
@@ -533,14 +512,16 @@ impl Player {
 
         let mut kan_tiles: Vec<Tile> = indices.iter().map(|&idx| self.hand.tiles()[idx]).collect();
 
-        // カン牌を先に除去する。ツモ牌を手牌に戻してソートすると
-        // indices が指す位置がずれて誤った牌を削除してしまうため。
+        // Remove the kan tiles first: pushing the drawn tile back and
+        // sorting would shift the positions `indices` points at and
+        // delete the wrong tiles.
         self.hand.remove_tiles_by_indices(&mut indices);
 
         if drawn_matches {
             kan_tiles.push(drawn.unwrap());
         } else if let Some(d) = drawn {
-            // ツモ牌がカン牌でない場合、手牌に戻す（嶺上ツモで上書きされないよう）
+            // An unrelated drawn tile goes back into the hand so the
+            // replacement draw does not overwrite it.
             self.hand.tiles_mut().push(d);
             self.hand.sort();
         }
@@ -559,7 +540,7 @@ impl Player {
         self.is_ippatsu = false;
     }
 
-    /// 加カンを実行する
+    /// Executes a promoted quad (kakan).
     pub fn do_kakan(&mut self, tile_type: TileType) {
         let drawn_matches = self
             .hand
@@ -609,7 +590,7 @@ impl Player {
         stored
     }
 
-    /// 手牌に含まれる槓子の数を返す
+    /// Number of quads the player has declared.
     pub fn kan_count(&self) -> usize {
         self.hand
             .melds()
@@ -618,17 +599,18 @@ impl Player {
             .count()
     }
 
-    /// 捨てたプレイヤーと自分の相対位置から MeldFrom を返す
+    /// Maps the caller/discarder seat difference to a `MeldFrom`.
     ///
-    /// 三麻（player_count=3）では対面が存在せず、diff 1=上家・diff 2=下家となる。
+    /// In three-player games there is no across player: diff 1 is the
+    /// left player and diff 2 the right player.
     pub fn meld_from_relative(caller: usize, discarder: usize, player_count: usize) -> MeldFrom {
         let diff = (caller + player_count - discarder) % player_count;
         if diff == 1 {
-            MeldFrom::Previous // 上家（カミチャ）
+            MeldFrom::Previous
         } else if diff == player_count - 1 {
-            MeldFrom::Following // 下家（シモチャ）
+            MeldFrom::Following
         } else if diff == 2 {
-            MeldFrom::Opposite // 対面（トイメン）
+            MeldFrom::Opposite
         } else {
             unreachable!()
         }
@@ -641,7 +623,7 @@ mod tests {
     use mahjong_core::tile::Tile;
 
     fn make_test_tiles() -> Vec<Tile> {
-        // 1m2m3m 4p5p6p 7s8s9s 1z2z3z4z の13枚
+        // 1m2m3m 4p5p6p 7s8s9s 1z2z3z4z
         vec![
             Tile::new(Tile::M1),
             Tile::new(Tile::M2),
@@ -692,13 +674,12 @@ mod tests {
 
         player.draw(draw_tile);
 
-        // 手牌の最初の牌（1m）を捨てる
         let discarded = player.discard(Some(Tile::new(Tile::M1)));
         assert_eq!(discarded.get(), Tile::M1);
         assert_eq!(player.discards.len(), 1);
         assert!(!player.discards[0].is_tsumogiri);
 
-        // 手牌が13枚のままであること（ツモ牌が手牌に入った）
+        // Still 13 tiles: the drawn tile joined the hand.
         assert_eq!(player.hand.tiles().len(), 13);
         assert!(player.hand.drawn().is_none());
     }
@@ -711,7 +692,7 @@ mod tests {
         assert!(player.is_riichi);
         assert!(!player.is_double_riichi);
         assert!(player.is_ippatsu);
-        assert_eq!(player.score, 24000); // 1000点引かれる
+        assert_eq!(player.score, 24000); // minus the riichi deposit
 
         player.declare_riichi(true);
         assert!(player.is_double_riichi);
@@ -731,7 +712,6 @@ mod tests {
 
     #[test]
     fn test_can_pon() {
-        // 手牌: 1m1m3m 4p5p6p 7s8s9s 1z2z3z4z
         let tiles = vec![
             Tile::new(Tile::M1),
             Tile::new(Tile::M1),
@@ -748,13 +728,12 @@ mod tests {
             Tile::new(Tile::Z4),
         ];
         let player = Player::new(Wind::East, tiles, 25000);
-        assert!(player.can_pon(Tile::new(Tile::M1))); // 1mが2枚ある
-        assert!(!player.can_pon(Tile::new(Tile::M3))); // 3mは1枚しかない
+        assert!(player.can_pon(Tile::new(Tile::M1)));
+        assert!(!player.can_pon(Tile::new(Tile::M3)));
     }
 
     #[test]
     fn test_chi_options() {
-        // 手牌: 2m3m5m 4p5p6p 7s8s9s 1z2z3z4z
         let tiles = vec![
             Tile::new(Tile::M2),
             Tile::new(Tile::M3),
@@ -772,7 +751,7 @@ mod tests {
         ];
         let player = Player::new(Wind::East, tiles, 25000);
 
-        // 4mでチー: [2m,3m] or [3m,5m]
+        // Calling 4m: [2m,3m] or [3m,5m].
         let options = player.chi_options(Tile::new(Tile::M4));
         assert_eq!(options.len(), 2);
         assert!(
@@ -786,11 +765,10 @@ mod tests {
                 .any(|o| o[0].get() == Tile::M3 && o[1].get() == Tile::M5)
         );
 
-        // 字牌はチー不可
         let options = player.chi_options(Tile::new(Tile::Z1));
         assert!(options.is_empty());
 
-        // 1mでチー: [2m,3m]
+        // Calling 1m: only [2m,3m].
         let options = player.chi_options(Tile::new(Tile::M1));
         assert_eq!(options.len(), 1);
         assert_eq!(options[0][0].get(), Tile::M2);
@@ -823,12 +801,9 @@ mod tests {
             MeldFrom::Previous,
         );
 
-        // 手牌が11枚になること（13 - 2 = 11）
         assert_eq!(player.hand.tiles().len(), 11);
-        // 副露が1つ
         assert_eq!(player.hand.melds().len(), 1);
         assert_eq!(player.hand.melds()[0].category, MeldType::Pon);
-        // 門前でなくなる
         assert!(!player.is_menzen());
     }
 
@@ -854,12 +829,9 @@ mod tests {
 
         player.do_chi(called, [Tile::new(Tile::M3), Tile::new(Tile::M5)]);
 
-        // 手牌が11枚になること
         assert_eq!(player.hand.tiles().len(), 11);
-        // 副露が1つ
         assert_eq!(player.hand.melds().len(), 1);
         assert_eq!(player.hand.melds()[0].category, MeldType::Chi);
-        // 門前でなくなる
         assert!(!player.is_menzen());
     }
 
@@ -953,8 +925,9 @@ mod tests {
         );
     }
 
-    /// 回帰テスト: カン牌より小さいツモ牌を手牌に戻す暗カンで、
-    /// ソートによるインデックスずれで誤った牌が削除されないこと
+    /// Regression: a concealed kan that returns a drawn tile smaller than
+    /// the kan tiles must not delete the wrong tiles via the sort-induced
+    /// index shift.
     #[test]
     fn test_do_ankan_with_smaller_unrelated_drawn_tile() {
         let hand = Hand::from("234m567m234p9999s 1m");
@@ -1032,24 +1005,22 @@ mod tests {
 
     #[test]
     fn test_meld_from_relative() {
-        // プレイヤー1から見たプレイヤー0 → 上家（Previous）
         assert_eq!(Player::meld_from_relative(1, 0, 4), MeldFrom::Previous);
-        // プレイヤー2から見たプレイヤー0 → 対面（Opposite）
         assert_eq!(Player::meld_from_relative(2, 0, 4), MeldFrom::Opposite);
-        // プレイヤー3から見たプレイヤー0 → 下家（Following）
         assert_eq!(Player::meld_from_relative(3, 0, 4), MeldFrom::Following);
     }
 
     #[test]
     fn test_can_pei_and_do_pei_from_hand() {
         let mut player = Player::new(Wind::East, make_test_tiles(), 35000);
-        // make_test_tiles は 4z（北）を1枚含む
+        // make_test_tiles includes one North (4z).
         assert!(player.can_pei());
 
         player.draw(Tile::new(Tile::P1));
         assert!(player.do_pei());
 
-        // 北が手牌から抜かれ、ツモ牌が手牌に組み込まれる（13枚のまま）
+        // The North leaves the hand and the drawn tile joins it,
+        // keeping 13 tiles.
         assert_eq!(player.pei_tiles.len(), 1);
         assert_eq!(player.pei_tiles[0].get(), Tile::Z4);
         assert_eq!(player.hand.tiles().len(), 13);
@@ -1063,7 +1034,8 @@ mod tests {
         player.draw(Tile::new(Tile::Z4));
         assert!(player.do_pei());
 
-        // ツモった北を優先して抜くため、手牌の北は残る
+        // The drawn North is extracted in preference, so the one in
+        // the hand stays.
         assert_eq!(player.pei_tiles.len(), 1);
         assert!(player.hand.tiles().iter().any(|t| t.get() == Tile::Z4));
         assert!(player.hand.drawn().is_none());
@@ -1074,10 +1046,10 @@ mod tests {
         let mut player = Player::new(Wind::East, make_test_tiles(), 35000);
         player.is_riichi = true;
 
-        // リーチ中は手牌の北だけでは抜けない
+        // Under riichi a North in the hand alone is not extractable.
         assert!(!player.can_pei());
 
-        // ツモった牌が北なら抜ける
+        // A drawn North is.
         player.draw(Tile::new(Tile::Z4));
         assert!(player.can_pei());
         assert!(player.do_pei());
@@ -1103,7 +1075,6 @@ mod tests {
 
     #[test]
     fn test_meld_from_relative_three_player() {
-        // 三麻: 対面は存在せず、diff 1=上家・diff 2=下家
         assert_eq!(Player::meld_from_relative(1, 0, 3), MeldFrom::Previous);
         assert_eq!(Player::meld_from_relative(2, 0, 3), MeldFrom::Following);
         assert_eq!(Player::meld_from_relative(0, 2, 3), MeldFrom::Previous);
@@ -1133,11 +1104,10 @@ mod tests {
     #[test]
     fn test_forbidden_discard_is_rejected() {
         let mut player = Player::new(Wind::East, make_test_tiles(), 25000);
-        // 1m を喰い替え禁止に設定
         player.set_forbidden_discards(vec![Tile::M1]);
 
         assert!(player.is_swap_call_forbidden(Tile::new(Tile::M1)));
-        // 禁止牌の打牌は拒否され、手牌は変化しない
+        // The forbidden discard is rejected and the hand is untouched.
         assert!(player.try_discard(Some(Tile::new(Tile::M1))).is_none());
         assert_eq!(player.hand.tiles().len(), 13);
         assert!(player.discards.is_empty());
@@ -1148,10 +1118,9 @@ mod tests {
         let mut player = Player::new(Wind::East, make_test_tiles(), 25000);
         player.set_forbidden_discards(vec![Tile::M1]);
 
-        // 禁止されていない牌は通常どおり捨てられる
         let discarded = player.try_discard(Some(Tile::new(Tile::M2)));
         assert_eq!(discarded.map(|t| t.get()), Some(Tile::M2));
-        // 打牌完了で制限が解除され、以後は 1m も捨てられる
+        // Completing a discard lifts the restriction; 1m becomes legal.
         assert!(!player.is_swap_call_forbidden(Tile::new(Tile::M1)));
         assert_eq!(player.discard(Some(Tile::new(Tile::M1))).get(), Tile::M1);
     }
@@ -1161,7 +1130,7 @@ mod tests {
         let mut player = Player::new(Wind::East, make_test_tiles(), 25000);
         player.set_forbidden_discards(vec![Tile::M1]);
 
-        // ツモで喰い替え制限は解除される
+        // Drawing lifts the restriction.
         player.draw(Tile::new(Tile::Z5));
         assert!(!player.is_swap_call_forbidden(Tile::new(Tile::M1)));
         assert_eq!(player.discard(Some(Tile::new(Tile::M1))).get(), Tile::M1);

@@ -1,4 +1,4 @@
-//! 鳴き（ロン・ポン・カン・チー）の判定と解決
+//! Call detection and resolution (ron, pon, kan, chii).
 
 use mahjong_core::hand_info::meld::MeldType;
 use mahjong_core::tile::{Tile, TileType};
@@ -13,9 +13,9 @@ use super::{
 };
 
 impl Round {
-    /// 打牌の通知と鳴き候補チェックを行い、フェーズを遷移させる
+    /// Announces a discard, checks call options, and advances the phase.
     ///
-    /// `do_discard` と `do_riichi` で共通の打牌後処理。
+    /// Shared post-discard flow for `do_discard` and `do_riichi`.
     pub(super) fn announce_discard_and_check_calls(
         &mut self,
         discarded: Tile,
@@ -23,7 +23,6 @@ impl Round {
         is_tsumogiri: bool,
         hand_index: Option<usize>,
     ) {
-        // 全プレイヤーに打牌を通知
         let discarder_wind = self.players[discarder].seat_wind;
         for i in 0..self.player_count {
             self.events.push((
@@ -37,15 +36,12 @@ impl Round {
             ));
         }
 
-        // 鳴き候補をチェック
         let call_state = self.check_available_calls(discarded, discarder);
         let has_any_calls = call_state.available_calls.iter().any(|c| !c.is_empty());
 
         if has_any_calls {
-            // 鳴き候補がある場合、WaitForCalls フェーズへ
             self.phase = TurnPhase::WaitForCalls;
 
-            // 各プレイヤーに鳴き可能通知を送信
             for i in 0..self.player_count {
                 if !call_state.available_calls[i].is_empty() {
                     self.events.push((
@@ -61,16 +57,14 @@ impl Round {
 
             self.call_state = Some(call_state);
         } else {
-            // 鳴き候補がなければ次のプレイヤーへ
             self.current_player = self.next_seat(discarder);
             self.phase = TurnPhase::Draw;
 
-            // 特殊流局チェック（四家立直チェック含む）
             self.check_special_draws();
         }
     }
 
-    /// 打牌後の鳴き候補を全てチェックする
+    /// Collects every player's call options for a discard.
     pub(super) fn check_available_calls(
         &self,
         discarded_tile: Tile,
@@ -79,7 +73,9 @@ impl Round {
         let is_last_tile = self.wall.is_empty();
         let mut available_calls: [Vec<AvailableCall>; 4] =
             [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-        let mut responded = [true; 4]; // デフォルトは応答済み（対象外・ダミー席含む）
+        // Players with no options (and the dummy seat) count as already
+        // responded, so resolution waits only on real choices.
+        let mut responded = [true; 4];
 
         for i in 0..self.player_count {
             if i == discarder {
@@ -88,8 +84,7 @@ impl Round {
 
             let player = &self.players[i];
 
-            // リーチ中は鳴き不可（ロンのみ可）
-            // ロン判定: フリテンでなく、和了形であること
+            // Furiten blocks ron entirely; riichi players may still ron.
             if !player.is_furiten() {
                 let win_result = scoring::check_ron_with_settings(
                     player,
@@ -103,7 +98,7 @@ impl Round {
                 }
             }
 
-            // リーチ中は鳴き不可
+            // A riichi player cannot call anything except ron.
             if player.is_riichi {
                 if !available_calls[i].is_empty() {
                     responded[i] = false;
@@ -111,18 +106,18 @@ impl Round {
                 continue;
             }
 
-            // ポン判定
             let pon_opts = player.pon_options(discarded_tile);
             if !pon_opts.is_empty() {
                 available_calls[i].push(AvailableCall::Pon { options: pon_opts });
             }
 
-            // 大明カン判定（場全体で4回カン済みなら不可）
+            // No further quads once four exist on the table.
             if self.total_kan_count() < 4 && player.can_daiminkan(discarded_tile) {
                 available_calls[i].push(AvailableCall::Daiminkan);
             }
 
-            // チー判定（上家からのみ＝次のプレイヤー。三麻ではチーなし）
+            // Chii is only allowed from the left player (= the next seat)
+            // and does not exist in three-player games.
             let next_player = self.next_seat(discarder);
             if !self.settings.three_player && i == next_player {
                 let chi_opts = player.chi_options(discarded_tile);
@@ -149,10 +144,8 @@ impl Round {
         }
     }
 
-    /// 鳴き応答を処理する
-    ///
-    /// プレイヤーからの鳴き応答（Ron/Pon/Chi/Pass）を受け付ける。
-    /// 全員の応答が揃ったら、優先度に基づいて鳴きを解決する。
+    /// Accepts a player's call response (Ron/Pon/Chi/Pass) and, once all
+    /// responses are in, resolves the calls by priority.
     pub fn respond_to_call(&mut self, player_idx: usize, response: CallResponse) -> bool {
         if self.phase != TurnPhase::WaitForCalls {
             return false;
@@ -163,15 +156,12 @@ impl Round {
             None => return false,
         };
 
-        // 既に応答済みなら無視
         if call_state.responded[player_idx] {
             return false;
         }
 
-        // 応答を記録
         match response {
             CallResponse::Ron => {
-                // ロン可能か確認
                 if call_state.available_calls[player_idx]
                     .iter()
                     .any(|c| matches!(c, AvailableCall::Ron))
@@ -182,7 +172,6 @@ impl Round {
                 }
             }
             CallResponse::Pon { hand_tile_types } => {
-                // ポンの組み合わせが有効か確認
                 let valid = call_state.available_calls[player_idx].iter().any(|c| {
                     if let AvailableCall::Pon { options } = c {
                         options.contains(&hand_tile_types)
@@ -207,7 +196,6 @@ impl Round {
                 }
             }
             CallResponse::Chi { hand_tile_types } => {
-                // チーの組み合わせが有効か確認
                 let valid = call_state.available_calls[player_idx].iter().any(|c| {
                     if let AvailableCall::Chi { options } = c {
                         options.contains(&hand_tile_types)
@@ -221,14 +209,11 @@ impl Round {
                     return false;
                 }
             }
-            CallResponse::Pass => {
-                // パスは何もしない
-            }
+            CallResponse::Pass => {}
         }
 
         call_state.responded[player_idx] = true;
 
-        // 全員応答済みなら解決
         if call_state.responded.iter().all(|&r| r) {
             self.resolve_calls();
         }
@@ -236,12 +221,12 @@ impl Round {
         true
     }
 
-    /// 鳴きを解決する（優先度: ロン > 大明カン > ポン > チー > パス）
+    /// Resolves the calls, in priority order:
+    /// ron > called quad > pon > chii > pass.
     fn resolve_calls(&mut self) {
         let call_state = self.call_state.take().unwrap();
 
-        // ロン見逃しによるフリテン判定
-        // AvailableCall::Ron があったのにロン宣言しなかったプレイヤーにフリテンを設定
+        // Passing on an available ron makes the player furiten.
         for i in 0..self.player_count {
             let had_ron = call_state.available_calls[i]
                 .iter()
@@ -250,16 +235,15 @@ impl Round {
 
             if had_ron && !declared_ron {
                 if self.players[i].is_riichi {
-                    // リーチ中 → リーチ後フリテン（局終了まで永続）
+                    // Permanent for the rest of the hand under riichi.
                     self.players[i].is_riichi_furiten = true;
                 } else {
-                    // 非リーチ → 同巡フリテン（自分のツモ番で解除）
+                    // Otherwise only until the player's own next draw.
                     self.players[i].is_temporary_furiten = true;
                 }
             }
         }
 
-        // 1. ロン（最優先）
         if !call_state.ron_declared.is_empty() {
             let is_robbing_a_quad =
                 matches!(call_state.resolution, CallResolution::AfterKakan { .. });
@@ -267,22 +251,22 @@ impl Round {
             let winning_tile = call_state.discarded_tile;
             let ron_count = call_state.ron_declared.len();
 
-            // 打順優先順（下家→対面→上家）でソート
+            // Sort by turn-order priority from the discarder
+            // (right, across, left).
             let mut sorted_winners = call_state.ron_declared.clone();
             sorted_winners
                 .sort_by_key(|&p| (p + self.player_count - discarder) % self.player_count);
 
             if ron_count >= 3 && self.settings.triple_ron_draw {
-                // 三家和流局（最優先）
+                // The triple-ron abortive draw outranks everything else.
                 self.declare_special_draw(DrawReason::TripleRon, None);
                 return;
             }
 
-            // 複数同時ロンが有効かつ2人以上: 全員和了
             let winners = if ron_count >= 2 && self.settings.multiple_ron {
                 sorted_winners
             } else {
-                // 上家取り: 最優先の1人のみ和了
+                // Head bump: only the player closest in turn order wins.
                 vec![sorted_winners[0]]
             };
 
@@ -295,13 +279,11 @@ impl Round {
             return;
         }
 
-        // 2. 大明カン
         if let Some(caller) = call_state.daiminkan_declared {
             self.execute_daiminkan(caller, call_state.discarder, call_state.discarded_tile);
             return;
         }
 
-        // 3. ポン
         if let Some((caller, hand_tile_types)) = call_state.pon_declared {
             self.execute_pon(
                 caller,
@@ -312,7 +294,6 @@ impl Round {
             return;
         }
 
-        // 4. チー
         if let Some((caller, hand_tile_types)) = call_state.chi_declared {
             self.execute_chi(
                 caller,
@@ -323,18 +304,18 @@ impl Round {
             return;
         }
 
-        // 5. 全員パス → 次のプレイヤーへ
+        // Everyone passed; move on to the next player.
         self.current_player = self.next_seat(call_state.discarder);
         self.phase = TurnPhase::Draw;
 
-        // 特殊流局チェック
         self.check_special_draws();
     }
 
-    /// ロン和了を実行する（通常・ダブロン・トリロン共通）
+    /// Executes a ron win, covering single, double, and triple ron.
     ///
-    /// - winners: ロン和了者の打順優先順（下家→対面→上家）でソート済みのインデックスリスト
-    /// - 本場ボーナスと供託棒は最初の和了者（打順最優先）のみが取得する
+    /// - `winners` is sorted by turn-order priority from the discarder.
+    /// - The honba bonus and riichi deposits go only to the first winner
+    ///   in turn order.
     pub(super) fn execute_ron(
         &mut self,
         winners: Vec<usize>,
@@ -355,7 +336,6 @@ impl Round {
             score_points: i32,
         }
 
-        // 打順が最も早い和了者を rank=0 として本場・供託ボーナスの基準にする
         let mut winner_data: Vec<WinnerData> = Vec::new();
 
         for (rank, &winner) in winners.iter().enumerate() {
@@ -395,7 +375,9 @@ impl Round {
             );
 
             let winner_is_dealer = self.players[winner].is_dealer();
-            // 包（責任払い）: 対象役満が成立していれば包のプレイヤーが放銃者と折半で支払う
+            // Liability payment (pao / 包): the liable player splits the
+            // payment with the deal-in player when a qualifying yakuman
+            // was completed.
             let deltas = if let Some(pao_player) =
                 self.pao_player_for_win(winner, &score_result.yaku_list)
             {
@@ -417,7 +399,6 @@ impl Round {
                 )
             };
 
-            // 供託棒は打順最優先の和了者（winner_data の先頭）のみ取得
             let riichi_bonus = if winner_data.is_empty() {
                 (riichi_sticks as i32) * RIICHI_STICK_VALUE
             } else {
@@ -434,20 +415,19 @@ impl Round {
             });
         }
 
-        // 安全のため: 和了成立者が0人ならフェーズを進めて返す
+        // Safety net: if no declared ron actually validates,
+        // keep the game moving instead of stalling.
         if winner_data.is_empty() {
             self.current_player = self.next_seat(loser);
             self.phase = TurnPhase::Draw;
             return;
         }
 
-        // 全スコアデルタを合算して適用
         for wd in &winner_data {
             for i in 0..self.player_count {
                 self.players[i].score += wd.deltas[i];
             }
         }
-        // 供託棒は打順最優先の和了者に付与
         if riichi_sticks > 0 {
             self.players[winner_data[0].winner].score +=
                 (riichi_sticks as i32) * RIICHI_STICK_VALUE;
@@ -461,7 +441,6 @@ impl Round {
         let scores = self.get_scores();
         let loser_wind = self.players[loser].seat_wind;
 
-        // 各和了者にRoundWonイベントを送信
         for (idx, wd) in winner_data.iter().enumerate() {
             let winner_wind = self.players[wd.winner].seat_wind;
             let yaku_list = wd.score_result.yaku_list.clone();
@@ -499,13 +478,14 @@ impl Round {
         });
     }
 
-    /// 包（責任払い）の成立を判定して記録する
+    /// Records a liability payment (pao / 包) when a call locks in
+    /// a yakuman.
     ///
-    /// ポン・大明カンの直後に呼ぶ。鳴きによって役満が確定した場合、
-    /// 鳴かせたプレイヤー（discarder）を責任払いの対象として記録する。
-    /// - 大三元: 3種類目の三元牌の刻子を鳴きで完成させた
-    /// - 大四喜: 4種類目の風牌の刻子を鳴きで完成させた
-    /// - 四槓子: 4回目のカンを大明カンで完成させた
+    /// Called right after a pon or called quad. The discarder who fed the
+    /// call becomes liable when it completes:
+    /// - Big Dragons: the third dragon triplet
+    /// - Big Winds: the fourth wind triplet
+    /// - Four Quads: the fourth quad via a called quad
     fn record_pao_if_confirmed(
         &mut self,
         caller: usize,
@@ -541,7 +521,7 @@ impl Round {
         }
     }
 
-    /// ポンを実行する
+    /// Executes a pon.
     pub(super) fn execute_pon(
         &mut self,
         caller: usize,
@@ -553,13 +533,10 @@ impl Round {
         self.players[caller].do_pon(called_tile, hand_tile_types, from);
         self.record_pao_if_confirmed(caller, discarder, called_tile, false);
 
-        // 捨て牌を「鳴かれた」としてマーク
         self.mark_last_discard_as_called(discarder);
 
-        // 鳴きにより全プレイヤーの一発フラグを無効化
         self.invalidate_first_turn_flags();
 
-        // 全プレイヤーにポン通知
         let caller_wind = self.players[caller].seat_wind;
         let tiles: Vec<Tile> = self.players[caller]
             .hand
@@ -581,7 +558,6 @@ impl Round {
             ));
         }
 
-        // 鳴いたプレイヤーに手牌更新を通知
         self.events.push((
             caller,
             ServerEvent::HandUpdated {
@@ -589,13 +565,12 @@ impl Round {
             },
         ));
 
-        // 喰い替え禁止牌を設定し、ポンしたプレイヤーの打牌待ちへ
         self.apply_swap_call_restriction(caller);
         self.current_player = caller;
         self.phase = TurnPhase::WaitForDiscard;
     }
 
-    /// 大明カンを実行する
+    /// Executes a called quad (daiminkan / 大明槓).
     pub(super) fn execute_daiminkan(&mut self, caller: usize, discarder: usize, called_tile: Tile) {
         let from = Player::meld_from_relative(caller, discarder, self.player_count);
         self.players[caller].do_daiminkan(called_tile, from);
@@ -632,7 +607,7 @@ impl Round {
         self.draw_after_kan(caller);
     }
 
-    /// チーを実行する
+    /// Executes a chii.
     pub(super) fn execute_chi(
         &mut self,
         caller: usize,
@@ -642,13 +617,10 @@ impl Round {
     ) {
         self.players[caller].do_chi(called_tile, hand_tile_types);
 
-        // 捨て牌を「鳴かれた」としてマーク
         self.mark_last_discard_as_called(discarder);
 
-        // 鳴きにより全プレイヤーの一発フラグを無効化
         self.invalidate_first_turn_flags();
 
-        // 全プレイヤーにチー通知
         let caller_wind = self.players[caller].seat_wind;
         let tiles: Vec<Tile> = self.players[caller]
             .hand
@@ -670,7 +642,6 @@ impl Round {
             ));
         }
 
-        // 鳴いたプレイヤーに手牌更新を通知
         self.events.push((
             caller,
             ServerEvent::HandUpdated {
@@ -678,13 +649,13 @@ impl Round {
             },
         ));
 
-        // 喰い替え禁止牌を設定し、チーしたプレイヤーの打牌待ちへ
         self.apply_swap_call_restriction(caller);
         self.current_player = caller;
         self.phase = TurnPhase::WaitForDiscard;
     }
 
-    /// チー・ポン直後の喰い替え禁止牌を、設定が有効なら当該プレイヤーに設定する
+    /// Applies the swap-calling (kuikae) discard restriction to the caller
+    /// when the rule is enabled.
     fn apply_swap_call_restriction(&mut self, caller: usize) {
         if !self.settings.forbid_swap_calling {
             return;

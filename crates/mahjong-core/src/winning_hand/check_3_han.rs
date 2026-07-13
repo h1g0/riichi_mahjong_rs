@@ -6,7 +6,7 @@ use crate::hand_info::status::*;
 use crate::settings::*;
 use crate::winning_hand::name::*;
 
-/// 二盃口
+/// Double Twin Sequences (Ryanpeikō / 二盃口)
 pub fn check_double_twin_sequences(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -20,15 +20,14 @@ pub fn check_double_twin_sequences(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 門前でなければ二盃口は成立しない
+    // Closed hands only.
     if status.has_claimed_open {
         return Ok((name, false, 0));
     }
-    // 順子が4つなければ二盃口はありえない
+    // Two identical sequence pairs require all four groups to be sequences.
     if hand_analyzer.sequential3.len() != 4 {
         return Ok((name, false, 0));
     }
-    // 2組の同じ順子ペアがあるか確認
     let mut used = [false; 4];
     let mut pair_count = 0;
     for i in 0..4 {
@@ -53,7 +52,7 @@ pub fn check_double_twin_sequences(
         Ok((name, false, 0))
     }
 }
-/// 純全帯么九
+/// Perfect Ends (Junchan / 純全帯么九)
 pub fn check_perfect_ends(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -67,28 +66,24 @@ pub fn check_perfect_ends(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 清老頭とは複合しないため、必ず順子が含まれる
+    // A hand with no sequences would be Perfect Terminals (清老頭) instead;
+    // the two yaku never combine, so require at least one sequence.
     if hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
 
     let mut no_1_9 = false;
-    // 面子
-
-    // 刻子
     for same in &hand_analyzer.same3 {
         if !same.has_1_or_9()? {
             no_1_9 = true;
         }
     }
-    // 順子
     for seq in &hand_analyzer.sequential3 {
         if !seq.has_1_or_9()? {
             no_1_9 = true;
         }
     }
 
-    // 雀頭
     for head in &hand_analyzer.same2 {
         if !head.has_1_or_9()? {
             no_1_9 = true;
@@ -104,7 +99,7 @@ pub fn check_perfect_ends(
         Ok((name, true, 3))
     }
 }
-/// 混一色
+/// Common Flush (Hon'itsu / 混一色)
 pub fn check_common_flush(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -180,7 +175,6 @@ pub fn check_common_flush(
     }
 }
 
-/// ユニットテスト
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,7 +182,6 @@ mod tests {
     use crate::winning_hand::check_2_han::*;
 
     #[test]
-    /// 純全帯么九で和了った
     fn test_perfect_ends() {
         let test_str = "123999m11p11179s 8s";
         let test = Hand::from(test_str);
@@ -201,8 +194,8 @@ mod tests {
             ("純全帯么九", true, 3)
         );
     }
+    /// Open hands score one han less (3 → 2).
     #[test]
-    /// 純全帯么九で和了った（食い下がり2翻）
     fn test_perfect_ends_open() {
         let test_str = "123m111p7999s 789m 8s";
         let test = Hand::from(test_str);
@@ -216,8 +209,8 @@ mod tests {
         );
     }
 
+    /// Common Ends (混全帯么九) and Perfect Ends (純全帯么九) never combine.
     #[test]
-    /// 混全帯么九は純全帯么九と複合しない
     fn test_common_ends_does_not_combined_with_perfect_ends() {
         let test_str = "111789m111p99s11z 1z";
         let test = Hand::from(test_str);
@@ -237,7 +230,6 @@ mod tests {
         );
     }
     #[test]
-    /// 純全帯么九は混全帯么九と複合しない
     fn test_perfect_ends_does_not_combined_with_common_ends() {
         let test_str = "111789m111p1199s 9s";
         let test = Hand::from(test_str);
@@ -256,8 +248,9 @@ mod tests {
                 .1
         );
     }
+    /// This shape also parses as Seven Pairs, but the higher-scoring
+    /// interpretation (Double Twin Sequences) must win.
     #[test]
-    /// 二盃口で和了った（高点法により七対子より二盃口が優先される）
     fn test_double_twin_sequences() {
         let test_str = "112233m456456p7z 7z";
         let test = Hand::from(test_str);
@@ -271,8 +264,8 @@ mod tests {
             ("二盃口", true, 3)
         );
     }
+    /// Open hands score one han less (3 → 2).
     #[test]
-    /// 混一色で和了った（食い下がり2翻）
     fn test_common_flush() {
         let test_str = "123456m2z 789m 111z 2z";
         let test = Hand::from(test_str);
@@ -286,7 +279,6 @@ mod tests {
         );
     }
     #[test]
-    /// 混一色で和了った
     fn test_common_flush_closed() {
         let test_str = "11112345699m11z 9m";
         let test = Hand::from(test_str);

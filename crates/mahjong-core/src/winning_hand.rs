@@ -1,23 +1,23 @@
-/// 役を判定する
+/// Yaku evaluation entry point
 pub mod checker;
 
-/// 役の名前
+/// Yaku names
 pub mod name;
 
-/// 1翻役の判定
+/// 1-han yaku checks
 mod check_1_han;
 
-/// 2翻役の判定
+/// 2-han yaku checks
 mod check_2_han;
 
-/// 3翻役の判定
+/// 3-han yaku checks
 mod check_3_han;
 
-/// 5翻（満貫）役の判定
+/// 5-han (mangan) yaku checks
 mod check_5_han;
 
-/// 6翻役の判定
+/// 6-han yaku checks
 mod check_6_han;
 
-/// 役満の判定
+/// Yakuman checks
 mod check_yakuman;

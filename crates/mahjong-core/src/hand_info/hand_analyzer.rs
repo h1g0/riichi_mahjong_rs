@@ -8,30 +8,30 @@ use crate::hand_info::block::*;
 use crate::tile::*;
 use crate::winning_hand::name::Form;
 
-/// 向聴数
+/// Shanten number (向聴数): how many tile exchanges away from tenpai.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ShantenNumber(i32);
 
 impl ShantenNumber {
-    /// 該当なし（副露時の七対子・国士無双など）を表す定数
+    /// Not applicable, e.g. Seven Pairs / Thirteen Orphans with an open hand.
     const UNAVAILABLE: ShantenNumber = ShantenNumber(i32::MAX);
 
-    /// 和了しているか（shanten == -1）
+    /// The hand is complete (shanten == -1).
     pub fn has_won(&self) -> bool {
         self.0 == -1
     }
 
-    /// 聴牌しているか（shanten == 0）
+    /// The hand is tenpai (shanten == 0).
     pub fn is_ready(&self) -> bool {
         self.0 == 0
     }
 
-    /// 聴牌もしくは和了しているか（shanten <= 0）
+    /// The hand is tenpai or complete (shanten <= 0).
     pub fn is_ready_or_won(&self) -> bool {
         self.0 <= 0
     }
 
-    /// 生の`i32`値を返す
+    /// Returns the raw `i32` value.
     pub fn as_i32(&self) -> i32 {
         self.0
     }
@@ -55,25 +55,25 @@ impl fmt::Display for ShantenNumber {
     }
 }
 
-/// 与えられた手牌について、向聴数が最小になる時の面子・対子等の組み合わせを計算して格納する
+/// The block decomposition of a hand that minimizes its shanten number.
 ///
-/// 通常形・七対子の場合は面子・対子等の情報もVecに格納される。
-/// 国士無双の場合は向聴数のみが格納される。
+/// For the normal form and Seven Pairs the groups/pairs are stored in the
+/// Vecs below; for Thirteen Orphans only the shanten number is meaningful.
 #[derive(Debug, Eq)]
 pub struct HandAnalyzer {
-    /// 向聴数：あと牌を何枚交換すれば聴牌できるかの最小数。
+    /// Shanten number
     pub shanten: ShantenNumber,
-    /// どの和了形か
+    /// Which winning form the decomposition targets
     pub form: Form,
-    /// 刻子（同じ牌が3枚）が入るVec
+    /// Triplets (kōtsu / 刻子)
     pub same3: Vec<Same3>,
-    /// 順子（連続した牌が3枚）が入るVec
+    /// Sequences (shuntsu / 順子)
     pub sequential3: Vec<Sequential3>,
-    /// 対子（同じ牌が2枚）が入るVec
+    /// Pairs (toitsu / 対子)
     pub same2: Vec<Same2>,
-    /// 塔子（連続した牌が2枚）もしくは嵌張（順子の真ん中が抜けている2枚）が入るVec
+    /// Partial sequences: two adjacent tiles or a gapped pair (塔子・嵌張)
     pub sequential2: Vec<Sequential2>,
-    /// 面子や対子・塔子などを構成しない、単独の牌が入るVec
+    /// Tiles that belong to no block
     pub single: Vec<TileType>,
 }
 impl Ord for HandAnalyzer {
@@ -107,7 +107,8 @@ impl HandAnalyzer {
         }
     }
 
-    /// 七対子・国士無双・通常の3つの和了形に対してそれぞれ向聴数を求め、最小のものを返す。
+    /// Computes the shanten number for each of the three winning forms
+    /// (Seven Pairs, Thirteen Orphans, normal) and returns the minimum.
     /// # Examples
     ///
     /// ```
@@ -115,7 +116,7 @@ impl HandAnalyzer {
     /// use mahjong_core::hand_info::hand_analyzer::*;
     /// use mahjong_core::winning_hand::name::*;
     ///
-    /// // 通常型で和了る
+    /// // Winning with the normal form
     /// let nm_test_str = "222333444666s6z 6z";
     /// let nm_test = Hand::from(nm_test_str);
     /// let analyzer = HandAnalyzer::new(&nm_test).unwrap();
@@ -129,8 +130,9 @@ impl HandAnalyzer {
         let sp = HandAnalyzer::new_by_form(hand, Form::SevenPairs)?;
         let to = HandAnalyzer::new_by_form(hand, Form::ThirteenOrphans)?;
         let normal = HandAnalyzer::new_by_form(hand, Form::Normal)?;
-        // 高点法: 和了している場合、通常形を優先する。
-        // 二盃口（3翻）は七対子（2翻）より高得点であるため、通常形で和了できるならそちらを採用する。
+        // Highest-value interpretation: prefer the normal form on a win.
+        // E.g. Double Twin Sequences (3 han) outscores the same tiles read
+        // as Seven Pairs (2 han).
         if normal.shanten.has_won() {
             Ok(normal)
         } else {
@@ -138,7 +140,7 @@ impl HandAnalyzer {
         }
     }
 
-    /// 和了形を指定して向聴数を計算する
+    /// Computes the shanten number for one specific winning form.
     /// # Examples
     ///
     /// ```
@@ -146,17 +148,17 @@ impl HandAnalyzer {
     /// use mahjong_core::hand_info::hand_analyzer::*;
     /// use mahjong_core::winning_hand::name::*;
     ///
-    /// // 国士無双で和了る
+    /// // Winning with Thirteen Orphans
     /// let to_test_str = "19m19p19s1234567z 1m";
     /// let to_test = Hand::from(to_test_str);
     /// assert!(HandAnalyzer::new_by_form(&to_test, Form::ThirteenOrphans).unwrap().shanten.has_won());
     ///
-    /// // 七対子で和了る
+    /// // Winning with Seven Pairs
     /// let sp_test_str = "1122m3344p5566s7z 7z";
     /// let sp_test = Hand::from(sp_test_str);
     /// assert!(HandAnalyzer::new_by_form(&sp_test, Form::SevenPairs).unwrap().shanten.has_won());
     ///
-    /// // 通常型で和了る
+    /// // Winning with the normal form
     /// let nm_test_str = "1112345678999m 5m";
     /// let nm_test = Hand::from(nm_test_str);
     /// assert!(HandAnalyzer::new_by_form(&nm_test, Form::Normal).unwrap().shanten.has_won());
@@ -169,10 +171,11 @@ impl HandAnalyzer {
         })
     }
 
-    /// 七対子への向聴数を計算・ブロック分解する
+    /// Shanten and block decomposition towards Seven Pairs.
     ///
-    /// Vecへの詰め込みは`same2`（対子）以外は`single`（単独）に詰め込まれる。
-    /// 七対子はVecを使用する役として断么九・混老頭・混一色・清一色と複合しうる
+    /// Everything except pairs goes into `single`. The decomposition is still
+    /// needed because Seven Pairs can combine with block-based yaku such as
+    /// All Inside, Common Terminals, Common Flush, and Perfect Flush.
     fn analyze_seven_pairs(hand: &Hand) -> Result<HandAnalyzer> {
         if !hand.melds().is_empty() {
             return Ok(HandAnalyzer::unavailable(Form::SevenPairs));
@@ -205,9 +208,9 @@ impl HandAnalyzer {
         })
     }
 
-    /// 国士無双への向聴数を計算する
+    /// Shanten towards Thirteen Orphans.
     ///
-    /// ブロック分解・Vecへの詰め込みはしない（詰め込んでも意味がない）
+    /// No block decomposition: the form has no groups to decompose into.
     fn analyze_thirteen_orphans(hand: &Hand) -> Result<HandAnalyzer> {
         if !hand.melds().is_empty() {
             return Ok(HandAnalyzer::unavailable(Form::ThirteenOrphans));
@@ -226,7 +229,7 @@ impl HandAnalyzer {
         })
     }
 
-    /// 通常の役への向聴数を計算・ブロック分解する
+    /// Shanten and block decomposition for the normal form.
     fn analyze_normal_form(hand: &Hand) -> Result<HandAnalyzer> {
         let (shanten_raw, tracking) = calc_normal_shanten::<FullTracking>(hand)?;
         let FullTracking {
@@ -248,11 +251,11 @@ impl HandAnalyzer {
     }
 }
 
-/// 向聴数のみを高速に計算する
+/// Computes only the shanten number, quickly.
 ///
-/// `HandAnalyzer::new().shanten` と同じ結果を返すが、
-/// ブロック分解やVecへの格納を行わないため高速。
-/// CPU打牌評価など大量に呼び出す箇所で使用する。
+/// Returns the same value as `HandAnalyzer::new().shanten` but skips the
+/// block decomposition and Vec bookkeeping, for hot paths such as the CPU
+/// discard evaluation.
 pub fn calc_shanten_number(hand: &Hand) -> ShantenNumber {
     let t = hand.summarize_tiles();
     let is_closed = hand.melds().is_empty();
@@ -272,14 +275,14 @@ pub fn calc_shanten_number(hand: &Hand) -> ShantenNumber {
     ShantenNumber(min(min(sp, to), nm))
 }
 
-/// 和了形を指定して向聴数のみを高速に計算する
+/// Computes only the shanten number for one winning form, quickly.
 ///
-/// `HandAnalyzer::new_by_form(hand, form)` の `shanten` と同じ結果を返すが、
-/// ブロック分解やVecへの格納を行わないため高速。
-/// CPU の路線判断（一般形・七対子・国士無双の比較）など、
-/// 形ごとの向聴数を大量に計算する箇所で使用する。
+/// Returns the same value as `HandAnalyzer::new_by_form(hand, form).shanten`
+/// but skips the block decomposition, for hot paths such as the CPU's
+/// form comparison (normal vs Seven Pairs vs Thirteen Orphans).
 ///
-/// 副露がある場合、七対子・国士無双は該当なし（`i32::MAX` 相当）を返す。
+/// With an open hand, Seven Pairs and Thirteen Orphans return
+/// the unavailable sentinel.
 pub fn calc_shanten_number_by_form(hand: &Hand, form: Form) -> ShantenNumber {
     let is_closed = hand.melds().is_empty();
     match form {
@@ -305,9 +308,9 @@ pub fn calc_shanten_number_by_form(hand: &Hand, form: Form) -> ShantenNumber {
     }
 }
 
-/// 七対子のシャンテン数を計算する共通ロジック
+/// Core Seven Pairs shanten computation.
 ///
-/// 戻り値: `(shanten, pair_count)`
+/// Returns `(shanten, pair_count)`.
 fn calc_seven_pairs_shanten(t: &TileSummarize) -> (i32, u32) {
     let mut pair: u32 = 0;
     let mut kind: u32 = 0;
@@ -323,7 +326,7 @@ fn calc_seven_pairs_shanten(t: &TileSummarize) -> (i32, u32) {
     (shanten, pair)
 }
 
-/// 国士無双のシャンテン数を計算する共通ロジック
+/// Core Thirteen Orphans shanten computation.
 fn calc_thirteen_orphans_shanten(t: &TileSummarize) -> i32 {
     const TO_TILES: [usize; 13] = [
         Tile::M1 as usize,
@@ -354,27 +357,27 @@ fn calc_thirteen_orphans_shanten(t: &TileSummarize) -> i32 {
 }
 
 // ============================================================================
-// 共通シャンテン数計算エンジン
+// Shared shanten computation engine.
 //
-// ShantenAccumulator トレイトにより、ブロック分解を Vec で追跡する FullTracking と
-// カウンタのみで追跡する CountOnly の2つのモードを、同一の再帰ロジックで実行する。
-// Rust のモノモーフィゼーションにより CountOnly ではゼロコストで最適化される。
+// The ShantenAccumulator trait lets the same recursive search run in two
+// modes: FullTracking records the block decomposition in Vecs, CountOnly
+// keeps bare counters. Monomorphization makes CountOnly effectively free.
 // ============================================================================
 
-/// 前処理で抽出された独立ブロックの情報
+/// Independent blocks extracted by preprocessing.
 trait PreprocessResult {
     fn same3_count(&self) -> usize;
     fn seq3_count(&self) -> usize;
 }
 
-/// シャンテン数計算中のブロック蓄積を抽象化するトレイト
+/// Abstracts block bookkeeping during the shanten search.
 trait ShantenAccumulator: Sized {
     type Preprocess: PreprocessResult;
 
-    /// 前処理: 独立した刻子・順子・孤立牌を抽出する
+    /// Preprocessing: pull out independent triplets, sequences, and isolated tiles.
     fn preprocess(t: &mut TileSummarize) -> Result<Self::Preprocess>;
 
-    /// 新しい空の追跡状態を作成する
+    /// Creates an empty tracking state.
     fn new_tracking() -> Self;
 
     fn push_same3(&mut self, tile: usize);
@@ -393,14 +396,14 @@ trait ShantenAccumulator: Sized {
     fn pop_seq2(&mut self);
     fn seq2_count(&self) -> usize;
 
-    /// 新しい最良結果が見つかったときに呼ばれる。現在の状態をスナップショットする。
+    /// Called when a new best result is found; snapshots the current state.
     fn snapshot_best(&self, pre: &Self::Preprocess, t: &TileSummarize, head: usize) -> Self;
 
-    /// 最終結果に独立ブロックをマージする
+    /// Merges the preprocessed independent blocks into the final result.
     fn finalize(self, pre: Self::Preprocess) -> Self;
 }
 
-// シャンテン数カウントのみの高速版
+// Fast counter-only mode.
 struct CountOnlyPreprocess {
     same3: usize,
     seq3: usize,
@@ -498,7 +501,7 @@ impl ShantenAccumulator for CountOnly {
 
     #[inline(always)]
     fn snapshot_best(&self, _pre: &CountOnlyPreprocess, _t: &TileSummarize, _head: usize) -> Self {
-        // カウンタのみなのでスナップショット不要
+        // Counters carry no state worth snapshotting.
         CountOnly {
             same3: 0,
             seq3: 0,
@@ -513,8 +516,7 @@ impl ShantenAccumulator for CountOnly {
     }
 }
 
-// Vec に個々の面子などを格納する
-// 役判定や符計算用に使用する、ややコストのかかるバージョン
+// Full mode: records every block in Vecs for yaku and fu evaluation.
 
 struct FullTrackingPreprocess {
     same3: Vec<Same3>,
@@ -642,7 +644,7 @@ impl ShantenAccumulator for FullTracking {
     }
 }
 
-/// 通常形のシャンテン数を計算する共通エントリポイント
+/// Entry point for the normal-form shanten search.
 fn calc_normal_shanten<A: ShantenAccumulator>(hand: &Hand) -> Result<(i32, A)> {
     let mut t = hand.summarize_tiles();
     let mut best = i32::MAX;
@@ -651,7 +653,7 @@ fn calc_normal_shanten<A: ShantenAccumulator>(hand: &Hand) -> Result<(i32, A)> {
     let mut acc = A::new_tracking();
     let mut best_acc = A::new_tracking();
 
-    // 雀頭を抜き出す
+    // Try each candidate pair as the head.
     for i in 0..Tile::LEN {
         if t[i] >= 2 {
             t[i] -= 2;
@@ -661,14 +663,14 @@ fn calc_normal_shanten<A: ShantenAccumulator>(hand: &Hand) -> Result<(i32, A)> {
             t[i] += 2;
         }
     }
-    // 雀頭なし
+    // Also try with no head.
     find_mentsu(0, &pre, &mut acc, 0, &mut t, &mut best, &mut best_acc);
 
     let result = best_acc.finalize(pre);
     Ok((best, result))
 }
 
-/// フェーズ1: 面子（刻子・順子）を再帰的に抽出する
+/// Phase 1: recursively extract groups (triplets and sequences).
 fn find_mentsu<A: ShantenAccumulator>(
     idx: usize,
     pre: &A::Preprocess,
@@ -679,7 +681,6 @@ fn find_mentsu<A: ShantenAccumulator>(
     best_acc: &mut A,
 ) {
     for i in idx..Tile::LEN {
-        // 刻子
         if t[i] >= 3 {
             t[i] -= 3;
             acc.push_same3(i);
@@ -687,7 +688,6 @@ fn find_mentsu<A: ShantenAccumulator>(
             acc.pop_same3();
             t[i] += 3;
         }
-        // 順子
         if i < 27 && i % 9 <= 6 && t[i] >= 1 && t[i + 1] >= 1 && t[i + 2] >= 1 {
             t[i] -= 1;
             t[i + 1] -= 1;
@@ -701,8 +701,8 @@ fn find_mentsu<A: ShantenAccumulator>(
         }
     }
 
-    // 面子を全て抽出し終えたら、塔子・対子の探索に移行する。
-    // 面子抽出後の残り牌は元のインデックスより前に存在し得るため、常に先頭から探索する。
+    // With all groups extracted, move on to partial sequences and pairs.
+    // Leftover tiles can sit below the current index, so restart from 0.
     let block3 = pre.same3_count() + pre.seq3_count() + acc.same3_count() + acc.seq3_count();
     let mut ctx = TatsuSearch {
         block3,
@@ -714,7 +714,7 @@ fn find_mentsu<A: ShantenAccumulator>(
     find_tatsu(0, &mut ctx, acc, t);
 }
 
-/// フェーズ2: 塔子（対子・両面/辺張・嵌張）を再帰的に抽出する
+/// Phase 2: recursively extract pairs and partial sequences.
 struct TatsuSearch<'a, A: ShantenAccumulator> {
     block3: usize,
     head: usize,
@@ -729,9 +729,9 @@ fn find_tatsu<A: ShantenAccumulator>(
     acc: &mut A,
     t: &mut TileSummarize,
 ) {
-    // 現在の分解で向聴数を計算
+    // Score the current decomposition.
     let block2_raw = acc.same2_count() + acc.seq2_count();
-    // 雀頭として使っている same2 は block2 に含めない
+    // The pair used as the head must not count as a block.
     let block2_net = block2_raw.saturating_sub(ctx.head);
     let block2_capped = block2_net.min(4usize.saturating_sub(ctx.block3));
     let shanten = 8i32 - (ctx.block3 * 2 + block2_capped + ctx.head) as i32;
@@ -740,13 +740,12 @@ fn find_tatsu<A: ShantenAccumulator>(
         *ctx.best_acc = acc.snapshot_best(ctx.pre, t, ctx.head);
     }
 
-    // 枝刈り: これ以上 block2 を増やしても改善しない場合
+    // Prune: more partial blocks cannot improve the result.
     if block2_net >= 4usize.saturating_sub(ctx.block3) {
         return;
     }
 
     for i in idx..Tile::LEN {
-        // 対子
         if t[i] >= 2 {
             t[i] -= 2;
             acc.push_same2(i);
@@ -754,7 +753,6 @@ fn find_tatsu<A: ShantenAccumulator>(
             acc.pop_same2();
             t[i] += 2;
         }
-        // 塔子（隣接する2枚）
         if i < 27 && i % 9 <= 7 && t[i] >= 1 && t[i + 1] >= 1 {
             t[i] -= 1;
             t[i + 1] -= 1;
@@ -764,7 +762,7 @@ fn find_tatsu<A: ShantenAccumulator>(
             t[i] += 1;
             t[i + 1] += 1;
         }
-        // 嵌張（間が空いた2枚）
+        // Gapped pair (kanchan shape).
         if i < 27 && i % 9 <= 6 && t[i] >= 1 && t[i + 1] == 0 && t[i + 2] >= 1 {
             t[i] -= 1;
             t[i + 2] -= 1;
@@ -778,13 +776,13 @@ fn find_tatsu<A: ShantenAccumulator>(
 }
 
 // ============================================================================
-// 前処理: 独立ブロック抽出
+// Preprocessing: independent block extraction.
 // ============================================================================
 
-/// 数牌において、隣接2マス以内に他の牌がないかを判定する
+/// Whether no other tile sits within two ranks of this suit tile.
 fn is_isolated(t: &TileSummarize, i: usize) -> bool {
     if i >= 27 {
-        return true; // 字牌は常に独立
+        return true; // Honours cannot form sequences, so they are always isolated.
     }
     let pos = i % 9;
     let base = i - pos;
@@ -795,7 +793,7 @@ fn is_isolated(t: &TileSummarize, i: usize) -> bool {
     left2 && left1 && right1 && right2
 }
 
-/// 独立した刻子を抽出する（カウントのみ返す）
+/// Extracts independent triplets (count only).
 fn extract_independent_same3(t: &mut TileSummarize) -> usize {
     let mut count = 0;
     for i in 0..Tile::LEN {
@@ -807,7 +805,7 @@ fn extract_independent_same3(t: &mut TileSummarize) -> usize {
     count
 }
 
-/// 独立した刻子を抽出する（Vec で返す）
+/// Extracts independent triplets (as a Vec).
 fn extract_independent_same3_full(t: &mut TileSummarize) -> Result<Vec<Same3>> {
     let mut result = Vec::new();
     for i in 0..Tile::LEN {
@@ -820,10 +818,10 @@ fn extract_independent_same3_full(t: &mut TileSummarize) -> Result<Vec<Same3>> {
     Ok(result)
 }
 
-/// 独立した順子を抽出する（共通ロジック）
+/// Extracts independent sequences (shared logic).
 ///
-/// 一盃口を先に処理してから通常処理する。
-/// `on_found` は見つかった順子の先頭インデックスと個数（1 or 2）を受け取る。
+/// Doubled sequences (iipeikō shape) are handled before single ones.
+/// `on_found` receives the starting index and the multiplicity (1 or 2).
 fn extract_independent_seq3_impl(t: &mut TileSummarize, mut on_found: impl FnMut(usize, u32)) {
     for n in (1u32..=2).rev() {
         for suit_start in (0..27).step_by(9) {
@@ -852,7 +850,7 @@ fn extract_independent_seq3_impl(t: &mut TileSummarize, mut on_found: impl FnMut
     }
 }
 
-/// 独立した順子を抽出する（カウントのみ返す）
+/// Extracts independent sequences (count only).
 fn extract_independent_seq3(t: &mut TileSummarize) -> usize {
     let mut count = 0usize;
     extract_independent_seq3_impl(t, |_l, n| {
@@ -861,7 +859,7 @@ fn extract_independent_seq3(t: &mut TileSummarize) -> usize {
     count
 }
 
-/// 独立した順子を抽出する（Vec で返す）
+/// Extracts independent sequences (as a Vec).
 fn extract_independent_seq3_full(t: &mut TileSummarize) -> Result<Vec<Sequential3>> {
     let mut result = Vec::new();
     let mut err: Option<anyhow::Error> = None;
@@ -885,7 +883,7 @@ fn extract_independent_seq3_full(t: &mut TileSummarize) -> Result<Vec<Sequential
     Ok(result)
 }
 
-/// 独立した孤立牌を除去する（カウントのみ返す）
+/// Removes independent isolated tiles (count only).
 fn remove_independent_singles(t: &mut TileSummarize) -> usize {
     let mut count = 0;
     for i in 0..Tile::LEN {
@@ -897,7 +895,7 @@ fn remove_independent_singles(t: &mut TileSummarize) -> usize {
     count
 }
 
-/// 独立した孤立牌を除去する（Vec で返す）
+/// Removes independent isolated tiles (as a Vec).
 fn extract_independent_singles_full(t: &mut TileSummarize) -> Result<Vec<TileType>> {
     let mut result = Vec::new();
     for i in 0..Tile::LEN {
@@ -909,13 +907,11 @@ fn extract_independent_singles_full(t: &mut TileSummarize) -> Result<Vec<TileTyp
     Ok(result)
 }
 
-/// ユニットテスト
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    /// 七対子を聴牌
     fn zero_shanten_to_seven_pairs() {
         let test_str = "226699m99p228s66z 1z";
         let test = Hand::from(test_str);
@@ -926,8 +922,8 @@ mod tests {
                 .is_ready()
         );
     }
+    /// A triplet among the pairs must not break the tenpai judgement.
     #[test]
-    /// 同じ牌が3枚ある状態で七対子を聴牌
     fn zero_shanten_to_seven_pairs_2() {
         let test_str = "226699m99p222s66z 1z";
         let test = Hand::from(test_str);
@@ -939,7 +935,6 @@ mod tests {
         );
     }
     #[test]
-    /// 国士無双を聴牌
     fn zero_shanten_to_orphans() {
         let test_str = "19m19p11s1234567z 5m";
         let test = Hand::from(test_str);
@@ -951,16 +946,16 @@ mod tests {
         );
     }
 
+    /// The fast path must agree with HandAnalyzer::new_by_form.
     #[test]
-    /// calc_shanten_number_by_form は HandAnalyzer::new_by_form と同じ向聴数を返す
     fn calc_shanten_number_by_form_matches_analyzer() {
         let test_strs = [
-            "226699m99p228s66z 1z", // 七対子聴牌
-            "19m19p11s1234567z 5m", // 国士無双聴牌
-            "123456789m123p11z 2p", // 通常形聴牌
-            "1122m3344p5555s1z 1z", // 4枚使い七対子
-            "139m258p47s12345z 6z", // バラバラ
-            "111222333m44455p 5p",  // 和了形
+            "226699m99p228s66z 1z", // seven pairs tenpai
+            "19m19p11s1234567z 5m", // thirteen orphans tenpai
+            "123456789m123p11z 2p", // normal form tenpai
+            "1122m3344p5555s1z 1z", // seven pairs with four of a kind
+            "139m258p47s12345z 6z", // scattered hand
+            "111222333m44455p 5p",  // winning hand
         ];
         for test_str in test_strs {
             let hand = Hand::from(test_str);
@@ -975,7 +970,6 @@ mod tests {
     }
 
     #[test]
-    /// 副露がある場合、七対子・国士無双は該当なしを返す
     fn calc_shanten_number_by_form_melded_hand() {
         use crate::hand_info::meld::{Meld, MeldFrom, MeldType};
         let tiles = vec![
@@ -1006,12 +1000,13 @@ mod tests {
             calc_shanten_number_by_form(&hand, Form::ThirteenOrphans),
             ShantenNumber::UNAVAILABLE
         );
-        // 通常形は計算できる（S9 か S6 待ちの聴牌）
+        // The normal form still computes: tenpai waiting on 6s/9s.
         assert!(calc_shanten_number_by_form(&hand, Form::Normal).is_ready());
     }
 
+    /// Four of a kind counts as only one pair for Seven Pairs,
+    /// so this hand is one away from tenpai, not tenpai.
     #[test]
-    /// 同じ牌が4枚ある状態で七対子は認められない（一向聴とみなす）
     fn seven_pairs_with_4_same_tiles() {
         let test_str = "1122m3344p5555s1z 1z";
         let test = Hand::from(test_str);
@@ -1024,7 +1019,6 @@ mod tests {
     }
 
     #[test]
-    /// 立直で和了った
     fn win_by_ready_hand() {
         let test_str = "123m444p789s1112z 2z";
         let test = Hand::from(test_str);
@@ -1037,7 +1031,6 @@ mod tests {
     }
 
     #[test]
-    /// 自風牌で和了った
     fn win_by_honour_tiles_players_wind() {
         let test_str = "333m456p1789s 333z 1s";
         let test = Hand::from(test_str);
@@ -1050,7 +1043,6 @@ mod tests {
     }
 
     #[test]
-    /// 場風で和了った
     fn win_by_honour_tiles_prevailing_wind() {
         let test_str = "234567m6789s 111z 6s";
         let test = Hand::from(test_str);
@@ -1062,7 +1054,6 @@ mod tests {
         );
     }
     #[test]
-    /// 三元牌で和了った
     fn win_by_honour_tiles_dragons() {
         let test_str = "5m123456p888s 777z 5m";
         let test = Hand::from(test_str);
@@ -1074,7 +1065,6 @@ mod tests {
         );
     }
     #[test]
-    /// 断么九で和了った
     fn win_by_all_simples() {
         let test_str = "234m8s 567m 333p 456s 8s";
         let test = Hand::from(test_str);
@@ -1087,7 +1077,6 @@ mod tests {
     }
 
     #[test]
-    /// 平和で和了った
     fn win_by_no_points() {
         let test_str = "123567m234p6799s 5s";
         let test = Hand::from(test_str);
@@ -1100,7 +1089,6 @@ mod tests {
     }
 
     #[test]
-    /// 55m123567p56789s + ツモ9m → 聴牌（シャンテン数0）
     fn tenpai_with_89_wait() {
         let test_str = "55m123567p56789s 9m";
         let test = Hand::from(test_str);
@@ -1108,7 +1096,6 @@ mod tests {
     }
 
     #[test]
-    /// 89sの塔子を含む聴牌
     fn tenpai_with_89s_toitsu() {
         let test_str = "11m234p567p234s89s 1z";
         let test = Hand::from(test_str);
@@ -1116,15 +1103,14 @@ mod tests {
     }
 
     #[test]
-    /// 89mの塔子を含む聴牌
     fn tenpai_with_89m_toitsu() {
         let test_str = "89m11p234p567s234s 2z";
         let test = Hand::from(test_str);
         assert!(HandAnalyzer::new(&test).unwrap().shanten.is_ready());
     }
 
+    /// Four groups plus a partial sequence is tenpai, not a win.
     #[test]
-    /// 4面子1塔子は和了ではなく聴牌
     fn four_melds_and_one_taatsu_is_ready_not_win() {
         let test = Hand::from("234678m56p567s55z 5z");
         assert!(HandAnalyzer::new(&test).unwrap().shanten.is_ready());
@@ -1153,7 +1139,7 @@ mod tests {
         );
     }
 
-    /// 様々なパターンの手牌でシャンテン数が正しいことを検証する回帰テスト
+    /// Shanten regression across a spread of hand shapes.
     #[rstest::rstest]
     #[case::seven_pairs_ready("226699m99p228s66z 1z", 0)]
     #[case::thirteen_orphans_ready("19m19p11s1234567z 5m", 0)]

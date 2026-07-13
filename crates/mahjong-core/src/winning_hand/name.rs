@@ -3,21 +3,22 @@ use strum_macros::{EnumCount as EnumCountMacro, EnumIter};
 
 use crate::settings::Lang;
 
-/// 和了時の手牌の形態
+/// Shape of a winning hand.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Form {
-    /// 七対子
+    /// Seven pairs (chiitoitsu / 七対子)
     SevenPairs,
-    /// 国士無双
+    /// Thirteen orphans (kokushi musō / 国士無双)
     ThirteenOrphans,
-    /// 通常（4面子1雀頭）の手牌
+    /// Standard four-groups-and-a-pair hand
     Normal,
 }
 
-/// 和了役を表す列挙型
+/// A yaku (winning hand pattern).
 ///
-/// 英語名は WRC Rules 2025 に準拠する（docs/glossary.md を参照）
-/// ここでの定義順で同翻役のリザルト画面の役の表示順も決定する
+/// English names follow WRC Rules 2025 (see docs/glossary.md).
+/// The declaration order here also fixes the display order of equal-han
+/// yaku on the result screen.
 #[derive(
     Debug,
     Clone,
@@ -33,102 +34,103 @@ pub enum Form {
     Deserialize,
 )]
 pub enum Kind {
-    /// 立直
+    /// Riichi (立直)
     Riichi,
-    /// ダブル立直
+    /// Double Riichi (ダブル立直)
     DoubleRiichi,
-    /// 一発
+    /// Ippatsu (一発)
     Unbroken,
-    /// 門前清自摸和
+    /// Menzen Tsumo (門前清自摸和)
     FullyConcealedHand,
-    /// 七対子
+    /// Chiitoitsu (七対子)
     SevenPairs,
-    /// 流し満貫
+    /// Nagashi Mangan (流し満貫)
     NagashiMangan,
-    /// 海底撈月
+    /// Haitei (海底撈月)
     LastTileDraw,
-    /// 河底撈魚
+    /// Hōtei (河底撈魚)
     LastTileClaim,
-    /// 嶺上開花
+    /// Rinshan Kaihō (嶺上開花)
     AfterAQuad,
-    /// 搶槓
+    /// Chankan (搶槓)
     RobbingAQuad,
-    /// 平和
+    /// Pinfu (平和)
     Pinfu,
-    /// 一盃口
+    /// Iipeikō (一盃口)
     TwinSequences,
-    /// 三色同順
+    /// Sanshoku Dōjun (三色同順)
     MixedSequences,
-    /// 一気通貫
+    /// Ittsū (一気通貫)
     FullStraight,
-    /// 二盃口
+    /// Ryanpeikō (二盃口)
     DoubleTwinSequences,
-    /// 対々和
+    /// Toitoi (対々和)
     AllTriplets,
-    /// 三暗刻
+    /// San'ankō (三暗刻)
     ThreeConcealedTriplets,
-    /// 三色同刻
+    /// Sanshoku Dōkō (三色同刻)
     MixedTriplets,
-    /// 断么九
+    /// Tan'yao (断么九)
     AllInside,
-    /// 役牌（自風牌）
+    /// Yakuhai: seat wind (役牌（自風牌）)
     ValueHonourSeatWind,
-    /// 役牌（場風牌）
+    /// Yakuhai: round wind (役牌（場風牌）)
     ValueHonourRoundWind,
-    /// 役牌（白）
+    /// Yakuhai: White dragon (役牌（白）)
     ValueHonourWhiteDragon,
-    /// 役牌（發）
+    /// Yakuhai: Green dragon (役牌（發）)
     ValueHonourGreenDragon,
-    /// 役牌（中）
+    /// Yakuhai: Red dragon (役牌（中）)
     ValueHonourRedDragon,
-    /// 混全帯么九
+    /// Chanta (混全帯么九)
     CommonEnds,
-    /// 純全帯么九
+    /// Junchan (純全帯么九)
     PerfectEnds,
-    /// 混老頭
+    /// Honrōtō (混老頭)
     CommonTerminals,
-    /// 小三元
+    /// Shōsangen (小三元)
     LittleDragons,
-    /// 三槓子
+    /// Sankantsu (三槓子)
     ThreeQuads,
-    /// 混一色
+    /// Hon'itsu (混一色)
     CommonFlush,
-    /// 清一色
+    /// Chin'itsu (清一色)
     PerfectFlush,
-    /// 国士無双
+    /// Kokushi Musō (国士無双)
     ThirteenOrphans,
-    /// 四暗刻
+    /// Sūankō (四暗刻)
     FourConcealedTriplets,
-    /// 四暗刻単騎待ち
+    /// Sūankō tanki (四暗刻単騎待ち)
     FourConcealedTripletsPairWait,
-    /// 大三元
+    /// Daisangen (大三元)
     BigDragons,
-    /// 小四喜
+    /// Shōsūshii (小四喜)
     LittleWinds,
-    /// 大四喜
+    /// Daisūshii (大四喜)
     BigWinds,
-    /// 字一色
+    /// Tsūiisō (字一色)
     AllHonours,
-    /// 清老頭
+    /// Chinrōtō (清老頭)
     PerfectTerminals,
-    /// 緑一色
+    /// Ryūiisō (緑一色)
     AllGreen,
-    /// 九蓮宝燈
+    /// Chūren Pōto (九蓮宝燈)
     NineGates,
-    /// 四槓子
+    /// Sūkantsu (四槓子)
     FourQuads,
-    /// 天和
+    /// Tenhō (天和)
     BlessingOfHeaven,
-    /// 地和
+    /// Chihō (地和)
     BlessingOfEarth,
 }
 
-/// 和了役の名前を返す
+/// Returns the display name of a yaku.
 ///
 /// # Arguments
-/// * `hand_kind` - 和了役の種類
-/// * `has_opened` - 副露しているか否か（喰い下がり役は`true`にすると名前の後に「（鳴）」が付く）
-/// * `lang` - 言語
+/// * `hand_kind` - the yaku
+/// * `has_opened` - whether the hand is open; yaku that lose han when open
+///   get an "(Open)" /「（鳴）」suffix
+/// * `lang` - display language
 ///
 /// # Examples
 ///
@@ -148,7 +150,7 @@ pub fn get(hand_kind: Kind, has_openned: bool, lang: Lang) -> &'static str {
     }
 }
 
-/// 喰い下がり役に対しては「（鳴）」を付けるマクロ
+/// Appends the "(Open)" /「（鳴）」suffix for yaku that lose han when open.
 macro_rules! openned_name {
     ($str:expr, $open:expr, $lang:expr) => {
         match $open {
@@ -162,211 +164,123 @@ macro_rules! openned_name {
 }
 
 fn get_en(hand_kind: Kind, has_openned: bool) -> &'static str {
-    // 英語名は WRC Rules 2025 に準拠する（docs/glossary.md を参照）
+    // English names follow WRC Rules 2025 (see docs/glossary.md).
     match hand_kind {
-        // 立直
         Kind::Riichi => "Riichi",
-        // 七対子
         Kind::SevenPairs => "Seven Pairs",
-        // 流し満貫
         Kind::NagashiMangan => "Nagashi Mangan",
-        // 門前清自摸和
         Kind::FullyConcealedHand => "Fully Concealed Hand",
-        // 一発
         Kind::Unbroken => "Unbroken",
-        // 海底撈月
         Kind::LastTileDraw => "Last Tile Draw",
-        // 河底撈魚
         Kind::LastTileClaim => "Last Tile Claim",
-        // 嶺上開花
         Kind::AfterAQuad => "After a Quad",
-        // 搶槓
         Kind::RobbingAQuad => "Robbing a Quad",
-        // ダブル立直
         Kind::DoubleRiichi => "Double Riichi",
-        // 平和
         Kind::Pinfu => "Pinfu",
-        // 一盃口
         Kind::TwinSequences => "Twin Sequences",
-        // 三色同順
         Kind::MixedSequences => {
             openned_name!("Mixed Sequences", has_openned, Lang::En)
         }
-        // 一気通貫
         Kind::FullStraight => openned_name!("Full Straight", has_openned, Lang::En),
 
-        // 二盃口
         Kind::DoubleTwinSequences => "Double Twin Sequences",
-        // 対々和
         Kind::AllTriplets => "All Triplets",
-        // 三暗刻
         Kind::ThreeConcealedTriplets => "Three Concealed Triplets",
-        // 三色同刻
         Kind::MixedTriplets => "Mixed Triplets",
-        // 断么九
         Kind::AllInside => "All Inside",
-        // 役牌（自風牌）
         Kind::ValueHonourSeatWind => "Value Honour (seat wind)",
-        // 役牌（場風牌）
         Kind::ValueHonourRoundWind => "Value Honour (round wind)",
-        // 役牌（白）
         Kind::ValueHonourWhiteDragon => "Value Honour (White dragon)",
-        // 役牌（發）
         Kind::ValueHonourGreenDragon => "Value Honour (Green dragon)",
-        // 役牌（中）
         Kind::ValueHonourRedDragon => "Value Honour (Red dragon)",
-        // 混全帯么九
         Kind::CommonEnds => {
             openned_name!("Common Ends", has_openned, Lang::En)
         }
-        // 純全帯么九
         Kind::PerfectEnds => {
             openned_name!("Perfect Ends", has_openned, Lang::En)
         }
-        // 混老頭
         Kind::CommonTerminals => "Common Terminals",
-        // 小三元
         Kind::LittleDragons => "Little Dragons",
-        // 三槓子
         Kind::ThreeQuads => "Three Quads",
-        // 混一色
         Kind::CommonFlush => {
             openned_name!("Common Flush", has_openned, Lang::En)
         }
-        // 清一色
         Kind::PerfectFlush => {
             openned_name!("Perfect Flush", has_openned, Lang::En)
         }
-        // 国士無双
         Kind::ThirteenOrphans => "Thirteen Orphans",
-        // 四暗刻
         Kind::FourConcealedTriplets => "Four Concealed Triplets",
-        // 四暗刻単騎待ち
         Kind::FourConcealedTripletsPairWait => "Four Concealed Triplets (pair wait)",
-        // 大三元
         Kind::BigDragons => "Big Dragons",
-        // 小四喜
         Kind::LittleWinds => "Little Winds",
-        // 大四喜
         Kind::BigWinds => "Big Winds",
-        // 字一色
         Kind::AllHonours => "All Honours",
-        // 清老頭
         Kind::PerfectTerminals => "Perfect Terminals",
-        // 緑一色
         Kind::AllGreen => "All Green",
-        // 九蓮宝燈
         Kind::NineGates => "Nine Gates",
-        // 四槓子
         Kind::FourQuads => "Four Quads",
-        // 天和
         Kind::BlessingOfHeaven => "Blessing of Heaven",
-        // 地和
         Kind::BlessingOfEarth => "Blessing of Earth",
     }
 }
 
 fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
     match hand_kind {
-        // 立直
         Kind::Riichi => "立直",
-        // 七対子
         Kind::SevenPairs => "七対子",
-        // 流し満貫
         Kind::NagashiMangan => "流し満貫",
-        // 門前清自摸和
         Kind::FullyConcealedHand => "門前清自摸和",
-        // 一発
         Kind::Unbroken => "一発",
-        // 海底撈月
         Kind::LastTileDraw => "海底撈月",
-        // 河底撈魚
         Kind::LastTileClaim => "河底撈魚",
-        // 嶺上開花
         Kind::AfterAQuad => "嶺上開花",
-        // 搶槓
         Kind::RobbingAQuad => "搶槓",
-        // ダブル立直
         Kind::DoubleRiichi => "ダブル立直",
-        // 平和
         Kind::Pinfu => "平和",
-        // 一盃口
         Kind::TwinSequences => "一盃口",
-        // 三色同順
         Kind::MixedSequences => {
             openned_name!("三色同順", has_openned, Lang::Ja)
         }
-        // 一気通貫
         Kind::FullStraight => {
             openned_name!("一気通貫", has_openned, Lang::Ja)
         }
-        // 二盃口
         Kind::DoubleTwinSequences => "二盃口",
-        // 対々和
         Kind::AllTriplets => "対々和",
-        // 三暗刻
         Kind::ThreeConcealedTriplets => "三暗刻",
-        // 三色同刻
         Kind::MixedTriplets => "三色同刻",
-        // 断么九
         Kind::AllInside => "断么九",
-        // 役牌（自風牌）
         Kind::ValueHonourSeatWind => "役牌（自風牌）",
-        // 役牌（場風牌）
         Kind::ValueHonourRoundWind => "役牌（場風牌）",
-        // 役牌（白）
         Kind::ValueHonourWhiteDragon => "役牌（白）",
-        // 役牌（發）
         Kind::ValueHonourGreenDragon => "役牌（發）",
-        // 役牌（中）
         Kind::ValueHonourRedDragon => "役牌（中）",
-        // 混全帯么九
         Kind::CommonEnds => {
             openned_name!("混全帯么九", has_openned, Lang::Ja)
         }
-        // 純全帯么九
         Kind::PerfectEnds => {
             openned_name!("純全帯么九", has_openned, Lang::Ja)
         }
-        // 混老頭
         Kind::CommonTerminals => "混老頭",
-        // 小三元
         Kind::LittleDragons => "小三元",
-        // 三槓子
         Kind::ThreeQuads => "三槓子",
-        // 混一色
         Kind::CommonFlush => {
             openned_name!("混一色", has_openned, Lang::Ja)
         }
-        // 清一色
         Kind::PerfectFlush => {
             openned_name!("清一色", has_openned, Lang::Ja)
         }
-        // 国士無双
         Kind::ThirteenOrphans => "国士無双",
-        // 四暗刻
         Kind::FourConcealedTriplets => "四暗刻",
-        // 四暗刻単騎待ち
         Kind::FourConcealedTripletsPairWait => "四暗刻単騎待ち",
-        // 大三元
         Kind::BigDragons => "大三元",
-        // 小四喜
         Kind::LittleWinds => "小四喜",
-        // 大四喜
         Kind::BigWinds => "大四喜",
-        // 字一色
         Kind::AllHonours => "字一色",
-        // 清老頭
         Kind::PerfectTerminals => "清老頭",
-        // 緑一色
         Kind::AllGreen => "緑一色",
-        // 九蓮宝燈
         Kind::NineGates => "九蓮宝燈",
-        // 四槓子
         Kind::FourQuads => "四槓子",
-        // 天和
         Kind::BlessingOfHeaven => "天和",
-        // 地和
         Kind::BlessingOfEarth => "地和",
     }
 }

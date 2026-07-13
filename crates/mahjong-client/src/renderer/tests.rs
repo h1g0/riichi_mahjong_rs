@@ -1,4 +1,4 @@
-//! 描画レイアウトのユニットテスト
+//! Unit tests for the rendering layout.
 
 use super::{
     PLAYER_ROTATIONS, calc_meld_width, other_meld_x_positions, rotation_index,
@@ -7,7 +7,7 @@ use super::{
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType};
 
-/// 並び順検証用の最小のポン副露を作る。
+/// Minimal pon meld for the ordering tests.
 fn pon(tile_type: TileType) -> Meld {
     let tile = Tile::new(tile_type);
     Meld {
@@ -18,8 +18,8 @@ fn pon(tile_type: TileType) -> Meld {
     }
 }
 
-// 副露の並び順は「最初に鳴いた牌ほどプレイヤーから見て右」が正。
-// 自分の手牌では右端 (x が大きい側) から左へ詰める。
+// Melds must lay out earliest-rightmost from the player's view;
+// our own pack right-to-left from the right edge.
 #[test]
 fn self_melds_place_first_called_on_the_right() {
     let (tw, th, gap, right_edge) = (40.0, 56.0, 12.0, 1220.0);
@@ -27,7 +27,7 @@ fn self_melds_place_first_called_on_the_right() {
     let xs = self_meld_x_positions(&melds, tw, th, gap, right_edge);
 
     assert_eq!(xs.len(), 3);
-    // 最初に鳴いた副露 (index 0) が最も右、後の副露ほど左。
+    // The earliest meld (index 0) is rightmost.
     assert!(
         xs[0] > xs[1],
         "first-called meld must be right of the second"
@@ -36,11 +36,11 @@ fn self_melds_place_first_called_on_the_right() {
         xs[1] > xs[2],
         "second-called meld must be right of the third"
     );
-    // 先頭の副露の右端は描画領域の右端を超えない。
+    // The first meld must not overflow the right edge.
     assert!(xs[0] + calc_meld_width(&melds[0], tw, th) <= right_edge);
 }
 
-// 他家の手牌でも、そのプレイヤー視点で最初に鳴いた牌が右 (x が大きい側) に来る。
+// Opponents' melds are also earliest-rightmost from their own view.
 #[test]
 fn other_melds_place_first_called_on_the_right() {
     let (tw, th, gap, start_x) = (28.0, 40.0, 6.0, 100.0);
@@ -56,7 +56,8 @@ fn other_melds_place_first_called_on_the_right() {
         xs[1] > xs[2],
         "second-called meld must be right of the third"
     );
-    // 描画領域は手牌の右隣 (start_x) から始まり、左へはみ出さない。
+    // The layout starts at start_x beside the hand and never
+    // overflows left.
     assert!(xs[2] >= start_x);
 }
 
@@ -67,7 +68,7 @@ fn player_rotations_place_turn_order_counterclockwise() {
 
 #[test]
 fn seat0_relative_positions_match_seat_indices() {
-    // 自分が座席0なら相対位置と座席インデックスは一致する（ローカル対局）。
+    // At seat 0 (local play) relative positions equal seat indices.
     for rel in 0..4 {
         assert_eq!(seat_at_relative_position(0, rel, 4), rel);
     }
@@ -75,8 +76,9 @@ fn seat0_relative_positions_match_seat_indices() {
 
 #[test]
 fn nonzero_seat_maps_relative_positions_to_correct_seats() {
-    // オンライン非ホスト: 自分の座席が0以外でも、相対位置→絶対座席へ正しく回る。
-    // 自分(0)=座席2, 下家(1)=座席3, 対面(2)=座席0, 上家(3)=座席1。
+    // Online non-host: relative positions rotate correctly from any
+    // seat. Self (0) = seat 2, right (1) = seat 3, across (2) = seat 0,
+    // left (3) = seat 1.
     assert_eq!(seat_at_relative_position(2, 0, 4), 2);
     assert_eq!(seat_at_relative_position(2, 1, 4), 3);
     assert_eq!(seat_at_relative_position(2, 2, 4), 0);
@@ -85,7 +87,7 @@ fn nonzero_seat_maps_relative_positions_to_correct_seats() {
 
 #[test]
 fn sanma_seat_mapping_wraps_at_three() {
-    // 三麻: 座席は0〜2で循環する。
+    // Three-player: seats cycle over 0-2.
     assert_eq!(seat_at_relative_position(0, 0, 3), 0);
     assert_eq!(seat_at_relative_position(0, 1, 3), 1);
     assert_eq!(seat_at_relative_position(0, 2, 3), 2);
@@ -95,21 +97,15 @@ fn sanma_seat_mapping_wraps_at_three() {
 
 #[test]
 fn sanma_rotation_leaves_north_position_empty() {
-    // 三麻: 東1局開始時の風で四麻の方角に合わせて席を固定し、
-    // 「北」の位置が常に空席になる（#309）。以降は席固定で風だけが回る。
-    // 東1で自分が東家: 南家（下家）=右、西家（上家）=対面、左（北）が空席。
     assert_eq!(rotation_index(0, 3, 0), 0);
     assert_eq!(rotation_index(1, 3, 0), 1);
     assert_eq!(rotation_index(2, 3, 0), 2);
-    // 東1で自分が南家: 西家（下家）=右、東家（上家）=左、上（北）が空席。
     assert_eq!(rotation_index(0, 3, 1), 0);
     assert_eq!(rotation_index(1, 3, 1), 1);
     assert_eq!(rotation_index(2, 3, 1), 3);
-    // 東1で自分が西家: 東家（下家）=対面、南家（上家）=左、右（北）が空席。
     assert_eq!(rotation_index(0, 3, 2), 0);
     assert_eq!(rotation_index(1, 3, 2), 2);
     assert_eq!(rotation_index(2, 3, 2), 3);
-    // 四麻は開始時の風にかかわらず恒等写像。
     for wind in 0..4 {
         for rel in 0..4 {
             assert_eq!(rotation_index(rel, 4, wind), rel);
@@ -117,7 +113,7 @@ fn sanma_rotation_leaves_north_position_empty() {
     }
 }
 
-// ── 牌インデックスラベル（英語UI） ──────────────────────────────────────
+// --- Tile index labels (English UI) ---
 
 use super::labels::{
     LABEL_BLACK, LABEL_BLUE, LABEL_GREEN, LABEL_RED, bake_label, tile_index_label,
@@ -126,7 +122,7 @@ use macroquad::prelude::{Color, Image, WHITE};
 
 #[test]
 fn number_tiles_get_suit_colored_digits() {
-    // 数牌: 萬子=赤・筒子=青・索子=緑の数字。
+    // Suit digits: characters red, circles blue, bamboos green.
     for n in 0..9u32 {
         let digit = (n + 1).to_string();
         assert_eq!(tile_index_label(Tile::M1 + n), (digit.as_str(), LABEL_RED));
@@ -140,7 +136,7 @@ fn number_tiles_get_suit_colored_digits() {
 
 #[test]
 fn honor_tiles_get_letter_labels() {
-    // 風牌は E/S/W/N（黒）、三元牌は輸出用麻雀牌の伝統的表記 P/F/C。
+    // Winds E/S/W/N in black; dragons use the export-set P/F/C.
     assert_eq!(tile_index_label(Tile::Z1), ("E", LABEL_BLACK));
     assert_eq!(tile_index_label(Tile::Z2), ("S", LABEL_BLACK));
     assert_eq!(tile_index_label(Tile::Z3), ("W", LABEL_BLACK));
@@ -158,7 +154,7 @@ fn every_tile_type_has_a_label() {
     }
 }
 
-/// テスト用にアプリ同梱フォントを読み込む。
+/// Loads the bundled font for the tests.
 fn test_font() -> fontdue::Font {
     let bytes: &[u8] = include_bytes!("../../../../assets/fonts/ShipporiMincho-Regular.ttf");
     fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).expect("font")
@@ -166,13 +162,14 @@ fn test_font() -> fontdue::Font {
 
 #[test]
 fn bake_label_paints_top_right_and_leaves_rest_untouched() {
-    // 単色の不透明画像へ焼き込み、右上にだけ変化があることを確かめる。
+    // Bake onto a solid opaque image; only the top-right may change.
     let mut img = Image::gen_image_color(111, 150, Color::new(0.5, 0.5, 0.5, 1.0));
-    // 格納時に u8 へ量子化されるため、比較基準は画像から読み戻した値にする
+    // Colors quantize to u8 on store, so compare against values read
+    // back from the image.
     let base = img.get_pixel(0, 0);
     bake_label(&mut img, "5", LABEL_RED, &test_font());
 
-    // 右上のバッジ領域内に、下地の白とラベルの赤の両方が現れる。
+    // The badge area must show both the white badge and the red glyph.
     let mut has_white = false;
     let mut has_red = false;
     for y in 0..55u32 {
@@ -185,7 +182,7 @@ fn bake_label_paints_top_right_and_leaves_rest_untouched() {
     assert!(has_white, "badge background not painted");
     assert!(has_red, "label glyph not painted");
 
-    // バッジ領域の外（左下）は変化しない。
+    // Outside the badge (bottom-left) nothing changes.
     for y in 80..150u32 {
         for x in 0..55u32 {
             let p = img.get_pixel(x, y);
@@ -196,7 +193,8 @@ fn bake_label_paints_top_right_and_leaves_rest_untouched() {
 
 #[test]
 fn bake_label_preserves_transparent_silhouette() {
-    // 完全に透明な画像（牌の角丸の外側に相当）には何も描かれない。
+    // A fully transparent image (outside the tile silhouette)
+    // stays untouched.
     let mut img = Image::gen_image_color(111, 150, Color::new(0.0, 0.0, 0.0, 0.0));
     bake_label(&mut img, "E", LABEL_BLACK, &test_font());
     for y in 0..150u32 {
@@ -208,9 +206,10 @@ fn bake_label_preserves_transparent_silhouette() {
 
 #[test]
 fn bake_label_masks_by_destination_alpha() {
-    // 半透明ではなく「不透明部分にだけ」乗ることを、境界を跨いだ画像で確認する。
+    // Labels must land on opaque pixels only, checked across
+    // the boundary.
     let mut img = Image::gen_image_color(111, 150, WHITE);
-    // 右端 10px を透明にする（角丸の外側を模す）
+    // The right 10px are transparent, mimicking the rounded corner.
     for y in 0..150u32 {
         for x in 101..111u32 {
             img.set_pixel(x, y, Color::new(0.0, 0.0, 0.0, 0.0));
@@ -283,7 +282,7 @@ fn export_labeled_tiles_for_visual_check() {
         };
         let (label, color) = tile_index_label(tile_type);
         bake_label(&mut img, label, color, &font);
-        // export_png は保存時に上下反転するため、先に反転して相殺する
+        // export_png flips vertically on save; pre-flip to cancel it.
         let w = img.width as usize * 4;
         let rows: Vec<Vec<u8>> = img.bytes.chunks(w).rev().map(|r| r.to_vec()).collect();
         img.bytes = rows.concat();
@@ -291,7 +290,7 @@ fn export_labeled_tiles_for_visual_check() {
     }
 }
 
-// ── 他家の手出し詰めアニメーション ──────────────────────────────────────
+// --- Opponent hand-discard animation ---
 
 use super::tiles::{
     TEDASHI_GAP_HOLD_SECS, TEDASHI_SLIDE_SECS, tedashi_progress, tedashi_tile_offset,
@@ -299,13 +298,13 @@ use super::tiles::{
 
 #[test]
 fn tedashi_progress_holds_gap_then_finishes() {
-    // 空白表示中は進捗0のまま
+    // Progress stays 0 while the gap shows.
     assert_eq!(tedashi_progress(0.0), 0.0);
     assert_eq!(tedashi_progress(TEDASHI_GAP_HOLD_SECS * 0.9), 0.0);
-    // スライド中は0と1の間で単調に進む
+    // Progress rises monotonically during the slide.
     let mid = tedashi_progress(TEDASHI_GAP_HOLD_SECS + TEDASHI_SLIDE_SECS / 2.0);
     assert!(0.0 < mid && mid < 1.0);
-    // スライド終了以降は1に張り付く
+    // Progress clamps to 1 after the slide.
     assert_eq!(
         tedashi_progress(TEDASHI_GAP_HOLD_SECS + TEDASHI_SLIDE_SECS),
         1.0
@@ -316,9 +315,10 @@ fn tedashi_progress_holds_gap_then_finishes() {
 #[test]
 fn tedashi_offsets_show_gap_at_discarded_position() {
     let (step, gap) = (28.0, 8.0);
-    // 13枚の手牌から5枚目（index 4）を手出し（ツモ牌あり）。
-    // 開始時点（進捗0）: 空白より左は動かず、右は1枚ぶん右にあり、
-    // 右端の牌（元ツモ牌）はツモ牌スロットの位置にある。
+    // Discard the fifth tile (index 4) from a 13-tile hand with a drawn
+    // tile. At progress 0: tiles left of the gap are still, tiles right
+    // of it sit one tile to the right, and the last tile (the former
+    // drawn tile) sits at the drawn-tile slot.
     assert_eq!(tedashi_tile_offset(3, 13, 4, true, step, gap, 0.0), 0.0);
     assert_eq!(tedashi_tile_offset(4, 13, 4, true, step, gap, 0.0), step);
     assert_eq!(tedashi_tile_offset(11, 13, 4, true, step, gap, 0.0), step);
@@ -326,7 +326,7 @@ fn tedashi_offsets_show_gap_at_discarded_position() {
         tedashi_tile_offset(12, 13, 4, true, step, gap, 0.0),
         step + gap
     );
-    // 完了時点（進捗1）: 全牌が最終位置（オフセットなし）
+    // At progress 1 every tile is at its final position (no offset).
     for i in 0..13 {
         assert_eq!(tedashi_tile_offset(i, 13, 4, true, step, gap, 1.0), 0.0);
     }
@@ -335,8 +335,8 @@ fn tedashi_offsets_show_gap_at_discarded_position() {
 #[test]
 fn tedashi_offsets_without_drawn_include_recentering_shift() {
     let (step, gap) = (28.0, 8.0);
-    // 鳴き直後の打牌（ツモ牌なし）: 1枚減るぶん中央寄せが半歩ずれるため、
-    // 空白より左の牌も半歩ぶんだけ滑る。
+    // A post-call discard (no drawn tile) shrinks the hand by one, so
+    // centering shifts half a tile and tiles left of the gap slide too.
     assert_eq!(
         tedashi_tile_offset(0, 10, 2, false, step, gap, 0.0),
         -step / 2.0
@@ -345,6 +345,6 @@ fn tedashi_offsets_without_drawn_include_recentering_shift() {
         tedashi_tile_offset(5, 10, 2, false, step, gap, 0.0),
         step / 2.0
     );
-    // 最終位置ではオフセットなし
+    // No offsets at the final position.
     assert_eq!(tedashi_tile_offset(0, 10, 2, false, step, gap, 1.0), 0.0);
 }

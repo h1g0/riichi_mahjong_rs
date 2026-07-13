@@ -1,10 +1,9 @@
-//! 複数マシン構成の統合テスト
+//! Multi-machine integration tests.
 //!
-//! 2台の「マシン」（プロセス内サーバ）を相互にピア登録して起動し、
-//! ルーム所在の照会と fly-replay 転送の判断を検証する。
-//! 実際の転送は Fly Proxy が行うため、ここでは「正しい fly-replay
-//! ヘッダを返すこと」と「転送後のリクエストが正常に処理されること」を
-//! それぞれ確認する。
+//! Starts two in-process "machines" registered as each other's peers and
+//! verifies room lookup and the fly-replay decision. The Fly proxy does
+//! the actual forwarding, so these tests check that the right fly-replay
+//! header is returned and that a replayed request is handled correctly.
 
 use std::net::SocketAddr;
 
@@ -22,15 +21,15 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite};
 
-/// テスト用マシン（プロセス内サーバ）
+/// A test machine (in-process server).
 struct Machine {
-    /// 公開リスナー（/ws）のアドレス
+    /// Public listener (/ws) address
     public: SocketAddr,
-    /// 内部リスナー（/internal/rooms/{code}）のアドレス
+    /// Internal listener (/internal/rooms/{code}) address
     internal: SocketAddr,
 }
 
-/// 状態からマシンを起動する（内部リスナーは bind 済みのものを使う）
+/// Starts a machine from state, using the pre-bound internal listener.
 async fn serve_machine(state: AppState, internal: tokio::net::TcpListener) -> Machine {
     let internal_addr = internal.local_addr().unwrap();
     let internal_state = state.clone();
@@ -57,9 +56,10 @@ async fn serve_machine(state: AppState, internal: tokio::net::TcpListener) -> Ma
     }
 }
 
-/// 2台のマシンを相互にピア登録して起動する
+/// Starts two machines registered as each other's peers.
 async fn start_two_machines() -> (Machine, Machine) {
-    // 先に内部リスナーを bind してアドレスを確定させ、相互参照させる
+    // Bind the internal listeners first so the addresses exist for
+    // cross-registration.
     let internal_a = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let internal_b = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr_a = internal_a.local_addr().unwrap().to_string();
@@ -77,7 +77,7 @@ async fn start_two_machines() -> (Machine, Machine) {
     (machine_a, machine_b)
 }
 
-/// テスト用 WebSocket クライアント（ロビー操作のみ）
+/// Test WebSocket client (lobby operations only).
 struct TestClient {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }
@@ -148,7 +148,8 @@ impl TestClient {
     }
 }
 
-/// 他マシンのルームコード付きで接続すると fly-replay 応答が返る
+/// Connecting with another machine's room code yields a fly-replay
+/// response.
 #[tokio::test]
 async fn test_join_foreign_room_returns_fly_replay() {
     let (machine_a, machine_b) = start_two_machines().await;
@@ -157,8 +158,8 @@ async fn test_join_foreign_room_returns_fly_replay() {
     host.hello("ホスト").await;
     let code = host.create_room().await;
 
-    // マシンBへ ?room=CODE 付きで接続すると、アップグレードせずに
-    // マシンAへの fly-replay 応答が返る
+    // A ?room=CODE connection to machine B returns a fly-replay to
+    // machine A instead of upgrading.
     let request = format!("ws://{}/ws?room={}", machine_b.public, code)
         .into_client_request()
         .unwrap();
@@ -177,7 +178,8 @@ async fn test_join_foreign_room_returns_fly_replay() {
     }
 }
 
-/// 自マシンのルームコード付きの接続は通常どおりアップグレードして入室できる
+/// A connection with our own machine's room code upgrades and joins
+/// normally.
 #[tokio::test]
 async fn test_join_local_room_with_query_param() {
     let (machine_a, _machine_b) = start_two_machines().await;
@@ -195,11 +197,11 @@ async fn test_join_local_room_with_query_param() {
     }
 }
 
-/// 転送されてきたリクエスト（fly-replay-src 付き）は再転送されない
+/// A replayed request (with fly-replay-src) is never re-forwarded.
 ///
-/// Fly Proxy による転送後の受信側の挙動を、ヘッダを付けた直接接続で模擬する。
-/// ルームを所持するマシンでは入室でき、所持しないマシンでは（転送し直さず）
-/// RoomNotFound になることを確認する。
+/// Simulates the post-replay receiving side with a direct connection
+/// carrying the header: the owning machine joins fine, and the
+/// non-owning machine yields RoomNotFound rather than forwarding again.
 #[tokio::test]
 async fn test_replayed_request_is_not_replayed_again() {
     let (machine_a, machine_b) = start_two_machines().await;
@@ -219,7 +221,7 @@ async fn test_replayed_request_is_not_replayed_again() {
         request
     };
 
-    // 所持マシンA: 転送後のリクエストとして正常に入室できる
+    // Owning machine A: the replayed request joins normally.
     let mut guest = TestClient::connect_with(with_replay_src(machine_a.public)).await;
     guest.hello("ゲスト").await;
     match guest.join_room(&code).await {
@@ -227,7 +229,8 @@ async fn test_replayed_request_is_not_replayed_again() {
         other => panic!("RoomStateでないメッセージ: {other:?}"),
     }
 
-    // 非所持マシンB: 再転送せずアップグレードし、JoinRoom は RoomNotFound
+    // Non-owning machine B upgrades without re-forwarding;
+    // JoinRoom yields RoomNotFound.
     let mut lost = TestClient::connect_with(with_replay_src(machine_b.public)).await;
     lost.hello("迷子").await;
     match lost.join_room(&code).await {
@@ -236,7 +239,7 @@ async fn test_replayed_request_is_not_replayed_again() {
     }
 }
 
-/// 存在しないコードや不正な形式のコードでは転送されず通常どおり接続できる
+/// Nonexistent or malformed codes connect normally with no forwarding.
 #[tokio::test]
 async fn test_unknown_or_invalid_code_upgrades_normally() {
     let (machine_a, _machine_b) = start_two_machines().await;
@@ -248,7 +251,7 @@ async fn test_unknown_or_invalid_code_upgrades_normally() {
     }
 }
 
-/// ピア照会（find_room）がルームの所在を正しく返す
+/// find_room locates rooms correctly.
 #[tokio::test]
 async fn test_peer_lookup_finds_room_owner() {
     let (machine_a, _machine_b) = start_two_machines().await;
@@ -257,24 +260,27 @@ async fn test_peer_lookup_finds_room_owner() {
     host.hello("ホスト").await;
     let code = host.create_room().await;
 
-    // 第三者視点のピア構成からマシンAの内部リスナーへ照会する
+    // Query machine A's internal listener from a third party's
+    // peer config.
     let observer = Peers::with_static(Some("observer1"), vec![machine_a.internal.to_string()]);
     assert_eq!(
         observer.find_room(&code).await,
         Some("machinea".to_string())
     );
     assert_eq!(observer.find_room("ZZZZZZ").await, None);
-    // 小文字でも正規化されて見つかる（Lobby::get が正規化する）
+    // Lowercase codes normalize and still resolve (Lobby::get
+    // normalizes).
     assert_eq!(
         observer.find_room(&code.to_ascii_lowercase()).await,
         Some("machinea".to_string())
     );
 }
 
-/// ピアが常に「所持している」と答えてもルーム作成が完了する（無限ループしない）
+/// Room creation completes even against a peer that always claims
+/// ownership (no infinite loop).
 #[tokio::test]
 async fn test_create_room_completes_with_lying_peer() {
-    // どのコードにも 200 を返す偽ピア
+    // A fake peer answering 200 for every code.
     let liar = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let liar_addr = liar.local_addr().unwrap().to_string();
     tokio::spawn(async move {
@@ -296,7 +302,8 @@ async fn test_create_room_completes_with_lying_peer() {
 
     let mut host = TestClient::connect(&format!("ws://{}/ws", machine.public)).await;
     host.hello("ホスト").await;
-    // 衝突チェックの上限に達した後、ローカルの一意性のみで確定して完了する
+    // Past the collision-check cap, local uniqueness decides and
+    // creation completes.
     let code = host.create_room().await;
     assert_eq!(code.len(), 6);
 }

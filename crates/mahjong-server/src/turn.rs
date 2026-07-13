@@ -1,1 +1,1 @@
-// ターンの管理
+//! Turn bookkeeping.

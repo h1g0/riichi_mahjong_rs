@@ -1,25 +1,25 @@
-//! 鳴き・リーチ・和了などの宣言バナー（吹き出し）の描画
+//! Declaration banners (speech bubbles) for calls, riichi, wins, etc.
 //!
-//! 各家が発声すべき場面（ポン・チー・カン・リーチ・北抜き・ロン・ツモ・
-//! 九種九牌）で、その家の手牌・捨て牌の近くに吹き出しを一定時間表示する。
-//! バナーの生成と寿命管理は `GameState::process_events` が行い、ここでは
-//! `state.call_banners` を描画するだけ。
+//! Whenever a player would call out (pon, chii, kan, riichi, pei, ron,
+//! tsumo, nine terminals) a bubble appears near their hand for a while.
+//! `GameState::process_events` creates and expires the banners; this
+//! module only draws `state.call_banners`.
 
 use macroquad::prelude::*;
 
 use super::{BOARD_CENTER_Y, DESIGN_W, rotation_index, theme};
 use crate::game::{CALL_BANNER_SECS, GameState};
 
-/// バナー文字サイズ（`USED_FONT_SIZES` に含まれるサイズを使うこと）
+/// Banner font size; must be one of `USED_FONT_SIZES`.
 const BANNER_FONT: u16 = 26;
-/// フェードアウトにかける時間（秒）
+/// Fade-out duration in seconds.
 const FADE_SECS: f64 = 0.35;
-/// 吹き出しの高さ
+/// Bubble height.
 const BUBBLE_H: f32 = 46.0;
-/// 吹き出しのしっぽ（三角形）の長さ
+/// Length of the bubble's tail triangle.
 const TAIL_LEN: f32 = 12.0;
 
-/// しっぽの向き（吹き出しからプレイヤーの手牌方向を指す）
+/// Tail direction, pointing from the bubble towards the player's hand.
 enum TailDir {
     Down,
     Right,
@@ -27,22 +27,22 @@ enum TailDir {
     Left,
 }
 
-/// 描画スロット（[`super::PLAYER_ROTATIONS`] と同じ並び）ごとの
-/// 吹き出し中心座標としっぽの向き。
+/// Bubble center and tail direction per draw slot, in
+/// [`super::PLAYER_ROTATIONS`] order.
 fn banner_anchor(slot: usize) -> (f32, f32, TailDir) {
     match slot {
-        // 自分: 手牌（y=680）の上
+        // Self: above the hand (y = 680).
         0 => (DESIGN_W / 2.0, 600.0, TailDir::Down),
-        // 下家: 右側の手牌の内側
+        // Right player: inside their hand.
         1 => (890.0, BOARD_CENTER_Y, TailDir::Right),
-        // 対面: 上側の手牌の下
+        // Across player: below their hand.
         2 => (DESIGN_W / 2.0, 165.0, TailDir::Up),
-        // 上家: 左側の手牌の内側
+        // Left player: inside their hand.
         _ => (390.0, BOARD_CENTER_Y, TailDir::Left),
     }
 }
 
-/// アクティブな宣言バナーをすべて描画する。
+/// Draws every active declaration banner.
 pub(super) fn draw_call_banners(state: &GameState, font: Option<&Font>) {
     let now = get_time();
     let tr = state.tr();
@@ -61,7 +61,7 @@ pub(super) fn draw_call_banners(state: &GameState, font: Option<&Font>) {
     }
 }
 
-/// 吹き出しを1つ描画する。
+/// Draws one bubble.
 fn draw_banner_bubble(font: Option<&Font>, slot: usize, text: &str, alpha: f32) {
     let (cx, cy, tail) = banner_anchor(slot);
 
@@ -74,7 +74,7 @@ fn draw_banner_bubble(font: Option<&Font>, slot: usize, text: &str, alpha: f32) 
     let fill = theme::rgba(0x050e08, 0.94 * alpha);
     let border = theme::rgba(0xc9a227, 0.95 * alpha);
 
-    // しっぽ（本体に少し食い込ませて隙間をなくす）
+    // The tail bites slightly into the body to avoid a seam.
     let (t1, t2, t3) = match tail {
         TailDir::Down => (
             vec2(cx - 9.0, y + h - 1.0),

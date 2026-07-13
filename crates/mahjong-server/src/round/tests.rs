@@ -1,4 +1,4 @@
-//! `Round` のユニットテスト
+//! Unit tests for `Round`.
 
 use super::*;
 
@@ -12,51 +12,47 @@ fn test_round_new() {
     assert_eq!(round.phase, TurnPhase::Draw);
     assert!(round.result.is_none());
 
-    // 各プレイヤーに13枚配られている
     for i in 0..4 {
         assert_eq!(round.players[i].hand.tiles().len(), 13);
     }
 
-    // 親（プレイヤー0）が東家
     assert_eq!(round.players[0].seat_wind, Wind::East);
 }
 
 #[test]
 fn test_round_draw() {
-    // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
+    // Seeded wall guarantees the first draw is not a nine-terminals offer.
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
-    round.drain_events(); // 初期イベントをクリア
+    round.drain_events();
 
     assert!(round.do_draw());
     assert_eq!(round.phase, TurnPhase::WaitForDiscard);
     assert!(round.players[0].hand.drawn().is_some());
 
-    // イベントを確認: 1つのTileDrawn + 3つのOtherPlayerDrew = 4イベント
+    // One TileDrawn plus three OtherPlayerDrew = four events.
     let events = round.drain_events();
     assert_eq!(events.len(), 4);
 }
 
 #[test]
 fn test_round_discard() {
-    // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
+    // Seeded wall guarantees the first draw is not a nine-terminals offer.
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     round.drain_events();
     round.do_draw();
     round.drain_events();
 
-    // ツモ切り
     assert!(round.do_discard(None));
 
-    // 打牌後のフェーズは Draw か WaitForCalls
     assert!(
         round.phase == TurnPhase::Draw || round.phase == TurnPhase::WaitForCalls,
         "phase should be Draw or WaitForCalls, got: {:?}",
         round.phase
     );
 
-    // 鳴き待ちなら全員パスして進める
+    // Pass everyone through a possible WaitForCalls.
     if round.phase == TurnPhase::WaitForCalls {
         for i in 0..4 {
             if let Some(ref cs) = round.call_state
@@ -71,12 +67,12 @@ fn test_round_discard() {
     }
 
     assert_eq!(round.phase, TurnPhase::Draw);
-    assert_eq!(round.current_player, 1); // 次のプレイヤーへ
+    assert_eq!(round.current_player, 1);
 }
 
 #[test]
 fn test_round_discard_rejects_tile_not_in_hand() {
-    // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
+    // Seeded wall guarantees the first draw is not a nine-terminals offer.
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     round.drain_events();
@@ -93,12 +89,12 @@ fn test_round_discard_rejects_tile_not_in_hand() {
 
 #[test]
 fn test_round_turn_flow() {
-    // 固定シードで牌山を生成し、テストの再現性を確保する
+    // Seeded wall for reproducibility.
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     round.drain_events();
 
-    // 4人分のターンを回す
+    // Run one full go-around.
     for expected_player in 0..4 {
         assert_eq!(round.current_player, expected_player);
 
@@ -108,7 +104,7 @@ fn test_round_turn_flow() {
             break;
         }
 
-        // 九種九牌が成立した場合は宣言せず続行する
+        // Decline any nine-terminals offer and continue.
         if round.phase == TurnPhase::WaitForNineTerminals {
             round.do_nine_terminals(expected_player, false);
         }
@@ -119,7 +115,7 @@ fn test_round_turn_flow() {
             break;
         }
 
-        // WaitForCalls なら全員パス
+        // Pass everyone through a possible WaitForCalls.
         if round.phase == TurnPhase::WaitForCalls {
             for i in 0..4 {
                 if let Some(ref cs) = round.call_state
@@ -138,7 +134,7 @@ fn test_round_turn_flow() {
     }
 
     if round.phase != TurnPhase::RoundOver {
-        // 一巡して最初のプレイヤーに戻る
+        // Back to the first player after the go-around.
         assert_eq!(round.current_player, 0);
     }
 }
@@ -173,7 +169,6 @@ fn test_round_events_on_start() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     let events = round.drain_events();
 
-    // 4人分のGameStartedイベント
     assert_eq!(events.len(), 4);
     for (i, (player_idx, event)) in events.iter().enumerate() {
         assert_eq!(*player_idx, i);
@@ -197,8 +192,8 @@ fn test_round_events_on_start() {
 
 #[test]
 fn test_wait_for_calls_and_pass() {
-    // 打牌後に WaitForCalls になった場合、全員パスで Draw に進む
-    // 固定シードで牌山を生成し、初回ツモが九種九牌にならないことを保証する
+    // After a discard, WaitForCalls resolves to Draw once everyone passes.
+    // Seeded wall guarantees the first draw is not a nine-terminals offer.
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     round.drain_events();
@@ -207,7 +202,6 @@ fn test_wait_for_calls_and_pass() {
     round.do_discard(None);
 
     if round.phase == TurnPhase::WaitForCalls {
-        // 全員パス
         for i in 0..4 {
             if let Some(ref cs) = round.call_state
                 && !cs.responded[i]
@@ -421,18 +415,16 @@ fn test_do_kakan_keeps_unrelated_drawn_tile_in_hand() {
 
 #[test]
 fn test_temporary_furiten_set_on_ron_pass() {
-    // プレイヤー1がロン可能な状態で、パスすると同巡フリテンが設定される
+    // Passing an available ron sets temporary furiten.
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
-    // プレイヤー1にテンパイ手を設定: 123m456p789s11z 待ち1z（場風東）
+    // Player 1 tenpai: 123m456p789s11z waiting on 1z (East round).
     let seat1 = round.players[1].seat_wind;
     let hand1 = mahjong_core::hand::Hand::from("123m456p789s1122z");
     round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
 
-    // プレイヤー0が1z（東）を捨てた場合をチェック
     let call_state = round.check_available_calls(Tile::new(Tile::Z1), 0);
 
-    // ロンが可能であること
     assert!(
         call_state.available_calls[1]
             .iter()
@@ -440,7 +432,6 @@ fn test_temporary_furiten_set_on_ron_pass() {
         "player 1 should be able to ron"
     );
 
-    // CallStateをセットしてパスで応答
     round.phase = TurnPhase::WaitForCalls;
     round.call_state = Some(call_state);
     for i in 0..4 {
@@ -454,7 +445,6 @@ fn test_temporary_furiten_set_on_ron_pass() {
         }
     }
 
-    // 同巡フリテンが設定されていること
     assert!(round.players[1].is_temporary_furiten);
     assert!(!round.players[1].is_riichi_furiten);
 }
@@ -464,21 +454,19 @@ fn test_temporary_furiten_cleared_on_draw() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     round.drain_events();
 
-    // プレイヤー1に同巡フリテンを設定
     round.players[1].is_temporary_furiten = true;
 
-    // プレイヤー1のツモ番にする
     round.current_player = 1;
     round.phase = TurnPhase::Draw;
     round.do_draw();
 
-    // 同巡フリテンが解除されていること
+    // The player's own draw lifts temporary furiten.
     assert!(!round.players[1].is_temporary_furiten);
 }
 
 #[test]
 fn test_riichi_furiten_set_on_ron_pass() {
-    // リーチ中のプレイヤーがロンを見逃すとリーチ後フリテンが設定される
+    // A riichi player passing a ron becomes riichi-furiten.
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
     let seat1 = round.players[1].seat_wind;
@@ -507,7 +495,6 @@ fn test_riichi_furiten_set_on_ron_pass() {
         }
     }
 
-    // リーチ後フリテンが設定されていること
     assert!(round.players[1].is_riichi_furiten);
     assert!(!round.players[1].is_temporary_furiten);
 }
@@ -517,22 +504,20 @@ fn test_riichi_furiten_persists_after_draw() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     round.drain_events();
 
-    // リーチ後フリテンを設定
     round.players[1].is_riichi_furiten = true;
     round.players[1].is_riichi = true;
 
-    // プレイヤー1がツモ
     round.current_player = 1;
     round.phase = TurnPhase::Draw;
     round.do_draw();
 
-    // リーチ後フリテンは解除されないこと
+    // Riichi furiten survives the player's own draw.
     assert!(round.players[1].is_riichi_furiten);
 }
 
 #[test]
 fn test_temporary_furiten_blocks_ron() {
-    // 同巡フリテンのプレイヤーにはロンが提供されない
+    // A furiten player is never offered ron.
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
     let seat1 = round.players[1].seat_wind;
@@ -542,7 +527,6 @@ fn test_temporary_furiten_blocks_ron() {
 
     let call_state = round.check_available_calls(Tile::new(Tile::Z1), 0);
 
-    // フリテンなのでロンが提供されないこと
     assert!(
         !call_state.available_calls[1]
             .iter()
@@ -553,7 +537,7 @@ fn test_temporary_furiten_blocks_ron() {
 
 #[test]
 fn test_kakan_ron_pass_sets_furiten() {
-    // 加カンで搶槓可能だがパスした場合、フリテンが設定される
+    // Passing a robbing-a-quad chance also sets furiten.
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
     let seat0 = round.players[0].seat_wind;
@@ -578,16 +562,14 @@ fn test_kakan_ron_pass_sets_furiten() {
             .any(|call| matches!(call, AvailableCall::Ron))
     );
 
-    // ロンせずパス → フリテンが設定されること
     assert!(round.respond_to_call(1, CallResponse::Pass));
     assert!(round.players[1].is_temporary_furiten);
 }
 
 #[test]
 fn test_riichi_with_specific_tenpai_hand() {
-    // 再現テスト: 6m7m1p2p3p3p4p5p5p6p7s8s9s ツモ8m
-    // shanten=0 で riichi_discards がある（3p,3p,5p,5p,6p）
-    // → can_riichi = true であるべき
+    // Reproduction: 6m7m1p2p3p3p4p5p5p6p7s8s9s drawing 8m is tenpai with
+    // several riichi discards (3p,3p,5p,5p,6p), so can_riichi must be true.
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
     let seat0 = round.players[0].seat_wind;
@@ -595,7 +577,6 @@ fn test_riichi_with_specific_tenpai_hand() {
     round.players[0] = Player::new(seat0, hand.tiles().to_vec(), 25000);
     round.players[0].hand.set_drawn(Some(Tile::new(Tile::M8)));
 
-    // 前提条件チェック
     assert!(!round.players[0].is_riichi, "should not be in riichi");
     assert!(round.players[0].is_menzen(), "should be menzen");
     assert!(round.players[0].score >= 1000, "should have >= 1000 score");
@@ -605,7 +586,6 @@ fn test_riichi_with_specific_tenpai_hand() {
         "should have drawn tile"
     );
 
-    // リーチ可能であるべき
     assert!(
         round.can_player_riichi(0),
         "should be able to declare riichi with tenpai hand"
@@ -654,15 +634,13 @@ fn test_kakan_offers_rob_ron() {
     }
 }
 
-// ─── 九種九牌テスト ───────────────────────────────────────────────────────────
+// --- Nine terminals ---
 
-/// 九種九牌の条件を満たす手牌をセットアップするヘルパー
-///
-/// 1m9m1p9p1s9s1z2z3z4z5z6z7z (13種全ヤオ九牌) + ツモ牌1枚
+/// Sets up a hand qualifying for nine terminals:
+/// 1m9m1p9p1s9s1z2z3z4z5z6z7z (all 13 orphan kinds) plus a drawn tile.
 fn setup_nine_terminals_hand(round: &mut Round, player_idx: usize) {
     let seat = round.players[player_idx].seat_wind;
     let mut player = Player::new(seat, vec![], 25000);
-    // 14枚: 1m9m1p9p1s9s1z2z3z4z5z6z7z + ツモ1m（重複は問題なし）
     player.hand = mahjong_core::hand::Hand::from("1m9m1p9p1s9s1z2z3z4z5z6z7z 1m");
     round.players[player_idx] = player;
     round.current_player = player_idx;
@@ -673,7 +651,6 @@ fn setup_nine_terminals_hand(round: &mut Round, player_idx: usize) {
 fn test_check_nine_terminals_qualifies() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     setup_nine_terminals_hand(&mut round, 0);
-    // 初回ツモ（捨て牌0枚）かつヤオ九牌9種以上
     assert!(round.check_nine_terminals());
 }
 
@@ -682,8 +659,7 @@ fn test_check_nine_terminals_insufficient_types() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     let seat = round.players[0].seat_wind;
     let mut player = Player::new(seat, vec![], 25000);
-    // ヤオ九牌が8種類のみ（6z・7zがなく中張牌が多い）
-    // 1m,9m,1p,9p,1s,9s,1z,2z = 8種
+    // Only eight orphan kinds (1m,9m,1p,9p,1s,9s,1z,2z), so no offer.
     player.hand = mahjong_core::hand::Hand::from("1m9m1p9p1s9s1z2z5m5p5s5s 1m");
     round.players[0] = player;
     round.current_player = 0;
@@ -695,14 +671,13 @@ fn test_check_nine_terminals_insufficient_types() {
 fn test_check_nine_terminals_after_discard() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     setup_nine_terminals_hand(&mut round, 0);
-    // 捨て牌を1枚追加（既に1巡した状態を再現）
+    // One discard already made: the offer window has closed.
     round.players[0].discards.push(crate::player::Discard {
         tile: Tile::new(Tile::M5),
         is_tsumogiri: true,
         is_riichi_declaration: false,
         is_called: false,
     });
-    // 捨て牌済みなので宣言不可
     assert!(!round.check_nine_terminals());
 }
 
@@ -738,7 +713,6 @@ fn test_do_nine_terminals_continue() {
     round.drain_events();
 
     assert!(round.do_nine_terminals(0, false));
-    // 続行 → 打牌フェーズへ
     assert_eq!(round.phase, TurnPhase::WaitForDiscard);
     assert!(round.result.is_none());
 }
@@ -749,17 +723,16 @@ fn test_do_nine_terminals_wrong_player() {
     setup_nine_terminals_hand(&mut round, 0);
     round.phase = TurnPhase::WaitForNineTerminals;
 
-    // 別プレイヤーからのアクションは無効
     assert!(!round.do_nine_terminals(1, true));
     assert_eq!(round.phase, TurnPhase::WaitForNineTerminals);
 }
 
 #[test]
 fn test_do_draw_triggers_nine_terminals_phase() {
-    // 牌山の先頭を7z（13種目のヤオ九牌）に設定する
-    // Wall::from_tiles は先頭から draw() するため、先頭に7zを置く
+    // Put 7z (the 13th orphan kind) on top of the wall;
+    // Wall::from_tiles draws from the front.
     let mut wall_tiles: Vec<Tile> = vec![Tile::new(Tile::Z7)];
-    // 残りは適当な牌で埋める（最低 14 枚の王牌分が必要）
+    // Pad the rest (at least the 14 dead-wall tiles are needed).
     for _ in 0..(70 + 14) {
         wall_tiles.push(Tile::new(Tile::M5));
     }
@@ -768,7 +741,7 @@ fn test_do_draw_triggers_nine_terminals_phase() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     round.wall = wall;
 
-    // 手牌をヤオ九牌12種に設定（ツモで7zが来て13種になる）
+    // Twelve orphan kinds in hand; the drawn 7z makes thirteen.
     let seat = round.players[0].seat_wind;
     let mut player = Player::new(seat, vec![], 25000);
     player.hand = mahjong_core::hand::Hand::from("1m9m1p9p1s9s1z2z3z4z5z6z5m");
@@ -797,9 +770,9 @@ fn test_do_draw_triggers_nine_terminals_phase() {
 
 #[test]
 fn test_nine_terminals_continue_resends_tile_drawn() {
-    // 続行を選んだプレイヤーには TileDrawn を再送して打牌を促す。
-    // （最初の TileDrawn への打牌は WaitForNineTerminals フェーズで
-    // 拒否されているため、再送がないと局が進行不能になる）
+    // Declining re-sends TileDrawn to prompt the discard: the response
+    // to the first TileDrawn was rejected during WaitForNineTerminals,
+    // so without the re-send the hand would stall.
     let mut wall_tiles: Vec<Tile> = vec![Tile::new(Tile::Z7)];
     for _ in 0..(70 + 14) {
         wall_tiles.push(Tile::new(Tile::M5));
@@ -828,7 +801,7 @@ fn test_nine_terminals_continue_resends_tile_drawn() {
         .any(|(idx, e)| *idx == 0 && matches!(e, ServerEvent::TileDrawn { .. }));
     assert!(resent, "続行時に TileDrawn が再送されるべき");
 
-    // 再送されたツモ牌で打牌できる（局が進行する）
+    // The re-sent draw allows the discard; the hand moves on.
     assert!(round.do_discard(None));
 }
 
@@ -855,28 +828,22 @@ fn test_nine_terminals_disabled_by_setting() {
 
     round.do_draw();
 
-    // 設定オフなら通常の打牌フェーズになる
+    // With the rule off, play proceeds straight to the discard phase.
     assert_eq!(round.phase, TurnPhase::WaitForDiscard);
 }
 
-// ─── 三家和流局テスト ─────────────────────────────────────────────────────────
+// --- Triple-ron abortive draw ---
 
-/// 3人がロン可能な状態を作るヘルパー
-///
-/// - プレイヤー0: 打牌側（5sを捨てる）
-/// - プレイヤー1,2,3: 5sでロン可能な手牌（タンヤオ形）
-///
-/// 全員の手牌は同じ点数になる（非親・同一役・同一符）ため点数テストに使える。
+/// Sets up three players able to ron player 0's 5s discard, each with a
+/// tanyao hand. All winners score identically (non-dealer, same yaku and
+/// fu), which the scoring tests rely on.
 fn setup_triple_ron(round: &mut Round) {
-    // プレイヤー0: 5sをツモ切り
     let seat0 = round.players[0].seat_wind;
     let mut p0 = Player::new(seat0, vec![], 25000);
-    // 12枚クローズ + ツモ牌5s
     p0.hand = mahjong_core::hand::Hand::from("234m456m234p456p 5s");
     round.players[0] = p0;
 
-    // プレイヤー1,2,3: 5sでロン可能な手牌（234m456m234p456p5s で 55s 待ち）
-    // 全員タンヤオ（2〜8のみ）で同一役・同一符
+    // Players 1-3: 234m456m234p456p5s waiting on 5s, all tanyao.
     for i in 1..=3 {
         let seat = round.players[i].seat_wind;
         let mut p = Player::new(seat, vec![], 25000);
@@ -896,16 +863,13 @@ fn test_triple_ron_draw_enabled() {
     setup_triple_ron(&mut round);
     round.drain_events();
 
-    // プレイヤー0が1mを捨てる
     assert!(round.do_discard(None));
     assert_eq!(round.phase, TurnPhase::WaitForCalls);
 
-    // 3人全員がロン宣言
     assert!(round.respond_to_call(1, CallResponse::Ron));
     assert!(round.respond_to_call(2, CallResponse::Ron));
     assert!(round.respond_to_call(3, CallResponse::Ron));
 
-    // 三家和流局になること
     assert_eq!(round.phase, TurnPhase::RoundOver);
     assert!(matches!(round.result, Some(RoundResult::SpecialDraw)));
 
@@ -924,8 +888,8 @@ fn test_triple_ron_draw_enabled() {
 
 #[test]
 fn test_triple_ron_draw_takes_priority_over_multiple_ron() {
-    // triple_ron_draw=true かつ multiple_ron=true の両方が有効な場合、
-    // 三家和流局が優先されてトリロン（全員和了）にはならないことを明示的に確認する
+    // With both triple_ron_draw and multiple_ron on, the abortive draw
+    // must take precedence over a triple win.
     let mut settings = Settings::new();
     settings.triple_ron_draw = true;
     settings.multiple_ron = true;
@@ -955,7 +919,7 @@ fn test_triple_ron_draw_takes_priority_over_multiple_ron() {
 
 #[test]
 fn test_triple_ron_draw_disabled_multiple_ron_disabled_picks_winner() {
-    // triple_ron_draw=false, multiple_ron=false の場合は上家取り（頭ハネ）の1人ロン
+    // Both flags off: head bump, a single winner.
     let mut settings = Settings::new();
     settings.triple_ron_draw = false;
     settings.multiple_ron = false;
@@ -970,7 +934,7 @@ fn test_triple_ron_draw_disabled_multiple_ron_disabled_picks_winner() {
     assert!(round.respond_to_call(2, CallResponse::Ron));
     assert!(round.respond_to_call(3, CallResponse::Ron));
 
-    // multiple_ron=false → 上家（プレイヤー1）が優先してロン
+    // multiple_ron=false: the closest player (1) wins.
     assert_eq!(round.phase, TurnPhase::RoundOver);
     match &round.result {
         Some(RoundResult::Ron { winners, loser, .. }) => {
@@ -983,10 +947,9 @@ fn test_triple_ron_draw_disabled_multiple_ron_disabled_picks_winner() {
 
 #[test]
 fn test_two_ron_no_draw() {
-    // 2人ロンは三家和流局にならない（triple_ron_draw=true でも2人なら流局しない）
+    // Two rons never trigger the abortive draw, even with the flag on.
     let mut settings = Settings::new();
     settings.triple_ron_draw = true;
-    // multiple_ron=true（デフォルト）なので両方和了
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
     setup_triple_ron(&mut round);
     round.drain_events();
@@ -998,7 +961,7 @@ fn test_two_ron_no_draw() {
     assert!(round.respond_to_call(2, CallResponse::Ron));
     assert!(round.respond_to_call(3, CallResponse::Pass));
 
-    // 2人ロンは流局でなくダブロン
+    // Two rons resolve as a double ron, not a draw.
     assert_eq!(round.phase, TurnPhase::RoundOver);
     match &round.result {
         Some(RoundResult::Ron { winners, loser, .. }) => {
@@ -1011,7 +974,7 @@ fn test_two_ron_no_draw() {
 
 #[test]
 fn test_two_ron_disabled_picks_winner() {
-    // multiple_ron=false の場合は上家取り（頭ハネ）の1人ロン
+    // multiple_ron=false: head bump, a single winner.
     let mut settings = Settings::new();
     settings.multiple_ron = false;
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
@@ -1025,7 +988,7 @@ fn test_two_ron_disabled_picks_winner() {
     assert!(round.respond_to_call(2, CallResponse::Ron));
     assert!(round.respond_to_call(3, CallResponse::Pass));
 
-    // multiple_ron=false → 上家（プレイヤー1）のみロン
+    // multiple_ron=false: only the closest player (1) wins.
     assert_eq!(round.phase, TurnPhase::RoundOver);
     match &round.result {
         Some(RoundResult::Ron { winners, loser, .. }) => {
@@ -1038,7 +1001,7 @@ fn test_two_ron_disabled_picks_winner() {
 
 #[test]
 fn test_double_ron_both_win() {
-    // multiple_ron=true（デフォルト）: 2人ロンで両方和了
+    // Default multiple_ron: both win.
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     setup_triple_ron(&mut round);
     round.drain_events();
@@ -1061,7 +1024,7 @@ fn test_double_ron_both_win() {
 
 #[test]
 fn test_triple_ron_all_win() {
-    // multiple_ron=true かつ triple_ron_draw=false: 3人ロンで全員和了
+    // multiple_ron on, triple_ron_draw off: all three win.
     let mut settings = Settings::new();
     settings.multiple_ron = true;
     settings.triple_ron_draw = false;
@@ -1087,8 +1050,8 @@ fn test_triple_ron_all_win() {
 
 #[test]
 fn test_double_ron_scores() {
-    // ダブロン時のスコア: 各和了者が放銃者から独立して点数を受け取る
-    // 本場ボーナスは上家取りで最初の和了者（プレイヤー1）のみ
+    // Double-ron scoring: each winner is paid independently; the honba
+    // bonus goes only to the first winner in turn order.
     let mut round = Round::new(Wind::East, 0, [25000; 4], 1, 0, 0, 4, Settings::new()); // honba=1
     setup_triple_ron(&mut round);
     round.drain_events();
@@ -1102,8 +1065,7 @@ fn test_double_ron_scores() {
     assert!(round.respond_to_call(2, CallResponse::Ron));
     assert!(round.respond_to_call(3, CallResponse::Pass));
 
-    // プレイヤー1: 本場ボーナスあり (honba=1 → 300点加算)
-    // プレイヤー2: 本場ボーナスなし
+    // Player 1 gets the honba bonus (300); player 2 does not.
     let p1_gain = round.players[1].score - initial_score_p1;
     let p2_gain = round.players[2].score - initial_score_p2;
     assert!(
@@ -1118,7 +1080,7 @@ fn test_double_ron_scores() {
         "本場ボーナスの差は1本場=300点であること"
     );
 
-    // 放銃者は両方の点数を払う
+    // The deal-in player pays both.
     let loser_loss = initial_score_loser - round.players[0].score;
     let total_gain = p1_gain + p2_gain;
     assert_eq!(
@@ -1129,7 +1091,7 @@ fn test_double_ron_scores() {
 
 #[test]
 fn test_double_ron_events_generated() {
-    // ダブロン時に各和了者分のRoundWonイベントが生成されること
+    // A double ron emits one RoundWon per winner.
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     setup_triple_ron(&mut round);
     round.drain_events();
@@ -1153,7 +1115,7 @@ fn test_double_ron_events_generated() {
 
 #[test]
 fn test_multi_ron_riichi_sticks_first_winner_only() {
-    // 供託棒は最初の和了者（プレイヤー1）のみ取得
+    // The riichi deposits go only to the first winner.
     let settings = Settings::new();
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 2, 0, 4, settings); // riichi_sticks=2
     setup_triple_ron(&mut round);
@@ -1169,7 +1131,7 @@ fn test_multi_ron_riichi_sticks_first_winner_only() {
 
     let p1_gain = round.players[1].score - initial_p1;
     let p2_gain = round.players[2].score - initial_p2;
-    // プレイヤー1は供託2本（2000点）分多く得点しているはず
+    // Player 1 nets 2000 more from the two deposits.
     assert_eq!(
         p1_gain - p2_gain,
         2000,
@@ -1178,7 +1140,7 @@ fn test_multi_ron_riichi_sticks_first_winner_only() {
     assert_eq!(round.riichi_sticks, 0, "供託棒はすべて消費されること");
 }
 
-// ─── auto_pass_cpu テスト ────────────────────────────────────────────────────
+// --- auto_pass_cpu ---
 
 #[test]
 fn test_auto_pass_cpu_no_op_when_wrong_phase() {
@@ -1192,7 +1154,7 @@ fn test_auto_pass_cpu_no_op_when_wrong_phase() {
 fn test_auto_pass_cpu_passes_cpu_players_and_resolves() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
-    // プレイヤー1に5zポン可能な手牌をセット
+    // Give player 1 a hand that can pon 5z.
     let seat1 = round.players[1].seat_wind;
     let hand1 = mahjong_core::hand::Hand::from("234678m56p567s55z");
     round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
@@ -1203,7 +1165,7 @@ fn test_auto_pass_cpu_passes_cpu_players_and_resolves() {
     round.phase = TurnPhase::WaitForCalls;
     round.call_state = Some(call_state);
 
-    // human = 0 (捨て牌側), CPU のプレイヤー1 が自動パスされて鳴き解決される
+    // human = 0 (the discarder); CPU player 1 auto-passes and the calls resolve.
     round.auto_pass_cpu(0);
 
     assert!(
@@ -1217,7 +1179,7 @@ fn test_auto_pass_cpu_passes_cpu_players_and_resolves() {
 fn test_auto_pass_cpu_skips_human_player() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
 
-    // プレイヤー1に5zポン可能な手牌をセット
+    // Give player 1 a hand that can pon 5z.
     let seat1 = round.players[1].seat_wind;
     let hand1 = mahjong_core::hand::Hand::from("234678m56p567s55z");
     round.players[1] = Player::new(seat1, hand1.tiles().to_vec(), 25000);
@@ -1228,7 +1190,7 @@ fn test_auto_pass_cpu_skips_human_player() {
     round.phase = TurnPhase::WaitForCalls;
     round.call_state = Some(call_state);
 
-    // human = 1 → プレイヤー1はスキップされるので応答が残る
+    // human = 1 is skipped, so their response stays pending.
     round.auto_pass_cpu(1);
 
     assert!(
@@ -1242,14 +1204,14 @@ fn test_auto_pass_cpu_skips_human_player() {
     assert_eq!(round.phase, TurnPhase::WaitForCalls);
 }
 
-// ===== 喰い替え禁止（#247） =====
+// ===== Swap-calling restriction (#247) =====
 
 use mahjong_core::hand::Hand;
 
 #[test]
 fn test_swap_calling_forbids_genbutsu_after_chi() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
-    // 3m4m5m を含む手牌。捨てられた 3m を [4m,5m] でチーすると 3m が手牌に残る。
+    // Holds 3m4m5m; calling the discarded 3m with [4m,5m] keeps a 3m in hand.
     round.players[1].hand = Hand::from("345m234567p678s1z");
 
     round.execute_chi(
@@ -1261,16 +1223,16 @@ fn test_swap_calling_forbids_genbutsu_after_chi() {
 
     assert_eq!(round.current_player, 1);
     assert_eq!(round.phase, TurnPhase::WaitForDiscard);
-    // 現物喰い替え（鳴いた 3m と同種）の打牌は拒否される
+    // Discarding the same kind as the called tile is rejected.
     assert!(!round.do_discard(Some(Tile::new(Tile::M3))));
-    // 喰い替えにならない打牌は許可される
+    // A non-swap discard is fine.
     assert!(round.do_discard(Some(Tile::new(Tile::P2))));
 }
 
 #[test]
 fn test_swap_calling_forbids_suji_after_chi() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
-    // 4m5m6m を含む手牌。捨てられた 3m を [4m,5m] でチーすると 6m が手牌に残る。
+    // Holds 4m5m6m; calling the discarded 3m with [4m,5m] keeps a 6m in hand.
     round.players[1].hand = Hand::from("456m234567p678s1z");
 
     round.execute_chi(
@@ -1280,16 +1242,16 @@ fn test_swap_calling_forbids_suji_after_chi() {
         [Tile::new(Tile::M4), Tile::new(Tile::M5)],
     );
 
-    // スジ喰い替え（順子 3-4-5 の反対端 6m）の打牌は拒否される
+    // Discarding the suji swap tile (6m, opposite end of 3-4-5) is rejected.
     assert!(!round.do_discard(Some(Tile::new(Tile::M6))));
-    // 喰い替えにならない打牌は許可される
+    // A non-swap discard is fine.
     assert!(round.do_discard(Some(Tile::new(Tile::P2))));
 }
 
 #[test]
 fn test_swap_calling_forbids_genbutsu_after_pon() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
-    // 1s を3枚含む手牌。2枚を使ってポンすると 1s が手牌に残る。
+    // Holds three 1s; the pon leaves one 1s in hand.
     round.players[1].hand = Hand::from("111s234567p678m1z");
 
     round.execute_pon(
@@ -1299,9 +1261,9 @@ fn test_swap_calling_forbids_genbutsu_after_pon() {
         [Tile::new(Tile::S1), Tile::new(Tile::S1)],
     );
 
-    // 現物喰い替え（鳴いた 1s と同種）の打牌は拒否される
+    // Discarding the same kind as the called tile is rejected.
     assert!(!round.do_discard(Some(Tile::new(Tile::S1))));
-    // 喰い替えにならない打牌は許可される
+    // A non-swap discard is fine.
     assert!(round.do_discard(Some(Tile::new(Tile::P2))));
 }
 
@@ -1321,13 +1283,13 @@ fn test_swap_calling_disabled_allows_genbutsu_discard() {
         [Tile::new(Tile::M4), Tile::new(Tile::M5)],
     );
 
-    // 設定で喰い替え禁止を無効化している場合は、スジ牌でも打牌できる
+    // With the rule disabled even the suji swap tile may be discarded.
     assert!(round.do_discard(Some(Tile::new(Tile::M6))));
 }
 
-// ===== 三人麻雀（#257） =====
+// ===== Three-player mahjong (#257) =====
 
-/// 三麻のテスト用 Settings
+/// Three-player test settings.
 fn sanma_settings() -> Settings {
     Settings {
         three_player: true,
@@ -1335,7 +1297,7 @@ fn sanma_settings() -> Settings {
     }
 }
 
-/// 三麻のテスト用 Round を生成する
+/// Builds a three-player test round.
 fn sanma_round(seed: u64, dealer: usize) -> Round {
     Round::new_with_seed(
         seed,
@@ -1355,22 +1317,22 @@ fn test_sanma_round_setup() {
     let round = sanma_round(42, 0);
     assert_eq!(round.player_count, 3);
 
-    // 席風は東・南・西のみ（北家は存在しない）
+    // Seat winds are East/South/West only; no North seat.
     assert_eq!(round.players[0].seat_wind, Wind::East);
     assert_eq!(round.players[1].seat_wind, Wind::South);
     assert_eq!(round.players[2].seat_wind, Wind::West);
 
-    // シート0〜2に13枚配られ、ダミー席3は空手牌・点数0
+    // Seats 0-2 get 13 tiles; the dummy seat has none and zero points.
     for i in 0..3 {
         assert_eq!(round.players[i].hand.tiles().len(), 13);
     }
     assert!(round.players[3].hand.tiles().is_empty());
     assert_eq!(round.players[3].score, 0);
 
-    // 配牌後の山は 108 - 14(王牌) - 13*3 = 55枚
+    // 108 - 14 dead wall - 3 x 13 = 55.
     assert_eq!(round.wall.remaining(), 55);
 
-    // 手牌に萬子2〜8が存在しない
+    // No 2m-8m may appear.
     for i in 0..3 {
         for tile in round.players[i].hand.tiles() {
             assert!(
@@ -1394,14 +1356,13 @@ fn test_sanma_wind_assignment_with_dealer_1() {
 fn test_sanma_game_started_only_for_three_seats() {
     let mut round = sanma_round(42, 0);
     let events = round.drain_events();
-    // GameStarted はシート0〜2にのみ送られる
+    // GameStarted goes to seats 0-2 only.
     let seats: Vec<usize> = events
         .iter()
         .filter(|(_, e)| matches!(e, ServerEvent::GameStarted { .. }))
         .map(|(i, _)| *i)
         .collect();
     assert_eq!(seats, vec![0, 1, 2]);
-    // three_player フラグが立っている
     for (_, e) in &events {
         if let ServerEvent::GameStarted { three_player, .. } = e {
             assert!(three_player);
@@ -1414,7 +1375,7 @@ fn test_sanma_turn_rotation_wraps_at_three() {
     let mut round = sanma_round(42, 0);
     round.drain_events();
 
-    // シート2の打牌後、手番はシート0に戻る（ダミー席3を飛ばす）
+    // After seat 2's discard the turn wraps to seat 0, skipping the dummy.
     for expected_player in [0usize, 1, 2, 0] {
         assert_eq!(round.current_player, expected_player);
         round.do_draw();
@@ -1435,7 +1396,7 @@ fn test_sanma_turn_rotation_wraps_at_three() {
             }
         }
         if round.phase == TurnPhase::RoundOver {
-            return; // 稀に和了・流局が発生しても正常
+            return; // A rare win/draw is fine.
         }
     }
 }
@@ -1443,13 +1404,12 @@ fn test_sanma_turn_rotation_wraps_at_three() {
 #[test]
 fn test_sanma_no_chi_offered() {
     let mut round = sanma_round(42, 0);
-    // シート1（シート0の下家）にチー可能な手牌を持たせる
+    // Seat 1 (to seat 0's right) could chii.
     round.players[1].hand = Hand::from("199m45p11223399s1z");
 
-    // シート0が 3p を捨てた想定で鳴き候補を計算する
     let call_state = round.check_available_calls(Tile::new(Tile::P3), 0);
 
-    // 三麻ではチーは提供されない
+    // Chii is never offered in three-player games.
     assert!(
         call_state.available_calls[1]
             .iter()
@@ -1461,31 +1421,30 @@ fn test_sanma_no_chi_offered() {
 #[test]
 fn test_sanma_pon_still_offered() {
     let mut round = sanma_round(42, 0);
-    // シート2にポン可能な手牌を持たせる
     round.players[2].hand = Hand::from("199m455p1122339s1z");
 
     let call_state = round.check_available_calls(Tile::new(Tile::P5), 0);
 
-    // ポンは三麻でも提供される
+    // Pon is still offered.
     assert!(
         call_state.available_calls[2]
             .iter()
             .any(|c| matches!(c, AvailableCall::Pon { .. })),
         "三麻でポンが提供されない"
     );
-    // ダミー席3は常に応答済み
+    // The dummy seat always counts as responded.
     assert!(call_state.responded[3]);
 }
 
-// ===== 北抜き（#257 Phase 3） =====
+// ===== North extraction (#257 Phase 3) =====
 
-/// 現在の手番プレイヤーに北を持たせて北抜きできる状態を作る
+/// Gives the current player a North so pei is possible.
 fn setup_pei_round() -> Round {
     let mut round = sanma_round(42, 0);
     round.drain_events();
     round.do_draw();
     round.drain_events();
-    // 手牌を北入りの形に差し替える（ツモ牌は do_draw のものを保持）
+    // Swap in a hand holding a North; keep the drawn tile from do_draw.
     round.players[0].hand = Hand::from("19m199p1199s1234z 5z");
     round
 }
@@ -1497,17 +1456,17 @@ fn test_pei_basic_flow() {
 
     assert!(round.do_pei());
 
-    // 北が晒され、補充ツモで手牌13枚+ツモ牌1枚になる
+    // The North is set aside and the replacement draw restores 13 + 1.
     assert_eq!(round.players[0].pei_tiles.len(), 1);
     assert_eq!(round.players[0].hand.tiles().len(), 13);
     assert!(round.players[0].hand.drawn().is_some());
-    // 補充で山が1枚減る
+    // The replacement shrinks the wall by one.
     assert_eq!(round.wall.remaining(), remaining_before - 1);
-    // 手番は変わらず打牌待ちのまま
+    // Still the same player's discard.
     assert_eq!(round.current_player, 0);
     assert_eq!(round.phase, TurnPhase::WaitForDiscard);
 
-    // PeiDeclared が3人に配信され、枚数が正しい
+    // PeiDeclared reaches all three players with the right counts.
     let events = round.drain_events();
     let pei_events: Vec<_> = events
         .iter()
@@ -1520,7 +1479,7 @@ fn test_pei_basic_flow() {
             assert_eq!(*pei_counts, [1, 0, 0, 0]);
         }
     }
-    // 補充ツモの TileDrawn が本人に届く
+    // The declarer receives the replacement TileDrawn.
     assert!(
         events
             .iter()
@@ -1568,7 +1527,6 @@ fn test_pei_rejected_in_four_player_game() {
 #[test]
 fn test_pei_rejected_when_wall_empty() {
     let mut round = setup_pei_round();
-    // 山を空にする
     while round.wall.draw().is_some() {}
 
     assert!(!round.do_pei());
@@ -1581,10 +1539,10 @@ fn test_pei_win_adds_pei_dora() {
     assert!(round.do_pei());
     round.drain_events();
 
-    // 手牌をタンヤオのツモ和了形に差し替える（三麻に萬子2-8は無いため筒子・索子のみ）
-    // 既に北を1枚抜いた状態のため、和了時に北ドラ1翻が加算される
+    // A tanyao tsumo hand (circles/bamboos only: no 2m-8m in sanma).
+    // One North already extracted, so the win gains one pei-dora han.
     round.players[0].hand = Hand::from("234567p234567s8s 8s");
-    // 天和（第一ツモの役満）判定を避ける（役満はドラ加算されないため）
+    // Avoid Blessing of Heaven: yakuman hands ignore dora.
     round.players[0].is_first_turn = false;
 
     assert!(round.do_tsumo());
@@ -1607,14 +1565,14 @@ fn test_pei_win_adds_pei_dora() {
     );
 }
 
-// ===== 役満の包（責任払い #134） =====
+// ===== Yakuman liability payment (pao, #134) =====
 
-/// 3種類目の三元牌をポンさせたプレイヤーが包として記録される
+/// Feeding the third dragon triplet records the feeder as liable.
 #[test]
 fn test_pao_recorded_on_third_dragon_pon() {
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
-    // プレイヤー1: 白・發をポン済みで、手牌に中が2枚
+    // Player 1 has ponned White and Green and holds two Red.
     round.players[1].hand = Hand::from("34m88s77z 555z 666z");
 
     round.execute_pon(
@@ -1627,12 +1585,12 @@ fn test_pao_recorded_on_third_dragon_pon() {
     assert_eq!(round.pao[1], vec![(Kind::BigDragons, 0)]);
 }
 
-/// 2種類目の三元牌のポンでは包は記録されない
+/// The second dragon pon records no liability.
 #[test]
 fn test_pao_not_recorded_on_second_dragon_pon() {
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
-    // プレイヤー1: 白のみポン済み
+    // Player 1 has ponned only White.
     round.players[1].hand = Hand::from("34m88s66z77z 555z");
 
     round.execute_pon(
@@ -1645,12 +1603,12 @@ fn test_pao_not_recorded_on_second_dragon_pon() {
     assert!(round.pao[1].is_empty());
 }
 
-/// 4種類目の風牌をポンさせたプレイヤーが包として記録される
+/// Feeding the fourth wind triplet records the feeder as liable.
 #[test]
 fn test_pao_recorded_on_fourth_wind_pon() {
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
-    // プレイヤー1: 東・南・西をポン済みで、手牌に北が2枚
+    // Player 1 has ponned East/South/West and holds two North.
     round.players[1].hand = Hand::from("88s44z 111z 222z 333z");
 
     round.execute_pon(
@@ -1663,12 +1621,12 @@ fn test_pao_recorded_on_fourth_wind_pon() {
     assert_eq!(round.pao[1], vec![(Kind::BigWinds, 2)]);
 }
 
-/// 4回目のカンを大明カンさせたプレイヤーが包として記録される
+/// Feeding the fourth quad via a called quad records the feeder.
 #[test]
 fn test_pao_recorded_on_fourth_kan_daiminkan() {
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
-    // プレイヤー1: 3回カン済みで、手牌に東が3枚
+    // Player 1 has three kans and holds three East.
     round.players[1].hand = Hand::from("44p111z 1111m 2222s 9999p");
 
     round.execute_daiminkan(1, 0, Tile::new(Tile::Z1));
@@ -1676,7 +1634,7 @@ fn test_pao_recorded_on_fourth_kan_daiminkan() {
     assert_eq!(round.pao[1], vec![(Kind::FourQuads, 0)]);
 }
 
-/// yakuman_pao 無効時は包が記録されない
+/// With yakuman_pao off nothing is recorded.
 #[test]
 fn test_pao_not_recorded_when_disabled() {
     let settings = Settings {
@@ -1696,7 +1654,7 @@ fn test_pao_not_recorded_when_disabled() {
     assert!(round.pao[1].is_empty());
 }
 
-/// 包ありの大三元ツモ: 包のプレイヤーが全額を支払う
+/// Big Dragons tsumo with pao: the liable player pays everything.
 #[test]
 fn test_pao_tsumo_daisangen_full_payment() {
     let mut round =
@@ -1710,14 +1668,15 @@ fn test_pao_tsumo_daisangen_full_payment() {
 
     assert!(round.do_tsumo());
 
-    // 子の役満ツモ32000点を包のプレイヤー0が全額支払う
+    // The liable player 0 covers the whole 32000.
     assert_eq!(round.players[0].score, 25000 - 32000);
     assert_eq!(round.players[1].score, 25000 + 32000);
     assert_eq!(round.players[2].score, 25000);
     assert_eq!(round.players[3].score, 25000);
 }
 
-/// 包ありの大三元ロン（他家に放銃）: 放銃者と包のプレイヤーで折半
+/// Big Dragons ron off a third player: the deal-in player and the
+/// liable player split.
 #[test]
 fn test_pao_ron_daisangen_split_payment() {
     let mut round =
@@ -1729,14 +1688,14 @@ fn test_pao_ron_daisangen_split_payment() {
 
     round.execute_ron(vec![1], 3, Tile::new(Tile::M2), false);
 
-    // 子の役満ロン32000点を放銃者3と包のプレイヤー0で折半
+    // 32000 split between deal-in player 3 and liable player 0.
     assert_eq!(round.players[0].score, 25000 - 16000);
     assert_eq!(round.players[1].score, 25000 + 32000);
     assert_eq!(round.players[2].score, 25000);
     assert_eq!(round.players[3].score, 25000 - 16000);
 }
 
-/// 包のプレイヤー自身への放銃: 通常のロンと同じ（全額支払い）
+/// Deal-in by the liable player: an ordinary full-payment ron.
 #[test]
 fn test_pao_ron_from_pao_player_pays_full_amount() {
     let mut round =
@@ -1754,13 +1713,13 @@ fn test_pao_ron_from_pao_player_pays_full_amount() {
     assert_eq!(round.players[3].score, 25000);
 }
 
-/// 記録された包と異なる役満で和了した場合は通常の支払い
+/// Winning with a different yakuman than the recorded pao pays normally.
 #[test]
 fn test_pao_not_applied_for_unrelated_yakuman() {
     let mut round =
         Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     round.drain_events();
-    // 四槓子の包が記録されているが、和了は大三元（四槓子は不成立）
+    // A Four Quads pao is recorded, but the win is Big Dragons.
     round.pao[1] = vec![(Kind::FourQuads, 0)];
     round.players[1].hand = Hand::from("34m88s 555z 666z 777z 2m");
     round.players[1].is_first_turn = false;
@@ -1769,7 +1728,7 @@ fn test_pao_not_applied_for_unrelated_yakuman() {
 
     assert!(round.do_tsumo());
 
-    // 通常のツモ支払い: 親16000・子8000ずつ
+    // Normal tsumo payments: dealer 16000, others 8000.
     assert_eq!(round.players[0].score, 25000 - 16000);
     assert_eq!(round.players[1].score, 25000 + 32000);
     assert_eq!(round.players[2].score, 25000 - 8000);
@@ -1781,7 +1740,7 @@ fn test_sanma_three_winds_draw() {
     let mut round = sanma_round(42, 0);
     round.drain_events();
 
-    // 3人全員が第一打で同じ風牌（東）を捨てる
+    // All players discard the same wind (East) on their first discard.
     for i in 0..3 {
         round.players[i].discards.push(crate::player::Discard {
             tile: Tile::new(Tile::Z1),
@@ -1793,7 +1752,7 @@ fn test_sanma_three_winds_draw() {
     assert!(round.check_four_winds_draw(), "三麻の四風連打が成立しない");
 }
 
-/// 手出しの TileDiscarded は打牌前のソート済み手牌内での位置を含む
+/// A hand-discard TileDiscarded carries the pre-discard sorted position.
 #[test]
 fn test_tedashi_discard_event_includes_hand_index() {
     let mut round =
@@ -1802,7 +1761,7 @@ fn test_tedashi_discard_event_includes_hand_index() {
     round.do_draw();
     round.drain_events();
 
-    // ソート済み手牌: 1m2m3m 1p2p3p 1s2s3s 1z2z3z4z（1p は 0始まりで3番目）
+    // Sorted hand: 1m2m3m 1p2p3p 1s2s3s 1z2z3z4z; 1p sits at index 3.
     round.players[0].hand = Hand::from("123m123p123s1234z 5z");
     assert!(round.do_discard(Some(Tile::new(Tile::P1))));
 
@@ -1821,7 +1780,7 @@ fn test_tedashi_discard_event_includes_hand_index() {
     assert_eq!(discarded, (false, Some(3)));
 }
 
-/// ツモ切りの TileDiscarded は手牌内の位置を含まない
+/// A tsumogiri TileDiscarded carries no hand position.
 #[test]
 fn test_tsumogiri_discard_event_has_no_hand_index() {
     let mut round =

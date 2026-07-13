@@ -1,1 +1,1 @@
-// プレイヤーのアクション定義
+//! Player action definitions.

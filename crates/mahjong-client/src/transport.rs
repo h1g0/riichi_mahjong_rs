@@ -1,43 +1,44 @@
-//! WebSocketトランスポート
+//! WebSocket transport.
 //!
-//! macroquad のフレームループから毎フレーム poll できる、
-//! ノンブロッキングな WebSocket 抽象。
+//! A non-blocking WebSocket abstraction pollable every frame from
+//! macroquad's loop.
 //!
-//! - ネイティブ: tungstenite を別スレッドで動かし、mpsc チャネルで橋渡しする
-//! - WASM: 手書きJSグルー (crates/mahjong-client/js/ws.js) の関数を
-//!   extern "C" で呼ぶ（wasm-bindgen 不使用。wasm_rng.rs と同じ方針）
+//! - Native: tungstenite on a worker thread bridged over mpsc channels.
+//! - WASM: extern "C" calls into hand-written JS glue
+//!   (crates/mahjong-client/js/ws.js); no wasm-bindgen, same policy as
+//!   wasm_rng.rs.
 
-/// トランスポートで発生したイベント
-// WASMスタブは Error しか生成しないが、ネイティブでは全バリアントを使う
+/// An event produced by the transport.
+// The WASM stub only produces Error; native uses every variant.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #[derive(Debug, Clone)]
 pub enum WsEvent {
-    /// 接続が確立した
+    /// The connection opened
     Opened,
-    /// テキストメッセージを受信した
+    /// A text message arrived
     Message(String),
-    /// 接続が閉じられた
+    /// The connection closed
     Closed,
-    /// エラーが発生した（接続失敗・通信エラー）
+    /// A connection or transport error.
     ///
-    /// 文字列はログ向けの技術的な詳細。UI に表示する文言は
-    /// クライアント側でローカライズして組み立てる。
+    /// The string is a technical detail for logs; user-facing text is
+    /// localized and built client-side.
     Error(String),
 }
 
-/// ノンブロッキングな WebSocket 接続
+/// A non-blocking WebSocket connection.
 ///
-/// `RemoteAdapter` はこのトレイト経由で通信するため、
-/// テストではスクリプト化したモックに差し替えられる。
+/// `RemoteAdapter` talks through this trait, so tests can substitute a
+/// scripted mock.
 pub trait Transport {
-    /// テキストフレームを送信する（未接続・切断後の送信は無視される）
+    /// Sends a text frame; ignored before opening or after closing.
     fn send_text(&mut self, text: &str);
 
-    /// 発生したイベントをすべて取り出す（ブロックしない）
+    /// Drains pending events without blocking.
     fn poll(&mut self) -> Vec<WsEvent>;
 }
 
-/// 既定の接続先URLを返す
+/// The default server URL.
 pub fn default_server_url() -> String {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -45,16 +46,16 @@ pub fn default_server_url() -> String {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        // index.html で window.MAHJONG_SERVER_URL が設定されていればそれを使う
+        // Prefer window.MAHJONG_SERVER_URL when index.html sets it.
         wasm::page_server_url().unwrap_or_else(|| "ws://127.0.0.1:8080/ws".to_string())
     }
 }
 
-/// 接続URLにルームコードのクエリパラメータ（`room=CODE`）を付ける
+/// Appends the room code as a `room=CODE` query parameter.
 ///
-/// 複数マシン構成のサーバが、WebSocket アップグレード前にルームの所在
-/// （どのマシンが所持しているか）を判断して接続を転送するために使う。
-/// コードはユーザー入力なので、URLとして安全な文字以外はエスケープする。
+/// A multi-machine server uses it to locate the room's owning machine
+/// and forward the connection before the WebSocket upgrade. The code is
+/// user input, so URL-unsafe characters are escaped.
 pub fn url_with_room(url: &str, code: &str) -> String {
     let separator = if url.contains('?') { '&' } else { '?' };
     let encoded: String = code
@@ -70,9 +71,10 @@ pub fn url_with_room(url: &str, code: &str) -> String {
     format!("{url}{separator}room={encoded}")
 }
 
-/// サーバへの接続を開始し、トランスポートを返す
+/// Starts connecting to the server and returns the transport.
 ///
-/// 接続は非同期に進行し、結果は `poll()` の `Opened` / `Error` で通知される。
+/// Connecting proceeds asynchronously; the outcome arrives via `poll()`
+/// as `Opened` or `Error`.
 pub fn connect(url: &str) -> Box<dyn Transport> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -95,10 +97,10 @@ mod native {
 
     use super::{Transport, WsEvent};
 
-    /// 受信待ちのポーリング間隔
+    /// Polling interval while waiting for messages.
     const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-    /// ネイティブ用トランスポート: 通信スレッドとチャネルで橋渡しする
+    /// Native transport bridging a worker thread over channels.
     pub struct NativeTransport {
         out_tx: Sender<String>,
         in_rx: Receiver<WsEvent>,
@@ -115,11 +117,12 @@ mod native {
         }
     }
 
-    /// rustls のプロセス既定 CryptoProvider を一度だけ用意する
+    /// Installs rustls's process-default CryptoProvider exactly once.
     ///
-    /// rustls 0.23 は wss 接続前にプロセス既定のプロバイダが必要で、
-    /// 未設定だと tungstenite が接続時に panic する。複数の機能で rustls を
-    /// 引き込んでも安全なよう、`install_default` の失敗（設定済み）は無視する。
+    /// rustls 0.23 requires a process default before a wss connection,
+    /// or tungstenite panics on connect. `install_default` failing
+    /// (already set) is ignored so multiple features can pull in rustls
+    /// safely.
     fn ensure_crypto_provider() {
         use std::sync::Once;
         static INIT: Once = Once::new();
@@ -130,13 +133,14 @@ mod native {
 
     impl Transport for NativeTransport {
         fn send_text(&mut self, text: &str) {
-            // スレッド終了後（切断後）の送信は無視する
+            // Sends after the thread exits (disconnected) are ignored.
             let _ = self.out_tx.send(text.to_string());
         }
 
         fn poll(&mut self) -> Vec<WsEvent> {
             let mut events = Vec::new();
-            // Err はキューが空か、スレッド終了済み（Closed/Error は通知済み）
+            // Err means an empty queue or a finished thread
+            // (Closed/Error already delivered).
             while let Ok(event) = self.in_rx.try_recv() {
                 events.push(event);
             }
@@ -144,7 +148,7 @@ mod native {
         }
     }
 
-    /// 通信スレッド本体
+    /// The worker thread body.
     fn run_socket(url: &str, out_rx: &Receiver<String>, in_tx: &Sender<WsEvent>) {
         let (mut socket, _) = match tungstenite::connect(url) {
             Ok(ok) => ok,
@@ -154,7 +158,7 @@ mod native {
             }
         };
 
-        // 送受信を1ループで回すためノンブロッキングにする
+        // Non-blocking so one loop serves both directions.
         if let Err(e) = set_nonblocking(socket.get_mut()) {
             let _ = in_tx.send(WsEvent::Error(format!("socket setup failed: {e}")));
             return;
@@ -165,14 +169,13 @@ mod native {
         }
 
         loop {
-            // 送信キューを書き込みバッファへ移す
             loop {
                 match out_rx.try_recv() {
                     Ok(text) => {
                         match socket.write(Message::text(text)) {
                             Ok(()) => {}
-                            // WouldBlock でもフレームは内部バッファに積まれて
-                            // いるため、後続の flush が再送を試みる
+                            // Even on WouldBlock the frame is queued in
+                            // the internal buffer; a later flush retries.
                             Err(tungstenite::Error::Io(ref e))
                                 if e.kind() == std::io::ErrorKind::WouldBlock => {}
                             Err(e) => {
@@ -183,7 +186,7 @@ mod native {
                     }
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
-                        // トランスポートが破棄された: 接続を閉じて終了
+                        // The transport was dropped: close and exit.
                         let _ = socket.close(None);
                         let _ = socket.flush();
                         return;
@@ -191,7 +194,8 @@ mod native {
                 }
             }
 
-            // 書き込みバッファを送出する（Pong の自動応答もここで送られる）
+            // Flush the write buffer; automatic Pong replies go
+            // out here too.
             match socket.flush() {
                 Ok(()) => {}
                 Err(tungstenite::Error::Io(ref e))
@@ -206,7 +210,6 @@ mod native {
                 }
             }
 
-            // 受信
             match socket.read() {
                 Ok(Message::Text(text)) => {
                     if in_tx.send(WsEvent::Message(text.to_string())).is_err() {
@@ -218,7 +221,8 @@ mod native {
                     let _ = in_tx.send(WsEvent::Closed);
                     return;
                 }
-                // Ping/Pong は下層が応答をキューイングする。Binary は使わない
+                // The layer below queues Ping/Pong replies;
+                // Binary is unused.
                 Ok(_) => {}
                 Err(tungstenite::Error::Io(ref e))
                     if e.kind() == std::io::ErrorKind::WouldBlock =>
@@ -237,7 +241,7 @@ mod native {
         }
     }
 
-    /// 下層の TCP ストリームをノンブロッキングに設定する
+    /// Makes the underlying TCP stream non-blocking.
     fn set_nonblocking(stream: &mut MaybeTlsStream<TcpStream>) -> std::io::Result<()> {
         match stream {
             MaybeTlsStream::Plain(s) => s.set_nonblocking(true),
@@ -251,12 +255,13 @@ mod native {
 mod wasm {
     use super::{Transport, WsEvent};
 
-    // 接続ステータス（ws.js と一致させる）
+    // Connection status codes, matching ws.js.
     const STATUS_OPEN: i32 = 1;
     const STATUS_CLOSED: i32 = 2;
     const STATUS_ERROR: i32 = 3;
 
-    // ws.js が miniquad のプラグイン機構で importObject.env に注入する関数群
+    // Functions ws.js injects into importObject.env via miniquad's
+    // plugin mechanism.
     unsafe extern "C" {
         fn mahjong_ws_connect(url_ptr: *const u8, url_len: usize) -> i32;
         fn mahjong_ws_status(handle: i32) -> i32;
@@ -267,16 +272,15 @@ mod wasm {
         fn mahjong_ws_default_url(buf_ptr: *mut u8, cap: usize) -> i32;
     }
 
-    /// ws.js プラグインのバージョン照合用
-    ///
-    /// mq_js_bundle.js の init_plugins が `{プラグイン名}_crate_version` を
-    /// 呼び、JS側のバージョンと一致するか検証する。
+    /// Version handshake for the ws.js plugin: mq_js_bundle.js's
+    /// init_plugins calls `{plugin}_crate_version` and verifies it
+    /// matches the JS-side version.
     #[unsafe(no_mangle)]
     pub extern "C" fn mahjong_ws_crate_version() -> u32 {
         1
     }
 
-    /// ページに設定された接続先URL (window.MAHJONG_SERVER_URL) を取得する
+    /// Reads the page-configured server URL (window.MAHJONG_SERVER_URL).
     pub fn page_server_url() -> Option<String> {
         let mut buf = vec![0u8; 1024];
         let len = unsafe { mahjong_ws_default_url(buf.as_mut_ptr(), buf.len()) };
@@ -287,12 +291,12 @@ mod wasm {
         String::from_utf8(buf).ok()
     }
 
-    /// WASM用トランスポート: ws.js の WebSocket をハンドル経由で操作する
+    /// WASM transport driving the ws.js WebSocket by handle.
     pub struct WasmTransport {
         handle: i32,
-        /// Opened を通知済みか
+        /// Whether Opened has been delivered
         opened_reported: bool,
-        /// Closed/Error を通知済みか（以後 poll は空を返す）
+        /// Whether Closed/Error has been delivered (poll then stays empty)
         terminated: bool,
     }
 
@@ -309,7 +313,8 @@ mod wasm {
 
     impl Transport for WasmTransport {
         fn send_text(&mut self, text: &str) {
-            // 失敗（未接続・切断後）はステータス変化として poll で検出される
+            // Failures (not yet open / already closed) surface as a
+            // status change in poll.
             unsafe {
                 mahjong_ws_send(self.handle, text.as_ptr(), text.len());
             }
@@ -327,7 +332,7 @@ mod wasm {
                 events.push(WsEvent::Opened);
             }
 
-            // 受信済みメッセージを取り出す（長さ取得 → コピーの2段階）
+            // Dequeue received messages: length first, then copy.
             loop {
                 let len = unsafe { mahjong_ws_next_msg_len(self.handle) };
                 if len < 0 {
@@ -343,7 +348,8 @@ mod wasm {
                 }
             }
 
-            // 終了状態は受信済みメッセージを流し切ってから通知する
+            // Deliver the terminal state only after draining
+            // received messages.
             match status {
                 STATUS_CLOSED => {
                     self.terminated = true;
@@ -379,7 +385,7 @@ mod tests {
             url_with_room("ws://127.0.0.1:8080/ws", "ABC234"),
             "ws://127.0.0.1:8080/ws?room=ABC234"
         );
-        // 既にクエリがある場合は & でつなぐ
+
         assert_eq!(
             url_with_room("wss://example.com/ws?v=1", "ABC234"),
             "wss://example.com/ws?v=1&room=ABC234"
@@ -388,7 +394,7 @@ mod tests {
 
     #[test]
     fn test_url_with_room_escapes_unsafe_chars() {
-        // ユーザー入力のコードに含まれうるURL構造を壊す文字はエスケープする
+        // Escape characters that could break the URL structure.
         assert_eq!(
             url_with_room("ws://h/ws", "A&B=#?"),
             "ws://h/ws?room=A%26B%3D%23%3F"

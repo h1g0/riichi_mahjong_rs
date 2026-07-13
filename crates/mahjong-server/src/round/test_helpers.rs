@@ -1,9 +1,10 @@
-//! テスト用ヘルパー関数
+//! Test helpers.
 
 use super::{CallResponse, Round, TurnPhase};
 
 impl Round {
-    /// 局を最後まで自動進行する（全員ツモ切り・鳴きなし）
+    /// Auto-plays the hand to the end: everyone discards the drawn tile
+    /// and never calls.
     pub fn play_to_end(&mut self) {
         while self.phase != TurnPhase::RoundOver {
             match self.phase {
@@ -14,7 +15,6 @@ impl Round {
                     self.do_discard(None);
                 }
                 TurnPhase::WaitForCalls => {
-                    // 全員パス
                     for i in 0..4 {
                         if let Some(ref cs) = self.call_state
                             && !cs.responded[i]
@@ -34,10 +34,10 @@ impl Round {
         }
     }
 
-    /// WaitForCalls フェーズでCPUプレイヤーを全員パスさせる
+    /// Makes every CPU player pass during the WaitForCalls phase.
     ///
-    /// human_player 以外のプレイヤーで鳴き候補がある者を自動パスさせる。
-    /// 全員パスしたらフェーズが自動進行する。
+    /// Auto-passes each player other than `human_player` that has a pending
+    /// call option; when all have passed the phase advances on its own.
     pub fn auto_pass_cpu(&mut self, human_player: usize) {
         if self.phase != TurnPhase::WaitForCalls {
             return;

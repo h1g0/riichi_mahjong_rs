@@ -1,11 +1,10 @@
-//! 定石（heuristics）フレームワーク
+//! Heuristics framework (issue #142).
 //!
-//! 人間らしい打牌判断の定石を「打牌候補へのスコア補正」として表現し、
-//! CPU の強さレベルに応じて有効な定石だけを適用する（issue #142）。
-//!
-//! 個々の定石は `DiscardHeuristic` として定義し、`DISCARD_HEURISTICS` に
-//! 登録する。定石をハードコードの分岐で書かないことで、
-//! レベルごとの有効/無効切り替えと定石単位のテストを可能にする。
+//! Human-style discard wisdom is expressed as score adjustments on
+//! discard candidates, with only the heuristics enabled for the CPU's
+//! level applied. Each heuristic is a `DiscardHeuristic` registered in
+//! `DISCARD_HEURISTICS` rather than a hard-coded branch, which makes
+//! per-level toggling and per-heuristic testing possible.
 
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{
@@ -23,90 +22,90 @@ use super::defense::ORPHAN_TYPES;
 use super::evaluator::{DiscardCandidate, estimate_hand_value, get_yakuhai_types};
 use super::state::CpuGameState;
 
-/// 打牌補正を計算する際の局面コンテキスト
+/// Context for computing discard adjustments.
 pub struct DiscardContext<'a> {
-    /// CPU が観測しているゲーム状態
+    /// The game state as the CPU sees it
     pub state: &'a CpuGameState,
-    /// CPU 設定
+    /// CPU configuration
     pub config: &'a CpuConfig,
-    /// 攻撃継続中か（false なら守備優先）
+    /// Whether we are pushing; false means defense takes priority
     pub attacking: bool,
 }
 
-/// 定石1つの定義
+/// One heuristic.
 ///
-/// `apply` は「この牌を捨てる」ことの良さに対する補正値を返す。
-/// 正の値はその牌を切りやすく、負の値は切りにくくする。
-/// スケールは `select_best_discard` の基本スコア（向聴数1段階 = 100.0）に合わせる。
+/// `apply` returns an adjustment to how good discarding the candidate is:
+/// positive makes the tile easier to discard, negative harder. The scale
+/// matches `select_best_discard`'s base score (one shanten step = 100.0).
 pub struct DiscardHeuristic {
-    /// 定石名（ログ・テスト用）
+    /// Name, for logs and tests
     pub name: &'static str,
-    /// この定石が有効になる最低レベル
+    /// Minimum level at which the heuristic activates
     pub min_level: CpuLevel,
-    /// 補正関数
+    /// The adjustment function
     pub apply: fn(&DiscardContext, &DiscardCandidate) -> f64,
 }
 
-/// 打牌定石のレジストリ
+/// Registry of discard heuristics (issue #142).
 ///
-/// issue #142 の定石を後続の変更でここに追加していく。
-/// 補正は合算されるため、登録順は結果に影響しない。
+/// Adjustments are summed, so registration order does not matter.
 pub const DISCARD_HEURISTICS: &[DiscardHeuristic] = &[
-    // #147: 孤立字牌・孤立么九牌から優先して切る（弱以上）
+    // #147: discard isolated honours and terminals first (weak+).
     DiscardHeuristic {
         name: "isolated-honour-terminal-first",
         min_level: CpuLevel::Weak,
         apply: isolated_tile_bonus,
     },
-    // #148: 両面ターツを辺張・嵌張より優先する（弱以上）
+    // #148: prefer two-sided shapes over edge/closed shapes (weak+).
     DiscardHeuristic {
         name: "protect-ryanmen-shapes",
         min_level: CpuLevel::Weak,
         apply: shape_protection_bonus,
     },
-    // #152: ドラを雑に切らない（弱以上）
+    // #152: do not discard dora carelessly (weak+).
     DiscardHeuristic {
         name: "protect-dora",
         min_level: CpuLevel::Weak,
         apply: dora_protection_bonus,
     },
-    // #173/#174/#176: 守備時は現物を最優先で切る（弱以上）
+    // #173/#174/#176: when defending, genbutsu comes first (weak+).
     DiscardHeuristic {
         name: "genbutsu-first-when-defending",
         min_level: CpuLevel::Weak,
         apply: defense_safety_bonus,
     },
-    // #149: 一般形では5ブロックを意識する（中以上）
+    // #149: aim for five blocks in a standard hand (normal+).
     DiscardHeuristic {
         name: "five-block-surplus",
         min_level: CpuLevel::Normal,
         apply: five_block_bonus,
     },
-    // #151: 唯一の雀頭候補を安易に壊さない（中以上）
+    // #151: do not casually break the only pair candidate (normal+).
     DiscardHeuristic {
         name: "protect-sole-pair",
         min_level: CpuLevel::Normal,
         apply: sole_pair_protection,
     },
-    // #153: 見えている枚数で有効牌を補正する（中以上）
+    // #153: adjust by how many useful tiles remain visible (normal+).
     DiscardHeuristic {
         name: "dismantle-dead-shapes",
         min_level: CpuLevel::Normal,
         apply: dead_shape_bonus,
     },
-    // #150: 3対子以上は原則としてほぐす（強以上）
+    // #150: with three or more pairs, break some up (strong).
     DiscardHeuristic {
         name: "break-excess-pairs",
         min_level: CpuLevel::Strong,
         apply: excess_pair_bonus,
     },
-    // #154/#155/#156: 七対子と一般形の路線選択に沿って打牌する（中以上）
+    // #154/#155/#156: discard along the chosen route,
+    // seven pairs vs standard (normal+).
     DiscardHeuristic {
         name: "follow-hand-route",
         min_level: CpuLevel::Normal,
         apply: route_lock_bonus,
     },
-    // #186: 河底牌（最終打牌）で危険牌を切らない（中以上）
+    // #186: never discard dangerously on the final discard (normal+).
     DiscardHeuristic {
         name: "safe-last-discard",
         min_level: CpuLevel::Normal,
@@ -115,12 +114,11 @@ pub const DISCARD_HEURISTICS: &[DiscardHeuristic] = &[
 ];
 
 // ============================================================================
-// 打牌定石の実装
+// Discard heuristic implementations.
 // ============================================================================
 
-/// 打牌候補を除いた残り手牌の牌種カウントを返す
-///
-/// 「この牌を切ったときに残る形」を評価するため、候補牌1枚を差し引く。
+/// Tile-kind counts of the hand after removing the candidate,
+/// i.e. the shape that would remain after the discard.
 fn remaining_counts(state: &CpuGameState, discard: Tile) -> [u8; 34] {
     let mut counts = [0u8; 34];
     for t in &state.my_hand {
@@ -134,30 +132,29 @@ fn remaining_counts(state: &CpuGameState, discard: Tile) -> [u8; 34] {
     counts
 }
 
-/// #147: 孤立した字牌・么九牌は切りやすくする
+/// #147: make isolated honours and terminals easier to discard.
 ///
-/// 序盤のバラバラな手では、孤立した客風牌 > 1・9牌 > 役牌 > 2・8牌
-/// の順で打牌候補としての価値を上げる（=手牌としての価値を下げる）。
-/// 役牌は対子になれば役が付くため 1・9 牌より残す。
-/// 中張牌の孤立牌には補正を与えず、相対的に残りやすくする。
+/// In a scattered early hand the discard preference runs guest wind >
+/// terminal > value honour > 2/8. Value honours outrank terminals as
+/// keeps because pairing one yields a yaku. Isolated inside tiles get no
+/// bonus and are therefore kept.
 fn isolated_tile_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     let counts = remaining_counts(ctx.state, c.tile);
     let tt = c.tile.get();
 
-    // 対子・刻子の一部なら孤立牌ではない
     if counts[tt as usize] >= 1 {
         return 0.0;
     }
 
     if tt >= 27 {
-        // 字牌: 役牌は対子になれば役があるため、1・9牌よりさらに残す
         if is_yakuhai(tt, ctx.state.my_seat_wind, ctx.state.round_wind) {
             8.0
         } else {
             16.0
         }
     } else {
-        // 数牌: 前後2つ以内に牌があればターツ候補なので孤立ではない
+        // A suit tile with a neighbour within two ranks is a partial
+        // sequence candidate, not isolated.
         let pos = (tt % 9) as i32;
         let suit_start = tt - tt % 9;
         let near = |offset: i32| -> bool {
@@ -170,26 +167,25 @@ fn isolated_tile_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
         match pos {
             0 | 8 => 10.0, // 1, 9
             1 | 7 => 5.0,  // 2, 8
-            _ => 0.0,      // 中張牌は雑に切らない
+            _ => 0.0,      // Inside tiles are never discarded carelessly.
         }
     }
 }
 
-/// #148: 両面ターツの牌は残し、辺張・嵌張の牌は整理しやすくする
+/// #148: protect two-sided shapes; loosen edge and closed shapes.
 fn shape_protection_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
-    // 守備時は安全度を優先する
     if !ctx.attacking {
         return 0.0;
     }
 
     let tt = c.tile.get();
     if tt >= 27 {
-        return 0.0; // 字牌にターツはない
+        return 0.0; // Honours form no sequences.
     }
 
     let counts = remaining_counts(ctx.state, c.tile);
     if counts[tt as usize] >= 1 {
-        return 0.0; // 対子・刻子側の判断はしない
+        return 0.0; // Pairs/triplets are judged elsewhere.
     }
 
     let pos = (tt % 9) as i32;
@@ -203,32 +199,32 @@ fn shape_protection_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     let upper = has(1);
 
     if lower && upper {
-        return 0.0; // 順子の真ん中（切れば向聴数で評価される）
+        return 0.0; // Middle of a sequence; the shanten term covers it.
     }
 
     if lower || upper {
-        // 隣の牌と2枚ターツを構成している
-        // ターツの下端位置で両面か辺張かを判定（0-indexed: 1..=6 始まりが両面）
+        // Two adjacent tiles: the lower end position tells two-sided
+        // (0-indexed start 1..=6) from edge shapes.
         let pair_low = if lower { pos - 1 } else { pos };
         let two_sided = (1..=6).contains(&pair_low);
         return if two_sided {
-            -6.0 // 両面ターツの牌は守る
+            -6.0 // Keep two-sided shapes.
         } else {
-            3.0 // 辺張（12/89）は整理しやすく
+            3.0 // Edge shapes (12/89) may go.
         };
     }
 
     if has(-2) || has(2) {
-        return 3.0; // 嵌張も愚形として整理しやすく
+        return 3.0; // Closed shapes are weak too.
     }
 
     0.0
 }
 
-/// #152: ドラ・赤ドラを雑に切らない
+/// #152: do not discard dora or red fives carelessly.
 ///
-/// 攻撃中はドラ1枚につきペナルティを与えて手に残しやすくする。
-/// 守備時は補正しない（安全度を優先する）。
+/// While pushing, each dora carries a penalty that keeps it in hand.
+/// No adjustment while defending, where safety must win.
 fn dora_protection_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     if !ctx.attacking {
         return 0.0;
@@ -243,18 +239,20 @@ fn dora_protection_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     -(dora_count as f64) * 12.0
 }
 
-/// #173/#174/#176: 守備時は安全度を最優先する（ベタオリ）
+/// #173/#174/#176: when defending, safety dominates (full fold).
 ///
-/// 安全度に大きな重みを掛けることで、現物 > スジ・字牌 > 無筋么九牌 >
-/// 無筋中張牌（456が最も危険）の順で打牌が選ばれる。
-/// 重み300は向聴数3段階分に相当し、聴牌を崩してでも現物を切る。
+/// A heavy weight on safety orders discards genbutsu > suji/honours >
+/// off-suji terminals > off-suji inside tiles (456 most dangerous).
+/// Weight 300 equals three shanten steps, so genbutsu is discarded even
+/// at the cost of tenpai.
 ///
-/// #179（強以上）: 聴牌・1向聴で降りる場合は重みを150に下げる。
-/// スジ程度の安全度差（0.25 → 37.5点）では向聴数1段階（100点）を
-/// 覆せなくなるため、現物で形を崩す代わりにスジ・字牌などの
-/// 安全寄りの牌で聴牌復帰を狙う「まわし打ち」になる。
-/// 無筋中張牌との差（0.85 → 127.5点）は依然として向聴数を上回るので、
-/// 危険牌を押してまで形は守らない。
+/// #179 (strong): when folding at tenpai/1-shanten the weight drops to
+/// 150. A suji-sized safety difference (0.25 -> 37.5 points) can then no
+/// longer beat one shanten step (100), so instead of wrecking the shape
+/// with genbutsu the CPU plays safe-ish tiles (suji, honours) and keeps a
+/// path back to tenpai - "mawashi" play. The gap to an off-suji inside
+/// tile (0.85 -> 127.5) still exceeds a shanten step, so the shape is
+/// never protected by pushing a dangerous tile.
 fn defense_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     if ctx.attacking {
         return 0.0;
@@ -270,15 +268,16 @@ fn defense_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     let close = calc_shanten_number(&hand).as_i32() <= 1;
 
     if close {
-        // #179（強以上）: まわし打ち
+        // #179 (strong): mawashi play.
         if ctx.config.level >= CpuLevel::Strong {
             weight = 150.0;
         }
-        // #184（中以上）: 流局間際は安全牌を切りながら形式聴牌を狙う
+        // #184 (normal+): near the exhaustive draw, chase a formal tenpai
+        // while still discarding safe-ish tiles.
         if ctx.config.level >= CpuLevel::Normal && ctx.state.remaining_tiles <= 8 {
             weight = 150.0;
-            // #185（強以上）: 親番・オーラスで順位が懸かる場面では
-            // 聴牌維持の価値をさらに上げる
+            // #185 (strong): the dealer, or a non-leader in the final
+            // hand, values keeping tenpai even more.
             if ctx.config.level >= CpuLevel::Strong
                 && (ctx.state.my_seat_wind == Wind::East
                     || (ctx.state.is_final_round() && !ctx.state.is_top()))
@@ -291,18 +290,18 @@ fn defense_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     c.safety * weight
 }
 
-/// #186: 河底牌（最終打牌）で危険牌を切らない
+/// #186: never discard dangerously on the hand's final discard.
 ///
-/// 山が空のときの打牌はこの局の最後の行動であり、手を進める意味がない。
-/// 攻撃中でも安全度に大きな重みを掛ける。形式聴牌の維持（約100点 =
-/// 向聴数1段階）はスジ程度の安全差なら優先されるが、無筋の危険牌を
-/// 押してまで維持はしない。
+/// With the wall empty this discard is the last action of the hand, so
+/// advancing the hand is worthless; safety gets a heavy weight even while
+/// pushing. Keeping formal tenpai (~100 points = one shanten step) still
+/// wins over suji-sized safety differences, but never over pushing an
+/// off-suji dangerous tile.
 fn last_discard_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     if ctx.state.remaining_tiles > 0 {
         return 0.0;
     }
 
-    // 脅威（リーチ者・3副露以上）がいなければ補正不要
     let my_idx = CpuGameState::wind_to_index(ctx.state.my_seat_wind);
     let any_threat = (0..4).any(|i| {
         i != my_idx && (ctx.state.player_riichi[i] || ctx.state.player_melds[i].len() >= 3)
@@ -314,14 +313,14 @@ fn last_discard_safety_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 
     c.safety * 200.0
 }
 
-/// 手牌全体（ツモ込み・副露込み）のブロック数を数える
+/// Counts blocks in the whole hand (drawn tile and melds included).
 ///
-/// ブロック = 面子（副露含む）+ 対子 + ターツ。
-/// 和了形は4面子1雀頭 = 5ブロックなので、6以上は持ちすぎ。
+/// Block = group (melds included) + pair + partial sequence. A winning
+/// hand is 4 groups + 1 pair = 5 blocks, so 6+ is a surplus.
 ///
-/// `HandAnalyzer` の分解は向聴数計算に必要な5ブロックまでしか記録しない
-/// （余剰ブロックは孤立牌扱いになる）ため、ここでは牌種カウントから
-/// 貪欲に数える。刻子 → 順子 → 対子 → ターツの順に取り出す。
+/// `HandAnalyzer` only records the five blocks the shanten needs (extras
+/// become isolated tiles), so this counts greedily from tile-kind counts:
+/// triplets, then sequences, pairs, and partial sequences.
 fn count_blocks(state: &CpuGameState) -> usize {
     let mut counts = [0u8; 34];
     for t in &state.my_hand {
@@ -334,13 +333,11 @@ fn count_blocks(state: &CpuGameState) -> usize {
     state.my_melds().len() + greedy_block_count(counts)
 }
 
-/// 牌種カウントからブロック数（面子+対子+ターツ）を貪欲に数える
-///
-/// 刻子 → 順子 → 対子 → ターツの順に取り出す。
+/// Greedy block count from tile-kind counts:
+/// triplets, sequences, pairs, then partial sequences.
 fn greedy_block_count(mut counts: [u8; 34]) -> usize {
     let mut blocks = 0;
 
-    // 刻子
     for c in counts.iter_mut() {
         if *c >= 3 {
             *c -= 3;
@@ -348,7 +345,6 @@ fn greedy_block_count(mut counts: [u8; 34]) -> usize {
         }
     }
 
-    // 順子（数牌のみ、昇順に貪欲）
     for suit_start in [0usize, 9, 18] {
         for pos in 0..7 {
             let i = suit_start + pos;
@@ -361,7 +357,6 @@ fn greedy_block_count(mut counts: [u8; 34]) -> usize {
         }
     }
 
-    // 対子
     for c in counts.iter_mut() {
         if *c >= 2 {
             *c -= 2;
@@ -369,7 +364,6 @@ fn greedy_block_count(mut counts: [u8; 34]) -> usize {
         }
     }
 
-    // ターツ（隣接・嵌張。数牌のみ、昇順に貪欲）
     for suit_start in [0usize, 9, 18] {
         for pos in 0..8 {
             let i = suit_start + pos;
@@ -388,9 +382,8 @@ fn greedy_block_count(mut counts: [u8; 34]) -> usize {
     blocks
 }
 
-/// 手牌中で「ちょうど2枚」ある牌種（対子）のリストを返す
-///
-/// 3枚以上は刻子（またはカン材）とみなして含めない。
+/// Tile kinds held exactly twice (pairs); three or more copies count as
+/// triplets (or kan material) and are excluded.
 fn pair_types(state: &CpuGameState) -> Vec<TileType> {
     let mut counts = [0u8; 34];
     for t in &state.my_hand {
@@ -407,7 +400,8 @@ fn pair_types(state: &CpuGameState) -> Vec<TileType> {
         .collect()
 }
 
-/// #149: 6ブロック以上の手では弱いブロック（愚形ターツ・余剰対子）を整理する
+/// #149: with six or more blocks, shed the weak ones
+/// (edge/closed shapes, surplus pairs).
 fn five_block_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     if !ctx.attacking {
         return 0.0;
@@ -419,12 +413,11 @@ fn five_block_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     let tt = c.tile.get();
     let counts = remaining_counts(ctx.state, c.tile);
 
-    // 余剰対子: 対子が2つ以上あれば、1つは整理してよい
+    // With two or more pairs, one may be shed.
     if counts[tt as usize] == 1 && pair_types(ctx.state).len() >= 2 {
         return 4.0;
     }
 
-    // 愚形ターツ（辺張・嵌張）の構成牌
     if tt < 27 && counts[tt as usize] == 0 {
         let pos = (tt % 9) as i32;
         let suit_start = tt - tt % 9;
@@ -435,13 +428,13 @@ fn five_block_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
         let lower = has(-1);
         let upper = has(1);
         if lower != upper {
-            // 2枚ターツ: 辺張なら整理対象
+            // Edge shapes may be shed.
             let pair_low = if lower { pos - 1 } else { pos };
             if !(1..=6).contains(&pair_low) {
                 return 6.0;
             }
         } else if !lower && !upper && (has(-2) || has(2)) {
-            // 嵌張も整理対象
+            // So may closed shapes.
             return 6.0;
         }
     }
@@ -449,7 +442,7 @@ fn five_block_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     0.0
 }
 
-/// #151: 唯一の雀頭候補（対子が1つだけ）の牌は壊さない
+/// #151: never break the only pair candidate.
 fn sole_pair_protection(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     if !ctx.attacking {
         return 0.0;
@@ -460,7 +453,7 @@ fn sole_pair_protection(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
         return 0.0;
     }
 
-    // 刻子があれば雀頭候補は他にもある
+    // A triplet can also supply the pair.
     let mut counts = [0u8; 34];
     for t in &ctx.state.my_hand {
         counts[t.get() as usize] += 1;
@@ -475,10 +468,11 @@ fn sole_pair_protection(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     -12.0
 }
 
-/// #153: 受け牌がほぼ枯れている形（死にターツ）は整理する
+/// #153: dismantle shapes whose winning tiles are nearly dead.
 ///
-/// 嵌張・辺張は待ち1種なので、残り1枚以下なら死にターツとして扱う。
-/// 両面も両方の待ちが計2枚以下なら同様に扱う。
+/// Closed and edge shapes wait on one kind, so one remaining copy or
+/// fewer makes them dead; a two-sided shape is treated the same when both
+/// waits total two copies or fewer.
 fn dead_shape_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     if !ctx.attacking {
         return 0.0;
@@ -491,7 +485,7 @@ fn dead_shape_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
 
     let counts = remaining_counts(ctx.state, c.tile);
     if counts[tt as usize] > 0 {
-        return 0.0; // 対子・刻子側は対象外
+        return 0.0; // Pairs/triplets are out of scope.
     }
 
     let pos = (tt % 9) as i32;
@@ -514,11 +508,11 @@ fn dead_shape_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     let upper = has(1);
 
     if lower && upper {
-        return 0.0; // 順子の真ん中
+        return 0.0; // Middle of a sequence.
     }
 
     if lower || upper {
-        // 隣接2枚ターツ: 両面は両端、辺張は片端のみが待ち
+        // Adjacent shape: two-sided waits on both ends, edge on one.
         let pair_low = if lower { pos - 1 } else { pos };
         let waits = remaining_of(pair_low - 1) + remaining_of(pair_low + 2);
         if waits <= 1 {
@@ -531,7 +525,7 @@ fn dead_shape_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     }
 
     if has(-2) || has(2) {
-        // 嵌張: 真ん中の1種のみが待ち
+        // Closed shape: only the middle tile completes it.
         let mid = if has(-2) { pos - 1 } else { pos + 1 };
         let waits = remaining_of(mid);
         if waits <= 1 {
@@ -545,11 +539,12 @@ fn dead_shape_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     0.0
 }
 
-/// #150: 3対子以上は順子化しやすい対子からほぐす（強以上）
+/// #150 (strong): with three or more pairs, break up the ones that
+/// convert to sequences most easily.
 ///
-/// 一般形が七対子より明確に近い場合のみ適用する。
-/// 中張牌の対子は残った1枚が両面候補になるため、ほぐす優先度が高い。
-/// 字牌対子はポン材・雀頭として残す。
+/// Applies only when the standard form is clearly closer than seven
+/// pairs. Inside-tile pairs go first: the remaining tile becomes a
+/// two-sided candidate. Honour pairs stay as pon material or the head.
 fn excess_pair_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     if !ctx.attacking {
         return 0.0;
@@ -560,7 +555,6 @@ fn excess_pair_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
         return 0.0;
     }
 
-    // 七対子の方が近い（または同等の）手はほぐさない
     let mut all_tiles = ctx.state.my_hand.clone();
     if let Some(drawn) = ctx.state.my_drawn {
         all_tiles.push(drawn);
@@ -574,23 +568,23 @@ fn excess_pair_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
 
     let tt = c.tile.get();
     if tt >= 27 {
-        return 0.0; // 字牌対子は残す
+        return 0.0; // Keep honour pairs.
     }
     match tt % 9 {
-        0 | 8 => 3.0, // 1/9 の対子
-        _ => 5.0,     // 中張牌の対子は順子材として残った1枚が活きる
+        0 | 8 => 3.0,
+        _ => 5.0, // The freed inside tile keeps sequence potential.
     }
 }
 
-/// 打牌候補1つに対して、有効な全定石の補正値を合算する
+/// Sums every active heuristic's adjustment for one candidate.
 pub fn discard_adjustment(ctx: &DiscardContext, candidate: &DiscardCandidate) -> f64 {
     discard_adjustment_with(DISCARD_HEURISTICS, ctx, candidate)
 }
 
-/// レジストリを指定して補正値を合算する
+/// Sums adjustments from an explicit registry.
 ///
-/// レベルが `min_level` 未満の定石は適用しない。
-/// `heuristics_enabled` が false の場合は全定石を無効化する（新旧比較用）。
+/// Heuristics above the CPU's level are skipped; `heuristics_enabled`
+/// false disables everything (for A/B comparison).
 fn discard_adjustment_with(
     heuristics: &[DiscardHeuristic],
     ctx: &DiscardContext,
@@ -606,16 +600,17 @@ fn discard_adjustment_with(
         .sum()
 }
 
-/// 七対子・国士無双・一般形のどれを本線にするかを判定する
-/// （#154/#155/#156, #158/#159/#160/#161）
+/// Picks the hand's main route: seven pairs, thirteen orphans, or the
+/// standard form (#154/#155/#156, #158-#161).
 ///
-/// - 副露があれば一般形（七対子・国士無双は門前限定）
-/// - 么九牌の種類数と点棒状況に応じて国士無双ルートを選ぶ（#158〜#161）
-/// - 対子が4つ未満なら一般形（#154: 4トイツ未満で七対子を本線にしない）
-/// - 対子が4つ以上でも、一般形の方が近い場合や、連続対子などの
-///   複合形が多い場合は一般形を優先する（#155）
-/// - 字牌・么九牌・孤立した数牌対子（横に伸びにくい対子）が過半数なら
-///   七対子に向かう（#156）
+/// - Any meld forces the standard form (the others are closed-only).
+/// - The orphan-kind count and score situation may select the Thirteen
+///   Orphans route (#158-#161).
+/// - Fewer than four pairs means standard (#154).
+/// - Even with four pairs, standard wins when it is closer or the pairs
+///   sit in composite shapes (#155).
+/// - When most pairs are "stiff" (honours, terminals, isolated suit
+///   pairs that cannot extend sideways), head for seven pairs (#156).
 pub(crate) fn preferred_form(state: &CpuGameState) -> Form {
     if !state.my_melds().is_empty() {
         return Form::Normal;
@@ -626,7 +621,6 @@ pub(crate) fn preferred_form(state: &CpuGameState) -> Form {
         all_tiles.push(drawn);
     }
 
-    // 国士無双ルート（#158〜#161）
     if kokushi_route_viable(state, &all_tiles) {
         return Form::ThirteenOrphans;
     }
@@ -643,7 +637,7 @@ pub(crate) fn preferred_form(state: &CpuGameState) -> Form {
         return Form::Normal;
     }
 
-    // 対子の質: 横に伸びにくい対子が過半数なら七対子寄り
+    // Pair quality: mostly stiff pairs leans seven pairs.
     let mut counts = [0u8; 34];
     for t in &all_tiles {
         counts[t.get() as usize] += 1;
@@ -659,16 +653,17 @@ pub(crate) fn preferred_form(state: &CpuGameState) -> Form {
     }
 }
 
-/// 国士無双を本線にすべきか（#158/#159/#160/#161）
+/// Whether Thirteen Orphans should be the main route (#158-#161).
 ///
-/// - #160: 么九牌10種以上なら本線にする
-/// - #158: 8〜9種は他形と同等以上に近ければ採用、
-///   7種は通常手に見込みがない（5向聴以上）ときのみ候補に留める
-/// - #159: 大きく負けている場合は7種から、多少遠くても狙う
-///   （役満で逆転する価値がある）
-/// - #161: 未所持の必要牌が枯れている（4枚見え）なら成立不可能なので狙わない。
-///   中盤以降、未所持の必要牌が残り1枚以下の種類が2つ以上あれば見切る。
-///   この判定は自分の意思決定なので、自分の手牌を含む全ての見え情報を使う。
+/// - #160: 10+ orphan kinds make it the main route.
+/// - #158: 8-9 kinds qualify when at least as close as the other forms;
+///   7 kinds only when the normal hand is hopeless (5+ shanten).
+/// - #159: when far behind, chase from 7 kinds even if slightly farther —
+///   a yakuman is worth the comeback.
+/// - #161: a missing requirement that is dead (4 visible) makes the form
+///   impossible; from mid-game, two or more missing kinds with at most
+///   one copy left also abandon the chase. This is our own decision, so
+///   all visibility including our own hand counts.
 fn kokushi_route_viable(state: &CpuGameState, all_tiles: &[Tile]) -> bool {
     let mut counts = [0u8; 34];
     for t in all_tiles {
@@ -682,7 +677,7 @@ fn kokushi_route_viable(state: &CpuGameState, all_tiles: &[Tile]) -> bool {
         return false;
     }
 
-    // #161: 未所持の必要牌の枯れチェック
+    // #161: dead-tile checks on missing requirements.
     let visible = state.visible_tile_counts();
     let missing_dead = ORPHAN_TYPES
         .iter()
@@ -698,7 +693,6 @@ fn kokushi_route_viable(state: &CpuGameState, all_tiles: &[Tile]) -> bool {
         return false;
     }
 
-    // #160: 10種以上は本線
     if kinds >= 10 {
         return true;
     }
@@ -708,23 +702,19 @@ fn kokushi_route_viable(state: &CpuGameState, all_tiles: &[Tile]) -> bool {
     let best_other = calc_shanten_number_by_form(&hand, Form::Normal)
         .min(calc_shanten_number_by_form(&hand, Form::SevenPairs));
 
-    // #158: 8〜9種は他形と同等以上に近ければ採用（高く評価）
     if kinds >= 8 && orphans <= best_other {
         return true;
     }
 
-    // #159: 大きく負けているなら7種から、多少遠くても役満を狙う
     if is_far_behind(state) && orphans.as_i32() <= best_other.as_i32() + 1 {
         return true;
     }
 
-    // #158: 7種は通常手に見込みがない（5向聴以上）ときのみ候補に留める
     orphans <= best_other && best_other.as_i32() >= 5
 }
 
-/// 大きく負けているか（#159: 役満狙いの価値が上がる点棒状況）
-///
-/// ラス目、またはトップとの点差が16000点以上ある場合。
+/// Whether we are far behind (#159): last place, or 16000+ points off
+/// the lead — situations where chasing a yakuman gains value.
 pub(crate) fn is_far_behind(state: &CpuGameState) -> bool {
     let my_idx = CpuGameState::wind_to_index(state.my_seat_wind);
     let my_score = state.scores[my_idx];
@@ -737,17 +727,16 @@ pub(crate) fn is_far_behind(state: &CpuGameState) -> bool {
     (top - my_score) >= 16000 || (is_last && top - my_score >= 8000)
 }
 
-/// 対子が「横に伸びにくい」か（#156）
-///
-/// 字牌・么九牌、または前後2つ以内に他の牌がない孤立した数牌対子は
-/// 順子化しにくく、七対子向きの対子として扱う。
+/// Whether a pair is "stiff" (#156): honours, terminals, or isolated
+/// suit pairs with no neighbour within two ranks rarely become
+/// sequences, which suits seven pairs.
 fn is_stiff_pair(counts: &[u8; 34], tile_type: TileType) -> bool {
     if tile_type >= 27 {
-        return true; // 字牌
+        return true; // honour
     }
     let pos = (tile_type % 9) as i32;
     if pos == 0 || pos == 8 {
-        return true; // 么九牌
+        return true; // terminal
     }
     let suit_start = tile_type - tile_type % 9;
     let near = |offset: i32| -> bool {
@@ -757,11 +746,12 @@ fn is_stiff_pair(counts: &[u8; 34], tile_type: TileType) -> bool {
     !(near(-2) || near(-1) || near(1) || near(2))
 }
 
-/// #154/#155/#156: 選択した路線（一般形/七対子）に沿わない打牌を減点する
+/// #154/#155/#156: penalize discards that stray from the chosen route.
 ///
-/// 総合向聴数（全形のmin）は対子が増えるだけで七対子に引っ張られるため、
-/// 路線の形での向聴数と総合向聴数の差分をペナルティにして、
-/// 実質的に「選択路線の向聴数」で打牌をランク付けする。
+/// The overall shanten (min across forms) drifts towards seven pairs as
+/// pairs accumulate, so the difference between the route's shanten and
+/// the overall shanten becomes a penalty — effectively ranking discards
+/// by the chosen route's shanten.
 fn route_lock_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
     if !ctx.attacking {
         return 0.0;
@@ -769,7 +759,6 @@ fn route_lock_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
 
     let route = preferred_form(ctx.state);
 
-    // 候補を除いた残り手牌で、路線の形の向聴数を計算
     let mut remaining = ctx.state.my_hand.clone();
     if let Some(drawn) = ctx.state.my_drawn {
         remaining.push(drawn);
@@ -788,55 +777,54 @@ fn route_lock_bonus(ctx: &DiscardContext, c: &DiscardCandidate) -> f64 {
 }
 
 // ============================================================================
-// 鳴き判断の定石
+// Call heuristics.
 //
-// 打牌定石（スコア補正の合算）と異なり、鳴きは個別の意思決定なので
-// 「禁止 / 推奨 / 中立」の三値判定で表現する。禁止は推奨より優先される。
+// Unlike discard heuristics (summed adjustments), a call is a discrete
+// decision, expressed as forbid / encourage / neutral. Forbid wins over
+// encourage.
 // ============================================================================
 
-/// 鳴き判断の文脈
+/// Context for call decisions.
 pub struct CallContext<'a> {
-    /// CPU が観測しているゲーム状態
+    /// The game state as the CPU sees it
     pub state: &'a CpuGameState,
-    /// CPU 設定
+    /// CPU configuration
     pub config: &'a CpuConfig,
 }
 
-/// 鳴き・カンに対する定石の判定結果
+/// Heuristic verdict on a call or kan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallJudgement {
-    /// 定石上、鳴くべきでない
+    /// The heuristics forbid the call
     Forbid,
-    /// 定石上、積極的に鳴くべき（性格・積極度の判断を上書きする）
+    /// The heuristics encourage it, overriding personality/aggressiveness
     Encourage,
-    /// 定石は関与しない（既存の性格・積極度判断に委ねる）
+    /// The heuristics abstain; personality/aggressiveness decides
     Neutral,
 }
 
-/// ポンに対する定石判定
+/// Heuristic verdict on a pon.
 ///
-/// 適用される定石:
-/// - 裸単騎回避（#166, 弱以上）: 4副露目になる鳴きはしない
-/// - 役なし鳴き禁止（#162, 弱以上）: 鳴いた後に役の見込みがなければ鳴かない
-///   （対々和・喰いタンの見込み条件は中以上で #157/#164 により厳しくなる）
-/// - 安くて遠い仕掛けの抑制（#165, 中以上）: 打点要素がなく2向聴以上の
-///   仕掛けはしない（親番は例外）
-/// - 役牌対子は早めにポン（#163, 弱以上）: 役牌のポンは性格によらず推奨
+/// Applies:
+/// - avoid the bare pair (#166, weak+): never make a fourth meld;
+/// - no yakuless calls (#162, weak+); the toitoi/kuitan prospects use
+///   the stricter #157/#164 conditions from normal up;
+/// - suppress cheap distant calls (#165, normal+): no yaku-less 2+
+///   shanten calls (the dealer is exempt);
+/// - pon value-honour pairs early (#163, weak+), whatever the
+///   personality.
 ///
-/// 呼び出し元で「向聴数が下がること」は確認済みである前提。
+/// The caller has already verified the call lowers the shanten.
 pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
     if !ctx.config.heuristics_enabled {
         return CallJudgement::Neutral;
     }
 
-    // 裸単騎回避（弱以上）
     if ctx.state.my_melds().len() >= 3 {
         return CallJudgement::Forbid;
     }
 
     if let Some((hand_after, melds_after)) = hand_after_pon(ctx.state, called_tile) {
-        // 役なし鳴き禁止（弱以上）。
-        // 対々和・喰いタンの見込みは中以上で #157/#164 の厳しい条件を使う
         if !has_yaku_prospect(
             &hand_after,
             &melds_after,
@@ -847,7 +835,6 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
             return CallJudgement::Forbid;
         }
 
-        // 安くて遠い仕掛けは控える（#165, 中以上）
         if ctx.config.level >= CpuLevel::Normal
             && is_cheap_distant_call(
                 ctx.state,
@@ -860,7 +847,6 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
         }
     }
 
-    // 役牌対子は早めにポン（弱以上）
     if is_yakuhai(
         called_tile.get(),
         ctx.state.my_seat_wind,
@@ -872,28 +858,24 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
     CallJudgement::Neutral
 }
 
-/// チーに対する定石判定
+/// Heuristic verdict on a chii.
 ///
-/// 適用される定石:
-/// - 裸単騎回避（#166, 弱以上）
-/// - 役なし鳴き禁止（#162, 弱以上）
-///   （対々和・喰いタンの見込み条件は中以上で #157/#164 により厳しくなる）
-/// - 安くて遠い仕掛けの抑制（#165, 中以上）
+/// Applies the same rules as `judge_pon` minus the value-honour
+/// encouragement: avoid the bare pair (#166), no yakuless calls (#162,
+/// with strict #157/#164 prospects from normal up), and suppress cheap
+/// distant calls (#165, normal+).
 ///
-/// 呼び出し元で「向聴数が下がること」は確認済みである前提。
+/// The caller has already verified the call lowers the shanten.
 pub fn judge_chi(ctx: &CallContext, called_tile: Tile, hand_tiles: [Tile; 2]) -> CallJudgement {
     if !ctx.config.heuristics_enabled {
         return CallJudgement::Neutral;
     }
 
-    // 裸単騎回避（弱以上）
     if ctx.state.my_melds().len() >= 3 {
         return CallJudgement::Forbid;
     }
 
     if let Some((hand_after, melds_after)) = hand_after_chi(ctx.state, called_tile, hand_tiles) {
-        // 役なし鳴き禁止（弱以上）。
-        // 対々和・喰いタンの見込みは中以上で #157/#164 の厳しい条件を使う
         if !has_yaku_prospect(
             &hand_after,
             &melds_after,
@@ -904,7 +886,6 @@ pub fn judge_chi(ctx: &CallContext, called_tile: Tile, hand_tiles: [Tile; 2]) ->
             return CallJudgement::Forbid;
         }
 
-        // 安くて遠い仕掛けは控える（#165, 中以上）
         if ctx.config.level >= CpuLevel::Normal
             && is_cheap_distant_call(
                 ctx.state,
@@ -920,11 +901,11 @@ pub fn judge_chi(ctx: &CallContext, called_tile: Tile, hand_tiles: [Tile; 2]) ->
     CallJudgement::Neutral
 }
 
-/// 暗カンに対する定石判定（#167, 中以上）
+/// Heuristic verdict on a concealed kan (#167, normal+).
 ///
-/// - 向聴数が悪化するカン（手を壊すカン）はしない
-/// - 他家リーチ中は、カン後も聴牌している場合を除きカンしない
-///   （新ドラで相手の打点を上げるリスクを評価する）
+/// - Never kan when it worsens the shanten (breaks the hand).
+/// - Under an opponent's riichi, kan only when still tenpai afterwards:
+///   the new dora indicator could inflate their hand.
 pub fn judge_ankan(ctx: &CallContext, tile_type: TileType) -> CallJudgement {
     if !ctx.config.heuristics_enabled || ctx.config.level < CpuLevel::Normal {
         return CallJudgement::Neutral;
@@ -937,11 +918,9 @@ pub fn judge_ankan(ctx: &CallContext, tile_type: TileType) -> CallJudgement {
 
     let melds = ctx.state.my_melds_for_analysis();
 
-    // カン前の向聴数
     let before_hand = Hand::new_with_melds(all_tiles.clone(), melds.clone(), None);
     let before = calc_shanten_number(&before_hand);
 
-    // カン後の向聴数（対象の4枚を除き、カンを面子として加える）
     let remaining: Vec<Tile> = all_tiles
         .iter()
         .filter(|t| t.get() != tile_type)
@@ -957,12 +936,10 @@ pub fn judge_ankan(ctx: &CallContext, tile_type: TileType) -> CallJudgement {
     let after_hand = Hand::new_with_melds(remaining, melds_after, None);
     let after = calc_shanten_number(&after_hand);
 
-    // 手を壊すカンはしない
     if after > before {
         return CallJudgement::Forbid;
     }
 
-    // 他家リーチ中は聴牌維持できる場合のみカンする
     let my_idx = CpuGameState::wind_to_index(ctx.state.my_seat_wind);
     let opponent_riichi = ctx
         .state
@@ -978,30 +955,32 @@ pub fn judge_ankan(ctx: &CallContext, tile_type: TileType) -> CallJudgement {
 }
 
 // ============================================================================
-// 押し引きの定石（#178）
+// Push/fold heuristics (#178).
 // ============================================================================
 
-/// 押し引きに対する定石の判定結果
+/// Heuristic verdict on pushing vs folding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PushJudgement {
-    /// 押すべき（攻撃続行）
+    /// Keep attacking
     Push,
-    /// 降りるべき
+    /// Fold
     Fold,
-    /// 定石では決まらない（従来の判断に委ねる）
+    /// Undecided; the legacy judgement applies
     Neutral,
 }
 
-/// 脅威がいる局面で押すか降りるかの定石判定（#178, 中以上）
+/// Push-or-fold verdict when threats exist (#178, normal+).
 ///
-/// - 聴牌: 良形で「高打点・親・脅威1人」のいずれかなら押す。
-///   愚形かつ安手なら降りる（従来は聴牌なら無条件に押していた）。
-///   親は連荘価値があるため愚形安手でも単独脅威には判断を保留する（#190）。
-///   供託・本場が多い局では安手聴牌の価値が上がる（#191, 強以上）。
-/// - 後半のトップ目は満貫級の良形聴牌以外は降りる（#188）。
-/// - 2向聴: 高打点で脅威が1人なら押し続ける。大きく負けている場合は
-///   打点の基準を下げて押す（#189: ラス目は打点寄り）。
-/// - それ以外は従来の判断（性格・撤退閾値）に委ねる。
+/// - Tenpai: push a good shape with any of high value / dealer / a single
+///   threat; fold a bad-shape cheap hand (tenpai used to push
+///   unconditionally). The dealer defers to the legacy judgement against
+///   a single threat because continuation has value (#190); big table
+///   stakes raise the value of a cheap tenpai (#191, strong).
+/// - A leader in the second half folds everything but a mangan-class
+///   good-shape tenpai (#188).
+/// - 2-shanten: keep pushing a high-value hand against a single threat;
+///   when far behind the value bar drops (#189).
+/// - Everything else defers to the personality/threshold judgement.
 pub fn judge_push(ctx: &CallContext, threat_count: usize) -> PushJudgement {
     if !ctx.config.heuristics_enabled || ctx.config.level < CpuLevel::Normal || threat_count == 0 {
         return PushJudgement::Neutral;
@@ -1016,7 +995,7 @@ pub fn judge_push(ctx: &CallContext, threat_count: usize) -> PushJudgement {
     let shanten = calc_shanten_number(&hand);
 
     if shanten.is_ready_or_won() {
-        // 聴牌: 最も広い聴牌を取る打牌を選んだときの待ちの形と打点で判断する
+        // At tenpai, judge on the widest tenpai's wait shape and value.
         let visible = ctx.state.visible_tile_counts();
         let mut best_waits = 0u32;
         let mut best_han = 0u32;
@@ -1044,13 +1023,13 @@ pub fn judge_push(ctx: &CallContext, threat_count: usize) -> PushJudgement {
         }
 
         let good_shape = best_waits >= 6;
-        // 門前ならリーチ・裏ドラなどの上積みを見込む
+        // A closed hand can add riichi and ura dora.
         let value_han = best_han + u32::from(ctx.state.my_melds().is_empty());
         let high_value = value_han >= 4;
         let dealer = ctx.state.my_seat_wind == Wind::East;
 
-        // #188: 後半のトップ目は放銃回避を最優先する。
-        // 満貫級の良形聴牌だけは押す
+        // #188: a second-half leader avoids deal-ins above all,
+        // pushing only a mangan-class good shape.
         if ctx.state.is_top() && ctx.state.is_second_half() {
             return if good_shape && high_value {
                 PushJudgement::Push
@@ -1063,12 +1042,12 @@ pub fn judge_push(ctx: &CallContext, threat_count: usize) -> PushJudgement {
             return PushJudgement::Push;
         }
         if !good_shape && !high_value {
-            // #190: 親は連荘価値があるため、単独脅威には判断を保留する
-            // （従来の判断 = 聴牌なら押す、に委ねる）
+            // #190: the dealer defers against a single threat
+            // (the legacy judgement pushes at tenpai).
             if dealer && threat_count == 1 {
                 return PushJudgement::Neutral;
             }
-            // #191（強以上）: 供託・本場が大きければ安手聴牌でも降り推奨はしない
+            // #191 (strong): big stakes remove the fold recommendation.
             let stakes = ctx.state.riichi_sticks as i32 * 1000 + ctx.state.honba as i32 * 300;
             if ctx.config.level >= CpuLevel::Strong && stakes >= 2000 {
                 return PushJudgement::Neutral;
@@ -1078,13 +1057,13 @@ pub fn judge_push(ctx: &CallContext, threat_count: usize) -> PushJudgement {
         return PushJudgement::Neutral;
     }
 
-    // #188: 後半のトップ目は聴牌以外では押さない
+    // #188: a second-half leader never pushes below tenpai.
     if ctx.state.is_top() && ctx.state.is_second_half() {
         return PushJudgement::Fold;
     }
 
-    // 2向聴: 高打点（推定値が満貫級）で脅威が1人なら押し続ける。
-    // 大きく負けている場合は基準を下げる（#189: 高打点ルートを取りに行く）
+    // 2-shanten: keep pushing a mangan-class hand against one threat;
+    // when far behind the bar drops (#189).
     let value_threshold = if is_far_behind(ctx.state) { 4.0 } else { 6.0 };
     if shanten.as_i32() == 2
         && threat_count == 1
@@ -1097,37 +1076,40 @@ pub fn judge_push(ctx: &CallContext, threat_count: usize) -> PushJudgement {
 }
 
 // ============================================================================
-// リーチ・ダマ判断の定石（#168〜#172）
+// Riichi vs damaten heuristics (#168-#172).
 // ============================================================================
 
-/// リーチ宣言に対する定石の判定結果
+/// Heuristic verdict on declaring riichi.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RiichiJudgement {
-    /// リーチすべき
+    /// Declare riichi
     Declare,
-    /// ダマ（宣言しない）にすべき
+    /// Stay damaten (do not declare)
     Damaten,
-    /// 定石では決まらない（従来の積極度判断に委ねる）
+    /// Undecided; the aggressiveness judgement applies
     Neutral,
 }
 
-/// リーチすべきかの定石判定
+/// Heuristic verdict on declaring riichi.
 ///
-/// `riichi_discard` はリーチ宣言牌（`None` はツモ切り）。
+/// `riichi_discard` is the declaration discard (`None` = tsumogiri).
 ///
-/// 適用される定石:
-/// - #168（弱以上）: 役なし門前聴牌は基本的にリーチする
-///   （リーチしないと和了できないため）
-/// - #170（中以上）: 全ての待ちでダマでも満貫以上あるならダマにする
-/// - #169（弱以上）: 先制の良形聴牌（残り待ち6枚以上）はリーチする
-/// - #172（強以上）: 序盤の愚形聴牌で良形変化が多ければ一巡待つ
-/// - #171（中以上）: 愚形の安手リーチは早巡の先制なら打ち、中終盤は控える
+/// Applies:
+/// - #168 (weak+): a yakuless closed tenpai declares — without riichi it
+///   cannot win at all;
+/// - #170 (normal+): when every wait is mangan-class even damaten,
+///   stay damaten;
+/// - #169 (weak+): an uncontested good-shape tenpai (6+ waits left)
+///   declares;
+/// - #172 (strong): an early bad-shape tenpai with many good-shape
+///   upgrades waits a turn;
+/// - #171 (normal+): a cheap bad-shape riichi goes in early uncontested
+///   turns but not mid-to-late game.
 pub fn judge_riichi(ctx: &CallContext, riichi_discard: Option<Tile>) -> RiichiJudgement {
     if !ctx.config.heuristics_enabled {
         return RiichiJudgement::Neutral;
     }
 
-    // リーチ後の13枚を構築
     let mut remaining = ctx.state.my_hand.clone();
     if let Some(drawn) = ctx.state.my_drawn {
         remaining.push(drawn);
@@ -1143,7 +1125,7 @@ pub fn judge_riichi(ctx: &CallContext, riichi_discard: Option<Tile>) -> RiichiJu
     let melds = ctx.state.my_melds_for_analysis();
     let waits = waiting_tiles(&remaining, &melds);
     if waits.is_empty() {
-        return RiichiJudgement::Neutral; // 聴牌していない（想定外）
+        return RiichiJudgement::Neutral; // Not tenpai (unexpected).
     }
 
     let visible = ctx.state.visible_tile_counts();
@@ -1152,21 +1134,19 @@ pub fn judge_riichi(ctx: &CallContext, riichi_discard: Option<Tile>) -> RiichiJu
         .map(|&t| 4u32.saturating_sub(visible[t as usize] as u32))
         .sum();
 
-    // 各待ちでの「リーチなし・ロン和了」の翻数（役なしなら None）
     let values: Vec<Option<u32>> = waits
         .iter()
         .map(|&w| estimate_ron_han(ctx.state, &remaining, &melds, w))
         .collect();
 
-    // #168（弱以上）: どの待ちでも役がない → リーチしないと和了できない
+    // #168: no wait carries a yaku, so riichi is the only path to a win.
     if values.iter().all(Option::is_none) {
         return RiichiJudgement::Declare;
     }
 
-    // #170（中以上）: 全ての待ちでダマでも満貫以上 → リーチ棒・放銃リスクを
-    // 取らず出和了しやすさを優先する。
-    // ただし大きく負けている場合は打点を伸ばす方が価値が高いので
-    // リーチに回す（#189: ラス目は打点寄り）
+    // #170: mangan-class on every wait even damaten - skip the deposit
+    // and deal-in risk and stay easy to win off discards. When far
+    // behind, growing the hand matters more, so declare instead (#189).
     if ctx.config.level >= CpuLevel::Normal
         && !is_far_behind(ctx.state)
         && values.iter().all(|v| matches!(v, Some(han) if *han >= 5))
@@ -1182,16 +1162,15 @@ pub fn judge_riichi(ctx: &CallContext, riichi_discard: Option<Tile>) -> RiichiJu
         .enumerate()
         .any(|(i, &r)| i != my_idx && r);
 
-    // #169（弱以上）: 先制の良形聴牌はリーチで打点を作る
+    // #169: an uncontested good shape declares for value.
     if wait_count >= 6 && !opponent_riichi {
         return RiichiJudgement::Declare;
     }
 
-    // 愚形（残り待ち4枚以下）の判断
+    // Bad shapes (4 or fewer waits left).
     if wait_count <= 4 {
         let turn = ctx.state.turn();
 
-        // #172（強以上）: 序盤の愚形は良形変化が多ければ一巡待つ
         if ctx.config.level >= CpuLevel::Strong
             && turn <= 6
             && good_shape_upgrade_draws(&remaining, &visible) >= 12
@@ -1201,11 +1180,11 @@ pub fn judge_riichi(ctx: &CallContext, riichi_discard: Option<Tile>) -> RiichiJu
 
         if ctx.config.level >= CpuLevel::Normal {
             let max_han = values.iter().flatten().max().copied().unwrap_or(0);
-            // 安手（ダマ2翻以下）の愚形は中終盤では控える
+            // A cheap bad shape holds back mid-to-late game...
             if max_han <= 2 && turn >= 10 {
                 return RiichiJudgement::Damaten;
             }
-            // 早巡の先制なら愚形でもリーチ（#171）
+            // ...but declares in early uncontested turns (#171).
             if !opponent_riichi && turn <= 8 {
                 return RiichiJudgement::Declare;
             }
@@ -1215,9 +1194,8 @@ pub fn judge_riichi(ctx: &CallContext, riichi_discard: Option<Tile>) -> RiichiJu
     RiichiJudgement::Neutral
 }
 
-/// 13枚の手牌の待ち牌の残り枚数合計を数える
-///
-/// リーチ宣言牌の選択（待ちの広い聴牌を選ぶ）に使用する。
+/// Total remaining copies of a 13-tile hand's waits; used to pick the
+/// widest tenpai when choosing the riichi declaration discard.
 pub(crate) fn remaining_wait_count(remaining: &[Tile], melds: &[Meld], visible: &[u8; 34]) -> u32 {
     waiting_tiles(remaining, melds)
         .iter()
@@ -1225,7 +1203,7 @@ pub(crate) fn remaining_wait_count(remaining: &[Tile], melds: &[Meld], visible: 
         .sum()
 }
 
-/// 13枚の手牌（副露込み）の待ち牌を列挙する
+/// Enumerates the waits of a 13-tile hand (melds included).
 fn waiting_tiles(remaining: &[Tile], melds: &[Meld]) -> Vec<TileType> {
     (0..Tile::LEN as TileType)
         .filter(|&t| {
@@ -1235,10 +1213,9 @@ fn waiting_tiles(remaining: &[Tile], melds: &[Meld]) -> Vec<TileType> {
         .collect()
 }
 
-/// 「リーチなし・ロン和了」を仮定した翻数（ドラ込み）を計算する
-///
-/// 役がない（ロン和了できない）場合は `None`。
-/// 裏ドラ・一発は不確定なので含めない。
+/// Estimated han (dora included) of a hypothetical no-riichi ron win;
+/// `None` when the hand has no yaku and cannot ron. Ura dora and ippatsu
+/// are uncertain and excluded.
 fn estimate_ron_han(
     state: &CpuGameState,
     remaining: &[Tile],
@@ -1267,7 +1244,6 @@ fn estimate_ron_han(
         .ok()
         .flatten()?;
 
-    // ドラ・赤ドラを加算（裏ドラは不明なので含めない）
     let mut dora = 0u32;
     for t in remaining
         .iter()
@@ -1287,11 +1263,11 @@ fn estimate_ron_han(
     Some(result.han + dora)
 }
 
-/// 良形変化につながるツモの残り枚数を概算する（#172用の近似）
+/// Rough count of draws that upgrade the hand into a good shape (#172).
 ///
-/// 手牌の数牌に隣接して新たな両面ターツを作る牌の残り枚数を数える。
-/// 完成面子の隣も数えるため過大評価気味だが、「変化の多い手」の
-/// 判定には十分な精度とする。
+/// Counts remaining tiles adjacent to our suit tiles that would form a
+/// new two-sided shape. Neighbours of completed groups also count, so it
+/// overestimates a little - good enough for spotting "flexible" hands.
 fn good_shape_upgrade_draws(remaining: &[Tile], visible: &[u8; 34]) -> u32 {
     let mut counts = [0u8; 34];
     for t in remaining {
@@ -1315,7 +1291,7 @@ fn good_shape_upgrade_draws(remaining: &[Tile], visible: &[u8; 34]) -> u32 {
             if counts[neighbor] > 0 || counted[neighbor] {
                 continue;
             }
-            // 新たにできるターツが両面か（下端が2〜7の位置）
+            // Only count it when the new shape is two-sided.
             let pair_low = pos.min(q);
             if !(1..=6).contains(&pair_low) {
                 continue;
@@ -1327,49 +1303,46 @@ fn good_shape_upgrade_draws(remaining: &[Tile], visible: &[u8; 34]) -> u32 {
     total
 }
 
-/// #165: 安くて遠い仕掛けか（中以上）
+/// #165 (normal+): whether the call is cheap and distant.
 ///
-/// 鳴いた後も2向聴以上で、打点要素（ドラ・赤ドラ・役牌・染め手）が
-/// 何もない仕掛けは、守備力低下のデメリットの方が大きいため控える。
-/// 親は連荘価値があるため例外とする。
+/// A call that still leaves 2+ shanten with no value element (dora, red
+/// five, value honour, flush) loses more in defense than it gains, so it
+/// is suppressed. The dealer is exempt: continuation has value.
 ///
-/// 点棒状況による例外・強化（#187/#191）:
-/// - オーラスで安手の和了でも順位が上がるなら速度優先（例外）
-/// - 供託・本場が大きい局は安手和了の価値が上がる（強以上、例外）
-/// - オーラスで満貫級が必要なら、近い仕掛けでも安手なら控える（強化）
+/// Score-situation adjustments (#187/#191):
+/// - final hand where even a cheap win climbs a place: speed wins
+///   (exemption);
+/// - big table stakes raise cheap wins' value (strong, exemption);
+/// - final hand needing a mangan-class win: suppress cheap calls even
+///   when close (tightening).
 fn is_cheap_distant_call(
     state: &CpuGameState,
     hand_after: &[Tile],
     melds_after: &[Meld],
     consider_stakes: bool,
 ) -> bool {
-    // 親番は例外（連荘価値がある）
     if state.my_seat_wind == Wind::East {
         return false;
     }
 
-    // #187: オーラスで安手の和了でも順位が上がるなら速度を優先する
     if state.is_final_round() && state.gap_to_next_rank().is_some_and(|gap| gap <= 3900) {
         return false;
     }
 
-    // #191（強以上）: 供託・本場が大きければ安手和了にも価値がある
     let stakes = state.riichi_sticks as i32 * 1000 + state.honba as i32 * 300;
     if consider_stakes && stakes >= 2000 {
         return false;
     }
 
-    // #187: オーラスで満貫級が必要な点差なら、安手は近い仕掛けでも控える
     let needs_big_win =
         state.is_final_round() && state.gap_to_next_rank().is_some_and(|gap| gap >= 8000);
 
-    // 鳴いた後も2向聴以上か（遠い仕掛けか）
     let hand = Hand::new_with_melds(hand_after.to_vec(), melds_after.to_vec(), None);
     if !needs_big_win && calc_shanten_number(&hand).as_i32() < 2 {
         return false;
     }
 
-    // 打点要素: ドラ・赤ドラ
+    // Value elements: dora and red fives.
     let all_tiles = hand_after
         .iter()
         .chain(melds_after.iter().flat_map(|m| m.tiles.iter()));
@@ -1386,14 +1359,14 @@ fn is_cheap_distant_call(
         counts[t.get() as usize] += 1;
     }
 
-    // 打点要素: 役牌対子以上
+    // Value element: a value-honour pair or better.
     for yh in get_yakuhai_types(state.my_seat_wind, state.round_wind) {
         if counts[yh as usize] >= 2 {
             return false;
         }
     }
 
-    // 打点要素: 染め手（数牌が1色に収まっている）
+    // Value element: a flush (all suit tiles in one suit).
     let mut suits_used = [false; 3];
     for (tile_type, &count) in counts.iter().enumerate().take(27) {
         if count > 0 {
@@ -1407,9 +1380,8 @@ fn is_cheap_distant_call(
     true
 }
 
-/// ポンした後の手牌と副露を構築する
-///
-/// 手牌に同種の牌が2枚なければ `None`。
+/// Builds the hand and melds after a pon; `None` when the hand lacks
+/// two matching tiles.
 fn hand_after_pon(state: &CpuGameState, called_tile: Tile) -> Option<(Vec<Tile>, Vec<Meld>)> {
     let tt = called_tile.get();
     let mut remaining = state.my_hand.clone();
@@ -1436,9 +1408,8 @@ fn hand_after_pon(state: &CpuGameState, called_tile: Tile) -> Option<(Vec<Tile>,
     Some((remaining, melds))
 }
 
-/// チーした後の手牌と副露を構築する
-///
-/// 指定の2枚が手牌になければ `None`。
+/// Builds the hand and melds after a chii; `None` when the hand lacks
+/// the two tiles.
 fn hand_after_chi(
     state: &CpuGameState,
     called_tile: Tile,
@@ -1461,23 +1432,21 @@ fn hand_after_chi(
     Some((remaining, melds))
 }
 
-/// 鳴いた後の手に和了役の見込みがあるか（簡易判定）
+/// Rough check that an open hand still has a yaku prospect (#162).
 ///
-/// 副露した手で成立しうる代表的な役の見込みを判定する（#162）:
-/// - 役牌: 手牌+副露に役牌が2枚以上ある
-/// - 断么九: 副露が全て中張牌で、手牌の么九牌が少ない
-/// - 混一色/清一色: 数牌が1色に収まっている
-/// - 対々和: 副露が全て刻子系で、刻子系ブロックが十分にある
+/// Considers the representative open-hand yaku:
+/// - value honours: two or more in hand + melds;
+/// - All Inside: melds all inside tiles with few orphans in hand;
+/// - Common/Perfect Flush: all suit tiles in one suit;
+/// - All Triplets: melds all triplet-like with enough triplet blocks.
 ///
-/// `strict` が true（中以上）の場合、より厳しい条件を使う:
-/// - 対々和（#157）: 副露 + 手牌の対子・刻子が4ブロック以上
-/// - 断么九（#164）: 手牌の么九牌が2枚以下、かつタンヤオ圏内に
-///   複数ブロックが収まっている
+/// With `strict` (normal+) the toitoi and kuitan conditions tighten:
+/// - All Triplets (#157): melds + hand pairs/triplets total 4+ blocks;
+/// - All Inside (#164): at most two orphans in hand and multiple blocks
+///   already inside the tanyao range.
 ///
-/// false（弱）の場合は従来どおりの緩い条件で判定する。
-///
-/// チャンタ系などの稀な役は考慮しない（見込みなしと誤判定しても
-/// 「鳴かない」側に倒れるだけで安全）。
+/// Rare yaku (chanta family etc.) are ignored: a false "no prospect"
+/// only errs on the side of not calling, which is safe.
 pub fn has_yaku_prospect(
     hand_tiles: &[Tile],
     melds: &[Meld],
@@ -1485,7 +1454,6 @@ pub fn has_yaku_prospect(
     round_wind: Wind,
     strict: bool,
 ) -> bool {
-    // 手牌 + 副露の牌種ごとの枚数
     let mut counts = [0u8; 34];
     for t in hand_tiles {
         counts[t.get() as usize] += 1;
@@ -1496,23 +1464,19 @@ pub fn has_yaku_prospect(
         }
     }
 
-    // 役牌: 対子以上があれば刻子にできる見込みがある
     for yh in get_yakuhai_types(seat_wind, round_wind) {
         if counts[yh as usize] >= 2 {
             return true;
         }
     }
 
-    // 断么九: 副露が全て中張牌で、手牌の么九牌が少ない
     let melds_all_simple = melds
         .iter()
         .all(|m| m.tiles.iter().all(|t| !t.is_1_9_honour()));
     if melds_all_simple {
         let terminal_honour_count = hand_tiles.iter().filter(|t| t.is_1_9_honour()).count();
         if strict {
-            // #164（中以上）: 么九牌が多い手から無理に喰いタンへ向かわない。
-            // 么九牌2枚以下、かつタンヤオ圏内の牌で複数ブロックが
-            // 構成できる場合のみ見込みとする。
+            // #164: never force kuitan from an orphan-heavy hand.
             if terminal_honour_count <= 2 {
                 let mut simple_counts = [0u8; 34];
                 for t in hand_tiles {
@@ -1529,7 +1493,6 @@ pub fn has_yaku_prospect(
         }
     }
 
-    // 混一色/清一色/字一色: 数牌が1色以下に収まっている
     let mut suits_used = [false; 3];
     for (tile_type, &count) in counts.iter().enumerate().take(27) {
         if count > 0 {
@@ -1540,7 +1503,6 @@ pub fn has_yaku_prospect(
         return true;
     }
 
-    // 対々和: 副露が全て刻子系で、手牌が対子・刻子中心
     let melds_all_triplets = melds
         .iter()
         .all(|m| matches!(m.category, MeldType::Pon | MeldType::Kan | MeldType::Kakan));
@@ -1550,8 +1512,7 @@ pub fn has_yaku_prospect(
             hand_counts[t.get() as usize] += 1;
         }
         if strict {
-            // #157（中以上）: 副露 + 手牌の対子・刻子で4ブロック以上あるときだけ
-            // 対々和を候補にする（2〜3トイツから無理に向かわない）
+            // #157: only chase toitoi with 4+ triplet-family blocks.
             let pair_or_triplet_types = hand_counts.iter().filter(|&&c| c >= 2).count();
             if melds.len() + pair_or_triplet_types >= 4 {
                 return true;

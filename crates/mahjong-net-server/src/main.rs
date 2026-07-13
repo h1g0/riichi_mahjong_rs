@@ -1,11 +1,11 @@
-//! mahjong-net-server エントリポイント
+//! mahjong-net-server entry point.
 //!
-//! `PORT` 環境変数でリッスンポートを指定する（デフォルト 8080）。
-//! ログは `RUST_LOG` で制御する（例: `RUST_LOG=mahjong_net_server=debug`）。
+//! `PORT` picks the listen port (default 8080); logging is controlled by
+//! `RUST_LOG` (e.g. `RUST_LOG=mahjong_net_server=debug`).
 //!
-//! 複数マシン構成ではマシン間のルーム所在照会のため、公開リスナーとは別に
-//! 内部リスナー（デフォルト 8081、`INTERNAL_PORT` で変更可）を起動する。
-//! Fly.io 上ではプライベートネットワーク（6PN）のアドレスにのみ bind する。
+//! Multi-machine setups also start an internal listener (default 8081,
+//! `INTERNAL_PORT`) for cross-machine room lookups; on Fly.io it binds
+//! only to the private-network (6PN) address.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -34,9 +34,9 @@ async fn main() {
 
     let state = build_state(RoomConfig::default());
 
-    // 内部（マシン間照会）リスナー。公開サービスには含めない。
-    // Fly 上では 6PN アドレス（FLY_PRIVATE_IP）にのみ bind し、
-    // ローカル開発ではループバックに bind する。
+    // The internal (cross-machine lookup) listener, never exposed
+    // publicly: bound to the 6PN address (FLY_PRIVATE_IP) on Fly and to
+    // loopback in local development.
     let internal_host: IpAddr = std::env::var("FLY_PRIVATE_IP")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -52,11 +52,12 @@ async fn main() {
                 }
             });
         }
-        // 内部リスナーが無くても単一マシンとしては動けるため、起動は続ける
+        // A single machine works without the internal listener,
+        // so keep starting.
         Err(e) => tracing::warn!("failed to bind internal listener {internal_addr}: {e}"),
     }
 
-    // ConnectInfo<SocketAddr> を有効にして接続元IPを取得できるようにする
+    // Enable ConnectInfo<SocketAddr> so the peer IP is available.
     axum::serve(
         listener,
         app_with_state(state).into_make_service_with_connect_info::<SocketAddr>(),

@@ -1,7 +1,6 @@
-//! ロビー（ルームレジストリ）
-//!
-//! ルームコードからルームアクターへの送信チャネルを引けるレジストリ。
-//! ロックは作成・参照・削除の間だけ保持する（ゲーム状態は持たない）。
+//! Lobby (room registry): maps room codes to the room actors' send
+//! channels. The lock is held only across create/lookup/remove; no game
+//! state lives here.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -13,13 +12,13 @@ use tokio::sync::mpsc;
 use crate::peers::Peers;
 use crate::room::{RoomConfig, RoomMsg, run_room};
 
-/// ルームコードの文字種（紛らわしい 0/O/1/I を除いた32文字）
+/// Room-code alphabet: 32 characters, excluding the confusable 0/O/1/I.
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-/// ルームコードの長さ
+/// Room-code length.
 const CODE_LEN: usize = 6;
 
-/// ルームコードを生成する（約30ビットのエントロピー）
+/// Generates a room code (~30 bits of entropy).
 fn generate_code() -> String {
     let mut rng = rand::rng();
     (0..CODE_LEN)
@@ -27,17 +26,17 @@ fn generate_code() -> String {
         .collect()
 }
 
-/// ルームコードを正規化する（前後の空白を除き大文字にする）
+/// Normalizes a room code: trim and uppercase.
 pub fn normalize_code(code: &str) -> String {
     code.trim().to_ascii_uppercase()
 }
 
-/// 正規化済みのルームコードとして正しい形式か判定する
+/// Whether a normalized room code is well-formed.
 pub fn is_valid_code(code: &str) -> bool {
     code.len() == CODE_LEN && code.bytes().all(|b| CODE_ALPHABET.contains(&b))
 }
 
-/// ロビー: ルームコード → ルームアクターのレジストリ
+/// The lobby: room code to room actor registry.
 #[derive(Clone)]
 pub struct Lobby {
     rooms: Arc<Mutex<HashMap<String, mpsc::Sender<RoomMsg>>>>,
@@ -45,7 +44,6 @@ pub struct Lobby {
 }
 
 impl Lobby {
-    /// 新しいロビーを作成する
     pub fn new(config: RoomConfig) -> Self {
         Lobby {
             rooms: Arc::new(Mutex::new(HashMap::new())),
@@ -53,12 +51,11 @@ impl Lobby {
         }
     }
 
-    /// ルームを作成し、アクタータスクを起動する
+    /// Creates a room and spawns its actor task.
     ///
-    /// 生成したルームコードと、ルームへの送信チャネルを返す。
-    /// コードはローカルのレジストリに加えて、ピア（他マシン）のルームとも
-    /// 衝突しないことを確認して確定する（衝突すると参加者が誤ったルームへ
-    /// 転送されうるため）。
+    /// Returns the generated code and the room's send channel. The code
+    /// is checked against both the local registry and the peers' rooms:
+    /// a collision could forward joiners to the wrong room.
     pub async fn create_room(
         &self,
         settings: GameSettings,
@@ -67,7 +64,7 @@ impl Lobby {
         let (tx, rx) = mpsc::channel(64);
 
         let code = loop {
-            // ローカルで未使用の候補を選び、ピアにも照会する
+            // Pick a locally unused candidate, then ask the peers.
             let candidate = peers
                 .pick_unused_code(|| {
                     let rooms = self.rooms.lock().unwrap();
@@ -79,8 +76,8 @@ impl Lobby {
                     }
                 })
                 .await;
-            // ピア照会（await）中にローカルで同じコードが使われた可能性が
-            // あるため、挿入と同じロック内で再確認する
+            // The code may have been taken locally while the peer query
+            // awaited; recheck under the same lock as the insert.
             let mut rooms = self.rooms.lock().unwrap();
             if !rooms.contains_key(&candidate) {
                 rooms.insert(candidate.clone(), tx.clone());
@@ -100,19 +97,19 @@ impl Lobby {
         (code, tx)
     }
 
-    /// ルームコードからルームを引く（大文字小文字は区別しない）
+    /// Looks up a room by code, case-insensitively.
     pub fn get(&self, code: &str) -> Option<mpsc::Sender<RoomMsg>> {
         let normalized = normalize_code(code);
         self.rooms.lock().unwrap().get(&normalized).cloned()
     }
 
-    /// ルームをレジストリから削除する（ルームアクターが終了時に呼ぶ）
+    /// Removes a room; called by the actor as it exits.
     pub fn remove(&self, code: &str) {
         self.rooms.lock().unwrap().remove(code);
         tracing::info!(code, "room removed");
     }
 
-    /// 現在のルーム数
+    /// Current room count.
     pub fn room_count(&self) -> usize {
         self.rooms.lock().unwrap().len()
     }
@@ -131,7 +128,7 @@ mod tests {
                 code.bytes().all(|b| CODE_ALPHABET.contains(&b)),
                 "コードに不正な文字が含まれる: {code}"
             );
-            // 紛らわしい文字が含まれない
+            // No confusable characters.
             assert!(!code.contains(['0', 'O', '1', 'I']));
         }
     }
@@ -140,7 +137,8 @@ mod tests {
     fn test_normalize_and_validate_code() {
         assert_eq!(normalize_code(" abc234 "), "ABC234");
         assert!(is_valid_code("ABC234"));
-        // 長さ違い・不正文字（0/O/1/I や小文字）は拒否
+        // Wrong lengths and invalid characters (0/O/1/I, lowercase)
+        // are rejected.
         assert!(!is_valid_code("ABC23"));
         assert!(!is_valid_code("ABC2345"));
         assert!(!is_valid_code("ABC0O1"));
@@ -156,7 +154,7 @@ mod tests {
 
         assert_eq!(lobby.room_count(), 1);
         assert!(lobby.get(&code).is_some());
-        // 小文字や空白付きでも引ける
+        // Lookup tolerates lowercase and surrounding whitespace.
         assert!(
             lobby
                 .get(&format!(" {} ", code.to_ascii_lowercase()))

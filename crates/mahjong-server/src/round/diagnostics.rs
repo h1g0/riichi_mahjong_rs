@@ -1,6 +1,4 @@
-//! デバッグ診断ログ
-//!
-//! `#[cfg(debug_assertions)]` でのみ有効なログ出力機能。
+//! Debug diagnostics logging, active only under `#[cfg(debug_assertions)]`.
 
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::settings::Lang;
@@ -10,7 +8,7 @@ use crate::scoring;
 use super::Round;
 
 impl Round {
-    /// デバッグ用に自分のツモ時の判定状態を出力する
+    /// Logs the human player's win/riichi judgement state on draw, for debugging.
     pub(super) fn log_draw_diagnostics(
         &self,
         player_idx: usize,

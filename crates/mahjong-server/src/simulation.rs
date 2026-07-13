@@ -1,16 +1,18 @@
-//! CPU同士の自動対戦シミュレーション
+//! Automated CPU-vs-CPU simulations.
 //!
-//! 4人のCPUを同卓させて複数ゲームを実行し、和了率・放銃率などの
-//! 統計を集計する。CPU定石（issue #142）の回帰検知に使用する。
+//! Seats four CPUs at a table, runs many games, and aggregates win rates,
+//! deal-in rates, etc. Used as a regression check for the CPU heuristics
+//! work (issue #142).
 //!
-//! - 牌山はベースシードから決定的に導出されるため、同じシードなら
-//!   常に同じ結果になり、ブランチ間で集計値を直接比較できる。
-//! - 席順による有利不利を除去するため、ゲームごとにCPU設定を
-//!   席ローテーションし、統計は席ではなくCPU設定ごとに集計する。
-//! - `CpuConfig::without_heuristics()` のCPUを混ぜることで、
-//!   定石導入前後のA/B比較が同一卓でできる。
+//! - Walls are derived deterministically from the base seed, so the same
+//!   seed always yields the same results and aggregates can be compared
+//!   directly across branches.
+//! - CPU configs rotate seats between games to cancel out seat advantage;
+//!   stats are aggregated per config, not per seat.
+//! - Mixing in a `CpuConfig::without_heuristics()` CPU enables A/B
+//!   comparison of the heuristics at the same table.
 //!
-//! 実行例:
+//! Example:
 //! ```sh
 //! cargo run -p mahjong-server --release --example cpu_simulation -- 100 42
 //! ```
@@ -23,19 +25,19 @@ use crate::cpu::client::{CpuClient, CpuConfig, CpuLevel, CpuPersonality};
 use crate::round::{RoundResult, TurnPhase};
 use crate::table::{GameSettings, Table};
 
-/// 1局あたりの進行ステップ数の上限（これを超えたら進行不能とみなす）
+/// Step budget per hand; exceeding it is treated as a stall.
 const MAX_STEPS_PER_ROUND: usize = 5000;
 
-/// シミュレーション設定
+/// Simulation configuration.
 #[derive(Debug, Clone)]
 pub struct SimulationConfig {
-    /// 実行するゲーム（半荘/東風戦）数
+    /// Number of games to run
     pub games: usize,
-    /// ベースシード（ゲーム番号・局番号と合成して牌山シードを導出する）
+    /// Base seed, combined with game/hand numbers to derive wall seeds
     pub base_seed: u64,
-    /// 対戦させる4人のCPU設定
+    /// The four competing CPU configs
     pub cpu_configs: [CpuConfig; 4],
-    /// ゲーム設定（東風/東南、初期持ち点など）
+    /// Game settings (length, starting scores, ...)
     pub game_settings: GameSettings,
 }
 
@@ -50,10 +52,8 @@ impl Default for SimulationConfig {
     }
 }
 
-/// デフォルトの対戦カード
-///
-/// レベル差の確認用に弱・中・強を1人ずつ、新旧比較用に
-/// 定石無効の強を1人配置する。
+/// Default match-up: weak/normal/strong to gauge level differences, plus
+/// a heuristics-disabled strong CPU for before/after comparison.
 pub fn default_simulation_configs() -> [CpuConfig; 4] {
     [
         CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced),
@@ -63,36 +63,36 @@ pub fn default_simulation_configs() -> [CpuConfig; 4] {
     ]
 }
 
-/// CPU設定1つ分の集計結果
+/// Aggregated stats for one CPU config.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CpuStats {
-    /// CPU設定のラベル（レベル/性格/定石有無）
+    /// Config label (level/personality/heuristics)
     pub label: String,
-    /// ツモ和了数
+    /// Wins by tsumo
     pub tsumo_wins: u32,
-    /// ロン和了数
+    /// Wins by ron
     pub ron_wins: u32,
-    /// 放銃数
+    /// Deal-ins
     pub deal_ins: u32,
-    /// リーチ宣言数
+    /// Riichi declarations
     pub riichi_count: u32,
-    /// 副露数（ポン・チー・カンの合計。局をまたいで合算）
+    /// Melds called (pon/chii/kan, summed across hands)
     pub meld_count: u32,
-    /// 荒牌流局時に聴牌していた回数
+    /// Times tenpai at an exhaustive draw
     pub tenpai_at_draw: u32,
-    /// 着順ごとの回数（[1着, 2着, 3着, 4着]）
+    /// Finishes per placement ([1st, 2nd, 3rd, 4th])
     pub placements: [u32; 4],
-    /// 最終持ち点の合計（平均算出用）
+    /// Sum of final scores, for averaging
     pub total_final_score: i64,
 }
 
 impl CpuStats {
-    /// 和了数の合計
+    /// Total wins.
     pub fn total_wins(&self) -> u32 {
         self.tsumo_wins + self.ron_wins
     }
 
-    /// 平均着順
+    /// Average placement.
     pub fn average_placement(&self, games: u32) -> f64 {
         if games == 0 {
             return 0.0;
@@ -107,18 +107,18 @@ impl CpuStats {
     }
 }
 
-/// シミュレーション全体の集計結果
+/// Aggregated stats for the whole simulation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimulationStats {
-    /// CPU設定ごとの集計（SimulationConfig::cpu_configs と同じ順）
+    /// Per-config stats, in `SimulationConfig::cpu_configs` order
     pub per_cpu: [CpuStats; 4],
-    /// 実行したゲーム数
+    /// Games played
     pub games: u32,
-    /// 実行した局数
+    /// Hands played
     pub rounds: u32,
-    /// 荒牌流局の回数
+    /// Exhaustive draws
     pub exhaustive_draws: u32,
-    /// 途中流局の回数
+    /// Abortive draws
     pub special_draws: u32,
 }
 
@@ -169,7 +169,7 @@ impl fmt::Display for SimulationStats {
     }
 }
 
-/// CPU設定のラベルを生成する
+/// Builds the label for a CPU config.
 fn config_label(config: &CpuConfig) -> String {
     let mut label = format!("{:?}/{:?}", config.level, config.personality);
     if !config.heuristics_enabled {
@@ -178,10 +178,10 @@ fn config_label(config: &CpuConfig) -> String {
     label
 }
 
-/// 牌山シードをベースシード・ゲーム番号・局通し番号から導出する
+/// Derives a wall seed from the base seed, game number, and hand serial.
 ///
-/// splitmix64 の finalizer でビットを攪拌し、近いシード同士でも
-/// 牌山が相関しないようにする。
+/// The splitmix64 finalizer scrambles the bits so nearby inputs do not
+/// produce correlated walls.
 fn derive_wall_seed(base_seed: u64, game: u64, round_serial: u64) -> u64 {
     let mut x = base_seed
         ^ game.wrapping_mul(0x9E37_79B9_7F4A_7C15)
@@ -194,7 +194,7 @@ fn derive_wall_seed(base_seed: u64, game: u64, round_serial: u64) -> u64 {
     x
 }
 
-/// シミュレーションを実行する
+/// Runs the simulation.
 pub fn run_simulation(config: &SimulationConfig) -> Result<SimulationStats, String> {
     let mut stats = SimulationStats {
         per_cpu: std::array::from_fn(|i| CpuStats {
@@ -210,8 +210,9 @@ pub fn run_simulation(config: &SimulationConfig) -> Result<SimulationStats, Stri
     let player_count = config.game_settings.rules.player_count();
 
     for game in 0..config.games {
-        // 席ローテーション: ゲーム g では設定 c が席 (c + g) % n に座る
-        // （三麻ではダミー席3は固定で設定3のまま。イベントが来ないため実際には動かない）
+        // Seat rotation: in game g, config c sits at seat (c + g) % n.
+        // In three-player games dummy seat 3 keeps config 3; it receives
+        // no events, so it never actually acts.
         let config_for_seat: [usize; 4] = std::array::from_fn(|seat| {
             if seat < player_count {
                 (seat + player_count - game % player_count) % player_count
@@ -241,7 +242,7 @@ pub fn run_simulation(config: &SimulationConfig) -> Result<SimulationStats, Stri
             table.finish_round();
         }
 
-        // 着順集計（同点は起家に近い席が上位）
+        // Placements; ties go to the seat closer to the starting dealer.
         let mut order: Vec<usize> = (0..player_count).collect();
         order.sort_by_key(|&seat| (std::cmp::Reverse(table.scores[seat]), seat));
         for (rank, &seat) in order.iter().enumerate() {
@@ -255,12 +256,11 @@ pub fn run_simulation(config: &SimulationConfig) -> Result<SimulationStats, Stri
     Ok(stats)
 }
 
-/// 1局を最後まで進行させる
+/// Plays one hand to completion.
 fn play_round(table: &mut Table, cpus: &mut [CpuClient; 4]) -> Result<(), String> {
-    // 直近の拒否されたアクション（スタック診断用）
+    // Recent rejected actions, kept for stall diagnostics.
     let mut rejected_log: Vec<String> = Vec::new();
 
-    // 局開始イベント（GameStarted など）を配信
     process_events(table, cpus, &mut rejected_log);
 
     for _ in 0..MAX_STEPS_PER_ROUND {
@@ -304,11 +304,12 @@ fn play_round(table: &mut Table, cpus: &mut [CpuClient; 4]) -> Result<(), String
     ))
 }
 
-/// イベントをCPUに配信し、返ってきたアクションをサーバに送る
+/// Delivers events to the CPUs and feeds their actions back to the server.
 ///
-/// アクションが新たなイベントを生成しうるため、イベントが尽きるまでループする。
-/// 拒否されたアクションは診断用に `rejected_log` へ記録する
-/// （鳴きの競合などで正当に拒否される場合もあるため、エラーにはしない）。
+/// Actions can generate further events, so this loops until the queue is
+/// empty. Rejected actions go into `rejected_log` for diagnostics only:
+/// rejections can be legitimate (e.g. losing a call race), so they are
+/// not errors.
 fn process_events(table: &mut Table, cpus: &mut [CpuClient; 4], rejected_log: &mut Vec<String>) {
     loop {
         let events = table.drain_events();
@@ -338,7 +339,7 @@ fn process_events(table: &mut Table, cpus: &mut [CpuClient; 4], rejected_log: &m
     }
 }
 
-/// 終了した局から統計を収集する（finish_round の前に呼ぶ）
+/// Collects stats from a finished hand; must run before finish_round.
 fn collect_round_stats(
     table: &Table,
     config_for_seat: &[usize; 4],
@@ -389,7 +390,7 @@ fn collect_round_stats(
 mod tests {
     use super::*;
 
-    /// 高速なスモークテスト用の設定（弱CPUは受入計算を省くため速い）
+    /// Fast smoke-test config: weak CPUs skip tile-acceptance analysis.
     fn fast_config(games: usize, base_seed: u64) -> SimulationConfig {
         SimulationConfig {
             games,
@@ -404,7 +405,7 @@ mod tests {
         }
     }
 
-    /// 三麻の高速スモークテスト用の設定
+    /// Fast smoke-test config for three-player games.
     fn fast_sanma_config(games: usize, base_seed: u64) -> SimulationConfig {
         SimulationConfig {
             game_settings: GameSettings::sanma_default(),
@@ -420,7 +421,8 @@ mod tests {
         assert_eq!(stats.games, 2);
         assert!(stats.rounds >= 3 * 2, "三麻の東風戦は最低3局のはず");
 
-        // 三麻は3人なので着順は1〜3着のみ。ダミー席（設定3）に着順が付かないこと
+        // Three players means placements 1-3 only; the dummy seat
+        // (config 3) must never place.
         for rank in 0..3 {
             let total: u32 = stats.per_cpu.iter().map(|c| c.placements[rank]).sum();
             assert_eq!(total, stats.games, "{}着の合計がゲーム数と不一致", rank + 1);
@@ -432,7 +434,8 @@ mod tests {
             "ダミー席が集計されている"
         );
 
-        // 最終持ち点の合計は ゲーム数 × 初期持ち点 × 3 以下（供託分を除く）
+        // Total final scores cannot exceed games x starting score x 3
+        // (riichi deposits can only leak out).
         let total_score: i64 = stats.per_cpu.iter().map(|c| c.total_final_score).sum();
         assert!(total_score <= stats.games as i64 * 35000 * 3);
     }
@@ -451,13 +454,13 @@ mod tests {
         assert_eq!(stats.games, 1);
         assert!(stats.rounds >= 4, "東風戦は最低4局のはず");
 
-        // 着順の合計はゲーム数と一致する
         for rank in 0..4 {
             let total: u32 = stats.per_cpu.iter().map(|c| c.placements[rank]).sum();
             assert_eq!(total, stats.games, "{}着の合計がゲーム数と不一致", rank + 1);
         }
 
-        // 最終持ち点の合計は ゲーム数 × 初期持ち点 × 4 から供託分を引いた値以下
+        // Total final scores cannot exceed games x starting score x 4
+        // (riichi deposits can only leak out).
         let total_score: i64 = stats.per_cpu.iter().map(|c| c.total_final_score).sum();
         assert!(total_score <= stats.games as i64 * 25000 * 4);
     }
@@ -471,8 +474,9 @@ mod tests {
 
     #[test]
     fn test_simulation_differs_with_different_seed() {
-        // 異なるシードでは（牌山が変わるので）少なくとも局数か統計のどこかが変わる。
-        // 万一一致しても誤りではないが、決定性テストの裏付けとして確認する。
+        // Different seeds change the walls, so something in the stats
+        // should differ. A coincidental match would not be a bug, but this
+        // backs up the determinism test.
         let a = run_simulation(&fast_config(2, 1)).expect("run a should complete");
         let b = run_simulation(&fast_config(2, 2)).expect("run b should complete");
         assert_ne!(
@@ -484,7 +488,7 @@ mod tests {
     #[test]
     fn test_derive_wall_seed_is_deterministic_and_spread() {
         assert_eq!(derive_wall_seed(42, 0, 0), derive_wall_seed(42, 0, 0));
-        // 近い入力でも異なるシードになる
+        // Nearby inputs must still produce distinct seeds.
         assert_ne!(derive_wall_seed(42, 0, 0), derive_wall_seed(42, 0, 1));
         assert_ne!(derive_wall_seed(42, 0, 0), derive_wall_seed(42, 1, 0));
         assert_ne!(derive_wall_seed(42, 0, 0), derive_wall_seed(43, 0, 0));
@@ -500,10 +504,11 @@ mod tests {
         );
     }
 
-    /// 回帰検知用の大きめのシミュレーション
+    /// Larger simulation for regression checks.
     ///
-    /// 実行: `cargo test -p mahjong-server --release -- --ignored simulation_regression --nocapture`
-    /// 定石PRの前後で同一シードの結果を比較し、意図しない劣化がないか確認する。
+    /// Run: `cargo test -p mahjong-server --release -- --ignored simulation_regression --nocapture`
+    /// Compare same-seed results before and after a heuristics PR to catch
+    /// unintended regressions.
     #[test]
     #[ignore = "slow: run explicitly with --ignored --nocapture for regression checks"]
     fn simulation_regression_metrics() {
@@ -514,7 +519,6 @@ mod tests {
         let stats = run_simulation(&config).expect("regression simulation should complete");
         println!("{stats}");
 
-        // 基本的な健全性: 全ゲームが完走している
         assert_eq!(stats.games, 100);
     }
 }

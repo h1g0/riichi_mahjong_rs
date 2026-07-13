@@ -13,7 +13,7 @@
             overflow: hidden;
             background: #000;
         }
-        /* キャンバスをウィンドウ中央にレターボックス表示する */
+        /* Letterbox the canvas at the window center. */
         body {
             display: flex;
             align-items: center;
@@ -27,19 +27,18 @@
 <body>
     <canvas id="glcanvas" tabindex='1' width="1280" height="800"></canvas>
     <script>
-        // オンライン対戦サーバのURL。
-        // 未設定なら ws://127.0.0.1:8080/ws（ローカル開発用）が使われる。
-        // 本番デプロイ時はビルドスクリプトがここを差し替える。
+        // Online server URL. When unset, ws://127.0.0.1:8080/ws (local
+        // development) is used; the deploy build script replaces this.
         // window.MAHJONG_SERVER_URL = "wss://example.com/ws";
     </script>
     <script>
-        // 設計解像度。クライアント側(DESIGN_W/DESIGN_H)と一致させること。
+        // Design resolution; must match the client's DESIGN_W/DESIGN_H.
         var MAHJONG_DESIGN_W = 1280;
         var MAHJONG_DESIGN_H = 800;
-        // アスペクト比を保ったままウィンドウの縦横どちらかに収まるよう
-        // キャンバスの表示サイズを調整する。
-        // macroquad は canvas の clientWidth/clientHeight に描画バッファを合わせるため、
-        // ここで CSS サイズを変えるだけで内部解像度も追従する。
+        // Fit the canvas to the window while keeping the aspect ratio.
+        // macroquad sizes its draw buffer to the canvas's
+        // clientWidth/clientHeight, so changing the CSS size alone also
+        // adjusts the internal resolution.
         function fitMahjongCanvas() {
             var canvas = document.getElementById("glcanvas");
             if (!canvas) return;
@@ -50,8 +49,8 @@
             canvas.style.width = Math.round(MAHJONG_DESIGN_W * scale) + "px";
             canvas.style.height = Math.round(MAHJONG_DESIGN_H * scale) + "px";
         }
-        // macroquad が window.onresize を設定するより前にリスナーを登録しておくと、
-        // リサイズ時にこちらが先に走り、描画バッファのサイズずれを防げる。
+        // Registering before macroquad sets window.onresize makes this
+        // run first on resize, preventing draw-buffer size mismatches.
         window.addEventListener("resize", fitMahjongCanvas);
         fitMahjongCanvas();
     </script>

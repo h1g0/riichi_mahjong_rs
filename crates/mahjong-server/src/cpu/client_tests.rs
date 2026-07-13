@@ -1,4 +1,4 @@
-//! `CpuClient` のユニットテスト
+//! Unit tests for `CpuClient`.
 
 use super::*;
 use crate::protocol::CallType;
@@ -20,18 +20,17 @@ fn game_started_event(seat_wind: Wind, hand: Vec<Tile>) -> ServerEvent {
     }
 }
 
-/// 回帰テスト: 押し引き判断（should_attack）が副露を面子として数えること
-///
-/// かつて副露なしの `Hand` で向聴数を計算していたため、鳴いた手は
-/// 聴牌していても「遠い手」と誤判定され、終盤に必ず降りていた。
+/// Regression: the push/fold decision (should_attack) must count melds
+/// as groups. Shanten used to be computed on a meld-less `Hand`, so open
+/// hands looked "far" even at tenpai and always folded late in the hand.
 #[test]
 fn test_should_attack_counts_melds_when_tenpai() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
-    // 123m・456m をチー済み。残り手牌 789p + 11z + 34s（2s/5s 待ちの聴牌）
+    // 123m/456m called; hand 789p + 11z + 34s is a 2s/5s tenpai.
     client.state.my_seat_wind = Wind::East;
-    client.state.remaining_tiles = 10; // 終盤（残りツモ12枚以下）
+    client.state.remaining_tiles = 10; // late in the hand (<=12 draws)
     client.state.my_hand = vec![
         Tile::new(Tile::P7),
         Tile::new(Tile::P8),
@@ -70,7 +69,7 @@ fn test_should_attack_counts_melds_when_tenpai() {
     );
 }
 
-// ===== 北抜き（#257 Phase 3） =====
+// ===== North extraction (#257 Phase 3) =====
 
 #[test]
 fn test_consider_pei_declares_with_north_in_hand() {
@@ -79,7 +78,7 @@ fn test_consider_pei_declares_with_north_in_hand() {
     client.state.three_player = true;
     client.state.nuki_dora = true;
     client.state.remaining_tiles = 30;
-    // 北入りの普通の手（国士狙いではない）
+    // An ordinary hand holding a North (no orphan chase).
     client.state.my_hand = vec![
         Tile::new(Tile::P2),
         Tile::new(Tile::P3),
@@ -127,7 +126,7 @@ fn test_consider_pei_keeps_north_for_kokushi() {
     let mut client = CpuClient::new(config);
     client.state.three_player = true;
     client.state.nuki_dora = true;
-    // 国士無双1向聴（北は必要牌）
+    // Thirteen Orphans 1-shanten; the North is needed.
     client.state.my_hand = vec![
         Tile::new(Tile::M1),
         Tile::new(Tile::M9),
@@ -155,7 +154,7 @@ fn test_consider_pei_riichi_only_drawn_north() {
     client.state.nuki_dora = true;
     client.state.is_riichi = true;
     client.state.remaining_tiles = 30;
-    client.state.my_hand = vec![Tile::new(Tile::Z4)]; // リーチ中の手牌は抜けない
+    client.state.my_hand = vec![Tile::new(Tile::Z4)]; // hand tiles are locked under riichi
 
     assert_eq!(client.consider_pei(), None);
 
@@ -163,10 +162,9 @@ fn test_consider_pei_riichi_only_drawn_north() {
     assert_eq!(client.consider_pei(), Some(ClientAction::Pei));
 }
 
-/// 回帰テスト（#296）: 生牌山が空（海底ツモ後）は北抜きを宣言しない
-///
-/// 補充ツモができないためサーバに却下され、却下されたCPUは再打診
-/// されないため局が永久に停止していた。
+/// Regression (#296): never declare pei with the live wall empty
+/// (post-haitei). The server rejects it for lack of a replacement draw,
+/// and a rejected CPU is never re-consulted, so the hand stalled forever.
 #[test]
 fn test_consider_pei_none_when_wall_empty() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
@@ -180,11 +178,10 @@ fn test_consider_pei_none_when_wall_empty() {
     assert_eq!(client.consider_pei(), None);
 }
 
-/// 回帰テスト: 自分の鳴きを伴わない HandUpdated（打牌却下時の再同期 #294）
-/// に打牌を返さないこと
-///
-/// 返してしまうと「却下 → 再同期 HandUpdated → 再打牌 → 却下」の無限ループで
-/// CPU（代打ち含む）の手番が進まなくなり、局全体が停止する。
+/// Regression: a HandUpdated without our own call (the post-rejection
+/// resync, #294) must not produce a discard. Replying would loop
+/// reject -> resync -> re-discard -> reject and stall the whole hand,
+/// including CPU substitution.
 #[test]
 fn test_resync_hand_updated_does_not_trigger_discard() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
@@ -205,11 +202,11 @@ fn test_resync_hand_updated_does_not_trigger_discard() {
         Tile::new(Tile::Z1),
     ];
 
-    // 再同期の HandUpdated（自分の鳴きなし）: 打牌しない
+    // A resync HandUpdated (no own call): no discard.
     let action = client.handle_event(&ServerEvent::HandUpdated { hand: hand.clone() });
     assert_eq!(action, None, "再同期の HandUpdated に打牌を返している");
 
-    // 自分のポンに続く HandUpdated: 従来どおり打牌する
+    // A HandUpdated following our pon still discards.
     client.handle_event(&ServerEvent::PlayerCalled {
         player: Wind::South,
         call_type: CallType::Pon,
@@ -246,29 +243,29 @@ fn test_level_capabilities() {
 
 #[test]
 fn test_level_ordering() {
-    // 定石の「弱以上」「中以上」判定はこの順序に依存する
+    // The heuristics' level thresholds depend on this ordering.
     assert!(CpuLevel::Weak < CpuLevel::Normal);
     assert!(CpuLevel::Normal < CpuLevel::Strong);
 }
 
 #[test]
 fn test_is_yakuhai() {
-    assert!(is_yakuhai(Tile::Z5, Wind::East, Wind::East)); // 白
-    assert!(is_yakuhai(Tile::Z6, Wind::East, Wind::East)); // 發
-    assert!(is_yakuhai(Tile::Z7, Wind::East, Wind::East)); // 中
-    assert!(is_yakuhai(Tile::Z1, Wind::East, Wind::East)); // 東（場風+自風）
-    assert!(!is_yakuhai(Tile::Z2, Wind::East, Wind::East)); // 南（場風でも自風でもない）
+    assert!(is_yakuhai(Tile::Z5, Wind::East, Wind::East));
+    assert!(is_yakuhai(Tile::Z6, Wind::East, Wind::East));
+    assert!(is_yakuhai(Tile::Z7, Wind::East, Wind::East));
+    assert!(is_yakuhai(Tile::Z1, Wind::East, Wind::East)); // round + seat wind
+    assert!(!is_yakuhai(Tile::Z2, Wind::East, Wind::East)); // neither wind
 }
 
 #[test]
 fn test_is_yakuhai_seat_and_prevailing_wind() {
-    // 自風が南のとき、Z2（南）は役牌
+    // South is a value honour for the South seat...
     assert!(is_yakuhai(Tile::Z2, Wind::South, Wind::East));
-    // 場風が南のとき、Z2（南）は役牌
+    // ...and in the South round...
     assert!(is_yakuhai(Tile::Z2, Wind::East, Wind::South));
-    // どちらでもないとき、Z2 は役牌でない
+    // ...but not otherwise.
     assert!(!is_yakuhai(Tile::Z2, Wind::East, Wind::East));
-    // 三元牌は常に役牌
+    // Dragons always are.
     assert!(is_yakuhai(Tile::Z5, Wind::North, Wind::West));
     assert!(is_yakuhai(Tile::Z6, Wind::North, Wind::West));
     assert!(is_yakuhai(Tile::Z7, Wind::North, Wind::West));
@@ -276,7 +273,7 @@ fn test_is_yakuhai_seat_and_prevailing_wind() {
 
 #[test]
 fn test_is_tanyao_tile() {
-    // 端牌・字牌は非タンヤオ
+    // Terminals and honours are not tanyao tiles.
     assert!(!is_tanyao_tile(Tile::M1));
     assert!(!is_tanyao_tile(Tile::M9));
     assert!(!is_tanyao_tile(Tile::P1));
@@ -285,7 +282,7 @@ fn test_is_tanyao_tile() {
     assert!(!is_tanyao_tile(Tile::S9));
     assert!(!is_tanyao_tile(Tile::Z1));
     assert!(!is_tanyao_tile(Tile::Z7));
-    // 中張牌はタンヤオ
+    // Inside tiles are.
     assert!(is_tanyao_tile(Tile::M2));
     assert!(is_tanyao_tile(Tile::M8));
     assert!(is_tanyao_tile(Tile::P5));
@@ -345,7 +342,7 @@ fn test_ron_action() {
 
 #[test]
 fn test_discard_when_in_riichi_state() {
-    // リーチ中はcan_tsumo=falseのときツモ切りを返す
+    // Under riichi with can_tsumo=false, tsumogiri.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -386,11 +383,11 @@ fn test_discard_when_in_riichi_state() {
 
 #[test]
 fn test_riichi_action_when_can_riichi() {
-    // can_riichi=true かつリーチ積極度が十分なら Riichi を返す
+    // can_riichi=true with enough aggressiveness returns Riichi.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
-    // テンパイ1枚前の手牌（Z2待ち）
+    // One tile short of tenpai (waiting on Z2).
     client.handle_event(&game_started_event(
         Wind::East,
         vec![
@@ -410,8 +407,8 @@ fn test_riichi_action_when_can_riichi() {
         ],
     ));
 
-    // Z3をツモ → Z2Z3の順子形成でもテンパイにならないが、
-    // can_riichi フラグをサーバが立てている想定
+    // Drawing Z3 does not actually reach tenpai, but the server is
+    // assumed to have set can_riichi.
     let action = client.handle_event(&ServerEvent::TileDrawn {
         tile: Tile::new(Tile::Z3),
         remaining_tiles: 30,
@@ -425,9 +422,10 @@ fn test_riichi_action_when_can_riichi() {
 
 #[test]
 fn test_riichi_with_ankan_melds_selects_tenpai_keeping_tile() {
-    // 暗カンを含む手牌でもリーチ宣言牌を正しく選べる（回帰テスト）。
-    // 以前は副露を無視して向聴数を計算していたため「聴牌維持牌なし」と
-    // 誤判定し、不正なツモ切りリーチを送信して局が進行不能になっていた。
+    // Regression: the riichi declaration discard must be found in a hand
+    // with concealed kans. Shanten used to ignore melds, so "no
+    // tenpai-preserving discard" was misdetected and an invalid tsumogiri
+    // riichi stalled the hand.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -443,7 +441,7 @@ fn test_riichi_with_ankan_melds_selects_tenpai_keeping_tile() {
             Tile::new(Tile::S6),
         ],
     ));
-    // 暗カン2つ（M1, Z5）を副露情報としてセット
+    // Two concealed kans (M1, Z5) as melds.
     client.state.player_melds[0] = vec![
         Meld {
             tiles: vec![Tile::new(Tile::M1); 4],
@@ -467,7 +465,8 @@ fn test_riichi_with_ankan_melds_selects_tenpai_keeping_tile() {
         is_furiten: false,
     });
 
-    // P6切りリーチ（S5S6の両面を残す）が唯一の聴牌維持打牌
+    // Discarding P6 (keeping the S5S6 two-sided wait) is the only
+    // tenpai-preserving riichi.
     assert!(
         matches!(
             action,
@@ -479,12 +478,12 @@ fn test_riichi_with_ankan_melds_selects_tenpai_keeping_tile() {
 
 #[test]
 fn test_riichi_falls_back_to_discard_when_no_tenpai_keeping_tile() {
-    // can_riichi が立っていても聴牌維持牌が見つからなければ
-    // リーチせず通常打牌に進む（不正なリーチはサーバに拒否され停滞する）
+    // Even with can_riichi set, no tenpai-preserving discard means a
+    // normal discard: an invalid riichi would be rejected and stall.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
-    // 大きく聴牌から遠いバラバラの手牌
+    // A scattered hand far from tenpai.
     client.handle_event(&game_started_event(
         Wind::East,
         vec![
@@ -520,7 +519,7 @@ fn test_riichi_falls_back_to_discard_when_no_tenpai_keeping_tile() {
 
 #[test]
 fn test_discard_action_when_no_special_state() {
-    // ツモ和了不可・リーチ不可のとき Discard を返す
+    // Neither tsumo nor riichi possible: Discard.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -573,8 +572,8 @@ fn discarded_tile(action: &Option<ClientAction>) -> Option<Tile> {
 
 #[test]
 fn test_discards_isolated_guest_wind_before_terminal() {
-    // #147: 孤立牌の中でも客風牌を1・9牌より先に切る
-    // 3面子 + 雀頭 + 浮き牌3枚（Z3=客風, P9, ツモS9）
+    // #147: among isolated tiles, guest winds go before terminals.
+    // 3 groups + pair + three floaters (Z3 guest wind, P9, drawn S9).
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -604,8 +603,8 @@ fn test_discards_isolated_guest_wind_before_terminal() {
 
 #[test]
 fn test_discard_prefers_breaking_penchan_over_ryanmen() {
-    // #148: 6ブロックの手では両面より辺張を整理する
-    // ブロック: M234 P456 M9M9 S6S7(両面) P1P2(辺張) Z5Z5(ツモで対子)
+    // #148: with six blocks, edge shapes go before two-sided ones.
+    // Blocks: M234 P456 M9M9 S6S7 (two-sided) P1P2 (edge) Z5Z5 (pair).
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -638,7 +637,7 @@ fn test_discard_prefers_breaking_penchan_over_ryanmen() {
 
 #[test]
 fn test_dora_float_kept_over_plain_float() {
-    // #152: 同価値の浮き牌（孤立1・9牌）ならドラでない方を切る
+    // #152: between equal floaters (isolated terminals), keep the dora.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -662,7 +661,7 @@ fn test_dora_float_kept_over_plain_float() {
         hand: hand.clone(),
         scores: [25000; 4],
         round_wind: Wind::East,
-        dora_indicators: vec![Tile::new(Tile::P8)], // ドラは P9
+        dora_indicators: vec![Tile::new(Tile::P8)], // dora is P9
         round_number: 0,
         total_rounds: 4,
         honba: 0,
@@ -670,15 +669,16 @@ fn test_dora_float_kept_over_plain_float() {
         three_player: false,
         nuki_dora: false,
     });
-    // 4面子完成 + P9(ドラ) + ツモ S9 の単騎選択。
-    // ドラの P9 を残して S9 をツモ切りすべき
+    // Four groups plus a pair-wait choice between P9 (dora) and the
+    // drawn S9: keep the dora, tsumogiri the S9.
     let action = client.handle_event(&draw_event(Tile::S9));
     assert!(
         matches!(action, Some(ClientAction::Discard { tile: None })),
         "ドラ(P9)を残して S9 をツモ切りすべき, got {action:?}"
     );
 
-    // 対照: 定石無効なら P9 を切る（ドラ保護なし、同値で先頭の候補が選ばれる）
+    // Control: with heuristics off P9 goes (no dora protection;
+    // the first equal-scored candidate wins).
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
     let mut client = CpuClient::new(config);
     client.handle_event(&ServerEvent::GameStarted {
@@ -703,8 +703,8 @@ fn test_dora_float_kept_over_plain_float() {
 
 #[test]
 fn test_weak_folds_with_genbutsu_against_riichi() {
-    // #173/#174: 弱レベルでも他家リーチに対して現物からベタオリする
-    // （現物が対子の一部でも、聴牌への近さより安全を優先する）
+    // #173/#174: even Weak folds to a riichi starting from genbutsu,
+    // even when the genbutsu is part of a pair - safety beats closeness.
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -726,7 +726,7 @@ fn test_weak_folds_with_genbutsu_against_riichi() {
             Tile::new(Tile::M9),
         ],
     ));
-    // 南家が Z3 を切ってからリーチ
+    // South discarded Z3 before declaring riichi.
     client.handle_event(&ServerEvent::TileDiscarded {
         player: Wind::South,
         tile: Tile::new(Tile::Z3),
@@ -746,7 +746,7 @@ fn test_weak_folds_with_genbutsu_against_riichi() {
 
 #[test]
 fn test_defense_prefers_suji_over_dangerous_tiles() {
-    // #176: 現物がない場合、無筋の中張牌より筋・字牌寄りの牌を選ぶ
+    // #176: without genbutsu, suji/honour-ish tiles beat off-suji inside tiles.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -768,7 +768,7 @@ fn test_defense_prefers_suji_over_dangerous_tiles() {
             Tile::new(Tile::P2),
         ],
     ));
-    // 南家が M4 を切ってからリーチ → M7 は筋
+    // South discarded M4 before riichi, making M7 suji.
     client.handle_event(&ServerEvent::TileDiscarded {
         player: Wind::South,
         tile: Tile::new(Tile::M4),
@@ -788,9 +788,10 @@ fn test_defense_prefers_suji_over_dangerous_tiles() {
 
 #[test]
 fn test_riichi_declared_with_no_yaku_tenpai() {
-    // #168: 役なし聴牌は（従来なら宣言を控える局面でも）リーチする。
-    // Speedy（リーチ積極度0.4）は2人リーチに対して従来は宣言しないが、
-    // 役なしダマは和了できないため定石が宣言を強制する。
+    // #168: a yakuless tenpai declares even where the legacy judgement
+    // would not. Speedy (aggressiveness 0.4) normally stays quiet against
+    // two riichi, but a yakuless damaten cannot win at all, so the
+    // heuristic forces the declaration.
     let hand = vec![
         Tile::new(Tile::M2),
         Tile::new(Tile::M3),
@@ -819,7 +820,7 @@ fn test_riichi_declared_with_no_yaku_tenpai() {
         is_furiten: false,
     };
 
-    // 定石有効: リーチ宣言
+    // Heuristics on: declare.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Speedy);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand.clone()));
@@ -831,7 +832,7 @@ fn test_riichi_declared_with_no_yaku_tenpai() {
         "役なし聴牌はリーチすべき, got {action:?}"
     );
 
-    // 定石無効: 従来どおり2人リーチには宣言しない
+    // Heuristics off: legacy stays quiet against two riichi.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Speedy).without_heuristics();
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand));
@@ -843,7 +844,7 @@ fn test_riichi_declared_with_no_yaku_tenpai() {
 
 #[test]
 fn test_damaten_with_confirmed_mangan() {
-    // #170: ダマでも満貫（タンヤオ+ピンフ+ドラ3）ならリーチしない
+    // #170: mangan even damaten (tanyao+pinfu+3 dora): no riichi.
     let hand = vec![
         Tile::new(Tile::P2),
         Tile::new(Tile::P3),
@@ -864,7 +865,7 @@ fn test_damaten_with_confirmed_mangan() {
         hand,
         scores: [25000; 4],
         round_wind: Wind::East,
-        dora_indicators: vec![Tile::new(Tile::S7), Tile::new(Tile::M3)], // ドラ S8×2 + M4
+        dora_indicators: vec![Tile::new(Tile::S7), Tile::new(Tile::M3)], // dora: two S8 + M4
         round_number: 0,
         total_rounds: 4,
         honba: 0,
@@ -880,7 +881,7 @@ fn test_damaten_with_confirmed_mangan() {
         is_furiten: false,
     };
 
-    // 定石有効: ダマ（通常打牌）
+    // Heuristics on: damaten (a normal discard).
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&start(hand.clone()));
@@ -890,7 +891,7 @@ fn test_damaten_with_confirmed_mangan() {
         "満貫確定はダマにすべき, got {action:?}"
     );
 
-    // 定石無効: 従来の積極度判断でリーチする
+    // Heuristics off: the aggressiveness judgement declares.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
     let mut client = CpuClient::new(config);
     client.handle_event(&start(hand));
@@ -900,8 +901,9 @@ fn test_damaten_with_confirmed_mangan() {
 
 #[test]
 fn test_cheap_bad_shape_tenpai_folds_against_riichi() {
-    // #178: 愚形安手（タンヤオのみ・カンチャン待ち）の聴牌はリーチに押さず、
-    // 現物（対子の一部でも）から降りる。従来は聴牌なら無条件に押していた。
+    // #178: a bad-shape cheap tenpai (tanyao only, closed wait) folds to
+    // a riichi from genbutsu (even out of a pair) instead of pushing;
+    // tenpai used to push unconditionally.
     let hand = vec![
         Tile::new(Tile::M2),
         Tile::new(Tile::M3),
@@ -931,7 +933,7 @@ fn test_cheap_bad_shape_tenpai_folds_against_riichi() {
         });
     };
 
-    // 定石有効: 降りて現物(S2)を切る（聴牌は崩れる）
+    // Heuristics on: fold with the genbutsu S2, breaking tenpai.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::South, hand.clone()));
@@ -940,7 +942,7 @@ fn test_cheap_bad_shape_tenpai_folds_against_riichi() {
     let tile = discarded_tile(&action).expect("expected a hand discard");
     assert_eq!(tile.get(), Tile::S2, "愚形安手聴牌は現物から降りるべき");
 
-    // 定石無効: 従来どおり聴牌を維持して押す（ツモ切り）
+    // Heuristics off: keep tenpai and push (tsumogiri).
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::South, hand));
@@ -954,8 +956,8 @@ fn test_cheap_bad_shape_tenpai_folds_against_riichi() {
 
 #[test]
 fn test_folds_against_three_meld_opponent() {
-    // #180: リーチがなくても3副露の他家は聴牌濃厚として扱い、
-    // 遠い手なら現物からベタオリする
+    // #180: an opponent with three melds counts as likely tenpai even
+    // without riichi; a far hand folds from genbutsu.
     let hand = vec![
         Tile::new(Tile::M1),
         Tile::new(Tile::M2),
@@ -996,7 +998,7 @@ fn test_folds_against_three_meld_opponent() {
         },
     ];
 
-    // 南家が3副露 + Z3 を捨てている
+    // South has three melds and has discarded Z3.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand.clone()));
@@ -1015,7 +1017,7 @@ fn test_folds_against_three_meld_opponent() {
         "3副露の他家に対して現物(Z3)からベタオリすべき"
     );
 
-    // 定石無効: 副露者は脅威とみなさず通常打牌（現物優先にならない）
+    // Heuristics off: melds are not a threat; normal discard.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand));
@@ -1034,10 +1036,10 @@ fn test_folds_against_three_meld_opponent() {
 
 #[test]
 fn test_six_block_hand_dismantles_dead_kanchan_first() {
-    // #149/#151/#153 の連動:
-    // 6ブロック（M234 S789 Z5Z5 P1P2 S2S4 P78）の手で、
-    // S3が3枚見えて死んだ嵌張(S2S4)を最優先で整理する。
-    // 両面(P78)と唯一の雀頭(Z5Z5)は守る。
+    // #149/#151/#153 together: in a six-block hand
+    // (M234 S789 Z5Z5 P1P2 S2S4 P78), the S2S4 closed shape killed by
+    // three visible S3 goes first; the two-sided P78 and the only pair
+    // Z5Z5 are protected.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -1059,7 +1061,7 @@ fn test_six_block_hand_dismantles_dead_kanchan_first() {
             Tile::new(Tile::P7),
         ],
     ));
-    // S3 が3枚場に出る → S2S4 は死にターツ
+    // Three S3 on the table kill the S2S4 shape.
     for _ in 0..3 {
         client.handle_event(&ServerEvent::TileDiscarded {
             player: Wind::West,
@@ -1077,7 +1079,7 @@ fn test_six_block_hand_dismantles_dead_kanchan_first() {
     );
 }
 
-/// 么九牌 n 種 + 中張牌で14枚の配牌を作る
+/// Builds a 14-tile deal with n orphan kinds padded with inside tiles.
 fn orphan_rich_hand(kinds: usize) -> Vec<Tile> {
     let orphan_types = [
         Tile::M1,
@@ -1135,8 +1137,9 @@ fn nine_terminals_action(
 
 #[test]
 fn test_kokushi_hand_keeps_orphans() {
-    // #160: 么九牌10種の手では么九牌を守り、中張牌から切る。
-    // ルートロックがないと一般形向聴数に引かれて么九牌を切ってしまう。
+    // #160: with ten orphan kinds, keep the orphans and discard inside
+    // tiles. Without the route lock the standard-form shanten would pull
+    // an orphan discard.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -1144,7 +1147,7 @@ fn test_kokushi_hand_keeps_orphans() {
     let action = client.handle_event(&draw_event(Tile::P6));
 
     let tile = discarded_tile(&action);
-    // ツモ切り（P6）か手牌の中張牌切りなら正しい
+    // Tsumogiri (P6) or any inside-tile discard is correct.
     if let Some(t) = tile {
         assert!(
             !t.is_1_9_honour(),
@@ -1155,7 +1158,7 @@ fn test_kokushi_hand_keeps_orphans() {
 
 #[test]
 fn test_nine_terminals_continues_with_ten_kinds() {
-    // #160: 么九牌10種以上は性格によらず国士無双を狙って続行
+    // #160: ten orphan kinds continue regardless of personality.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let action = nine_terminals_action(config, orphan_rich_hand(10), [25000; 4]);
     assert!(matches!(
@@ -1166,7 +1169,7 @@ fn test_nine_terminals_continues_with_ten_kinds() {
 
 #[test]
 fn test_nine_terminals_nine_kinds_depends_on_situation() {
-    // 9種: 平場のバランス型は流局を選ぶ
+    // 9 kinds: a flat-score Balanced declares the draw.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let action = nine_terminals_action(config, orphan_rich_hand(9), [25000; 4]);
     assert!(matches!(
@@ -1174,7 +1177,7 @@ fn test_nine_terminals_nine_kinds_depends_on_situation() {
         Some(ClientAction::NineTerminals { declare: true })
     ));
 
-    // 9種: 高打点型は国士狙いで続行
+    // 9 kinds: HighValue continues for the orphans.
     let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue);
     let action = nine_terminals_action(config, orphan_rich_hand(9), [25000; 4]);
     assert!(matches!(
@@ -1182,7 +1185,7 @@ fn test_nine_terminals_nine_kinds_depends_on_situation() {
         Some(ClientAction::NineTerminals { declare: false })
     ));
 
-    // 9種: 大きく負けていれば（#159）バランス型でも続行
+    // 9 kinds: far behind (#159) even Balanced continues.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let action = nine_terminals_action(config, orphan_rich_hand(9), [8000, 42000, 25000, 25000]);
     assert!(matches!(
@@ -1193,7 +1196,7 @@ fn test_nine_terminals_nine_kinds_depends_on_situation() {
 
 #[test]
 fn test_nine_terminals_without_heuristics_uses_personality() {
-    // 定石無効時は従来どおり: HighValue のみ続行
+    // Heuristics off: legacy, only HighValue continues.
     let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue).without_heuristics();
     let action = nine_terminals_action(config, orphan_rich_hand(9), [25000; 4]);
     assert!(matches!(
@@ -1211,7 +1214,7 @@ fn test_nine_terminals_without_heuristics_uses_personality() {
 
 #[test]
 fn test_handle_event_returns_none_for_non_actionable() {
-    // 打牌・他プレイヤーツモ等はアクション不要なので None
+    // Discards, other players' draws etc. require no action.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -1243,7 +1246,7 @@ fn test_handle_event_returns_none_for_non_actionable() {
 
 #[test]
 fn test_pass_when_chi_only_and_high_value() {
-    // HighValue はチーしない → Pass を返す
+    // HighValue never calls chii: Pass.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::HighValue);
     let mut client = CpuClient::new(config);
 
@@ -1279,12 +1282,12 @@ fn test_pass_when_chi_only_and_high_value() {
 
 #[test]
 fn test_pon_yakuhai_normal_level() {
-    // 役牌ポンは向聴数が下がれば Normal レベルでも鳴く
+    // A value-honour pon that lowers shanten is taken even at Normal.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
-    // Z5（白）×2 を持つ一向聴の手牌: M123+P456+S789完成+Z5Z5雀頭+Z2Z3孤立
-    // → Z5 ポンで向聴数 1→0 に下がる
+    // 1-shanten with two Z5: M123+P456+S789 complete, Z5Z5 head,
+    // Z2Z3 floaters; the Z5 pon drops 1 -> 0.
     client.handle_event(&game_started_event(
         Wind::East,
         vec![
@@ -1317,14 +1320,13 @@ fn test_pon_yakuhai_normal_level() {
 
 #[test]
 fn test_pon_not_called_when_shanten_does_not_decrease() {
-    // ポンで向聴数が下がらない場合は Pass
-    // 国士無双テンパイ（13孤立牌+対子）では向聴数=0だが、
-    // Z5 をポンすると closed=false になり nm 向聴数が大幅に上がる
+    // A pon that does not lower shanten is passed. At a Thirteen Orphans
+    // tenpai (13 orphans + pair) the shanten is 0, but a Z5 pon opens the
+    // hand and the shanten jumps.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
-    // 12種の孤立牌 + Z5×2: 国士无双テンパイ(向聴数=0)
-    // Z5 ポン後は closed 制約外れて向聴数が大幅に上昇する
+    // 12 orphan kinds + two Z5: an orphans tenpai that a pon would ruin.
     client.handle_event(&game_started_event(
         Wind::East,
         vec![
@@ -1355,10 +1357,10 @@ fn test_pon_not_called_when_shanten_does_not_decrease() {
     assert!(matches!(action, Some(ClientAction::Pass)));
 }
 
-/// 役なしになる鳴きの機会を作る共通手牌（M9ポンで向聴数は下がるが役がない）
-///
-/// 浮き牌は客風牌（南家にとって役牌でない Z3/Z4）にして、
-/// 数牌の再分解による意図しない聴牌を防ぐ。
+/// Shared hand offering a yakuless call: an M9 pon lowers the shanten
+/// but leaves no yaku. The floaters are guest winds (Z3/Z4, not value
+/// honours for South) to prevent accidental tenpai via suit
+/// re-decomposition.
 fn yakuless_pon_hand() -> Vec<Tile> {
     vec![
         Tile::new(Tile::M2),
@@ -1389,7 +1391,8 @@ fn pon_call_event(tile_type: u32) -> ServerEvent {
 
 #[test]
 fn test_pass_on_yakuless_pon() {
-    // #162: 向聴数が下がっても役の見込みがない鳴きはしない
+    // #162: a call with no yaku prospect is declined even if it
+    // lowers the shanten.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -1401,7 +1404,7 @@ fn test_pass_on_yakuless_pon() {
 
 #[test]
 fn test_yakuless_pon_called_without_heuristics() {
-    // 定石無効時は従来どおり鳴く（A/B比較のベースライン維持）
+    // Heuristics off: legacy calls (the A/B baseline).
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
     let mut client = CpuClient::new(config);
 
@@ -1413,7 +1416,7 @@ fn test_yakuless_pon_called_without_heuristics() {
 
 #[test]
 fn test_weak_level_also_avoids_yakuless_pon() {
-    // #162 は弱以上: Weakレベルでも役なし鳴きはしない
+    // #162 is weak+: even Weak declines yakuless calls.
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -1425,7 +1428,7 @@ fn test_weak_level_also_avoids_yakuless_pon() {
 
 #[test]
 fn test_high_value_pons_yakuhai() {
-    // #163: 役牌対子のポンは性格（鳴き積極度）によらず行う
+    // #163: value-honour pair pons ignore call aggressiveness.
     let hand = vec![
         Tile::new(Tile::Z5),
         Tile::new(Tile::Z5),
@@ -1442,14 +1445,14 @@ fn test_high_value_pons_yakuhai() {
         Tile::new(Tile::S9),
     ];
 
-    // HighValue は鳴き積極度 0.2 で、従来は役牌すら鳴かなかった
+    // HighValue (aggressiveness 0.2) used to decline even value honours.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::HighValue);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::South, hand.clone()));
     let action = client.handle_event(&pon_call_event(Tile::Z5));
     assert!(matches!(action, Some(ClientAction::Pon { .. })));
 
-    // 定石無効時は従来どおりパス
+    // Heuristics off: legacy passes.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::HighValue).without_heuristics();
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::South, hand));
@@ -1469,7 +1472,8 @@ fn chi_call_event(tile_type: u32, hand_tiles: [u32; 2]) -> ServerEvent {
 
 #[test]
 fn test_kuitan_chi_requires_simple_centered_hand() {
-    // #164: 么九牌が3枚残る手から喰いタン目当てのチーをしない（中以上）
+    // #164 (normal+): no kuitan chii from a hand still holding
+    // three orphans.
     let hand = vec![
         Tile::new(Tile::M2),
         Tile::new(Tile::M3),
@@ -1486,14 +1490,14 @@ fn test_kuitan_chi_requires_simple_centered_hand() {
         Tile::new(Tile::P7),
     ];
 
-    // Normal: 厳しい条件で見込みなし → パス
+    // Normal: no prospect under the strict rule - pass.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::South, hand.clone()));
     let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
     assert!(matches!(action, Some(ClientAction::Pass)));
 
-    // Weak: 緩い条件（么九牌3枚以下）なら鳴く
+    // Weak: the loose rule (<=3 orphans) still calls.
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::South, hand));
@@ -1503,7 +1507,7 @@ fn test_kuitan_chi_requires_simple_centered_hand() {
 
 #[test]
 fn test_cheap_distant_chi_suppressed() {
-    // #165: 子の、打点要素のない2向聴超の仕掛けは控える
+    // #165: a non-dealer avoids value-less calls above 2-shanten.
     let hand = vec![
         Tile::new(Tile::M2),
         Tile::new(Tile::M3),
@@ -1520,7 +1524,7 @@ fn test_cheap_distant_chi_suppressed() {
         Tile::new(Tile::S8),
     ];
 
-    // ドラなし: 安くて遠い → パス
+    // No dora: cheap and distant - pass.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&ServerEvent::GameStarted {
@@ -1528,7 +1532,7 @@ fn test_cheap_distant_chi_suppressed() {
         hand: hand.clone(),
         scores: [25000; 4],
         round_wind: Wind::East,
-        dora_indicators: vec![Tile::new(Tile::Z5)], // ドラ(發)は手牌にない
+        dora_indicators: vec![Tile::new(Tile::Z5)], // the dora (Green) is not in hand
         round_number: 0,
         total_rounds: 4,
         honba: 0,
@@ -1539,7 +1543,7 @@ fn test_cheap_distant_chi_suppressed() {
     let action = client.handle_event(&chi_call_event(Tile::M4, [Tile::M2, Tile::M3]));
     assert!(matches!(action, Some(ClientAction::Pass)));
 
-    // ドラ2枚あり: 打点見込みがあるので鳴く
+    // Two dora give a value prospect: call.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&ServerEvent::GameStarted {
@@ -1547,7 +1551,7 @@ fn test_cheap_distant_chi_suppressed() {
         hand,
         scores: [25000; 4],
         round_wind: Wind::East,
-        dora_indicators: vec![Tile::new(Tile::P6)], // ドラは P7（手牌に2枚...P7,P8のP7）
+        dora_indicators: vec![Tile::new(Tile::P6)], // dora is P7 (held twice)
         round_number: 0,
         total_rounds: 4,
         honba: 0,
@@ -1561,7 +1565,7 @@ fn test_cheap_distant_chi_suppressed() {
 
 #[test]
 fn test_toitoi_pon_requires_four_blocks() {
-    // #157: 対々和狙いのポンは「副露+対子・刻子が4ブロック以上」のときだけ
+    // #157: toitoi pons need melds + pairs/triplets >= 4 blocks.
     let s9_pon = Meld {
         tiles: vec![Tile::new(Tile::S9); 3],
         category: MeldType::Pon,
@@ -1569,7 +1573,7 @@ fn test_toitoi_pon_requires_four_blocks() {
         called_tile: Some(Tile::new(Tile::S9)),
     };
 
-    // 3ブロック相当（副露1 + M9M9 + P1P1）から M9 ポン → 役の見込みなし → パス
+    // Three blocks (1 meld + M9M9 + P1P1): the M9 pon has no prospect - pass.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(
@@ -1591,7 +1595,7 @@ fn test_toitoi_pon_requires_four_blocks() {
     let action = client.handle_event(&pon_call_event(Tile::M9));
     assert!(matches!(action, Some(ClientAction::Pass)));
 
-    // 5ブロック相当（副露1 + 対子4）から M9 ポン → 対々和の見込みあり → 鳴く
+    // Five blocks (1 meld + 4 pairs): toitoi prospect - call.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(
@@ -1616,7 +1620,7 @@ fn test_toitoi_pon_requires_four_blocks() {
 
 #[test]
 fn test_pass_on_pon_leading_to_naked_tanki() {
-    // #166: 4副露目（裸単騎）になるポンはしない
+    // #166: never pon into a fourth meld (bare pair).
     let hand = vec![
         Tile::new(Tile::S3),
         Tile::new(Tile::S3),
@@ -1648,7 +1652,7 @@ fn test_pass_on_pon_leading_to_naked_tanki() {
         },
     ];
 
-    // 定石有効: パス
+    // Heuristics on: pass.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand.clone()));
@@ -1656,7 +1660,7 @@ fn test_pass_on_pon_leading_to_naked_tanki() {
     let action = client.handle_event(&pon_call_event(Tile::S3));
     assert!(matches!(action, Some(ClientAction::Pass)));
 
-    // 定石無効: 従来どおり鳴く
+    // Heuristics off: legacy calls.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand));
@@ -1667,7 +1671,7 @@ fn test_pass_on_pon_leading_to_naked_tanki() {
 
 #[test]
 fn test_normal_level_avoids_hand_breaking_ankan() {
-    // #167: 手を壊すカン（向聴数が悪化）は中レベル以上では行わない
+    // #167 (normal+): never kan when it breaks the hand.
     let hand = vec![
         Tile::new(Tile::M2),
         Tile::new(Tile::M3),
@@ -1691,7 +1695,7 @@ fn test_normal_level_avoids_hand_breaking_ankan() {
         is_furiten: false,
     };
 
-    // 定石有効: S5×4 は S456+S555 に使われているのでカンせず打牌
+    // Heuristics on: the four S5 serve S456+S555, so discard instead.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand.clone()));
@@ -1701,7 +1705,7 @@ fn test_normal_level_avoids_hand_breaking_ankan() {
         "expected discard instead of hand-breaking kan, got {action:?}"
     );
 
-    // 定石無効: 従来の Normal はカンしてしまう
+    // Heuristics off: legacy Normal kans anyway.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand));
@@ -1711,7 +1715,7 @@ fn test_normal_level_avoids_hand_breaking_ankan() {
 
 #[test]
 fn test_ankan_suppressed_during_opponent_riichi() {
-    // #167: 他家リーチ中、聴牌維持にならないカンはしない
+    // #167: under a riichi, only a tenpai-preserving kan is made.
     let hand = vec![
         Tile::new(Tile::M2),
         Tile::new(Tile::M3),
@@ -1735,14 +1739,14 @@ fn test_ankan_suppressed_during_opponent_riichi() {
         is_furiten: false,
     };
 
-    // リーチなし: 向聴数を保つカンなので実行する
+    // No riichi: the shanten-preserving kan happens.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand.clone()));
     let action = client.handle_event(&draw_event);
     assert!(matches!(action, Some(ClientAction::Kan { .. })));
 
-    // 他家リーチあり: カン後も聴牌しないのでカンしない
+    // With a riichi and no tenpai after: no kan.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
     client.handle_event(&game_started_event(Wind::East, hand));
@@ -1760,7 +1764,7 @@ fn test_ankan_suppressed_during_opponent_riichi() {
 
 #[test]
 fn test_pass_when_daiminkan_only_non_strong_high_value() {
-    // 大明カンの場合、Strong+HighValue 以外はパス
+    // Called quads: everyone but Strong+HighValue passes.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let mut client = CpuClient::new(config);
 
@@ -1775,7 +1779,7 @@ fn test_pass_when_daiminkan_only_non_strong_high_value() {
     assert!(matches!(action, Some(ClientAction::Pass)));
 }
 
-/// shuffle_cpu_configs が要素の中身を保ったまま並びだけを変えることを確認する
+/// shuffle_cpu_configs must permute without altering the configs.
 #[test]
 fn test_shuffle_cpu_configs_preserves_configs() {
     let original = [
@@ -1787,7 +1791,7 @@ fn test_shuffle_cpu_configs_preserves_configs() {
     let mut configs = original.clone();
     shuffle_cpu_configs(&mut configs);
 
-    // 並びは変わっても構成の集合は同じ
+    // The multiset of configs is unchanged.
     for c in &original {
         assert!(
             configs
@@ -1798,7 +1802,7 @@ fn test_shuffle_cpu_configs_preserves_configs() {
     }
 }
 
-/// スライス範囲外（対局に参加しないCPU）はシャッフルの影響を受けないことを確認する
+/// Configs outside the slice (non-playing CPUs) must be untouched.
 #[test]
 fn test_shuffle_cpu_configs_respects_slice_bounds() {
     for _ in 0..20 {
@@ -1807,7 +1811,7 @@ fn test_shuffle_cpu_configs_respects_slice_bounds() {
             CpuConfig::new(CpuLevel::Normal, CpuPersonality::Speedy),
             CpuConfig::new(CpuLevel::Strong, CpuPersonality::HighValue),
         ];
-        // 三麻相当: 先頭2つだけシャッフル
+        // Three-player style: shuffle only the first two.
         shuffle_cpu_configs(&mut configs[..2]);
         assert_eq!(configs[2].level, CpuLevel::Strong);
         assert_eq!(configs[2].personality, CpuPersonality::HighValue);

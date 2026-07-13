@@ -1,7 +1,7 @@
-//! オンライン対戦用のネットワークメッセージ定義
+//! Network messages for online play.
 //!
-//! WebSocket のテキストフレームで JSON としてやり取りするエンベロープ型。
-//! ゲーム内のやり取りは既存の `ClientAction` / `ServerEvent` をそのまま包む。
+//! Envelope types exchanged as JSON over WebSocket text frames. In-game
+//! traffic wraps the existing `ClientAction` / `ServerEvent` unchanged.
 
 use mahjong_core::settings::Settings;
 use serde::{Deserialize, Serialize};
@@ -10,31 +10,29 @@ use super::{ClientAction, ServerEvent};
 use crate::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 use crate::table::GameLength;
 
-/// プロトコルバージョン
+/// Protocol version.
 ///
-/// 互換性のない変更を入れる際にインクリメントする。
-/// `Hello` で照合し、不一致なら `ErrorCode::VersionMismatch` で切断する。
-/// v3: 三麻対応（CreateRoom / RoomState がルール設定 `Settings` を丸ごと運ぶ）
+/// Incremented on incompatible changes. Checked in `Hello`; a mismatch
+/// disconnects with `ErrorCode::VersionMismatch`.
+/// v3: three-player support (CreateRoom / RoomState carry the whole
+/// `Settings`).
 pub const PROTOCOL_VERSION: u32 = 3;
 
-/// CPUの強さ・性格の指定
+/// A CPU's level and personality.
 ///
-/// ホストが対局開始時に送り、サーバが空席・シャドーCPUに割り当てる。
+/// Sent by the host at game start; the server assigns them to empty seats
+/// and shadow CPUs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CpuSpec {
-    /// 強さレベル
     pub level: CpuLevel,
-    /// 性格
     pub personality: CpuPersonality,
 }
 
 impl CpuSpec {
-    /// `CpuConfig` へ変換する
     pub fn to_config(self) -> CpuConfig {
         CpuConfig::new(self.level, self.personality)
     }
 
-    /// `CpuConfig` から作る
     pub fn from_config(config: &CpuConfig) -> Self {
         CpuSpec {
             level: config.level,
@@ -43,204 +41,197 @@ impl CpuSpec {
     }
 }
 
-/// クライアントからサーバへのメッセージ
+/// Messages from a client to the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
-    /// 接続時のハンドシェイク（最初の1通目でなければならない）
+    /// Connection handshake; must be the very first message
     Hello {
-        /// クライアントのプロトコルバージョン
+        /// The client's protocol version
         protocol_version: u32,
-        /// 再接続時に提示するセッショントークン
+        /// Session token presented on reconnection
         session_token: Option<String>,
-        /// 表示名
+        /// Display name
         display_name: String,
     },
 
-    /// ルームを作成する（作成者がホスト）
+    /// Create a room; the creator becomes the host
     CreateRoom {
-        /// 対局の長さ（東風戦か半荘戦か）
+        /// Game length (East-only or hanchan)
         #[serde(default)]
         length: GameLength,
-        /// ルール設定（三麻・北抜き・喰いタン・三家和などの全フラグ）
+        /// Rule settings (all flags: three-player, pei dora, kuitan,
+        /// triple ron, ...)
         ///
-        /// 持ち点はサーバがルールから決める（四麻25000点・三麻35000点）。
-        /// 欠けたフィールドは既定値に補完されるため、ルールフラグを
-        /// 追加しても旧クライアントのメッセージを解釈できる。
+        /// Starting scores are derived server-side from the rules
+        /// (25000 four-player, 35000 three-player). Missing fields fall
+        /// back to defaults, so new rule flags stay compatible with old
+        /// clients' messages.
         #[serde(default)]
         rules: Settings,
     },
 
-    /// ルームコードを指定して参加する
+    /// Join a room by code
     JoinRoom {
-        /// 6文字のルームコード
+        /// Six-character room code
         code: String,
     },
 
-    /// ルームから退出する
+    /// Leave the room
     LeaveRoom,
 
-    /// 空席を埋めるCPUの強さ・性格を設定する（ホストのみ。開始前のみ）
+    /// Configure the CPUs that fill empty seats (host only, pre-game)
     ///
-    /// サーバは設定を保持して `RoomState` で全員へ共有する。
-    /// 対局開始時の割り当ては `StartGame` 時の設定が優先される。
+    /// The server stores the configs and shares them via `RoomState`.
+    /// Configs passed to `StartGame` take precedence at game start.
     SetCpuConfigs {
-        /// 各CPUの強さ・性格（下家・対面・上家の順）
+        /// CPU configs in seat order: right, across, left
         cpu_configs: [CpuSpec; 3],
     },
 
-    /// 対局を開始する（ホストのみ。空席はCPUで埋める）
+    /// Start the game (host only; CPUs fill the empty seats)
     StartGame {
-        /// ホストが選んだ各CPUの強さ・性格（下家・対面・上家の順）。
-        /// `None` ならサーバ既定の構成を使う。
+        /// Host-chosen CPU configs in seat order (right, across, left);
+        /// `None` uses the server defaults
         cpu_configs: Option<[CpuSpec; 3]>,
     },
 
-    /// ゲーム内アクション
+    /// An in-game action
     Action(ClientAction),
 
-    /// 局結果画面を確認し、次の局へ進む準備ができた
+    /// The player has reviewed the result screen and is ready for
+    /// the next hand
     ReadyNextRound,
 }
 
-/// サーバからクライアントへのメッセージ
+/// Messages from the server to a client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
-    /// ハンドシェイク応答
+    /// Handshake response
     Welcome {
-        /// 再接続に使うセッショントークン
+        /// Session token for reconnection
         session_token: String,
-        /// サーバのプロトコルバージョン
+        /// The server's protocol version
         protocol_version: u32,
     },
 
-    /// ルームの状態（参加・退出・接続状態の変化時に全員へ送信）
+    /// Room state, broadcast on joins, leaves, and connection changes
     RoomState {
-        /// ルームコード
+        /// Room code
         code: String,
-        /// 各座席の状態（座席インデックス順。三麻ではシート3は常に空席）
+        /// Seat states in seat order (seat 3 is always empty in
+        /// three-player games)
         seats: [SeatInfo; 4],
-        /// ホストの座席インデックス
+        /// The host's seat index
         host_seat: usize,
-        /// 受信者自身の座席インデックス
+        /// The recipient's own seat index
         your_seat: usize,
-        /// このルームのルール設定（三麻か否かの表示などに使う）
+        /// The room's rule settings (used e.g. to show three-player mode)
         #[serde(default)]
         rules: Settings,
-        /// 対局の長さ（東風戦か半荘戦か。東風/半荘の表示に使う）
+        /// Game length (East-only or hanchan), for the lobby display
         #[serde(default)]
         length: GameLength,
-        /// 空席を埋めるCPUの強さ・性格（下家・対面・上家の順）
+        /// CPU configs for empty seats in seat order (right, across, left)
         ///
-        /// ホストが `SetCpuConfigs` で変更でき、ロビーの空席表示に使う。
-        /// 旧サーバのメッセージには無いため `None` に補完される。
+        /// Changed by the host via `SetCpuConfigs`; drives the lobby's
+        /// empty-seat display. Old servers omit it, so it falls back
+        /// to `None`.
         #[serde(default)]
         cpu_configs: Option<[CpuSpec; 3]>,
     },
 
-    /// ゲーム内イベント
+    /// An in-game event
     Event(ServerEvent),
 
-    /// 再接続時の状態再同期（現在の局の開始からのイベント再生）
+    /// State resync on reconnection: replays the current hand's events
     Resync {
-        /// 現在の局の `GameStarted` 以降のイベント列
+        /// Events since the current hand's `GameStarted`
         events: Vec<ServerEvent>,
     },
 
-    /// ゲーム終了
+    /// The game is over
     GameOver {
-        /// 最終得点
+        /// Final scores
         final_scores: [i32; 4],
     },
 
-    /// プレイヤーの接続状態が変化した
+    /// A player's connection state changed
     PlayerConnectionChanged {
-        /// 座席インデックス
+        /// Seat index
         seat: usize,
-        /// 接続中か
+        /// Whether the player is connected
         connected: bool,
     },
 
-    /// 手番の制限時間の通知（自分の操作が待たれている座席に送る）
+    /// Turn time limit, sent to the seat whose action is awaited
     ///
-    /// 制限時間内に操作しないとサーバが既定アクション（ツモ切り/パス）を
-    /// 代行する。クライアントはこの秒数からカウントダウンを表示する。
+    /// If the player does not act in time the server performs the default
+    /// action (tsumogiri / pass) on their behalf. Clients show a countdown
+    /// from this value.
     TurnTimer {
-        /// 制限時間（秒）
+        /// Time limit in seconds
         seconds: u32,
     },
 
-    /// エラー通知
+    /// An error notification
     Error {
-        /// エラーコード
+        /// Error code
         code: ErrorCode,
-        /// 補足メッセージ（デバッグ用。表示文言はクライアント側で組み立てる）
+        /// Supplementary debug message; user-facing text is built
+        /// client-side
         message: String,
     },
 }
 
-/// 座席の状態
+/// State of one seat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SeatInfo {
-    /// 空席
     Empty,
-    /// CPU（強さと性格を含む）
     Cpu {
-        /// 強さレベル
         level: CpuLevel,
-        /// 性格
         personality: CpuPersonality,
     },
-    /// 人間プレイヤー
     Human {
-        /// 表示名
+        /// Display name
         name: String,
-        /// 接続中か
+        /// Whether the player is connected
         connected: bool,
     },
 }
 
-/// エラーコード
+/// Error codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ErrorCode {
-    /// プロトコルバージョン不一致
     VersionMismatch,
-    /// ルームが存在しない
     RoomNotFound,
-    /// ルームが満席
     RoomFull,
-    /// ホスト専用の操作
+    /// Host-only operation attempted by a non-host
     NotHost,
-    /// ルームに参加していない
     NotInRoom,
-    /// 対局中のため実行できない
+    /// Rejected because a game is in progress
     GameInProgress,
-    /// 無効なアクション（手番違い・フェーズ違いなど）
+    /// Invalid action (wrong turn, wrong phase, ...)
     InvalidAction,
-    /// メッセージを解釈できない
+    /// Unparseable message
     BadMessage,
-    /// レート制限超過
     RateLimited,
 }
 
 impl ClientMessage {
-    /// JSON 文字列にエンコードする
     pub fn to_json(&self) -> serde_json::Result<String> {
         serde_json::to_string(self)
     }
 
-    /// JSON 文字列からデコードする
     pub fn from_json(json: &str) -> serde_json::Result<Self> {
         serde_json::from_str(json)
     }
 }
 
 impl ServerMessage {
-    /// JSON 文字列にエンコードする
     pub fn to_json(&self) -> serde_json::Result<String> {
         serde_json::to_string(self)
     }
 
-    /// JSON 文字列からデコードする
     pub fn from_json(json: &str) -> serde_json::Result<Self> {
         serde_json::from_str(json)
     }
@@ -455,7 +446,8 @@ mod tests {
         }
     }
 
-    /// length を送らない旧サーバの RoomState が東風戦に補完されること
+    /// RoomState from an old server without `length` must fall back
+    /// to East-only.
     #[test]
     fn test_room_state_without_length_defaults_to_east_only() {
         let json = r#"{"RoomState":{"code":"ABC234","seats":["Empty","Empty","Empty","Empty"],"host_seat":0,"your_seat":1}}"#;
@@ -466,7 +458,8 @@ mod tests {
         }
     }
 
-    /// cpu_configs を送らない旧サーバの RoomState が None に補完されること（#245）
+    /// RoomState from an old server without `cpu_configs` must fall back
+    /// to None (#245).
     #[test]
     fn test_room_state_without_cpu_configs_defaults_to_none() {
         let json = r#"{"RoomState":{"code":"ABC234","seats":["Empty","Empty","Empty","Empty"],"host_seat":0,"your_seat":1}}"#;
@@ -483,8 +476,9 @@ mod tests {
         assert!(ServerMessage::from_json("{\"Unknown\":{}}").is_err());
     }
 
-    /// RoundWon が構造化された役・ドラ・等級を保ったまま JSON ラウンドトリップできること
-    /// （i18n のため整形済み文字列ではなく enum を送る #242 の回帰テスト）
+    /// RoundWon must round-trip through JSON with its structured yaku,
+    /// dora, and rank intact (regression for #242, which switched from
+    /// pre-formatted strings to enums for i18n).
     #[test]
     fn test_round_won_structured_roundtrip() {
         use mahjong_core::scoring::score::{DoraLabel, ScoreItem, ScoreRank};

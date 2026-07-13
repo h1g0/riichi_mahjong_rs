@@ -1,8 +1,6 @@
-//! WebSocket 接続の処理
-//!
-//! ハンドシェイク（Hello/Welcome）、ロビー操作（ルーム作成・参加）、
-//! 入室後のメッセージ中継を行う。1接続につき読み取りタスク（本体）と
-//! 書き込みタスクの2つが動く。
+//! WebSocket connection handling: the Hello/Welcome handshake, lobby
+//! operations (create/join), and post-join message relay. Each
+//! connection runs two tasks: the main read task and a write task.
 
 use std::collections::VecDeque;
 use std::net::{IpAddr, SocketAddr};
@@ -23,48 +21,48 @@ use tokio::sync::{mpsc, oneshot};
 use crate::AppState;
 use crate::room::RoomMsg;
 
-/// 受信が途絶えてから接続を切るまでの時間
+/// Idle time before the connection is dropped.
 ///
-/// サーバは30秒ごとに Ping を送り、クライアント（ブラウザ/tungstenite）は
-/// 自動で Pong を返すため、生きている接続でこの時間無音になることはない。
+/// The server pings every 30 seconds and clients (browsers, tungstenite)
+/// pong automatically, so a live connection is never silent this long.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// Ping の送信間隔
+/// Ping interval.
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 
-/// 接続ごとの送信バッファ（メッセージ数）
+/// Per-connection send buffer, in messages.
 const OUT_BUFFER: usize = 256;
 
-/// WebSocket フレーム/メッセージの最大サイズ（バイト）
+/// Maximum WebSocket frame/message size in bytes.
 const MAX_MESSAGE_SIZE: usize = 4 * 1024;
 
-/// 1秒あたりに許す受信メッセージ数
+/// Inbound messages allowed per second.
 const MAX_MSG_PER_SEC: usize = 20;
 
-/// 接続を切るまでに許す違反（不正メッセージ・レート超過）の累計
+/// Strikes (bad messages, rate violations) tolerated before dropping.
 const MAX_STRIKES: u32 = 10;
 
-/// セッショントークンを生成する（128ビットのランダム16進文字列）
+/// Generates a session token: 128 random bits as hex.
 fn generate_token() -> String {
     format!("{:032x}", rand::rng().random::<u128>())
 }
 
-/// 転送済みリクエストに Fly Proxy が付けるヘッダ（再転送のループ防止に使う）
+/// Header the Fly proxy adds to replayed requests; used to stop
+/// forwarding loops.
 const FLY_REPLAY_SRC: HeaderName = HeaderName::from_static("fly-replay-src");
 
-/// `/ws` のクエリパラメータ
+/// Query parameters of `/ws`.
 ///
-/// `room` は参加・再接続したいルームのコード。複数マシン構成で、
-/// WebSocket アップグレード前にルームの所在（どのマシンか）を判断する
-/// ために使う。入室処理自体は従来どおりアップグレード後の
-/// `JoinRoom` メッセージで行うため、このパラメータは省略可能
-/// （省略時はルーム作成またはこのマシンのルームへの参加として扱う）。
+/// `room` is the code to join or rejoin, used in multi-machine setups to
+/// locate the owning machine before the WebSocket upgrade. Joining still
+/// happens via the post-upgrade `JoinRoom` message, so the parameter is
+/// optional (its absence means room creation or a local-room join).
 #[derive(serde::Deserialize)]
 pub struct WsQuery {
     room: Option<String>,
 }
 
-/// `/ws` ハンドラ
+/// The `/ws` handler.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -72,45 +70,47 @@ pub async fn ws_handler(
     Query(query): Query<WsQuery>,
     headers: HeaderMap,
 ) -> Response {
-    // Origin 制限（ALLOWED_ORIGIN 設定時のみ）
+    // Origin restriction, only when ALLOWED_ORIGIN is set.
     let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
     if !origin_allowed(state.allowed_origin.as_deref(), origin) {
         tracing::warn!(?origin, "rejected connection from disallowed origin");
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // 指定されたルームを他マシンが所持していれば、そのマシンへ転送させる
+    // Forward to the owning machine if another one has the room.
     if let Some(code) = query.room.as_deref()
         && let Some(replay) = maybe_replay(&state, code, &headers).await
     {
         return replay;
     }
 
-    // フレーム/メッセージサイズを制限して巨大ペイロードを防ぐ
+    // Cap frame/message sizes against oversized payloads.
     let ws = ws
         .max_message_size(MAX_MESSAGE_SIZE)
         .max_frame_size(MAX_MESSAGE_SIZE);
     ws.on_upgrade(move |socket| handle_socket(socket, addr.ip(), state))
 }
 
-/// ルームコードの所在を確認し、他マシンが所持していれば fly-replay 応答を返す
+/// Locates the room code and returns a fly-replay response when another
+/// machine owns it.
 ///
-/// None を返した場合は通常どおりアップグレードする（ローカルに存在する、
-/// ルームが見つからない、または転送済みリクエスト）。見つからない場合に
-/// エラーにしないのは、所在確認と入室の間にルームが閉じられるレースが
-/// ありうるため。エラー通知は従来どおり `JoinRoom` の応答で行う。
+/// `None` upgrades normally (room is local, room not found, or already
+/// replayed). A missing room is deliberately not an error here: the room
+/// could close between lookup and join, so errors flow through the
+/// `JoinRoom` reply as before.
 async fn maybe_replay(state: &AppState, code: &str, headers: &HeaderMap) -> Option<Response> {
     let code = crate::lobby::normalize_code(code);
-    // 形式が不正なコードで無駄なピア照会をしない（このパスは認証も
-    // レート制限も通らないため、照会コストを抑える）
+    // Skip peer queries for malformed codes: this path passes neither
+    // auth nor rate limiting, so keep it cheap.
     if !crate::lobby::is_valid_code(&code) {
         return None;
     }
     if state.lobby.get(&code).is_some() {
         return None;
     }
-    // 転送されてきたリクエストは再転送しない（マシン間のループ防止）。
-    // 転送直後にルームが閉じた場合は通常の RoomNotFound フローに任せる
+    // Never re-forward a replayed request (loop prevention); if the room
+    // closed right after the replay, the normal RoomNotFound flow
+    // handles it.
     if headers.contains_key(FLY_REPLAY_SRC) {
         return None;
     }
@@ -128,9 +128,8 @@ async fn maybe_replay(state: &AppState, code: &str, headers: &HeaderMap) -> Opti
     )
 }
 
-/// 接続元 Origin が許可されるか判定する
-///
-/// `allowed` が None なら全許可。Some なら Origin ヘッダが一致した場合のみ許可。
+/// Whether the Origin is allowed: None allows all, Some requires an
+/// exact Origin-header match.
 fn origin_allowed(allowed: Option<&str>, origin: Option<&str>) -> bool {
     match allowed {
         None => true,
@@ -154,19 +153,19 @@ async fn handle_socket(socket: WebSocket, peer_ip: IpAddr, state: AppState) {
     };
     conn.run().await;
 
-    // out_tx を破棄すると書き込みタスクが Close を送って終了する
+    // Dropping out_tx makes the write task send Close and exit.
     drop(conn);
     let _ = writer.await;
 }
 
-/// 送信専用タスク: キューのメッセージを JSON で送り、定期的に Ping を打つ
+/// The write task: sends queued messages as JSON and pings periodically.
 async fn write_loop(
     mut sender: SplitSink<WebSocket, Message>,
     mut out_rx: mpsc::Receiver<ServerMessage>,
 ) {
     let mut ping = tokio::time::interval(PING_INTERVAL);
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    // 最初の tick は即時発火するので読み捨てる
+    // The first tick fires immediately; discard it.
     ping.tick().await;
 
     loop {
@@ -198,17 +197,17 @@ async fn write_loop(
     }
 }
 
-/// 読み取り結果
+/// Read outcome.
 enum Read {
     Msg(ClientMessage),
     Closed,
 }
 
-/// 入室後の中継ループの終わり方
+/// How the post-join relay loop ended.
 enum InRoomOutcome {
-    /// 接続が切れた（タスク終了）
+    /// The connection dropped (task exits)
     Closed,
-    /// 退出した（ロビーに戻る）
+    /// The client left (back to the lobby)
     LeftRoom,
 }
 
@@ -216,17 +215,17 @@ struct Connection {
     receiver: SplitStream<WebSocket>,
     out_tx: mpsc::Sender<ServerMessage>,
     state: AppState,
-    /// 接続元のIP（レート制限のキー）
+    /// Peer IP, the rate-limit key
     peer_ip: IpAddr,
-    /// 直近1秒間の受信時刻（メッセージレート計測）
+    /// Receive timestamps within the last second, for rate metering
     recent_msgs: VecDeque<Instant>,
-    /// 違反（不正メッセージ・レート超過）の累計
+    /// Strike count (bad messages, rate violations)
     strikes: u32,
 }
 
 impl Connection {
     async fn run(&mut self) {
-        // --- ハンドシェイク ---
+        // --- Handshake ---
         let (token, name) = match self.read().await {
             Read::Msg(ClientMessage::Hello {
                 protocol_version,
@@ -257,7 +256,7 @@ impl Connection {
         })
         .await;
 
-        // --- ロビー ⇄ 入室 ---
+        // --- Lobby <-> room ---
         loop {
             let msg = match self.read().await {
                 Read::Msg(msg) => msg,
@@ -271,8 +270,8 @@ impl Connection {
                             .await;
                         continue;
                     }
-                    // ルール設定はホストの指定を丸ごと採用する。
-                    // 持ち点はサーバが決める（四麻25000点・三麻35000点）。
+                    // The host's rule settings are adopted wholesale; the
+                    // starting score is the server's call (25000/35000).
                     let settings = GameSettings::with_rules(length, rules);
                     let (_code, room_tx) = self
                         .state
@@ -310,7 +309,7 @@ impl Connection {
                 continue;
             };
 
-            // --- 入室 ---
+            // --- Join ---
             let (reply_tx, reply_rx) = oneshot::channel();
             let join = RoomMsg::Join {
                 name: name.clone(),
@@ -336,7 +335,7 @@ impl Connection {
                 }
             };
 
-            // --- 中継ループ ---
+            // --- Relay loop ---
             match self.relay(room_tx, seat, conn_gen).await {
                 InRoomOutcome::Closed => return,
                 InRoomOutcome::LeftRoom => continue,
@@ -344,7 +343,7 @@ impl Connection {
         }
     }
 
-    /// 入室後: クライアントのメッセージをルームへ中継する
+    /// Post-join: relays client messages into the room.
     async fn relay(
         &mut self,
         room_tx: mpsc::Sender<RoomMsg>,
@@ -373,7 +372,7 @@ impl Connection {
                 }
                 msg => {
                     if room_tx.send(RoomMsg::FromSeat { seat, msg }).await.is_err() {
-                        // ルームが閉じられた
+                        // The room closed.
                         self.send_error(ErrorCode::RoomNotFound, "room closed")
                             .await;
                         return InRoomOutcome::LeftRoom;
@@ -383,22 +382,23 @@ impl Connection {
         }
     }
 
-    /// 次のクライアントメッセージを読む
+    /// Reads the next client message.
     ///
-    /// 不正な形式のフレームには `BadMessage` を返して読み続ける。
-    /// `IDLE_TIMEOUT` の間なにも届かなければ切断と判断する。
-    /// 不正メッセージ・レート超過が累計 `MAX_STRIKES` に達したら切断する。
+    /// Malformed frames get a `BadMessage` reply and reading continues;
+    /// `IDLE_TIMEOUT` of silence counts as a disconnect; `MAX_STRIKES`
+    /// accumulated violations drop the connection.
     async fn read(&mut self) -> Read {
         loop {
             let frame = match tokio::time::timeout(IDLE_TIMEOUT, self.receiver.next()).await {
                 Ok(Some(Ok(frame))) => frame,
-                // ストリーム終了・プロトコルエラー・タイムアウトはすべて切断扱い
+                // Stream end, protocol errors, and timeouts all count
+                // as disconnects.
                 Ok(Some(Err(_))) | Ok(None) | Err(_) => return Read::Closed,
             };
 
             match frame {
                 Message::Text(text) => {
-                    // メッセージレートを超過したら違反として扱う
+                    // Rate violations count as strikes.
                     if self.over_message_rate() {
                         self.send_error(ErrorCode::RateLimited, "too many messages")
                             .await;
@@ -425,16 +425,15 @@ impl Connection {
                         return Read::Closed;
                     }
                 }
-                // Ping への Pong 応答は下層が自動で行う
+                // The layer below answers pings automatically.
                 Message::Ping(_) | Message::Pong(_) => {}
                 Message::Close(_) => return Read::Closed,
             }
         }
     }
 
-    /// 受信メッセージが直近1秒の上限を超えているか判定する
-    ///
-    /// 呼び出しごとに現在時刻を記録し、1秒より古い記録を捨てる。
+    /// Whether inbound messages exceed the per-second cap; each call
+    /// records now and drops entries older than one second.
     fn over_message_rate(&mut self) -> bool {
         let now = Instant::now();
         let cutoff = now.checked_sub(Duration::from_secs(1));
@@ -450,13 +449,13 @@ impl Connection {
         self.recent_msgs.len() > MAX_MSG_PER_SEC
     }
 
-    /// 違反を1つ加算し、累計が上限に達したら true（切断すべき）を返す
+    /// Adds a strike; true (drop the connection) once the cap is hit.
     fn strike(&mut self) -> bool {
         self.strikes += 1;
         self.strikes >= MAX_STRIKES
     }
 
-    /// IPごとの入室レート制限を確認する（超過なら false）
+    /// Checks the per-IP join rate limit; false when exceeded.
     fn allow_room_entry(&self) -> bool {
         self.state.rate_limiter.check(self.peer_ip)
     }
@@ -488,7 +487,7 @@ mod tests {
     fn test_origin_allowed_requires_exact_match() {
         let allowed = Some("https://mahjong.example.com");
         assert!(origin_allowed(allowed, Some("https://mahjong.example.com")));
-        // 不一致・欠落は拒否
+        // Mismatches and missing headers are rejected.
         assert!(!origin_allowed(allowed, Some("https://evil.example.com")));
         assert!(!origin_allowed(allowed, None));
     }

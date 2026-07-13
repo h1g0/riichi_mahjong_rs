@@ -1,14 +1,14 @@
-/// 卓
+/// Board (table state shared by all players)
 pub mod board;
-/// 手牌
+/// Player's hand (tehai / 手牌)
 pub mod hand;
-/// 手牌の情報（副露しているか、面子があるかなど）
+/// Hand metadata (open/closed state, melds, etc.)
 pub mod hand_info;
-/// 符計算・点数計算
+/// Minipoints (fu) and score calculation
 pub mod scoring;
-/// ルールなどの設定
+/// Rule settings
 pub mod settings;
-/// 牌
+/// Tiles
 pub mod tile;
-/// 和了役
+/// Yaku (winning hand patterns)
 pub mod winning_hand;

@@ -8,7 +8,7 @@ use crate::settings::*;
 use crate::tile::Dragon;
 use crate::winning_hand::name::*;
 
-/// 立直
+/// Riichi (立直)
 pub fn check_riichi(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -21,7 +21,7 @@ pub fn check_riichi(
     if status.has_claimed_open {
         return Ok((name, false, 0));
     }
-    // ダブル立直の場合は通常の立直とは複合しない（ダブル立直が立直を置き換える）
+    // Double Riichi replaces plain Riichi; the two never combine.
     if status.is_double_riichi {
         return Ok((name, false, 0));
     }
@@ -32,7 +32,7 @@ pub fn check_riichi(
     }
 }
 
-/// 門前清自摸和
+/// Fully Concealed Hand (Menzen Tsumo / 門前清自摸和)
 pub fn check_fully_concealed_hand(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -52,7 +52,7 @@ pub fn check_fully_concealed_hand(
     Ok((name, false, 0))
 }
 
-/// 一発
+/// Unbroken (Ippatsu / 一発)
 pub fn check_unbroken(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -74,7 +74,7 @@ pub fn check_unbroken(
     }
     Ok((name, false, 0))
 }
-/// 海底撈月
+/// Last Tile Draw (Haitei / 海底撈月)
 pub fn check_last_tile_draw(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -94,7 +94,7 @@ pub fn check_last_tile_draw(
         Ok((name, false, 0))
     }
 }
-/// 河底撈魚
+/// Last Tile Claim (Hōtei / 河底撈魚)
 pub fn check_last_tile_claim(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -114,7 +114,7 @@ pub fn check_last_tile_claim(
         Ok((name, false, 0))
     }
 }
-/// 嶺上開花
+/// After a Quad (Rinshan Kaihō / 嶺上開花)
 pub fn check_after_a_quad(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -134,7 +134,7 @@ pub fn check_after_a_quad(
         Ok((name, false, 0))
     }
 }
-/// 搶槓
+/// Robbing a Quad (Chankan / 搶槓)
 pub fn check_robbing_a_quad(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -154,7 +154,7 @@ pub fn check_robbing_a_quad(
         Ok((name, false, 0))
     }
 }
-/// ダブル立直
+/// Double Riichi (ダブル立直)
 pub fn check_double_riichi(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -177,7 +177,7 @@ pub fn check_double_riichi(
         Ok((name, false, 0))
     }
 }
-/// 平和
+/// Pinfu (平和)
 pub fn check_pinfu(
     hand_analyzer: &HandAnalyzer,
     raw_hand: &Hand,
@@ -188,33 +188,29 @@ pub fn check_pinfu(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 門前でなければ平和は成立しない
+    // Closed hands only.
     if status.has_claimed_open {
         return Ok((name, false, 0));
     }
-    // 4つの順子と1つの雀頭で構成されている必要がある
     if hand_analyzer.sequential3.len() != 4 || hand_analyzer.same2.len() != 1 {
         return Ok((name, false, 0));
     }
-    // 雀頭が役牌でないこと
+    // The pair must not be a value honour (yakuhai).
     for head in &hand_analyzer.same2 {
-        // 三元牌は不可
         if head.has_dragon(Dragon::White)?
             || head.has_dragon(Dragon::Green)?
             || head.has_dragon(Dragon::Red)?
         {
             return Ok((name, false, 0));
         }
-        // 自風牌は不可
         if head.has_wind(status.seat_wind)? {
             return Ok((name, false, 0));
         }
-        // 場風牌は不可
         if head.has_wind(status.round_wind)? {
             return Ok((name, false, 0));
         }
     }
-    // 平和は両面待ちのみ成立（辺張・嵌張・単騎は不可）
+    // Pinfu requires a two-sided wait; edge, closed, and pair waits do not qualify.
     if let Some(winning_tile) = raw_hand.drawn() {
         let has_open_wait = hand_analyzer
             .sequential3
@@ -226,7 +222,7 @@ pub fn check_pinfu(
     }
     Ok((name, true, 1))
 }
-/// 一盃口
+/// Twin Sequences (Iipeikō / 一盃口)
 pub fn check_twin_sequences(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -240,15 +236,15 @@ pub fn check_twin_sequences(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 鳴いていたら一盃口は成立しない
+    // Closed hands only.
     if status.has_claimed_open {
         return Ok((name, false, 0));
     }
-    // 順子が2つ以上なければ一盃口はありえない
     if hand_analyzer.sequential3.len() < 2 {
         return Ok((name, false, 0));
     }
-    // 同一順子ペアの数をカウント（二盃口との区別のため）
+    // Count identical sequence pairs to tell this apart from
+    // Double Twin Sequences (二盃口).
     let mut used = vec![false; hand_analyzer.sequential3.len()];
     let mut pair_count = 0;
     for i in 0..hand_analyzer.sequential3.len() {
@@ -267,13 +263,13 @@ pub fn check_twin_sequences(
             }
         }
     }
-    // 二盃口（ペアが2組）の場合は一盃口とは複合しない
+    // Two pairs would be Double Twin Sequences, which never combines.
     if pair_count == 1 {
         return Ok((name, true, 1));
     }
     Ok((name, false, 0))
 }
-/// 断么九
+/// All Inside (Tan'yao / 断么九)
 pub fn check_all_inside(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -287,27 +283,22 @@ pub fn check_all_inside(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 喰いタンなしなら鳴いている時点で抜ける
+    // Under the no-kuitan rule an open hand cannot score All Inside.
     if !settings.opened_all_inside && status.has_claimed_open {
         return Ok((name, false, 0));
     }
     let mut has_1_9_honour = false;
-    // 面子
-
-    // 刻子
     for same in &hand_analyzer.same3 {
         if same.has_1_or_9()? || same.has_honour()? {
             has_1_9_honour = true;
         }
     }
-    // 順子
     for seq in &hand_analyzer.sequential3 {
         if seq.has_1_or_9()? {
             has_1_9_honour = true;
         }
     }
 
-    // 雀頭
     for head in &hand_analyzer.same2 {
         if head.has_1_or_9()? || head.has_honour()? {
             has_1_9_honour = true;
@@ -320,7 +311,7 @@ pub fn check_all_inside(
 
     Ok((name, true, 1))
 }
-/// 役牌（自風牌）
+/// Value Honour: seat wind (yakuhai / 役牌（自風牌）)
 pub fn check_value_honour_seat_wind(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -335,7 +326,6 @@ pub fn check_value_honour_seat_wind(
         return Ok((name, false, 0));
     }
     let mut has_player_wind = false;
-    // 刻子
     for same in &hand_analyzer.same3 {
         if same.has_wind(status.seat_wind)? {
             has_player_wind = true;
@@ -348,7 +338,7 @@ pub fn check_value_honour_seat_wind(
         Ok((name, false, 0))
     }
 }
-/// 役牌（場風牌）
+/// Value Honour: round wind (yakuhai / 役牌（場風牌）)
 pub fn check_value_honour_round_wind(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -363,7 +353,6 @@ pub fn check_value_honour_round_wind(
         return Ok((name, false, 0));
     }
     let mut has_prevailing_wind = false;
-    // 刻子
     for same in &hand_analyzer.same3 {
         if same.has_wind(status.round_wind)? {
             has_prevailing_wind = true;
@@ -377,13 +366,12 @@ pub fn check_value_honour_round_wind(
     }
 }
 
-/// 面子に三元牌の順子が含まれるか調べる
+/// Whether the hand contains a triplet of the given dragon.
 pub fn check_value_honour_dragons(hand_analyzer: &HandAnalyzer, dragon: Dragon) -> Result<bool> {
     if !hand_analyzer.shanten.has_won() {
         return Ok(false);
     }
     let mut has_dragon = false;
-    // 刻子
     for same in &hand_analyzer.same3 {
         if same.has_dragon(dragon)? {
             has_dragon = true;
@@ -393,7 +381,7 @@ pub fn check_value_honour_dragons(hand_analyzer: &HandAnalyzer, dragon: Dragon) 
     if has_dragon { Ok(true) } else { Ok(false) }
 }
 
-/// 役牌（白）
+/// Value Honour: White dragon (yakuhai / 役牌（白）)
 pub fn check_value_honour_white_dragon(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -410,7 +398,7 @@ pub fn check_value_honour_white_dragon(
         Ok((name, false, 0))
     }
 }
-/// 役牌（發）
+/// Value Honour: Green dragon (yakuhai / 役牌（發）)
 pub fn check_value_honour_green_dragon(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -427,7 +415,7 @@ pub fn check_value_honour_green_dragon(
         Ok((name, false, 0))
     }
 }
-/// 役牌（中）
+/// Value Honour: Red dragon (yakuhai / 役牌（中）)
 pub fn check_value_honour_red_dragon(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -445,13 +433,11 @@ pub fn check_value_honour_red_dragon(
     }
 }
 
-/// ユニットテスト
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{hand::*, tile::*};
     #[test]
-    /// 立直で和了った
     fn test_win_by_riichi() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -465,7 +451,6 @@ mod tests {
         );
     }
     #[test]
-    /// 立直に一発が付いた
     fn test_win_by_unbroken() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -480,7 +465,6 @@ mod tests {
         );
     }
     #[test]
-    /// 門前清自摸和で和了った
     fn test_win_by_fully_concealed_hand() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -494,7 +478,6 @@ mod tests {
         );
     }
     #[test]
-    /// 鳴いている場合は門前清自摸和は付かない
     fn test_not_win_by_fully_concealed_hand_with_claiming_open() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -509,14 +492,12 @@ mod tests {
         );
     }
     #[test]
-    /// 断么九で和了った（喰い断あり鳴きなし）
     fn test_win_by_all_inside_open_rule_close_hand() {
         let test_str = "222456m777p56s88s 7s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let mut rules = Settings::new();
-        // 喰い断あり鳴きなし
         rules.opened_all_inside = true;
         status.has_claimed_open = false;
         assert_eq!(
@@ -525,14 +506,12 @@ mod tests {
         );
     }
     #[test]
-    /// 么九牌ありでは断么九にならない（一）
     fn test_not_win_by_all_inside_with_1() {
         let test_str = "111456m777p56s88s 7s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let mut rules = Settings::new();
-        // 喰い断あり鳴きなし
         rules.opened_all_inside = true;
         status.has_claimed_open = false;
         assert_eq!(
@@ -541,14 +520,12 @@ mod tests {
         );
     }
     #[test]
-    /// 么九牌ありでは断么九にならない（九）
     fn test_not_win_by_all_inside_with_9() {
         let test_str = "222456m777p5699s 7s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let mut rules = Settings::new();
-        // 喰い断あり鳴きなし
         rules.opened_all_inside = true;
         status.has_claimed_open = false;
         assert_eq!(
@@ -557,14 +534,12 @@ mod tests {
         );
     }
     #[test]
-    /// 么九牌ありでは断么九にならない（字牌）
     fn test_not_win_by_all_inside_with_honour() {
         let test_str = "222456m56s88s111z 7s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let mut rules = Settings::new();
-        // 喰い断あり鳴きなし
         rules.opened_all_inside = true;
         status.has_claimed_open = false;
         assert_eq!(
@@ -573,14 +548,12 @@ mod tests {
         );
     }
     #[test]
-    /// 断么九で和了った（喰い断あり鳴きあり）
     fn test_win_by_all_inside_open_rule_open_hand() {
         let test_str = "234m567m234p345s3s 3s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let mut rules = Settings::new();
-        // 喰い断あり鳴きあり
         rules.opened_all_inside = true;
         status.has_claimed_open = true;
         assert_eq!(
@@ -589,14 +562,12 @@ mod tests {
         );
     }
     #[test]
-    /// 断么九で和了った（喰い断なし鳴きなし）
     fn test_win_by_all_inside_close_rule_close_hand() {
         let test_str = "678m23455p33345ss 5p";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let mut rules = Settings::new();
-        // 喰い断なし鳴きなし
         rules.opened_all_inside = false;
         status.has_claimed_open = false;
         assert_eq!(
@@ -605,14 +576,12 @@ mod tests {
         );
     }
     #[test]
-    /// 断么九で和了った（喰い断なし鳴きあり）->役無し
     fn test_win_by_all_inside_close_rule_open_hand() {
         let test_str = "222m456m777p56s88s 7s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let mut rules = Settings::new();
-        // 喰い断なし鳴きあり（役無し）
         rules.opened_all_inside = false;
         status.has_claimed_open = true;
         assert_eq!(
@@ -621,7 +590,6 @@ mod tests {
         );
     }
     #[test]
-    /// 一盃口で和了った
     fn test_win_by_twin_sequences() {
         let test_str = "112233m456p456s7z 7z";
         let test = Hand::from(test_str);
@@ -635,7 +603,6 @@ mod tests {
         );
     }
     #[test]
-    /// 一盃口で和了った（鳴きあり）→役なし
     fn test_no_win_by_twin_sequences_with_opened() {
         let test_str = "112233m456p456s7z 7z";
         let test = Hand::from(test_str);
@@ -649,7 +616,6 @@ mod tests {
         );
     }
     #[test]
-    /// 平和で和了った
     fn test_win_by_pinfu() {
         let test_str = "123567m234p6799s 5s";
         let test = Hand::from(test_str);
@@ -662,7 +628,6 @@ mod tests {
         );
     }
     #[test]
-    /// 鳴いていると平和にならない
     fn test_not_win_by_pinfu_with_open() {
         let test_str = "123567m6799s 234p 5s";
         let test = Hand::from(test_str);
@@ -676,7 +641,6 @@ mod tests {
         );
     }
     #[test]
-    /// 刻子が含まれると平和にならない
     fn test_not_win_by_pinfu_with_triplet() {
         let test_str = "123456m789p222s3s 3s";
         let test = Hand::from(test_str);
@@ -689,7 +653,6 @@ mod tests {
         );
     }
     #[test]
-    /// 両面待ちでないと平和にならない（辺張待ち）
     fn test_not_win_by_pinfu_with_edge_wait() {
         let test_str = "12567m234p56799s 3m";
         let test = Hand::from(test_str);
@@ -703,7 +666,6 @@ mod tests {
     }
 
     #[test]
-    /// 両面待ちでないと平和にならない（嵌張待ち）
     fn test_not_win_by_pinfu_with_closed_wait() {
         let test_str = "123567m234p5799s 6s";
         let test = Hand::from(test_str);
@@ -716,7 +678,6 @@ mod tests {
         );
     }
     #[test]
-    /// 雀頭が役牌だと平和にならない
     fn test_not_win_by_pinfu_with_honour_pair() {
         let test_str = "123567m234p67s11z 8s";
         let test = Hand::from(test_str);
@@ -731,16 +692,13 @@ mod tests {
         );
     }
     #[test]
-    /// 自風で和了った
     fn test_win_by_value_honour_seat_wind() {
         let test_str = "222m456m777p5s 222z 5s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
-        // 東場
         status.round_wind = Wind::East;
-        // プレイヤーは南家=`2z`
         status.seat_wind = Wind::South;
         assert_eq!(
             check_value_honour_seat_wind(&test_analyzer, &status, &settings).unwrap(),
@@ -748,16 +706,13 @@ mod tests {
         );
     }
     #[test]
-    /// 場風で和了った
     fn test_win_by_value_honour_round_wind() {
         let test_str = "222m456m777p5s 111z 5s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
-        // 東場
         status.round_wind = Wind::East;
-        // プレイヤーは南家=`2z`
         status.seat_wind = Wind::South;
         assert_eq!(
             check_value_honour_round_wind(&test_analyzer, &status, &settings).unwrap(),
@@ -765,16 +720,13 @@ mod tests {
         );
     }
     #[test]
-    /// 三元牌（白）で和了った
     fn test_win_by_value_honour_white_dragon() {
         let test_str = "222m456m777p5s 555z 5s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
-        // 東場
         status.round_wind = Wind::East;
-        // プレイヤーは南家=`2z`
         status.seat_wind = Wind::South;
         assert_eq!(
             check_value_honour_white_dragon(&test_analyzer, &status, &settings).unwrap(),
@@ -782,16 +734,13 @@ mod tests {
         );
     }
     #[test]
-    /// 三元牌（發）で和了った
     fn test_win_by_value_honour_green_dragon() {
         let test_str = "222m456m777p5s 666z 5s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
-        // 東場
         status.round_wind = Wind::East;
-        // プレイヤーは南家=`2z`
         status.seat_wind = Wind::South;
         assert_eq!(
             check_value_honour_green_dragon(&test_analyzer, &status, &settings).unwrap(),
@@ -799,16 +748,13 @@ mod tests {
         );
     }
     #[test]
-    /// 三元牌（中）で和了った
     fn test_win_by_value_honour_red_dragon() {
         let test_str = "222m456m777p5s 777z 5s";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
-        // 東場
         status.round_wind = Wind::East;
-        // プレイヤーは南家=`2z`
         status.seat_wind = Wind::South;
         assert_eq!(
             check_value_honour_red_dragon(&test_analyzer, &status, &settings).unwrap(),
@@ -816,7 +762,6 @@ mod tests {
         );
     }
     #[test]
-    /// 海底撈月で和了った
     fn test_win_by_last_tile_draw() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -831,7 +776,6 @@ mod tests {
         );
     }
     #[test]
-    /// 海底撈月はツモ和了でなければ成立しない
     fn test_not_win_by_last_tile_draw_without_self_drawn() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -846,7 +790,6 @@ mod tests {
         );
     }
     #[test]
-    /// 河底撈魚で和了った
     fn test_win_by_last_tile_claim() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -861,7 +804,6 @@ mod tests {
         );
     }
     #[test]
-    /// 嶺上開花で和了った
     fn test_win_by_after_a_quad() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -876,7 +818,6 @@ mod tests {
         );
     }
     #[test]
-    /// 搶槓で和了った
     fn test_win_by_robbing_a_quad() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -891,7 +832,6 @@ mod tests {
         );
     }
     #[test]
-    /// ダブル立直で和了った
     fn test_win_by_double_riichi() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -906,7 +846,6 @@ mod tests {
         );
     }
     #[test]
-    /// ダブル立直は立直していなければ成立しない
     fn test_not_win_by_double_riichi_without_ready() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);

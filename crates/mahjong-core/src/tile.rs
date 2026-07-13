@@ -3,12 +3,12 @@ use std::fmt;
 
 use crate::settings::Lang;
 
-/// 牌の種類を示す型
+/// Identifies one of the 34 tile kinds.
 pub type TileType = u32;
 
 pub type TileSummarize = [u32; Tile::LEN];
 
-/// 牌
+/// A tile (hai / 牌); `red_dora` distinguishes a red five from a normal five.
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Tile {
     index: TileType,
@@ -16,83 +16,56 @@ pub struct Tile {
 }
 
 impl Tile {
-    /// 一萬
     pub const M1: TileType = 0;
-    /// 二萬
     pub const M2: TileType = 1;
-    /// 三萬
     pub const M3: TileType = 2;
-    /// 四萬
     pub const M4: TileType = 3;
-    /// 五萬
     pub const M5: TileType = 4;
-    /// 六萬
     pub const M6: TileType = 5;
-    /// 七萬
     pub const M7: TileType = 6;
-    /// 八萬
     pub const M8: TileType = 7;
-    /// 九萬
     pub const M9: TileType = 8;
-    /// 一筒
     pub const P1: TileType = 9;
-    /// 二筒
     pub const P2: TileType = 10;
-    /// 三筒
     pub const P3: TileType = 11;
-    /// 四筒
     pub const P4: TileType = 12;
-    /// 五筒
     pub const P5: TileType = 13;
-    /// 六筒
     pub const P6: TileType = 14;
-    /// 七筒
     pub const P7: TileType = 15;
-    /// 八筒
     pub const P8: TileType = 16;
-    /// 九筒
     pub const P9: TileType = 17;
-    /// 一索
     pub const S1: TileType = 18;
-    /// 二索
     pub const S2: TileType = 19;
-    /// 三索
     pub const S3: TileType = 20;
-    /// 四索
     pub const S4: TileType = 21;
-    /// 五索
     pub const S5: TileType = 22;
-    /// 六索
     pub const S6: TileType = 23;
-    /// 七索
     pub const S7: TileType = 24;
-    /// 八索
     pub const S8: TileType = 25;
-    /// 九索
     pub const S9: TileType = 26;
-    /// 東
+    /// East wind (東)
     pub const Z1: TileType = 27;
-    /// 南
+    /// South wind (南)
     pub const Z2: TileType = 28;
-    /// 西
+    /// West wind (西)
     pub const Z3: TileType = 29;
-    /// 北
+    /// North wind (北)
     pub const Z4: TileType = 30;
-    /// 白
+    /// White dragon (白)
     pub const Z5: TileType = 31;
-    /// 發
+    /// Green dragon (發)
     pub const Z6: TileType = 32;
-    /// 中
+    /// Red dragon (中)
     pub const Z7: TileType = 33;
-    /// 牌の種類の数（インデックスは常にこの数よりも少ない整数値）
+    /// Number of distinct tile kinds; every index is below this value.
     pub const LEN: usize = 34;
 
-    /// Unicode表記
+    /// Unicode mahjong-tile glyphs, indexed by tile kind.
     const CHARS: [char; Tile::LEN] = [
         '🀇', '🀈', '🀉', '🀊', '🀋', '🀌', '🀍', '🀎', '🀏', '🀙', '🀚', '🀛', '🀜', '🀝', '🀞', '🀟', '🀠', '🀡',
         '🀐', '🀑', '🀒', '🀓', '🀔', '🀕', '🀖', '🀗', '🀘', '🀀', '🀁', '🀂', '🀃', '🀆', '🀅', '🀄',
     ];
-    /// Ascii表記
+    /// ASCII notation ("1m".."7z"), indexed by tile kind.
     const ASCII: [&'static str; Tile::LEN] = [
         "1m", "2m", "3m", "4m", "5m", "6m", "7m", "8m", "9m", "1p", "2p", "3p", "4p", "5p", "6p",
         "7p", "8p", "9p", "1s", "2s", "3s", "4s", "5s", "6s", "7s", "8s", "9s", "1z", "2z", "3z",
@@ -106,7 +79,7 @@ impl Tile {
         }
     }
 
-    /// 赤ドラの牌を作成する
+    /// Creates a red five (aka dora / 赤ドラ) tile.
     pub fn new_red(tile_type: TileType) -> Tile {
         Tile {
             index: tile_type,
@@ -118,61 +91,61 @@ impl Tile {
         self.index
     }
 
-    /// 赤ドラか否かを返す
+    /// Whether this tile is a red five (aka dora / 赤ドラ).
     pub fn is_red_dora(&self) -> bool {
         self.red_dora
     }
 
-    /// 数牌か否かを返す
+    /// Whether this is a suit tile (shūpai / 数牌).
     pub fn is_suited(&self) -> bool {
         self.is_character() || self.is_circle() || self.is_bamboo()
     }
 
-    /// 萬子か否かを返す
+    /// Whether this is a characters tile (manzu / 萬子).
     pub fn is_character(&self) -> bool {
         matches!(self.index, Tile::M1..=Tile::M9)
     }
-    /// 筒子か否かを返す
+    /// Whether this is a circles tile (pinzu / 筒子).
     pub fn is_circle(&self) -> bool {
         matches!(self.index, Tile::P1..=Tile::P9)
     }
-    /// 索子か否かを返す
+    /// Whether this is a bamboos tile (sōzu / 索子).
     pub fn is_bamboo(&self) -> bool {
         matches!(self.index, Tile::S1..=Tile::S9)
     }
-    /// 風牌か否かを返す
+    /// Whether this is a wind tile (kazehai / 風牌).
     pub fn is_wind(&self) -> bool {
         matches!(self.index, Tile::Z1..=Tile::Z4)
     }
-    /// 三元牌か否かを返す
+    /// Whether this is a dragon tile (sangenpai / 三元牌).
     pub fn is_dragon(&self) -> bool {
         matches!(self.index, Tile::Z5..=Tile::Z7)
     }
-    /// 字牌か否かを返す
+    /// Whether this is an honour tile (jihai / 字牌).
     pub fn is_honour(&self) -> bool {
         self.is_wind() || self.is_dragon()
     }
 
-    /// 老頭牌か否かを返す
+    /// Whether this is a terminal tile (rōtōhai / 老頭牌).
     pub fn is_1_or_9(&self) -> bool {
         matches!(
             self.index,
             Tile::M1 | Tile::M9 | Tile::P1 | Tile::P9 | Tile::S1 | Tile::S9
         )
     }
-    /// 么九牌（老頭牌＋字牌）か否かを返す
+    /// Whether this is a terminal or honour tile (yāochūhai / 么九牌).
     pub fn is_1_9_honour(&self) -> bool {
         self.is_1_or_9() || self.is_honour()
     }
 
-    /// 対子（同じ2枚）か否かを返す
+    /// Whether the two tiles form a pair (toitsu / 対子).
     pub fn is_same_to(&self, tile: Tile) -> bool {
         self.get() == tile.get()
     }
-    /// 搭子（連続した2枚）か否かを返す
+    /// Whether the two tiles form a partial sequence (tātsu / 搭子).
     pub fn is_sequential_to(&self, tile: Tile) -> bool {
-        // 同じスートの数牌同士でなければ連続はありえない
-        // （字牌や、九萬→一筒のようなスートをまたぐ隣接インデックスを除外する）
+        // Adjacent indices are not enough: honours and suit boundaries
+        // (e.g. 9m and 1p) also have adjacent indices, so require the same suit.
         let same_suit = (self.is_character() && tile.is_character())
             || (self.is_circle() && tile.is_circle())
             || (self.is_bamboo() && tile.is_bamboo());
@@ -233,10 +206,10 @@ impl fmt::Display for Tile {
     }
 }
 
-/// 数牌のスート内での数字（1〜9）を返す
+/// Returns the number (1-9) of a suit tile within its suit.
 ///
-/// 例: `Tile::M7`、`Tile::P7`、`Tile::S7` はいずれも `Some(7)` を返す。
-/// 字牌の場合は `None` を返す。
+/// E.g. `Tile::M7`, `Tile::P7`, and `Tile::S7` all return `Some(7)`.
+/// Returns `None` for honour tiles.
 pub fn suit_rank(tile: TileType) -> Option<u32> {
     match tile {
         Tile::M1 | Tile::P1 | Tile::S1 => Some(1),
@@ -252,15 +225,14 @@ pub fn suit_rank(tile: TileType) -> Option<u32> {
     }
 }
 
-/// ドラ表示牌から実際のドラを返す（三麻対応版）
+/// Maps a dora indicator to the actual dora, honouring the player count.
 ///
-/// 三麻では萬子は1mと9mしか存在しないため、
-/// 萬子のドラチェーンは 1m→9m、9m→1m とラップする（天鳳準拠）。
-/// それ以外の牌は四麻と同じチェーンを使う。
+/// In three-player mahjong only 1m and 9m exist among the characters,
+/// so the characters chain wraps 1m→9m and 9m→1m (Tenhou rule).
+/// All other tiles use the same chain as four-player games.
 pub fn dora_indicator_to_dora_in(indicator: TileType, three_player: bool) -> TileType {
     if three_player {
         match indicator {
-            // 三麻の萬子: 1m→9m、9m→1m（2m〜8mは存在しない）
             Tile::M1 => Tile::M9,
             Tile::M9 => Tile::M1,
             _ => dora_indicator_to_dora(indicator),
@@ -270,38 +242,30 @@ pub fn dora_indicator_to_dora_in(indicator: TileType, three_player: bool) -> Til
     }
 }
 
-/// ドラ表示牌から実際のドラを返す
+/// Maps a dora indicator to the actual dora
+/// (next tile in the suit, wrapping 9→1, North→East, Red→White).
 pub fn dora_indicator_to_dora(indicator: TileType) -> TileType {
     match indicator {
-        // 萬子: 9m→1m にループ
         Tile::M9 => Tile::M1,
         Tile::M1..=Tile::M8 => indicator + 1,
-        // 筒子: 9p→1p にループ
         Tile::P9 => Tile::P1,
         Tile::P1..=Tile::P8 => indicator + 1,
-        // 索子: 9s→1s にループ
         Tile::S9 => Tile::S1,
         Tile::S1..=Tile::S8 => indicator + 1,
-        // 風牌: 北→東 にループ
         Tile::Z4 => Tile::Z1,
         Tile::Z1..=Tile::Z3 => indicator + 1,
-        // 三元牌: 中→白 にループ
         Tile::Z7 => Tile::Z5,
         Tile::Z5..=Tile::Z6 => indicator + 1,
         _ => indicator,
     }
 }
 
-/// 自風／場風
+/// A wind, used for both seat wind (jikaze / 自風) and round wind (bakaze / 場風).
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Wind {
-    /// 東家（`Tile::Z1`）
     East = Tile::Z1 as isize,
-    /// 南家（`Tile::Z2`）
     South = Tile::Z2 as isize,
-    /// 西家（`Tile::Z3`）
     West = Tile::Z3 as isize,
-    /// 北家（`Tile::Z4`）
     North = Tile::Z4 as isize,
 }
 
@@ -319,7 +283,7 @@ impl Wind {
         Wind::is_tile_type(tile.get())
     }
 
-    /// 次の風を返す（東→南→西→北→東）
+    /// Returns the next wind in play order (East→South→West→North→East).
     pub fn next(&self) -> Wind {
         match self {
             Wind::East => Wind::South,
@@ -329,7 +293,7 @@ impl Wind {
         }
     }
 
-    /// 風をインデックス（0-3）に変換する
+    /// Converts the wind to a 0-3 index (East = 0).
     pub fn to_index(&self) -> usize {
         match self {
             Wind::East => 0,
@@ -339,7 +303,7 @@ impl Wind {
         }
     }
 
-    /// インデックス（0-3）から風を生成する
+    /// Inverse of [`Wind::to_index`]; the index is taken modulo 4.
     pub fn from_index(index: usize) -> Wind {
         match index % 4 {
             0 => Wind::East,
@@ -350,7 +314,7 @@ impl Wind {
         }
     }
 
-    /// 風の表示名を返す（英語名は WRC Rules 2025 準拠、docs/glossary.md を参照）
+    /// Returns the display name; English follows WRC Rules 2025 (see docs/glossary.md).
     pub fn name(&self, lang: Lang) -> &'static str {
         match lang {
             Lang::En => match self {
@@ -369,14 +333,11 @@ impl Wind {
     }
 }
 
-/// 三元牌
+/// A dragon tile (sangenpai / 三元牌).
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Dragon {
-    /// 白（`Tile::Z5`）
     White = Tile::Z5 as isize,
-    /// 發（`Tile::Z6`）
     Green = Tile::Z6 as isize,
-    /// 中（`Tile::Z7`）
     Red = Tile::Z7 as isize,
 }
 
@@ -393,7 +354,7 @@ impl Dragon {
         Dragon::is_tile_type(tile.get())
     }
 
-    /// 三元牌の表示名を返す（英語名は WRC Rules 2025 準拠、docs/glossary.md を参照）
+    /// Returns the display name; English follows WRC Rules 2025 (see docs/glossary.md).
     pub fn name(&self, lang: Lang) -> &'static str {
         match lang {
             Lang::En => match self {
@@ -414,7 +375,6 @@ impl Dragon {
 mod tests {
     use super::*;
 
-    /// 萬子の属性テスト
     #[test]
     fn suit_char_test() {
         for i in Tile::M1..=Tile::M9 {
@@ -427,7 +387,6 @@ mod tests {
         }
     }
 
-    /// 筒子の属性テスト
     #[test]
     fn suit_circle_test() {
         for i in Tile::P1..=Tile::P9 {
@@ -439,7 +398,6 @@ mod tests {
             assert_eq!(t.is_1_or_9(), i == Tile::P1 || i == Tile::P9);
         }
     }
-    /// 索子の属性テスト
     #[test]
     fn suit_bamboo_test() {
         for i in Tile::S1..=Tile::S9 {
@@ -451,7 +409,6 @@ mod tests {
             assert_eq!(t.is_1_or_9(), i == Tile::S1 || i == Tile::S9);
         }
     }
-    /// 風牌の属性テスト
     #[test]
     fn suit_wind_test() {
         for i in Tile::Z1..=Tile::Z4 {
@@ -464,7 +421,6 @@ mod tests {
             assert!(t.is_honour());
         }
     }
-    /// 三元牌の属性テスト
     #[test]
     fn suit_dragon_test() {
         for i in Tile::Z5..=Tile::Z7 {
@@ -477,7 +433,6 @@ mod tests {
             assert!(t.is_honour());
         }
     }
-    /// 字牌の属性テスト
     #[test]
     fn suit_honour_test() {
         for i in Tile::Z1..=Tile::Z7 {
@@ -489,45 +444,32 @@ mod tests {
         }
     }
 
-    /// 対子テスト
     #[test]
     fn sameness_test() {
-        // 1m→1mは対子
         assert!(Tile::new(Tile::M1).is_same_to(Tile::new(Tile::M1)));
-        // 1m→1pは対子ではない
         assert!(!Tile::new(Tile::M1).is_same_to(Tile::new(Tile::P1)));
-        // 1z→1zは対子
         assert!(Tile::new(Tile::Z1).is_same_to(Tile::new(Tile::Z1)));
     }
 
-    /// 搭子テスト
     #[test]
     fn sequential_test() {
-        // 1m→2mは搭子
         assert!(Tile::new(Tile::M1).is_sequential_to(Tile::new(Tile::M2)));
-        // 3p→3pは搭子ではない
         assert!(!Tile::new(Tile::P3).is_sequential_to(Tile::new(Tile::P3)));
-        // 7s→8sは搭子
         assert!(Tile::new(Tile::S7).is_sequential_to(Tile::new(Tile::S8)));
-        // 1m→1pは搭子ではない
         assert!(!Tile::new(Tile::M1).is_sequential_to(Tile::new(Tile::P1)));
-        // 9m→8mは搭子
         assert!(Tile::new(Tile::M9).is_sequential_to(Tile::new(Tile::M8)));
-        // 2m→1mは搭子（回帰テスト: 引数が一萬のとき u32 アンダーフローでパニックしていた）
+        // Regression: passing the lower tile as the argument used to panic
+        // on u32 underflow (2m→1m).
         assert!(Tile::new(Tile::M2).is_sequential_to(Tile::new(Tile::M1)));
-        // 1p→9mは搭子ではない（スート境界の逆方向）
+        // Tiles adjacent in index but across a suit/honour boundary
+        // must not count as sequential.
         assert!(!Tile::new(Tile::P1).is_sequential_to(Tile::new(Tile::M9)));
-        // 9m→1pは搭子ではない
         assert!(!Tile::new(Tile::M9).is_sequential_to(Tile::new(Tile::P1)));
-        // 1s→9pは搭子ではない
         assert!(!Tile::new(Tile::S1).is_sequential_to(Tile::new(Tile::P9)));
-        // 9s→1zは搭子ではない
         assert!(!Tile::new(Tile::S9).is_sequential_to(Tile::new(Tile::Z1)));
-        // 1z→2zは搭子ではない
         assert!(!Tile::new(Tile::Z1).is_sequential_to(Tile::new(Tile::Z2)));
     }
 
-    /// ドラ表示牌テスト
     #[test]
     fn dora_indicator_test() {
         assert_eq!(dora_indicator_to_dora(Tile::M1), Tile::M2);
@@ -541,25 +483,23 @@ mod tests {
         assert_eq!(dora_indicator_to_dora(Tile::Z7), Tile::Z5);
     }
 
-    /// 三麻のドラ表示牌テスト
     #[test]
     fn dora_indicator_three_player_test() {
-        // 三麻の萬子: 1m→9m、9m→1m にラップ（2m〜8mは存在しない）
+        // Characters wrap 1m→9m→1m because 2m-8m are removed in three-player games.
         assert_eq!(dora_indicator_to_dora_in(Tile::M1, true), Tile::M9);
         assert_eq!(dora_indicator_to_dora_in(Tile::M9, true), Tile::M1);
-        // 萬子以外は四麻と同じチェーン
+        // Other suits use the same chain as four-player games.
         assert_eq!(dora_indicator_to_dora_in(Tile::P5, true), Tile::P6);
         assert_eq!(dora_indicator_to_dora_in(Tile::P9, true), Tile::P1);
         assert_eq!(dora_indicator_to_dora_in(Tile::S9, true), Tile::S1);
         assert_eq!(dora_indicator_to_dora_in(Tile::Z1, true), Tile::Z2);
         assert_eq!(dora_indicator_to_dora_in(Tile::Z4, true), Tile::Z1);
         assert_eq!(dora_indicator_to_dora_in(Tile::Z7, true), Tile::Z5);
-        // 四麻フラグでは既存の挙動と一致
+        // With the four-player flag the behaviour matches dora_indicator_to_dora.
         assert_eq!(dora_indicator_to_dora_in(Tile::M1, false), Tile::M2);
         assert_eq!(dora_indicator_to_dora_in(Tile::M9, false), Tile::M1);
     }
 
-    /// 赤ドラテスト
     #[test]
     fn red_dora_test() {
         let red5m = Tile::new_red(Tile::M5);
@@ -570,7 +510,6 @@ mod tests {
         assert!(!normal5m.is_red_dora());
     }
 
-    /// Windテスト
     #[test]
     fn wind_test() {
         assert_eq!(Wind::East.next(), Wind::South);
@@ -582,7 +521,6 @@ mod tests {
         assert_eq!(Wind::from_index(4), Wind::East);
     }
 
-    /// 風の表示名
     #[test]
     fn wind_name_test() {
         assert_eq!(Wind::East.name(Lang::Ja), "東");
@@ -595,7 +533,6 @@ mod tests {
         assert_eq!(Wind::North.name(Lang::En), "North");
     }
 
-    /// 三元牌の表示名
     #[test]
     fn dragon_name_test() {
         assert_eq!(Dragon::White.name(Lang::Ja), "白");
@@ -647,7 +584,6 @@ mod tests {
 
     #[test]
     fn suit_rank_honour_returns_none() {
-        // 字牌（風牌・三元牌）はすべて None
         for tile in Tile::Z1..=Tile::Z7 {
             assert_eq!(suit_rank(tile), None, "tile {tile} should return None");
         }

@@ -1,12 +1,13 @@
-//! ルームアクター
+//! The room actor.
 //!
-//! 1ルーム = 1 tokio タスク。ルームが `GameDriver`（卓 + CPU）を所有し、
-//! 接続タスクからの `RoomMsg` を mpsc で逐次処理する。
-//! 同期的な卓の操作が await をまたがないため、ゲーム状態のロックは不要。
+//! One room = one tokio task. The room owns the `GameDriver` (table +
+//! CPUs) and processes `RoomMsg`s from the connection tasks over an
+//! mpsc channel; the synchronous table operations never span an await,
+//! so game state needs no lock.
 //!
-//! クライアントへの送信は `try_send` で行い、決してブロックしない。
-//! 受信が追いつかない接続（バッファ満杯）は切断として扱い、
-//! 1人の遅延がルーム全体の進行を止めないようにする。
+//! Sends to clients use `try_send` and never block: a connection that
+//! cannot keep up (full buffer) counts as disconnected, so one laggard
+//! cannot stall the whole room.
 
 use std::time::Duration;
 
@@ -21,23 +22,22 @@ use tokio::time::Instant;
 
 use crate::lobby::Lobby;
 
-/// ルームの動作タイミング設定
-///
-/// 本番は `Default`、テストでは短い値に差し替える。
+/// Room timing configuration: `Default` in production, shortened
+/// in tests.
 #[derive(Debug, Clone, Copy)]
 pub struct RoomConfig {
-    /// 局結果画面からの自動進行までの猶予
+    /// Grace before auto-advancing past the result screen
     pub ready_timeout: Duration,
-    /// 対局開始前のルームの生存期間
+    /// Lifetime of a room before the game starts
     pub lobby_timeout: Duration,
-    /// 対局中に全員切断してからルームを破棄するまでの猶予
+    /// Grace before discarding a room after everyone disconnects mid-game
     pub abandoned_timeout: Duration,
-    /// 1手番ごとの制限時間（None なら無制限）。
-    /// 超過するとサーバが既定アクション（ツモ切り/パス）を代行する。
+    /// Per-turn time limit (None = unlimited); on expiry the server
+    /// performs the default action (tsumogiri / pass).
     pub action_timeout: Option<Duration>,
-    /// CPUの打牌間隔（思考時間の演出）。0 なら即時に進行する。
+    /// Delay between CPU actions (thinking time); 0 runs immediately.
     pub cpu_action_delay: Duration,
-    /// ゲーム進行ティックの間隔。CPU遅延を計りながら進める粒度。
+    /// Game-tick interval: the granularity for pacing the CPU delay.
     pub tick_interval: Duration,
 }
 
@@ -54,107 +54,114 @@ impl Default for RoomConfig {
     }
 }
 
-/// 接続タスクからルームアクターへのメッセージ
+/// Messages from connection tasks to the room actor.
 pub enum RoomMsg {
-    /// 入室要求
+    /// A join request
     Join {
-        /// 表示名
+        /// Display name
         name: String,
-        /// セッショントークン
+        /// Session token
         token: String,
-        /// この接続への送信チャネル
+        /// Send channel to this connection
         tx: mpsc::Sender<ServerMessage>,
-        /// 割り当てた座席と接続世代（またはエラー）の返信先
+        /// Reply channel for the assigned seat and connection
+        /// generation (or an error)
         reply: oneshot::Sender<Result<(usize, u64), ErrorCode>>,
     },
-    /// 座席からのクライアントメッセージ
+    /// A client message from a seat
     FromSeat {
-        /// 座席インデックス
+        /// Seat index
         seat: usize,
-        /// メッセージ本体
+        /// The message
         msg: ClientMessage,
     },
-    /// 明示的な退出
+    /// An explicit leave
     Leave {
-        /// 座席インデックス
+        /// Seat index
         seat: usize,
     },
-    /// 切断（ソケットが閉じた）
+    /// A disconnect (socket closed)
     Disconnected {
-        /// 座席インデックス
+        /// Seat index
         seat: usize,
-        /// 切断した接続の世代番号（再接続との行き違いを防ぐ）
+        /// Generation of the dropped connection, so a late notice
+        /// cannot clobber a reconnect
         conn_gen: u64,
     },
 }
 
-/// 入室の結果（接続タスクへ返す座席情報とルーム内部の追加情報）
+/// Join outcome: the seat info returned to the connection task plus
+/// room-internal extras.
 struct JoinOutcome {
     seat: usize,
     conn_gen: u64,
-    /// 既存の座席への再接続か（新規入室なら false）
+    /// Whether this was a reconnect to an existing seat
     reconnect: bool,
 }
 
-/// 着席中のプレイヤー
+/// A seated player.
 struct Seat {
-    /// セッショントークン（再接続時の照合に使う）
+    /// Session token, matched on reconnection
     token: String,
     name: String,
-    /// 接続への送信チャネル（None = 切断中）
+    /// Send channel to the connection; None while disconnected
     tx: Option<mpsc::Sender<ServerMessage>>,
-    /// 現在の接続の世代番号（再接続のたびに更新）
+    /// Current connection generation, bumped on every reconnect
     conn_gen: u64,
-    /// 現在の局の GameStarted 以降のイベント履歴（再接続時の再同期用）
+    /// Event history since the current hand's GameStarted,
+    /// for reconnect resync
     history: Vec<ServerEvent>,
 }
 
-/// ホストの座席インデックス（最初の入室者）
+/// The host's seat index (the first joiner).
 const HOST_SEAT: usize = 0;
 
-/// ルームの状態
+/// Room state.
 struct Room {
     code: String,
     settings: GameSettings,
     config: RoomConfig,
     seats: [Option<Seat>; 4],
     driver: Option<GameDriver>,
-    /// 局結果の確認待ち中か
+    /// Whether the room awaits result-screen confirmations
     awaiting_ready: bool,
-    /// 各座席の次局進行確認
+    /// Per-seat next-hand confirmations
     ready: [bool; 4],
-    /// GameOver を送信済みか
+    /// Whether GameOver has been sent
     game_over_sent: bool,
-    /// 次局自動進行の期限
+    /// Deadline for auto-advancing to the next hand
     ready_deadline: Option<Instant>,
-    /// ルーム破棄の期限
+    /// Deadline for discarding the room
     close_deadline: Option<Instant>,
-    /// 手番の制限時間の期限
+    /// Turn-timer deadline
     action_deadline: Option<Instant>,
-    /// 現在の制限時間が対象とする座席（操作待ちの変化検出に使う）
+    /// Seats the current timer covers, for detecting changed waits
     deadline_seats: Vec<usize>,
-    /// ゲーム進行の時刻基準（対局開始時刻）。CPU遅延の計測に使う
+    /// Time base for game progress (game start), used to pace
+    /// the CPU delay
     game_clock: Option<Instant>,
-    /// ルームを閉じるフラグ
+    /// Set to close the room
     closing: bool,
-    /// 次に割り当てる接続の世代番号
+    /// Next connection generation to hand out
     next_conn_gen: u64,
-    /// 送信失敗（バッファ満杯・切断）で切断処理が必要になった座席
+    /// Seats whose sends failed (full buffer / closed) and need
+    /// disconnect handling
     pending_departures: Vec<usize>,
-    /// CPU（空席・シャドー）の強さ・性格。ホストが対局開始時に指定する
+    /// CPU configs (empty seats and shadows), set by the host at
+    /// game start
     cpu_configs: [CpuConfig; 3],
 }
 
-/// 座席に割り当てるCPU設定を返す
+/// The CPU config for a seat.
 ///
-/// 座席1〜3（ホストから見た下家・対面・上家）にホストの `configs[0..3]` を
-/// 順に対応させる。座席0（ホスト）はシャドーCPU用に `configs[0]` を流用する。
+/// Seats 1-3 (the host's right, across, left) map to `configs[0..3]` in
+/// order; seat 0 (the host) reuses `configs[0]` for its shadow CPU.
 fn config_for_seat(configs: &[CpuConfig; 3], seat: usize) -> CpuConfig {
     let idx = seat.saturating_sub(1).min(2);
     configs[idx].clone()
 }
 
-/// ルームアクターのメインループ
+/// The room actor's main loop.
 pub async fn run_room(
     code: String,
     settings: GameSettings,
@@ -182,7 +189,7 @@ pub async fn run_room(
         cpu_configs: default_cpu_configs(),
     };
 
-    // CPU遅延を計りながらゲームを進めるためのティック
+    // The tick that paces the game against the CPU delay.
     let mut game_tick = tokio::time::interval(config.tick_interval);
     game_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -213,7 +220,7 @@ pub async fn run_room(
             }
         }
 
-        // 送信に失敗した接続の切断処理をまとめて行う
+        // Handle every send-failure disconnect in one sweep.
         room.process_departures();
 
         if room.closing {
@@ -224,20 +231,19 @@ pub async fn run_room(
     lobby.remove(&code);
 }
 
-/// select! のために None を遠い未来の時刻に変換する
-///
-/// `if` ガードで無効化されるため、この時刻が実際に使われることはない。
+/// Turns None into a far-future instant for select!; the `if` guard
+/// disables the branch, so the value is never actually used.
 fn deadline_or_far(deadline: Option<Instant>) -> Instant {
     deadline.unwrap_or_else(|| Instant::now() + Duration::from_secs(365 * 24 * 3600))
 }
 
 impl Room {
-    /// ゲームが開始済みか
+    /// Whether the game has started.
     fn game_started(&self) -> bool {
         self.driver.is_some()
     }
 
-    /// プレイヤー人数を返す（四麻=4、三麻=3。三麻ではシート3は常に空席）
+    /// Player count (4 or 3; the three-player seat 3 stays empty).
     fn player_count(&self) -> usize {
         self.settings.rules.player_count()
     }
@@ -265,7 +271,8 @@ impl Room {
             RoomMsg::FromSeat { seat, msg } => self.handle_client_message(seat, msg),
             RoomMsg::Leave { seat } => self.handle_departure(seat),
             RoomMsg::Disconnected { seat, conn_gen } => {
-                // 古い接続からの遅延切断通知は無視する（再接続済みなら世代が進んでいる）
+                // Ignore a stale disconnect from an old connection;
+                // a reconnect has bumped the generation.
                 if self.seats[seat]
                     .as_ref()
                     .is_some_and(|s| s.conn_gen == conn_gen)
@@ -276,17 +283,16 @@ impl Room {
         }
     }
 
-    /// 接続の世代番号を1つ払い出す
+    /// Hands out the next connection generation.
     fn alloc_conn_gen(&mut self) -> u64 {
         let generation = self.next_conn_gen;
         self.next_conn_gen += 1;
         generation
     }
 
-    /// 入室または再接続を処理する
-    ///
-    /// 対局中はトークンが一致する切断済みの座席へ再接続させる。
-    /// 開始前は空席へ新規入室させる。
+    /// Handles a join or reconnect: mid-game a matching token reclaims
+    /// its disconnected seat; before the game a new joiner takes an
+    /// empty seat.
     fn try_join(
         &mut self,
         name: String,
@@ -294,7 +300,6 @@ impl Room {
         tx: mpsc::Sender<ServerMessage>,
     ) -> Result<JoinOutcome, ErrorCode> {
         if self.game_started() {
-            // 再接続: トークンが一致し切断中の座席を探す
             let seat = self
                 .seats
                 .iter()
@@ -316,7 +321,7 @@ impl Room {
             });
         }
 
-        // 新規入室: 空席へ（三麻ではシート0〜2のみ使用する）
+        // New join: an empty seat (three-player rooms use 0-2 only).
         let seat = self.seats[..self.player_count()]
             .iter()
             .position(|s| s.is_none())
@@ -337,25 +342,23 @@ impl Room {
         })
     }
 
-    /// 再接続した座席へ CPU 代打ちを止め、状態を再同期する
+    /// Stops the CPU substitution and resyncs a reconnected seat.
     fn handle_reconnect(&mut self, seat: usize) {
-        // CPU代打ちを止めて人間の操作に戻す
         if let Some(driver) = self.driver.as_mut() {
             driver.set_cpu_controlled(seat, false);
         }
-        // 全員へ接続状態の変化を通知
         self.broadcast(ServerMessage::PlayerConnectionChanged {
             seat,
             connected: true,
         });
-        // 再接続した座席へ最新の RoomState と現在の局の再生を送る
+        // Send the fresh RoomState plus the current hand's replay.
         self.send_room_state_to(seat);
         let history = self.seats[seat]
             .as_ref()
             .map(|s| s.history.clone())
             .unwrap_or_default();
         self.send_to_seat(seat, ServerMessage::Resync { events: history });
-        // 再接続で操作待ちの主体が変わった可能性があるため期限を張り直す
+        // The awaited seats may have changed; re-arm the timer.
         self.refresh_action_deadline();
     }
 
@@ -388,8 +391,8 @@ impl Room {
             }
             ClientMessage::ReadyNextRound => {
                 if !self.awaiting_ready {
-                    // 自動進行タイマーと行き違いになった遅延確認は無害なので
-                    // エラーにせず黙って無視する
+                    // A late confirmation racing the auto-advance timer is
+                    // harmless; ignore it silently.
                     return;
                 }
                 self.ready[seat] = true;
@@ -397,14 +400,15 @@ impl Room {
                     self.advance_round();
                 }
             }
-            // Hello / CreateRoom / JoinRoom / LeaveRoom は接続タスク側で処理済み
+            // Hello/CreateRoom/JoinRoom/LeaveRoom were handled by the
+            // connection task.
             _ => {
                 self.send_error(seat, ErrorCode::BadMessage, "unexpected message");
             }
         }
     }
 
-    /// ホストが選んだCPUの強さ・性格を保持し、全員のロビー表示へ共有する
+    /// Stores the host's CPU configs and shares them with every lobby.
     fn handle_set_cpu_configs(&mut self, seat: usize, cpu_configs: [CpuSpec; 3]) {
         if seat != HOST_SEAT {
             self.send_error(seat, ErrorCode::NotHost, "only the host can configure CPUs");
@@ -428,13 +432,12 @@ impl Room {
             return;
         }
 
-        // ホストが指定したCPU構成を採用する（無指定なら既定のまま）
         if let Some(specs) = cpu_configs {
             self.cpu_configs = specs.map(|spec| spec.to_config());
         }
 
-        // 席順ランダム化: 対局に参加するCPU分の設定をシャッフルする。
-        // 起家のランダム化は GameDriver::start_game が行う。
+        // Shuffle the participating CPUs' seats;
+        // GameDriver::start_game randomizes the dealer.
         let cpu_count = self.player_count() - 1;
         mahjong_server::cpu::client::shuffle_cpu_configs(&mut self.cpu_configs[..cpu_count]);
 
@@ -442,7 +445,8 @@ impl Room {
         for s in 0..self.player_count() {
             let config = config_for_seat(&self.cpu_configs, s);
             if self.seats[s].is_some() {
-                // 人間の座席にもシャドーCPUを常駐させ、切断時に即代打ちできるようにする
+                // Human seats get a resident shadow CPU for instant
+                // substitution on disconnect.
                 driver.set_shadow_cpu(s, config);
             } else {
                 driver.set_cpu(s, config);
@@ -451,9 +455,10 @@ impl Room {
         driver.set_cpu_action_delay(self.config.cpu_action_delay.as_secs_f64());
         driver.start_game();
         self.driver = Some(driver);
-        // CPU遅延を計る時刻基準を起動。以降は now_secs() で経過秒を渡す
+        // Start the clock for the CPU delay; now_secs() feeds it
+        // from here on.
         self.game_clock = Some(Instant::now());
-        // 開始したのでロビーの生存期限は解除
+        // The game started, so the lobby lifetime no longer applies.
         self.close_deadline = None;
 
         tracing::info!(code = self.code, "game started");
@@ -461,20 +466,21 @@ impl Room {
         self.progress_game();
     }
 
-    /// 直前のアクション結果を配信し、局終了の確認・期限の再設定を行う
+    /// Delivers the last action's results, checks for hand end, and
+    /// re-arms the deadlines.
     ///
-    /// CPUの進行は [`game_tick`](Self::game_tick) が遅延を計りながら進めるため、
-    /// ここではツモまで一気に進めない（イベントの送出と状態更新のみ）。
+    /// CPU progress is paced by [`game_tick`](Self::game_tick), so this
+    /// never races ahead to the next draw - it only flushes events and
+    /// updates state.
     fn progress_game(&mut self) {
         self.flush_events();
         self.check_round_end();
         self.refresh_action_deadline();
     }
 
-    /// CPU遅延を計りながらゲームを1ティック進める
-    ///
-    /// 待機中のCPUアクションが期限を迎えれば適用し、ツモフェーズなら牌を引く。
-    /// `needs_game_tick` が true の間だけ呼ばれる。
+    /// Advances the game one paced tick: applies due CPU actions and
+    /// draws in the draw phase. Called only while `needs_game_tick`
+    /// is true.
     fn game_tick(&mut self) {
         let now = self.now_secs();
         if let Some(driver) = self.driver.as_mut() {
@@ -485,7 +491,8 @@ impl Room {
         self.refresh_action_deadline();
     }
 
-    /// CPUの進行（ツモ・遅延待ちの打牌など）のために tick が必要か
+    /// Whether a tick is needed for CPU progress (draws, pending
+    /// delayed actions).
     fn needs_game_tick(&self) -> bool {
         if self.awaiting_ready || self.game_over_sent {
             return false;
@@ -493,24 +500,25 @@ impl Room {
         self.driver.as_ref().is_some_and(|d| d.needs_tick())
     }
 
-    /// ゲーム時刻基準からの経過秒（CPU遅延の計測に渡す）
+    /// Seconds since the game time base, fed to the CPU-delay pacing.
     fn now_secs(&self) -> f64 {
         self.game_clock
             .map(|c| c.elapsed().as_secs_f64())
             .unwrap_or(0.0)
     }
 
-    /// 指定した座席が接続中の人間か
+    /// Whether the seat is a connected human.
     fn is_connected_human(&self, seat: usize) -> bool {
         self.seats[seat].as_ref().is_some_and(|s| s.tx.is_some())
     }
 
-    /// 手番の制限時間を再設定する
+    /// Re-arms the turn timer.
     ///
-    /// 接続中の人間の操作待ちなら期限を設定し、対象座席へ残り秒数を通知する。
-    /// 同じ操作待ちが続いている間は期限を維持する（他プレイヤーの無効操作
-    /// などで制限時間が延長されるのを防ぐ）。
-    /// それ以外（CPU進行中・確認待ち・局終了）は期限を解除する。
+    /// While a connected human is being waited on, sets the deadline and
+    /// notifies the seat of the remaining seconds; the deadline persists
+    /// while the same wait continues (so another player's invalid action
+    /// cannot extend it). Otherwise (CPU progress, confirmations, hand
+    /// over) the timer is cleared.
     fn refresh_action_deadline(&mut self) {
         let Some(timeout) = self.config.action_timeout else {
             self.clear_action_deadline();
@@ -535,27 +543,27 @@ impl Room {
             return;
         }
 
-        // 操作待ちの座席が変わっていなければ既存の期限を使い続ける
         if self.action_deadline.is_some() && seats == self.deadline_seats {
             return;
         }
 
         self.deadline_seats = seats.clone();
         self.action_deadline = Some(Instant::now() + timeout);
-        // 端数は切り上げる（短い制限でも 0 秒表示にならないように）
+        // Round up so even short limits never show 0 seconds.
         let seconds = timeout.as_secs_f64().ceil() as u32;
         for seat in seats {
             self.send_to_seat(seat, ServerMessage::TurnTimer { seconds });
         }
     }
 
-    /// 手番の制限時間を解除する
+    /// Clears the turn timer.
     fn clear_action_deadline(&mut self) {
         self.action_deadline = None;
         self.deadline_seats.clear();
     }
 
-    /// 手番の制限時間切れ: 待っている接続中の人間に既定アクションを代行する
+    /// Turn-timer expiry: performs the default action for the awaited
+    /// connected humans.
     fn on_action_timeout(&mut self) {
         let now = self.now_secs();
         let seats: Vec<usize> = self
@@ -575,22 +583,23 @@ impl Room {
         self.progress_game();
     }
 
-    /// 各座席のイベントを履歴へ記録し、接続中の座席へ送信する
+    /// Records each seat's events into its history and sends them to
+    /// connected seats.
     ///
-    /// 履歴は局開始（GameStarted）でリセットし、現在の局のイベントだけを
-    /// 保持する。切断中の座席でも履歴は記録され、再接続時の再同期に使う。
+    /// Histories reset on GameStarted and hold only the current hand;
+    /// disconnected seats keep recording for the reconnect resync.
     fn flush_events(&mut self) {
         if self.driver.is_none() {
             return;
         }
-        // 先に全座席のイベントを取り出す（driver の借用をここで手放す）。
-        // drain_all_events_at は CPU遅延を計りながらイベントを処理する。
+        // Take every seat's events first (releasing the driver borrow);
+        // drain_all_events_at paces the CPU delay while processing.
         //
-        // 座席ごとに drain_events_at を呼ぶ実装だと、後の座席を処理する際の
-        // pump が新たなイベント（鳴き解決後の CallAvailable など）を生成し、
-        // それが既に取り出し済みの前の座席のバッファへ追加されて次回まで
-        // 配信されずに残ることがあった。全座席分をまとめて取り出すことで
-        // 生成順に関わらず同じフラッシュで確実に配信する。
+        // Draining per seat was broken: pumping a later seat could
+        // generate events (e.g. CallAvailable after a call resolved) into
+        // an already-drained earlier buffer, where they sat undelivered
+        // until the next pass. Draining all seats at once guarantees
+        // delivery in the same flush regardless of generation order.
         let now = self.now_secs();
         let per_seat: [Vec<ServerEvent>; 4] = {
             let driver = self.driver.as_mut().expect("checked above");
@@ -599,7 +608,6 @@ impl Room {
 
         for (seat, events) in per_seat.into_iter().enumerate() {
             for event in events {
-                // 履歴へ記録する（局開始でリセット）
                 {
                     let Some(s) = self.seats[seat].as_mut() else {
                         break;
@@ -609,13 +617,12 @@ impl Room {
                     }
                     s.history.push(event.clone());
                 }
-                // 接続中なら送信する（切断中は send_to_seat が何もしない）
                 self.send_to_seat(seat, ServerMessage::Event(event));
             }
         }
     }
 
-    /// 局が終了していたら次局確認待ちに入る
+    /// Enters the next-hand confirmation wait once the hand ends.
     fn check_round_end(&mut self) {
         let Some(driver) = self.driver.as_ref() else {
             return;
@@ -635,14 +642,14 @@ impl Room {
         }
     }
 
-    /// 接続中の人間全員が次局進行を確認したか
+    /// Whether every connected human has confirmed the next hand.
     fn all_connected_humans_ready(&self) -> bool {
         (0..4)
             .filter(|&s| self.seats[s].as_ref().is_some_and(|seat| seat.tx.is_some()))
             .all(|s| self.ready[s])
     }
 
-    /// 次の局へ進める（ゲーム終了なら GameOver を配信する）
+    /// Advances to the next hand, or broadcasts GameOver at game end.
     fn advance_round(&mut self) {
         self.awaiting_ready = false;
         self.ready_deadline = None;
@@ -658,7 +665,7 @@ impl Room {
             self.broadcast(ServerMessage::GameOver { final_scores });
             self.game_over_sent = true;
             self.clear_action_deadline();
-            // 全員が切断したら閉じる。念のため期限も設定する
+            // Close once everyone is gone; set the deadline as a backstop.
             self.close_deadline = Some(Instant::now() + self.config.abandoned_timeout);
             tracing::info!(code = self.code, "game over");
         } else {
@@ -666,11 +673,11 @@ impl Room {
         }
     }
 
-    /// 送信失敗で切断扱いになった座席の切断処理をまとめて行う
+    /// Sweeps the seats marked disconnected by failed sends.
     ///
-    /// 切断処理中の送信（切断通知など）がさらに失敗する可能性があるため、
-    /// 空になるまで繰り返す。各座席は一度切断されると送信対象から外れるので
-    /// 必ず停止する。
+    /// Sends made during the sweep (disconnect notices) can fail too, so
+    /// it loops until empty; each seat leaves the send set once
+    /// disconnected, so termination is guaranteed.
     fn process_departures(&mut self) {
         while let Some(seat) = self.pending_departures.pop() {
             tracing::info!(
@@ -682,9 +689,9 @@ impl Room {
         }
     }
 
-    /// 退出または切断を処理する
+    /// Handles a leave or disconnect.
     fn handle_departure(&mut self, seat: usize) {
-        // 開始前: 座席を空ける。ホストが抜けたらルームを閉じる
+        // Pre-game: vacate the seat; the host leaving closes the room.
         if !self.game_started() {
             self.seats[seat] = None;
             tracing::info!(code = self.code, seat, "player left");
@@ -701,7 +708,7 @@ impl Room {
             return;
         }
 
-        // ゲーム終了後: 座席を空け、全員いなくなったら閉じる
+        // Post-game: vacate; close once empty.
         if self.game_over_sent {
             self.seats[seat] = None;
             if self.seats.iter().all(|s| s.is_none()) {
@@ -710,10 +717,11 @@ impl Room {
             return;
         }
 
-        // 対局中: 座席は保持したまま切断扱いにし、CPUが代打ちする
+        // Mid-game: keep the seat, mark it disconnected, let the CPU
+        // substitute.
         match self.seats[seat].as_mut() {
-            // 既に切断処理済みなら二重に処理しない
-            // （送信失敗とソケット切断の両方から呼ばれることがある）
+            // Skip double handling: both a failed send and the socket
+            // close can get here.
             Some(s) if s.tx.is_some() => s.tx = None,
             _ => return,
         }
@@ -725,15 +733,16 @@ impl Room {
         let now = self.now_secs();
         if let Some(driver) = self.driver.as_mut() {
             driver.set_cpu_controlled(seat, true);
-            // 切断した座席の入力待ちで止まっていたら既定アクションで進める
+            // If the game was waiting on this seat, the default action
+            // unblocks it.
             driver.force_default_action_at(seat, now);
         }
-        // 残りの接続者へ切断を通知する
         self.broadcast(ServerMessage::PlayerConnectionChanged {
             seat,
             connected: false,
         });
-        // 確認待ち中の切断はその座席の確認を不要にする
+        // A disconnect during confirmations waives that seat's
+        // confirmation.
         if self.awaiting_ready && self.all_connected_humans_ready() {
             self.advance_round();
         } else {
@@ -745,14 +754,14 @@ impl Room {
         }
     }
 
-    /// 接続中の人間がいるか
+    /// Whether any human is connected.
     fn any_connected_human(&self) -> bool {
         self.seats
             .iter()
             .any(|s| s.as_ref().is_some_and(|seat| seat.tx.is_some()))
     }
 
-    /// 各座席の公開情報を組み立てる
+    /// Builds each seat's public info.
     fn seats_info(&self) -> [SeatInfo; 4] {
         std::array::from_fn(|s| match &self.seats[s] {
             Some(seat) => SeatInfo::Human {
@@ -761,7 +770,8 @@ impl Room {
             },
             None => {
                 if self.game_started() && s < self.player_count() {
-                    // 対局開始時の割り当てと同じ規則で強さ・性格を求める
+                    // Same level/personality rule as the game-start
+                    // assignment.
                     let config = config_for_seat(&self.cpu_configs, s);
                     SeatInfo::Cpu {
                         level: config.level,
@@ -774,7 +784,7 @@ impl Room {
         })
     }
 
-    /// 全員に RoomState を送る（your_seat は受信者ごとに変わる）
+    /// Sends RoomState to everyone; your_seat varies per recipient.
     fn broadcast_room_state(&mut self) {
         let seats_info = self.seats_info();
         for seat in 0..4 {
@@ -782,13 +792,13 @@ impl Room {
         }
     }
 
-    /// 特定の座席へ RoomState を送る
+    /// Sends RoomState to one seat.
     fn send_room_state_to(&mut self, seat: usize) {
         let seats_info = self.seats_info();
         self.send_room_state_with(seat, &seats_info);
     }
 
-    /// 組み立て済みの座席情報を使って特定の座席へ RoomState を送る
+    /// Sends RoomState to one seat using pre-built seat info.
     fn send_room_state_with(&mut self, seat: usize, seats_info: &[SeatInfo; 4]) {
         let msg = ServerMessage::RoomState {
             code: self.code.clone(),
@@ -804,14 +814,14 @@ impl Room {
         self.send_to_seat(seat, msg);
     }
 
-    /// 接続中の全員にメッセージを送る
+    /// Broadcasts a message to every connected seat.
     fn broadcast(&mut self, msg: ServerMessage) {
         for seat in 0..4 {
             self.send_to_seat(seat, msg.clone());
         }
     }
 
-    /// 接続中の全員にエラーを送る
+    /// Broadcasts an error to every connected seat.
     fn broadcast_error(&mut self, code: ErrorCode, message: &str) {
         self.broadcast(ServerMessage::Error {
             code,
@@ -819,7 +829,7 @@ impl Room {
         });
     }
 
-    /// 特定の座席にエラーを送る
+    /// Sends an error to one seat.
     fn send_error(&mut self, seat: usize, code: ErrorCode, message: &str) {
         self.send_to_seat(
             seat,
@@ -830,11 +840,12 @@ impl Room {
         );
     }
 
-    /// 特定の座席へブロックせずに送信する（切断中の座席は何もしない）
+    /// Sends to one seat without blocking; disconnected seats are a
+    /// no-op.
     ///
-    /// 送信バッファが満杯（受信が長時間止まっている）か接続が閉じている
-    /// 場合は失敗として座席を切断処理の対象に積む。実際の切断処理は
-    /// [`process_departures`](Self::process_departures) がまとめて行う。
+    /// A full buffer (the receiver stalled) or a closed connection marks
+    /// the seat for disconnect handling, performed in bulk by
+    /// [`process_departures`](Self::process_departures).
     fn send_to_seat(&mut self, seat: usize, msg: ServerMessage) {
         let Some(tx) = self.seats[seat].as_ref().and_then(|s| s.tx.as_ref()) else {
             return;

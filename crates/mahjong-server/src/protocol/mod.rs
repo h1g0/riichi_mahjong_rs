@@ -1,7 +1,7 @@
-//! サーバ・クライアント間プロトコル
+//! Server-client protocol.
 //!
-//! 将来的なオンライン対戦を見据えたメッセージ定義。
-//! LocalAdapter ではこれらのメッセージを直接やり取りする。
+//! Message definitions designed with online play in mind; LocalAdapter
+//! exchanges these messages directly in-process.
 
 pub mod net;
 
@@ -9,291 +9,300 @@ use mahjong_core::scoring::score::{ScoreItem, ScoreRank};
 use mahjong_core::tile::{Tile, Wind};
 use serde::{Deserialize, Serialize};
 
-/// 流局の理由
+/// Reason a hand ended in a draw.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DrawReason {
-    /// 荒牌流局（牌山切れ）
+    /// Exhaustive draw: the live wall ran out (荒牌流局)
     Exhaustive,
-    /// 四風連打
+    /// Four-winds abortive draw (四風連打)
     FourWinds,
-    /// 四家立直
+    /// Four-riichi abortive draw (四家立直)
     FourRiichi,
-    /// 九種九牌
+    /// Nine-terminals abortive draw (九種九牌)
     NineTerminals,
-    /// 四槓散了
+    /// Four-quads abortive draw (四槓散了)
     FourKans,
-    /// 三家和
+    /// Triple-ron abortive draw (三家和)
     TripleRon,
 }
 
-/// 鳴きの種類
+/// Kind of call.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CallType {
-    /// ロン
     Ron,
-    /// ポン
     Pon,
-    /// チー
     Chi,
-    /// 暗カン
+    /// Concealed quad (暗槓)
     Ankan,
-    /// 大明カン
+    /// Called quad (大明槓)
     Daiminkan,
-    /// 加カン
+    /// Promoted quad (加槓)
     Kakan,
 }
 
-/// 局終了時のプレイヤー手牌情報
+/// A player's hand as revealed at the end of a hand.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerHandInfo {
-    /// プレイヤーの風
+    /// Seat wind
     pub wind: Wind,
-    /// 手牌（閉じた部分）
+    /// Concealed part of the hand
     pub hand: Vec<Tile>,
-    /// 副露（鳴き）一覧
+    /// Melded groups
     pub melds: Vec<MeldTiles>,
-    /// 北抜きで晒した北風牌（三麻のみ。四麻では常に空）
+    /// North tiles set aside as pei dora (three-player only; always empty
+    /// in four-player games)
     #[serde(default)]
     pub pei: Vec<Tile>,
 }
 
-/// 副露の牌情報
+/// Tiles of one meld.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeldTiles {
-    /// 鳴きの種類
+    /// Kind of call
     pub call_type: CallType,
-    /// 副露で公開された牌
+    /// Tiles revealed by the call
     pub tiles: Vec<Tile>,
 }
 
-/// 利用可能な鳴きアクション（CallAvailableイベント内で使用）
+/// A call the player may make, carried by the CallAvailable event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AvailableCall {
-    /// ロン和了可能
     Ron,
-    /// ポン可能（使える手牌の組み合わせのリスト: 各要素は手牌から使う2枚の実際の牌）
-    Pon { options: Vec<[Tile; 2]> },
-    /// 大明カン可能
+    /// Pon; each option lists the two hand tiles to use (red fives distinct)
+    Pon {
+        options: Vec<[Tile; 2]>,
+    },
     Daiminkan,
-    /// チー可能（使える手牌の組み合わせのリスト: 各要素は手牌から使う2枚の実際の牌）
-    Chi { options: Vec<[Tile; 2]> },
+    /// Chii; each option lists the two hand tiles to use (red fives distinct)
+    Chi {
+        options: Vec<[Tile; 2]>,
+    },
 }
 
-/// サーバからクライアントへのイベント
+/// Events sent from the server to a client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerEvent {
-    /// ゲーム開始
+    /// A new hand has started
     GameStarted {
-        /// 自分の座席の風
+        /// This client's seat wind
         seat_wind: Wind,
-        /// 自分の手牌
+        /// This client's starting hand
         hand: Vec<Tile>,
-        /// 各プレイヤーの初期点数
+        /// Starting scores
         scores: [i32; 4],
-        /// 場風
+        /// Round wind
         round_wind: Wind,
-        /// ドラ表示牌
+        /// Revealed dora indicators
         dora_indicators: Vec<Tile>,
-        /// 局番号（0-based: 東1局=0, 東2局=1, ...）
+        /// Hand number, 0-based (East 1 = 0, East 2 = 1, ...)
         round_number: usize,
-        /// ゲーム全体の局数（東風戦=4, 東南戦=8。オーラス判定に使用）
+        /// Hands in the whole game (East-only = 4, hanchan = 8);
+        /// used to detect the final hand
         total_rounds: usize,
-        /// 本場数
+        /// Continuance counter (honba / 本場)
         honba: usize,
-        /// 供託リーチ棒の本数
+        /// Riichi deposits on the table
         riichi_sticks: usize,
-        /// 三麻かどうか（プレイヤー人数・牌集合・ドラチェーンの解釈に使用）
+        /// Three-player game: affects player count, tile set, and the
+        /// dora chain
         #[serde(default)]
         three_player: bool,
-        /// 北抜きドラが有効か（三麻のみ true になり得る）
+        /// Whether pei dora (North extraction) is enabled
+        /// (can only be true in three-player games)
         #[serde(default)]
         nuki_dora: bool,
     },
 
-    /// ツモ（自分がツモった）
+    /// This client drew a tile
     TileDrawn {
-        /// ツモった牌
+        /// The drawn tile
         tile: Tile,
-        /// 山の残り枚数
+        /// Tiles left in the live wall
         remaining_tiles: usize,
-        /// ツモ和了可能か
+        /// Whether a tsumo win is possible
         can_tsumo: bool,
-        /// リーチ宣言可能か
+        /// Whether riichi may be declared
         can_riichi: bool,
-        /// フリテン状態か（ロン不可・ツモのみ可）
+        /// Whether the player is furiten (may win by tsumo only, not ron)
         is_furiten: bool,
     },
 
-    /// 他プレイヤーがツモった（牌は非公開）
+    /// Another player drew a tile (the tile itself stays hidden)
     OtherPlayerDrew {
-        /// ツモったプレイヤーの風
+        /// Seat wind of the player who drew
         player: Wind,
-        /// 山の残り枚数
+        /// Tiles left in the live wall
         remaining_tiles: usize,
     },
 
-    /// 牌が捨てられた
+    /// A tile was discarded
     TileDiscarded {
-        /// 捨てたプレイヤーの風
+        /// Seat wind of the discarder
         player: Wind,
-        /// 捨てた牌
+        /// The discarded tile
         tile: Tile,
-        /// ツモ切りか
+        /// Whether the drawn tile was discarded directly (tsumogiri)
         is_tsumogiri: bool,
-        /// 手出しの場合、打牌前のソート済み手牌（ツモ牌を除く）内での位置（0始まり）。
-        /// ツモ切りでは None。実卓で「手牌のどこから切ったか」が見えるのと同様に、
-        /// 他家の手牌演出（抜かれた位置の空白を詰める表示）に使う。
+        /// For a hand discard (tedashi), the 0-based position within the
+        /// sorted hand (excluding the drawn tile) before the discard; None
+        /// on tsumogiri. At a real table everyone can see which part of the
+        /// hand a discard came from, so clients use this to animate the gap
+        /// closing in an opponent's hand.
         #[serde(default)]
         hand_index: Option<usize>,
     },
 
-    /// 鳴き可能通知（自分に鳴きの選択肢がある）
+    /// This client may call on a discard
     CallAvailable {
-        /// 捨てられた牌
+        /// The discarded tile
         tile: Tile,
-        /// 捨てたプレイヤーの風
+        /// Seat wind of the discarder
         discarder: Wind,
-        /// 利用可能な鳴きアクション
+        /// Calls the player may make
         calls: Vec<AvailableCall>,
     },
 
-    /// プレイヤーが鳴きを行った
+    /// A player made a call
     PlayerCalled {
-        /// 鳴いたプレイヤーの風
+        /// Seat wind of the caller
         player: Wind,
-        /// 鳴きの種類
+        /// Kind of call
         call_type: CallType,
-        /// 鳴いた牌（捨て牌から取った牌）
+        /// The called discard
         called_tile: Tile,
-        /// 副露で公開された牌
+        /// Tiles revealed by the call
         tiles: Vec<Tile>,
     },
 
-    /// ドラ表示牌の更新
+    /// The revealed dora indicators changed
     DoraIndicatorsUpdated {
-        /// 現在公開されているドラ表示牌
+        /// Currently revealed dora indicators
         dora_indicators: Vec<Tile>,
     },
 
-    /// リーチ宣言
+    /// A player declared riichi
     PlayerRiichi {
-        /// リーチしたプレイヤーの風
+        /// Seat wind of the declarer
         player: Wind,
-        /// リーチ宣言後の各プレイヤーの点数
+        /// Scores after the riichi deposit
         scores: [i32; 4],
-        /// 現在の供託リーチ棒の本数
+        /// Riichi deposits on the table
         riichi_sticks: usize,
     },
 
-    /// 北抜き宣言（三麻の抜きドラ）
+    /// A player extracted a North tile as pei dora (three-player games)
     PeiDeclared {
-        /// 北抜きしたプレイヤーの風
+        /// Seat wind of the declarer
         player: Wind,
-        /// 各プレイヤーの北抜き枚数（風のインデックス順: 東=0, 南=1, 西=2）
+        /// Extracted North count per player, indexed by wind
+        /// (East = 0, South = 1, West = 2)
         pei_counts: [u8; 4],
     },
 
-    /// 手牌更新（鳴き後やリーチ後に自分の手牌を同期する）
+    /// Hand resync after a call or riichi
     HandUpdated {
-        /// 更新後の手牌
+        /// The updated hand
         hand: Vec<Tile>,
     },
 
-    /// 局終了（和了）
+    /// The hand ended with a win
     RoundWon {
-        /// 和了プレイヤーの風
+        /// Seat wind of the winner
         winner: Wind,
-        /// 放銃プレイヤーの風（ツモの場合はNone）
+        /// Seat wind of the deal-in player; None on tsumo
         loser: Option<Wind>,
-        /// 和了牌
+        /// The winning tile
         winning_tile: Tile,
-        /// 点数移動後の各プレイヤーの点数
+        /// Scores after the payments
         scores: [i32; 4],
-        /// 成立した役・ドラの一覧（項目, 翻数）。表示名はクライアントがローカライズする
+        /// Awarded yaku and dora as (item, han) pairs;
+        /// the client localizes the display names
         yaku_list: Vec<(ScoreItem, u32)>,
-        /// 翻数
+        /// Han
         han: u32,
-        /// 符
+        /// Fu (minipoints)
         fu: u32,
-        /// 和了者が得た点数
+        /// Points gained by the winner
         score_points: i32,
-        /// 点数等級（満貫、跳満など。通常は `ScoreRank::Normal`）
+        /// Score rank (mangan etc.; usually `ScoreRank::Normal`)
         rank: ScoreRank,
-        /// 和了手が副露していたか（役名の喰い下がり表記の再構築に用いる）
+        /// Whether the winning hand was open; used to reconstruct the
+        /// "(Open)" suffix on yaku names
         has_opened: bool,
-        /// 裏ドラ表示牌（リーチ和了時のみ公開）
+        /// Ura dora indicators (revealed only on a riichi win)
         uradora_indicators: Vec<Tile>,
-        /// 和了前に場に出ていた供託リーチ棒の本数
+        /// Riichi deposits on the table before the win
         riichi_sticks: usize,
-        /// 全プレイヤーの手牌情報
+        /// Every player's revealed hand
         player_hands: Vec<PlayerHandInfo>,
     },
 
-    /// 九種九牌の宣言可能通知（自分が宣言できる状態）
+    /// This client may declare a nine-terminals abortive draw
     NineTerminalsAvailable,
 
-    /// 局終了（流局）
+    /// The hand ended in a draw
     RoundDraw {
-        /// 点数移動後の各プレイヤーの点数
+        /// Scores after any noten penalty
         scores: [i32; 4],
-        /// 流局の理由
+        /// Why the hand was drawn
         reason: DrawReason,
-        /// テンパイしているプレイヤーの風（荒牌流局の場合のみ）
+        /// Seat winds of tenpai players (exhaustive draws only)
         tenpai: Vec<Wind>,
-        /// 現在の供託リーチ棒の本数
+        /// Riichi deposits on the table
         riichi_sticks: usize,
-        /// 全プレイヤーの手牌情報
+        /// Every player's revealed hand
         player_hands: Vec<PlayerHandInfo>,
-        /// 九種九牌を宣言したプレイヤーの風（九種九牌流局の場合のみ）
+        /// Seat wind of the declarer (nine-terminals draws only)
         declarer: Option<Wind>,
     },
 }
 
-/// クライアントからサーバへのアクション
+/// Actions sent from a client to the server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientAction {
-    /// 牌を捨てる
+    /// Discard a tile
     Discard {
-        /// 捨てる牌（Noneならツモ切り）
+        /// The tile to discard; None discards the drawn tile (tsumogiri)
         tile: Option<Tile>,
     },
 
-    /// ツモ和了を宣言する
+    /// Declare a tsumo win
     Tsumo,
 
-    /// ロン和了を宣言する
+    /// Declare a ron win
     Ron,
 
-    /// リーチを宣言する
+    /// Declare riichi
     Riichi {
-        /// 捨てる牌（Noneならツモ切りリーチ）
+        /// The tile to discard; None discards the drawn tile
         tile: Option<Tile>,
     },
 
-    /// チーを宣言する
+    /// Call chii
     Chi {
-        /// 使用する手牌の2枚（実際の牌。赤ドラも区別する）
+        /// The two hand tiles to use (actual tiles; red fives distinct)
         tiles: [Tile; 2],
     },
 
-    /// ポンを宣言する
+    /// Call pon
     Pon {
-        /// 使用する手牌の2枚（実際の牌。赤ドラも区別する）
+        /// The two hand tiles to use (actual tiles; red fives distinct)
         tiles: [Tile; 2],
     },
 
-    /// カンを宣言する（暗カン/明カン/加カン）
+    /// Declare a kan (concealed, called, or promoted)
     Kan {
-        /// カンする牌の種類
+        /// Tile kind to kan
         tile_index: usize,
     },
 
-    /// 北抜きを宣言する（三麻の抜きドラ。手牌またはツモ牌の北を晒して補充ツモ）
+    /// Extract a North tile as pei dora (three-player games): reveal a North
+    /// from the hand or the drawn tile, then draw a replacement
     Pei,
 
-    /// パス（鳴きやロンをしない）
+    /// Pass on a call or ron
     Pass,
 
-    /// 九種九牌を宣言する（true=流局, false=続行）
+    /// Respond to a nine-terminals offer (true = abort, false = continue)
     NineTerminals { declare: bool },
 }

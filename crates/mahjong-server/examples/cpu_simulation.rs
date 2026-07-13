@@ -1,18 +1,19 @@
-//! CPU同士の自動対戦シミュレーションを実行する
+//! Runs automated CPU-vs-CPU game simulations.
 //!
-//! 使い方:
+//! Usage:
 //! ```sh
 //! cargo run -p mahjong-server --release --example cpu_simulation -- [games] [seed]
 //! ```
 //!
-//! デフォルトは 100 ゲーム、シード 42。
-//! 同一シードなら結果は決定的なので、定石PRの前後で実行して
-//! 集計値を比較することで回帰検知に使える。
+//! Defaults to 100 games with seed 42. Results are deterministic for a
+//! given seed, so running this before and after an AI-heuristics PR and
+//! comparing the aggregate stats works as a regression check.
 //!
-//! 注意:
-//! - サーバの診断ログが stderr に出るため、`2>/dev/null` 等で抑制すると見やすい。
-//! - 牌山生成は `SmallRng` を使うため、`rand` クレートのバージョンが変わると
-//!   同一シードでも結果が変わりうる。比較は同一環境・同一依存バージョンで行うこと。
+//! Notes:
+//! - The server writes diagnostics to stderr; silence it with `2>/dev/null`.
+//! - Wall generation uses `SmallRng`, so a `rand` crate upgrade can change
+//!   results even for the same seed. Compare runs only on identical
+//!   environments and dependency versions.
 
 use mahjong_server::simulation::{SimulationConfig, run_simulation};
 

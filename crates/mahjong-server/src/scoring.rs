@@ -1,8 +1,6 @@
-//! 得点計算（サーバ側）
-//!
-//! mahjong-core の得点計算機能をサーバ側から呼び出すラッパー。
-//! プレイヤーの手牌と局の状態から和了判定・点数計算を行い、
-//! 点数移動を適用する。
+//! Server-side scoring: wrappers over mahjong-core's scoring that judge
+//! wins from a player's hand and the hand state, then compute the point
+//! transfers.
 
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
@@ -16,19 +14,16 @@ use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora_in};
 
 use crate::player::Player;
 
-/// 和了判定の結果
+/// Result of a win check.
 #[derive(Debug)]
 pub struct WinCheckResult {
-    /// 和了が成立するか
+    /// Whether the hand wins
     pub is_win: bool,
-    /// 点数計算の結果（和了が成立する場合のみSome）
+    /// Score details; Some only when the hand wins
     pub score_result: Option<ScoreResult>,
 }
 
-/// プレイヤーの手牌が和了しているか判定する
-///
-/// ツモ和了の場合: `is_tsumo = true`
-/// ロン和了の場合: `is_tsumo = false`
+/// Checks whether the player's hand wins, under default rules.
 pub fn check_win(
     player: &Player,
     round_wind: Wind,
@@ -47,7 +42,7 @@ pub fn check_win(
     )
 }
 
-/// プレイヤーの手牌が和了しているか、指定ルールで判定する
+/// Checks whether the player's hand wins, under the given rules.
 pub fn check_win_with_settings(
     player: &Player,
     round_wind: Wind,
@@ -58,7 +53,6 @@ pub fn check_win_with_settings(
 ) -> WinCheckResult {
     let hand = &player.hand;
 
-    // HandAnalyzer で向聴数を計算（ツモ牌込み）
     let analyzer = match HandAnalyzer::new(hand) {
         Ok(a) => a,
         Err(_) => {
@@ -69,7 +63,6 @@ pub fn check_win_with_settings(
         }
     };
 
-    // 和了形（shanten == -1）でなければ不成立
     if !analyzer.shanten.has_won() {
         return WinCheckResult {
             is_win: false,
@@ -77,7 +70,6 @@ pub fn check_win_with_settings(
         };
     }
 
-    // Status を構築
     let mut status = Status::new();
     status.is_self_drawn = is_tsumo;
     status.seat_wind = player.seat_wind;
@@ -105,10 +97,10 @@ pub fn check_win_with_settings(
     }
 }
 
-/// ロン和了が可能か判定する
+/// Checks whether the player can ron on a discard, under default rules.
 ///
-/// プレイヤーの手牌（13枚）に対して、捨て牌を加えてロン和了になるか判定する。
-/// フリテン判定は呼び出し元で行うこと。
+/// Adds the discard to the 13-tile hand and judges the win.
+/// The caller is responsible for the furiten check.
 pub fn check_ron(
     player: &Player,
     discarded_tile: Tile,
@@ -126,7 +118,7 @@ pub fn check_ron(
     )
 }
 
-/// ロン和了が可能か指定ルールで判定する
+/// Checks whether the player can ron on a discard, under the given rules.
 pub fn check_ron_with_settings(
     player: &Player,
     discarded_tile: Tile,
@@ -144,7 +136,8 @@ pub fn check_ron_with_settings(
     )
 }
 
-/// ロン和了が可能か指定ルールと状態フラグで判定する
+/// Checks whether the player can ron, with explicit state flags
+/// (e.g. robbing a quad).
 pub fn check_ron_with_flags_and_settings(
     player: &Player,
     discarded_tile: Tile,
@@ -153,7 +146,6 @@ pub fn check_ron_with_flags_and_settings(
     is_robbing_a_quad: bool,
     settings: &Settings,
 ) -> WinCheckResult {
-    // 手牌をクローンして捨て牌をdrawnとしてセット
     let mut hand = player.hand.clone();
     hand.set_drawn(Some(discarded_tile));
 
@@ -174,7 +166,6 @@ pub fn check_ron_with_flags_and_settings(
         };
     }
 
-    // Status を構築（ロンなので is_self_drawn = false）
     let mut status = Status::new();
     status.is_self_drawn = false;
     status.seat_wind = player.seat_wind;
@@ -202,11 +193,10 @@ pub fn check_ron_with_flags_and_settings(
     }
 }
 
-/// 聴牌している牌（待ち牌）の種類を取得する
+/// Returns the tile kinds the player is waiting on, for the furiten check.
 ///
-/// フリテン判定に使用する。
-/// 手牌が13枚（drawn=None）の状態で、各TileTypeを仮にdrawnにセットし、
-/// 和了形（shanten == -1）になるものを全て返す。
+/// With the 13-tile hand (drawn = None), tries every tile kind as the
+/// drawn tile and collects those that complete the hand.
 pub fn get_waiting_tiles(player: &Player) -> Vec<TileType> {
     let mut waiting = Vec::new();
     for tile_type in 0..Tile::LEN as u32 {
@@ -220,19 +210,13 @@ pub fn get_waiting_tiles(player: &Player) -> Vec<TileType> {
     waiting
 }
 
-/// ツモ和了の点数移動を計算する
+/// Computes the point transfers for a tsumo win.
 ///
-/// - `winner`: 和了プレイヤーのインデックス (0-3)
-/// - `score_result`: 点数計算の結果
-/// - `winner_is_dealer`: 和了プレイヤーが親かどうか
-/// - `dealer_idx`: 親のプレイヤーインデックス (0-3)
-/// - `honba`: 本場数
-/// - `player_count`: プレイヤー人数（四麻=4、三麻=3）
+/// Three-player games use tsumo loss: per-person payments are unchanged
+/// and the absent player's share is simply not received.
 ///
-/// 三麻はツモ損方式: 1人あたりの支払額は四麻と同じで、
-/// いない北家の分は和了者が受け取れない。
-///
-/// 戻り値: 各プレイヤーの点数変動 (正=増加、負=減少)。合計は必ず0。
+/// Returns each player's score delta (positive = gain); deltas always
+/// sum to zero.
 pub fn calculate_tsumo_score_deltas(
     winner: usize,
     score_result: &ScoreResult,
@@ -245,7 +229,7 @@ pub fn calculate_tsumo_score_deltas(
     let honba_bonus = honba as i32 * 100;
 
     if winner_is_dealer {
-        // 親ツモ: 各子が dealer_tsumo_all + 本場ボーナス を支払う
+        // Dealer tsumo: every non-dealer pays the same amount.
         let each_pay = score_result.dealer_tsumo_all as i32 + honba_bonus;
         for (i, delta) in deltas.iter_mut().enumerate().take(player_count) {
             if i == winner {
@@ -255,7 +239,7 @@ pub fn calculate_tsumo_score_deltas(
             }
         }
     } else {
-        // 子ツモ: 親が non_dealer_tsumo_dealer、他の子が non_dealer_tsumo_non_dealer を支払う
+        // Non-dealer tsumo: the dealer pays the larger share.
         let dealer_pay = score_result.non_dealer_tsumo_dealer as i32 + honba_bonus;
         let non_dealer_pay = score_result.non_dealer_tsumo_non_dealer as i32 + honba_bonus;
         let mut total_gain = 0i32;
@@ -277,14 +261,11 @@ pub fn calculate_tsumo_score_deltas(
     deltas
 }
 
-/// ツモ和了の点数移動に包（責任払い）を適用する
+/// Applies a liability payment (pao / 包) to tsumo deltas.
 ///
-/// 包のプレイヤーが他のプレイヤー全員分の支払いを肩代わりする。
-/// 本場ボーナスやツモ損（三麻）を含む支払い総額がそのまま包のプレイヤーに移る。
-///
-/// - `deltas`: `calculate_tsumo_score_deltas` の結果
-/// - `winner`: 和了プレイヤーのインデックス
-/// - `pao_player`: 責任払いを負うプレイヤーのインデックス（winner とは異なること）
+/// The liable player covers every other player's payment. The total —
+/// including honba bonuses and any tsumo-loss shortfall — moves to the
+/// liable player as-is. `pao_player` must differ from `winner`.
 pub fn apply_pao_to_tsumo_deltas(deltas: &mut [i32; 4], winner: usize, pao_player: usize) {
     let mut total_payment = 0i32;
     for (i, delta) in deltas.iter_mut().enumerate() {
@@ -296,13 +277,13 @@ pub fn apply_pao_to_tsumo_deltas(deltas: &mut [i32; 4], winner: usize, pao_playe
     deltas[pao_player] = total_payment;
 }
 
-/// ロン和了の点数移動を包（責任払い）込みで計算する
+/// Computes the point transfers for a ron win with a liability payment.
 ///
-/// 包のプレイヤーと放銃者が和了点を折半して支払う。
-/// 本場ボーナスは放銃者が支払う。
-/// 放銃者自身が包のプレイヤーの場合は通常のロンと同じ（全額支払い）。
+/// The liable player and the deal-in player split the win; the honba
+/// bonus is paid by the deal-in player. When the deal-in player is the
+/// liable player, this reduces to an ordinary ron (full payment).
 ///
-/// 戻り値: 各プレイヤーの点数変動 (正=増加、負=減少)。合計は必ず0。
+/// Returns each player's score delta; deltas always sum to zero.
 pub fn calculate_ron_score_deltas_with_pao(
     winner: usize,
     loser: usize,
@@ -324,7 +305,7 @@ pub fn calculate_ron_score_deltas_with_pao(
         score_result.non_dealer_ron as i32
     };
 
-    // 折半（端数が出る場合は放銃者が多く支払う）
+    // Split; any odd remainder goes to the deal-in player.
     let pao_half = ron_points / 2;
     let loser_half = ron_points - pao_half;
 
@@ -335,19 +316,16 @@ pub fn calculate_ron_score_deltas_with_pao(
     deltas
 }
 
-/// 和了結果にドラ・赤ドラ・裏ドラの翻を加算する
+/// Adds dora han (dora, red fives, ura dora, pei dora) to a score and
+/// recomputes the han, rank, and payments.
 ///
-/// 役判定後の点数計算結果にドラ関連の翻を追加し、
-/// 翻数・等級・支払い額を再計算する。
-///
-/// * `score_result` - 役判定後の点数計算結果（ドラ未加算）
-/// * `hand` - 和了プレイヤーの手牌
-/// * `extra_tile` - ロン和了の場合の和了牌（手牌に含まれていないため別途指定）
-/// * `dora_indicators` - ドラ表示牌
-/// * `uradora_indicators` - 裏ドラ表示牌（リーチ時のみ非空）
-/// * `pei_tiles` - 北抜きで晒した北風牌（三麻のみ。1枚につき+1翻、
-///   表示牌が北を指す場合は表示牌ドラとしても重複カウントされる）
-/// * `three_player` - 三麻かどうか（萬子のドラチェーンが 1m↔9m にラップする）
+/// * `extra_tile` - the winning tile on a ron, passed separately because
+///   it is not part of the hand
+/// * `uradora_indicators` - non-empty only on a riichi win
+/// * `pei_tiles` - extracted North tiles (three-player only); each is
+///   worth one han, and also counts again as indicator dora when an
+///   indicator points at North
+/// * `three_player` - wraps the characters dora chain 1m<->9m
 pub fn add_dora_to_score(
     score_result: &mut ScoreResult,
     hand: &Hand,
@@ -357,12 +335,13 @@ pub fn add_dora_to_score(
     pei_tiles: &[Tile],
     three_player: bool,
 ) {
-    // 役満の場合はドラを加算しない
+    // Yakuman hands score a fixed amount; dora never applies.
     if score_result.yaku_list.iter().any(|(_, h)| *h >= 13) {
         return;
     }
 
-    // 和了手牌の全牌を集める（抜き北も表示牌ドラの対象になる）
+    // Collect every tile of the winning hand; extracted North tiles also
+    // count towards indicator dora.
     let mut all_tiles: Vec<Tile> = hand.tiles().to_vec();
     if let Some(drawn) = hand.drawn() {
         all_tiles.push(drawn);
@@ -375,24 +354,20 @@ pub fn add_dora_to_score(
     }
     all_tiles.extend_from_slice(pei_tiles);
 
-    // ドラ表示牌からドラ牌を計算してカウント
     let mut dora_count: u32 = 0;
     for indicator in dora_indicators {
         let dora_type = dora_indicator_to_dora_in(indicator.get(), three_player);
         dora_count += all_tiles.iter().filter(|t| t.get() == dora_type).count() as u32;
     }
 
-    // 裏ドラ表示牌からドラ牌を計算してカウント
     let mut uradora_count: u32 = 0;
     for indicator in uradora_indicators {
         let dora_type = dora_indicator_to_dora_in(indicator.get(), three_player);
         uradora_count += all_tiles.iter().filter(|t| t.get() == dora_type).count() as u32;
     }
 
-    // 赤ドラをカウント
     let red_dora_count = all_tiles.iter().filter(|t| t.is_red_dora()).count() as u32;
 
-    // 北ドラ（抜き北1枚につき1翻）をカウント
     let pei_count = pei_tiles.len() as u32;
 
     let extra_han = dora_count + uradora_count + red_dora_count + pei_count;
@@ -400,11 +375,9 @@ pub fn add_dora_to_score(
         return;
     }
 
-    // 翻数を再計算
     let new_han = score_result.han + extra_han;
     score_result.han = new_han;
 
-    // 等級・点数を再計算
     score_result.rank = determine_rank(new_han, score_result.fu, false);
     let base_points = calculate_base_points(new_han, score_result.fu, score_result.rank);
     score_result.dealer_ron = round_up_to_100(base_points * 6);
@@ -413,7 +386,7 @@ pub fn add_dora_to_score(
     score_result.non_dealer_tsumo_dealer = round_up_to_100(base_points * 2);
     score_result.non_dealer_tsumo_non_dealer = round_up_to_100(base_points);
 
-    // ドラ・赤ドラ・裏ドラをこの順で末尾に追加
+    // Appended in display order: dora, red five, ura dora, pei dora.
     if dora_count > 0 {
         score_result
             .yaku_list
@@ -436,20 +409,14 @@ pub fn add_dora_to_score(
     }
 }
 
-/// プレイヤーがテンパイしているか判定する（13枚の手牌で）
+/// Whether the player's 13-tile hand is tenpai.
 pub fn is_ready(player: &Player) -> bool {
     hand_analyzer::calc_shanten_number(&player.hand).is_ready()
 }
 
-/// ロン和了の点数移動を計算する
+/// Computes the point transfers for a ron win.
 ///
-/// - `winner`: 和了プレイヤーのインデックス (0-3)
-/// - `loser`: 放銃プレイヤーのインデックス (0-3)
-/// - `score_result`: 点数計算の結果
-/// - `winner_is_dealer`: 和了プレイヤーが親かどうか
-/// - `honba`: 本場数
-///
-/// 戻り値: 各プレイヤーの点数変動 (正=増加、負=減少)。合計は必ず0。
+/// Returns each player's score delta; deltas always sum to zero.
 pub fn calculate_ron_score_deltas(
     winner: usize,
     loser: usize,
@@ -458,7 +425,7 @@ pub fn calculate_ron_score_deltas(
     honba: usize,
 ) -> [i32; 4] {
     let mut deltas = [0i32; 4];
-    let honba_bonus = honba as i32 * 300; // ロンは本場1本場につき300点
+    let honba_bonus = honba as i32 * 300;
 
     let ron_points = if winner_is_dealer {
         score_result.dealer_ron as i32
@@ -519,17 +486,17 @@ mod tests {
     fn test_tsumo_non_dealer_mangan() {
         let score = make_mangan_score();
         let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 4);
-        assert_eq!(deltas[0], -4000); // 親
-        assert_eq!(deltas[1], 8000); // 和了者: 4000+2000+2000
-        assert_eq!(deltas[2], -2000); // 子
-        assert_eq!(deltas[3], -2000); // 子
+        assert_eq!(deltas[0], -4000); // dealer
+        assert_eq!(deltas[1], 8000); // winner: 4000+2000+2000
+        assert_eq!(deltas[2], -2000);
+        assert_eq!(deltas[3], -2000);
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 
     #[test]
     fn test_tsumo_with_honba() {
         let score = make_mangan_score();
-        // 2本場: 各プレイヤーの支払いに100*2=200点加算
+        // Two honba add 100 x 2 = 200 to each payment.
         let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 2, 4);
         assert_eq!(deltas[1], -4200); // 4000+200
         assert_eq!(deltas[2], -4200);
@@ -542,11 +509,12 @@ mod tests {
     fn test_sanma_tsumo_dealer_mangan_tsumo_loss() {
         let score = make_mangan_score();
         let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0, 3);
-        // ツモ損: 支払いは1人4000のまま、いない北家分は貰えない
+        // Tsumo loss: payments stay 4000 each; the absent player's
+        // share is simply not received.
         assert_eq!(deltas[0], 8000); // 4000 * 2
         assert_eq!(deltas[1], -4000);
         assert_eq!(deltas[2], -4000);
-        assert_eq!(deltas[3], 0); // ダミー席は支払わない
+        assert_eq!(deltas[3], 0); // The dummy seat never pays.
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 
@@ -554,10 +522,10 @@ mod tests {
     fn test_sanma_tsumo_non_dealer_mangan_tsumo_loss() {
         let score = make_mangan_score();
         let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3);
-        assert_eq!(deltas[0], -4000); // 親
-        assert_eq!(deltas[1], 6000); // 4000 + 2000（ツモ損）
-        assert_eq!(deltas[2], -2000); // 子
-        assert_eq!(deltas[3], 0); // ダミー席は支払わない
+        assert_eq!(deltas[0], -4000); // dealer
+        assert_eq!(deltas[1], 6000); // 4000 + 2000 (tsumo loss)
+        assert_eq!(deltas[2], -2000);
+        assert_eq!(deltas[3], 0); // The dummy seat never pays.
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 
@@ -593,7 +561,7 @@ mod tests {
         let mut player = Player::new(Wind::South, tiles, 35000);
         player.draw(Tile::new(Tile::S7));
 
-        // 三麻: ドラ表示牌1m → ドラは9m（1枚）
+        // Three-player: a 1m indicator wraps to 9m as the dora.
         let dora_indicators = vec![Tile::new(Tile::M1)];
         add_dora_to_score(
             &mut score,
@@ -646,8 +614,9 @@ mod tests {
         let mut player = Player::new(Wind::South, tiles, 35000);
         player.draw(Tile::new(Tile::S8));
 
-        // 抜き北2枚。表示牌が西（3z）→ ドラは北（4z）のため、
-        // 抜き北は北ドラ2翻+表示牌ドラ2翻の計4翻になる
+        // Two extracted Norths. A West (3z) indicator makes North (4z)
+        // the dora, so they count as 2 pei-dora han plus 2 indicator-dora
+        // han: 4 in total.
         let pei_tiles = vec![Tile::new(Tile::Z4), Tile::new(Tile::Z4)];
         let dora_indicators = vec![Tile::new(Tile::Z3)];
         add_dora_to_score(
@@ -674,7 +643,7 @@ mod tests {
             "西表示牌による北のドラ2翻が加算されていない: {:?}",
             score.yaku_list
         );
-        // 1（タンヤオ）+ 2（北ドラ）+ 2（表示牌ドラ）= 5翻
+        // 1 (All Inside) + 2 (pei dora) + 2 (indicator dora) = 5 han
         assert_eq!(score.han, 5);
     }
 
@@ -697,7 +666,7 @@ mod tests {
         }
     }
 
-    /// 包のツモ和了: 包のプレイヤーが全額を支払う
+    /// Tsumo with pao: the liable player pays everything.
     #[test]
     fn test_pao_tsumo_non_dealer_yakuman() {
         let score = make_yakuman_score();
@@ -705,12 +674,13 @@ mod tests {
         apply_pao_to_tsumo_deltas(&mut deltas, 1, 2);
         assert_eq!(deltas[0], 0);
         assert_eq!(deltas[1], 32000); // 16000 + 8000 + 8000
-        assert_eq!(deltas[2], -32000); // 包が全額支払い
+        assert_eq!(deltas[2], -32000); // The liable player pays everything.
         assert_eq!(deltas[3], 0);
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 
-    /// 包のツモ和了（本場あり）: 本場ボーナスも包のプレイヤーが支払う
+    /// Tsumo with pao and honba: the liable player pays the honba
+    /// bonus too.
     #[test]
     fn test_pao_tsumo_dealer_yakuman_with_honba() {
         let score = make_yakuman_score();
@@ -723,43 +693,46 @@ mod tests {
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 
-    /// 三麻の包ツモ: ツモ損による欠損はそのまま（総額のみ肩代わり）
+    /// Three-player pao tsumo: the tsumo-loss shortfall remains;
+    /// only the actual total is covered.
     #[test]
     fn test_pao_tsumo_sanma_tsumo_loss() {
         let score = make_yakuman_score();
         let mut deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3);
         apply_pao_to_tsumo_deltas(&mut deltas, 1, 2);
         assert_eq!(deltas[0], 0);
-        assert_eq!(deltas[1], 24000); // 16000 + 8000（ツモ損）
+        assert_eq!(deltas[1], 24000); // 16000 + 8000 (tsumo loss)
         assert_eq!(deltas[2], -24000);
         assert_eq!(deltas[3], 0);
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 
-    /// 包のロン和了（他家への放銃）: 放銃者と包のプレイヤーで折半
+    /// Ron with pao where a third player dealt in: the deal-in player
+    /// and the liable player split the payment.
     #[test]
     fn test_pao_ron_split_between_loser_and_pao() {
         let score = make_yakuman_score();
         let deltas = calculate_ron_score_deltas_with_pao(1, 3, 0, &score, false, 0);
         assert_eq!(deltas[1], 32000);
-        assert_eq!(deltas[3], -16000); // 放銃者が半額
-        assert_eq!(deltas[0], -16000); // 包が半額
+        assert_eq!(deltas[3], -16000); // deal-in player's half
+        assert_eq!(deltas[0], -16000); // liable player's half
         assert_eq!(deltas[2], 0);
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 
-    /// 包のロン和了（本場あり）: 本場ボーナスは放銃者が支払う
+    /// Ron with pao and honba: the deal-in player pays the honba bonus.
     #[test]
     fn test_pao_ron_honba_paid_by_loser() {
         let score = make_yakuman_score();
         let deltas = calculate_ron_score_deltas_with_pao(1, 3, 0, &score, false, 2);
         assert_eq!(deltas[1], 32600);
-        assert_eq!(deltas[3], -16600); // 半額 + 本場600
+        assert_eq!(deltas[3], -16600); // half + honba 600
         assert_eq!(deltas[0], -16000);
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 
-    /// 包のプレイヤー自身への放銃: 通常のロンと同じ（全額支払い）
+    /// Deal-in by the liable player: same as an ordinary ron
+    /// (full payment).
     #[test]
     fn test_pao_ron_from_pao_player_pays_full() {
         let score = make_yakuman_score();
@@ -794,7 +767,7 @@ mod tests {
     #[test]
     fn test_ron_with_honba() {
         let score = make_mangan_score();
-        // 3本場: 300*3=900点加算
+        // Three honba add 300 x 3 = 900.
         let deltas = calculate_ron_score_deltas(1, 3, &score, false, 3);
         assert_eq!(deltas[1], 8900);
         assert_eq!(deltas[3], -8900);
@@ -828,8 +801,6 @@ mod tests {
 
     #[test]
     fn test_check_win_tsumo() {
-        // 123m456p789s111z + 2zツモ = 門前ツモ + 場風(東)
-        // 合計14枚: 123m(順子) + 456p(順子) + 789s(順子) + 111z(東刻子) + 22z(雀頭)
         let hand = Hand::from("123m456p789s1112z 2z");
         let tiles: Vec<Tile> = hand.tiles().to_vec();
         let drawn = hand.drawn();
@@ -841,7 +812,7 @@ mod tests {
         let result = check_win(&player, Wind::East, true, false, false);
         assert!(result.is_win);
         let score = result.score_result.unwrap();
-        // 門前ツモ(1翻) + 場風(1翻) = 2翻
+        // Fully Concealed Hand (1) + round wind (1) = 2 han
         assert!(score.han >= 2);
     }
 
@@ -955,7 +926,8 @@ mod tests {
         assert_eq!(waiting, vec![Tile::P4, Tile::P7]);
     }
 
-    /// 通常役の後にドラ→赤ドラ→裏ドラの順で並ぶことを確認する
+    /// Dora entries must follow the yaku in the order
+    /// dora, red five, ura dora.
     #[test]
     fn test_dora_order_in_yaku_list() {
         use mahjong_core::tile::Wind;
@@ -981,7 +953,6 @@ mod tests {
             fu_result,
         };
 
-        // 手牌にM2（ドラ）・赤M5（赤ドラ）・S7（裏ドラ対象）を含む
         let tiles = vec![
             Tile::new(Tile::M2),
             Tile::new(Tile::M3),
@@ -998,11 +969,10 @@ mod tests {
             Tile::new(Tile::S7),
         ];
         let mut player = Player::new(Wind::South, tiles, 25000);
-        player.draw(Tile::new_red(Tile::M5)); // 赤ドラ
+        player.draw(Tile::new_red(Tile::M5));
 
-        // ドラ表示牌M1 → ドラはM2（1枚）
-        // 裏ドラ表示牌S6 → 裏ドラはS7（1枚）
-        // 赤ドラ: 赤M5（1枚）
+        // Indicator 1m -> dora 2m; ura indicator 6s -> ura dora 7s;
+        // plus the red 5m: one of each.
         let dora_indicators = vec![Tile::new(Tile::M1)];
         let uradora_indicators = vec![Tile::new(Tile::S6)];
 

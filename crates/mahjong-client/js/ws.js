@@ -1,23 +1,24 @@
-// オンライン対戦用 WebSocket プラグイン
+// WebSocket plugin for online play.
 //
-// miniquad の mq_js_bundle.js が提供するプラグイン機構で WASM に
-// WebSocket 機能を注入する。wasm-bindgen は使わない（wasm_rng.rs と同じ方針）。
+// Injects WebSocket support into the WASM module via miniquad's
+// mq_js_bundle.js plugin mechanism; no wasm-bindgen (same policy as
+// wasm_rng.rs).
 //
-// Rust 側 (crates/mahjong-client/src/transport.rs) の extern "C" 宣言と
-// 関数シグネチャ・ステータス値を一致させること。
+// Function signatures and status values must match the extern "C"
+// declarations in crates/mahjong-client/src/transport.rs.
 "use strict";
 
 const MAHJONG_WS_VERSION = 1;
 
-// 接続ステータス（Rust 側と一致させる）
-// 0 = 接続中, 1 = 接続済み, 2 = 切断, 3 = エラー
+// Connection status, matching the Rust side:
+// 0 = connecting, 1 = connected, 2 = closed, 3 = error
 const MAHJONG_WS_CONNECTING = 0;
 const MAHJONG_WS_OPEN = 1;
 const MAHJONG_WS_CLOSED = 2;
 const MAHJONG_WS_ERROR = 3;
 
 const mahjong_ws = {
-    // handle (配列インデックス) -> { ws, status, queue: [Uint8Array] }
+    // handle (array index) -> { ws, status, queue: [Uint8Array] }
     sockets: [],
     encoder: new TextEncoder(),
     decoder: new TextDecoder(),
@@ -27,7 +28,7 @@ const mahjong_ws = {
     },
 };
 
-// 接続を開始し、ハンドルを返す
+// Opens a connection and returns its handle.
 function mahjong_ws_connect(url_ptr, url_len) {
     const url = mahjong_ws.read_str(url_ptr, url_len);
     const handle = mahjong_ws.sockets.length;
@@ -62,13 +63,13 @@ function mahjong_ws_connect(url_ptr, url_len) {
     return handle;
 }
 
-// 接続ステータスを返す
+// Returns the connection status.
 function mahjong_ws_status(handle) {
     const entry = mahjong_ws.sockets[handle];
     return entry ? entry.status : MAHJONG_WS_ERROR;
 }
 
-// テキストフレームを送信する（成功 0 / 失敗 -1）
+// Sends a text frame; 0 on success, -1 on failure.
 function mahjong_ws_send(handle, ptr, len) {
     const entry = mahjong_ws.sockets[handle];
     if (!entry || entry.status !== MAHJONG_WS_OPEN) {
@@ -84,7 +85,7 @@ function mahjong_ws_send(handle, ptr, len) {
     }
 }
 
-// 受信キュー先頭のメッセージのバイト長を返す（空なら -1）
+// Byte length of the front queued message; -1 when empty.
 function mahjong_ws_next_msg_len(handle) {
     const entry = mahjong_ws.sockets[handle];
     if (!entry || entry.queue.length === 0) {
@@ -93,8 +94,8 @@ function mahjong_ws_next_msg_len(handle) {
     return entry.queue[0].length;
 }
 
-// 受信キュー先頭のメッセージを buf_ptr へコピーして取り除く
-// （Rust 側が mahjong_ws_next_msg_len の長さでバッファを確保して呼ぶ）
+// Copies the front queued message into buf_ptr and dequeues it. Rust
+// sizes the buffer from mahjong_ws_next_msg_len before calling.
 function mahjong_ws_read_msg(handle, buf_ptr) {
     const entry = mahjong_ws.sockets[handle];
     if (!entry || entry.queue.length === 0) {
@@ -104,8 +105,8 @@ function mahjong_ws_read_msg(handle, buf_ptr) {
     new Uint8Array(wasm_memory.buffer, buf_ptr, msg.length).set(msg);
 }
 
-// 接続を閉じ、保持しているリソースを解放する
-// （再接続のたびにハンドルが増えるため、古い接続の参照とキューは残さない）
+// Closes the connection and frees its resources. Each reconnect mints a
+// new handle, so stale references and queues must not linger.
 function mahjong_ws_close(handle) {
     const entry = mahjong_ws.sockets[handle];
     if (!entry) {
@@ -115,7 +116,7 @@ function mahjong_ws_close(handle) {
         try {
             entry.ws.close();
         } catch (_err) {
-            // 既に閉じている場合などは無視
+            // Ignore errors from an already-closed socket.
         }
         entry.ws.onopen = entry.ws.onmessage = entry.ws.onclose = entry.ws.onerror = null;
         entry.ws = null;
@@ -126,8 +127,9 @@ function mahjong_ws_close(handle) {
     }
 }
 
-// ページに設定された接続先URL (window.MAHJONG_SERVER_URL) を buf_ptr に書き込み、
-// バイト長を返す（未設定・容量不足なら 0 を返し、Rust 側が既定値を使う）
+// Writes the page-configured server URL (window.MAHJONG_SERVER_URL) into
+// buf_ptr and returns its byte length; 0 when unset or too large, in
+// which case Rust falls back to its default.
 function mahjong_ws_default_url(buf_ptr, cap) {
     const url = typeof window !== "undefined" && window.MAHJONG_SERVER_URL;
     if (!url) {

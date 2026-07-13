@@ -1,9 +1,9 @@
-//! トップ画面・モード選択画面
+//! Title and mode-selection screens.
 //!
-//! トップ画面はアプリ起動直後の入口で、CPU対戦・オンライン対戦・
-//! 設定（未実装）・言語設定を選ぶ。モード選択画面は対局モード
-//! （四人東風〜三人半荘）と北抜きドラを選び、CPU対戦とオンラインの
-//! ルーム作成で共有する。
+//! The title screen is the entry point: local CPU play, online play,
+//! settings (not yet implemented), and language. The mode screen picks
+//! the game mode (four-player East-only through three-player hanchan)
+//! and pei dora, shared by CPU play and online room creation.
 
 use macroquad::prelude::*;
 
@@ -12,7 +12,7 @@ use crate::game::{GameMode, GameState, MenuOrigin};
 use crate::i18n::Key;
 use mahjong_core::settings::Lang;
 
-/// ボタンの矩形
+/// A button rectangle.
 struct Rect2 {
     x: f32,
     y: f32,
@@ -34,7 +34,7 @@ impl Rect2 {
     }
 }
 
-// 共通パネル（トップ画面・モード選択画面で同じ枠を使う）
+// Shared panel frame for the title and mode screens.
 const PANEL_W: f32 = 560.0;
 const PANEL_Y: f32 = 110.0;
 const PANEL_H: f32 = 580.0;
@@ -43,7 +43,7 @@ fn panel_x() -> f32 {
     (DESIGN_W - PANEL_W) / 2.0
 }
 
-/// メニューの縦積みボタン（幅・Xは共通、Yだけ変える）
+/// Vertically stacked menu buttons: shared width/X, varying Y.
 fn menu_button(y: f32, h: f32) -> Rect2 {
     Rect2 {
         x: DESIGN_W / 2.0 - 180.0,
@@ -53,7 +53,7 @@ fn menu_button(y: f32, h: f32) -> Rect2 {
     }
 }
 
-// ========== トップ画面 ==========
+// ========== Title screen ==========
 
 fn top_cpu_rect() -> Rect2 {
     menu_button(300.0, 56.0)
@@ -67,7 +67,7 @@ fn top_settings_rect() -> Rect2 {
     menu_button(452.0, 56.0)
 }
 
-/// 言語トグルのボタン矩形。idx 0=日本語, 1=English。
+/// Language-toggle rectangles; idx 0 = Japanese, 1 = English.
 fn top_lang_rect(idx: usize) -> Rect2 {
     const W: f32 = 140.0;
     const H: f32 = 40.0;
@@ -81,19 +81,19 @@ fn top_lang_rect(idx: usize) -> Rect2 {
     }
 }
 
-/// 言語トグルに表示する固有名（言語非依存の自称表記）。
+/// Language names shown on the toggle, each in its own language.
 const LANG_LABELS: [&str; 2] = ["日本語", "English"];
 
-/// トップ画面での操作
+/// Title-screen actions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TopMenuAction {
-    /// CPU対戦（モード選択へ）
+    /// Local CPU play (to mode selection)
     CpuBattle,
-    /// オンライン対戦（オンライン対戦設定へ）
+    /// Online play (to the online menu)
     Online,
 }
 
-/// メニュー画面共通のパネルとタイトルを描画する
+/// Draws the shared menu panel and title.
 fn draw_panel_background() {
     super::draw_setup_background();
     theme::draw_panel(
@@ -119,7 +119,7 @@ fn draw_menu_panel(font: Option<&Font>, title: &str, title_size: u16) {
     );
 }
 
-/// トップ画面のロゴを描画する（パネル背景 + ロゴ画像）
+/// Draws the title logo (panel background + image).
 fn draw_menu_logo(logo: &Texture2D) {
     draw_panel_background();
     let logo_w = PANEL_W - 80.0;
@@ -136,7 +136,7 @@ fn draw_menu_logo(logo: &Texture2D) {
     );
 }
 
-/// 大きなメニューボタンを描画する
+/// Draws a large menu button.
 fn draw_menu_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool) {
     if accent {
         theme::draw_gradient_button(
@@ -187,7 +187,7 @@ fn draw_menu_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool
     }
 }
 
-/// 押せないメニューボタン（未実装機能）を描画する
+/// Draws a disabled menu button (unimplemented feature).
 fn draw_disabled_button(font: Option<&Font>, rect: &Rect2, label: &str) {
     theme::draw_rounded_rect(
         rect.x,
@@ -216,7 +216,7 @@ fn draw_disabled_button(font: Option<&Font>, rect: &Rect2, label: &str) {
     );
 }
 
-/// 小さなトグルボタン（選択状態を金色で示す）を描画する
+/// Draws a small toggle button; gold marks the selection.
 fn draw_toggle(font: Option<&Font>, rect: &Rect2, label: &str, selected: bool, size: u16) {
     let (fill, border, text_color) = if selected {
         (
@@ -243,7 +243,7 @@ fn draw_toggle(font: Option<&Font>, rect: &Rect2, label: &str, selected: bool, s
     );
 }
 
-/// トップ画面を描画する
+/// Draws the title screen.
 pub fn draw_top_menu(state: &GameState, font: Option<&Font>, tile_textures: &super::TileTextures) {
     let tr = state.tr();
     draw_menu_logo(tile_textures.logo());
@@ -251,11 +251,10 @@ pub fn draw_top_menu(state: &GameState, font: Option<&Font>, tile_textures: &sup
     draw_menu_button(font, &top_cpu_rect(), tr.get(Key::CpuBattle), true);
     draw_menu_button(font, &top_online_rect(), tr.get(Key::OnlinePlay), true);
 
-    // 設定（ルール設定の変更）は未実装のため押せない
+    // Rules settings are unimplemented, so the button is disabled.
     let settings_label = format!("{}{}", tr.get(Key::SettingsMenu), tr.get(Key::ComingSoon));
     draw_disabled_button(font, &top_settings_rect(), &settings_label);
 
-    // 言語設定（日本語 / English）
     let lang_rect = top_lang_rect(0);
     draw_jp_text(
         font,
@@ -274,14 +273,13 @@ pub fn draw_top_menu(state: &GameState, font: Option<&Font>, tile_textures: &sup
     }
 }
 
-/// トップ画面の入力を処理する。ボタンが押された場合 Some(action) を返す。
+/// Handles title-screen input, returning any pressed action.
 pub fn handle_top_menu_input(state: &mut GameState) -> Option<TopMenuAction> {
     if !is_mouse_button_pressed(MouseButton::Left) {
         return None;
     }
     let (mx, my) = mouse_position_design();
 
-    // 言語切替トグル（日本語 / English）
     for (idx, lang) in [Lang::Ja, Lang::En].into_iter().enumerate() {
         if top_lang_rect(idx).contains(mx, my) {
             state.lang = lang;
@@ -300,33 +298,33 @@ pub fn handle_top_menu_input(state: &mut GameState) -> Option<TopMenuAction> {
     None
 }
 
-// ========== モード選択画面 ==========
+// ========== Mode-selection screen ==========
 
-/// 対局モードボタンの矩形。idx はモードトグルの表示順（GameMode::ALL）。
+/// Mode-button rectangles; idx follows GameMode::ALL order.
 fn mode_rect(idx: usize) -> Rect2 {
     menu_button(220.0 + idx as f32 * 66.0, 52.0)
 }
 
-/// 北抜きドラトグルの矩形（モードボタンの下）
+/// Pei dora toggle rectangle, under the mode buttons.
 fn nuki_rect() -> Rect2 {
     menu_button(504.0, 40.0)
 }
 
-/// 戻るボタンの矩形
+/// Back-button rectangle.
 fn mode_back_rect() -> Rect2 {
     menu_button(596.0, 40.0)
 }
 
-/// モード選択画面での操作
+/// Mode-screen actions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModeSelectAction {
-    /// モードを選んで次へ進む（ローカルはCPU設定へ、オンラインはルーム作成）
+    /// Pick a mode and continue (CPU setup locally, room creation online)
     ModeChosen(GameMode),
-    /// 前の画面へ戻る
+    /// Back to the previous screen
     Back,
 }
 
-/// 遷移元に応じたモード・北抜きドラの現在値を返す
+/// Current mode and pei dora values for the given origin.
 fn mode_and_nuki(state: &GameState, origin: MenuOrigin) -> (GameMode, bool) {
     match origin {
         MenuOrigin::Local => (state.setup_state.mode, state.setup_state.nuki_dora),
@@ -334,7 +332,7 @@ fn mode_and_nuki(state: &GameState, origin: MenuOrigin) -> (GameMode, bool) {
     }
 }
 
-/// モード選択画面を描画する
+/// Draws the mode-selection screen.
 pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrigin) {
     let tr = state.tr();
     draw_menu_panel(font, tr.get(Key::ModeSelectTitle), 26);
@@ -351,7 +349,7 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
         );
     }
 
-    // 北抜きドラトグル（三麻を選んで進む場合のみ効く）
+    // Pei dora toggle; only takes effect for three-player modes.
     let nuki_label = format!(
         "{}{}",
         tr.get(Key::NukiDoraToggle),
@@ -362,7 +360,7 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
     draw_menu_button(font, &mode_back_rect(), tr.get(Key::Back), false);
 }
 
-/// モード選択画面の入力を処理する。ボタンが押された場合 Some(action) を返す。
+/// Handles mode-screen input, returning any pressed action.
 pub fn handle_mode_select_input(
     state: &mut GameState,
     origin: MenuOrigin,

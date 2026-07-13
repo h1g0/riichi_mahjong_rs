@@ -1,7 +1,7 @@
-//! 統合テスト
+//! Integration tests.
 //!
-//! サーバをプロセス内で起動し、tokio-tungstenite のヘッドレスクライアント
-//! （ツモ切りボット）を接続して、ロビー操作と対局進行を検証する。
+//! Starts the server in-process and connects headless tokio-tungstenite
+//! clients (tsumogiri bots) to exercise lobby operations and game flow.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -17,21 +17,21 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-/// テスト用の短いタイマー設定
+/// Shortened timer configuration for tests.
 fn fast_config() -> RoomConfig {
     RoomConfig {
         ready_timeout: Duration::from_millis(200),
         lobby_timeout: Duration::from_secs(30),
         abandoned_timeout: Duration::from_secs(5),
-        // 既存テストの自動進行を阻害しないよう長めにする
+        // Kept long so the auto-advance never interferes with the tests.
         action_timeout: Some(Duration::from_secs(30)),
-        // テストは遅延なし・細かいティックでほぼ即時に進める
+        // No delay and fine ticks: tests run nearly instantly.
         cpu_action_delay: Duration::ZERO,
         tick_interval: Duration::from_millis(1),
     }
 }
 
-/// サーバをプロセス内で起動し、リッスンアドレスを返す
+/// Starts the server in-process and returns its listen address.
 async fn start_server(config: RoomConfig) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -46,10 +46,9 @@ async fn start_server(config: RoomConfig) -> SocketAddr {
     addr
 }
 
-/// 最終得点の整合性を確認する
-///
-/// ゲーム終了時に場に残った供託リーチ棒は誰にも配られないため、
-/// 総和は「初期点数の合計 − 1000 × 残り供託」になる。
+/// Checks final-score consistency: deposits left on the table at game
+/// end go to no one, so the total equals the starting sum minus
+/// 1000 x the remaining deposits.
 fn assert_scores_consistent(scores: [i32; 4]) {
     let sum: i32 = scores.iter().sum();
     assert!(sum <= 25000 * 4, "総和が初期点数を超えている: {scores:?}");
@@ -60,7 +59,7 @@ fn assert_scores_consistent(scores: [i32; 4]) {
     );
 }
 
-/// 診断トレース用にメッセージを短い文字列へ要約する
+/// Summarizes a message for the diagnostic trace.
 fn summarize(msg: &ServerMessage) -> String {
     match msg {
         ServerMessage::Event(e) => match e {
@@ -84,7 +83,7 @@ fn summarize(msg: &ServerMessage) -> String {
     }
 }
 
-/// テスト用 WebSocket クライアント
+/// Test WebSocket client.
 struct TestClient {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }
@@ -100,9 +99,9 @@ impl TestClient {
         self.ws.send(Message::text(json)).await.unwrap();
     }
 
-    /// 次の ServerMessage を受信する（Ping/Pong は読み飛ばす）
+    /// Receives the next ServerMessage, skipping Ping/Pong.
     ///
-    /// タイムアウトはCI等の高負荷環境での誤検知を避けるため長めに取る。
+    /// The timeout is generous to avoid false failures on loaded CI.
     async fn recv(&mut self) -> ServerMessage {
         loop {
             let frame = tokio::time::timeout(Duration::from_secs(30), self.ws.next())
@@ -121,7 +120,7 @@ impl TestClient {
         }
     }
 
-    /// Error メッセージが届くまで読み、そのエラーコードを返す
+    /// Reads until an Error message arrives and returns its code.
     async fn recv_error(&mut self) -> ErrorCode {
         for _ in 0..100 {
             if let ServerMessage::Error { code, .. } = self.recv().await {
@@ -131,12 +130,12 @@ impl TestClient {
         panic!("Errorメッセージが届かなかった");
     }
 
-    /// Hello を送り、Welcome のセッショントークンを返す
+    /// Sends Hello and returns Welcome's session token.
     async fn hello(&mut self, name: &str) -> String {
         self.hello_with_token(name, None).await
     }
 
-    /// セッショントークンを指定して Hello を送り、Welcome のトークンを返す
+    /// Sends Hello with a session token and returns Welcome's token.
     async fn hello_with_token(&mut self, name: &str, token: Option<String>) -> String {
         self.send(&ClientMessage::Hello {
             protocol_version: PROTOCOL_VERSION,
@@ -150,7 +149,7 @@ impl TestClient {
         }
     }
 
-    /// ルームを作成し、ルームコードを返す
+    /// Creates a room and returns its code.
     async fn create_room(&mut self) -> String {
         self.send(&ClientMessage::CreateRoom {
             length: GameLength::EastOnly,
@@ -163,7 +162,7 @@ impl TestClient {
         }
     }
 
-    /// 三麻ルームを作成し、ルームコードを返す
+    /// Creates a three-player room and returns its code.
     async fn create_sanma_room(&mut self) -> String {
         self.send(&ClientMessage::CreateRoom {
             length: GameLength::EastOnly,
@@ -185,17 +184,17 @@ impl TestClient {
         }
     }
 
-    /// 受信済みのメッセージをまとめて取り出す（50msの静止で区切る）
+    /// Drains buffered messages, cut off by 50ms of quiet.
     ///
-    /// `TileDrawn` と `NineTerminalsAvailable` のように連続で送られる
-    /// イベントは別フレームで届くため、まとめてから行動を判断する。
+    /// Back-to-back events like `TileDrawn` + `NineTerminalsAvailable`
+    /// arrive in separate frames, so decisions are made on the batch.
     async fn recv_batch(&mut self) -> Vec<ServerMessage> {
         let mut batch = vec![self.recv().await];
         loop {
             let frame = match tokio::time::timeout(Duration::from_millis(50), self.ws.next()).await
             {
                 Ok(Some(Ok(frame))) => frame,
-                // 静止 or 切断（切断は次の recv で検出する）
+                // Quiet or disconnected; the next recv detects the latter.
                 Err(_) | Ok(None) | Ok(Some(Err(_))) => break,
             };
             match frame {
@@ -209,21 +208,22 @@ impl TestClient {
         batch
     }
 
-    /// ツモ切りボットとして GameOver まで打ち続ける
+    /// Plays as a tsumogiri bot until GameOver.
     ///
-    /// `send_ready` が false の場合は局結果の確認（ReadyNextRound）を送らず、
-    /// サーバ側の自動進行に任せる。
+    /// With `send_ready` false, no ReadyNextRound is sent and the
+    /// server's auto-advance takes over.
     async fn play_until_game_over(&mut self, send_ready: bool) -> [i32; 4] {
         loop {
             let batch = self.recv_batch().await;
-            // 失敗時の診断用トレース（パニック時のみ表示される）
+            // Diagnostic trace, shown only on panic.
             for msg in &batch {
                 println!("[bot] recv {}", summarize(msg));
             }
 
-            // 九種九牌の選択があるターンはフェーズが WaitForNineTerminals の
-            // ため、同時に届いた TileDrawn への打牌は無効になる。宣言を
-            // 拒否すると、サーバが TileDrawn を再送して打牌を促す
+            // During a nine-terminals offer the phase is
+            // WaitForNineTerminals, so discarding on the concurrent
+            // TileDrawn would be invalid; declining makes the server
+            // re-send TileDrawn to prompt the discard.
             let nine_terminals = batch
                 .iter()
                 .any(|m| matches!(m, ServerMessage::Event(ServerEvent::NineTerminalsAvailable)));
@@ -260,8 +260,8 @@ impl TestClient {
                         code: ErrorCode::InvalidAction,
                         ..
                     } => {
-                        // 鳴き解決などのレースで無効になったアクション。
-                        // ツモ切りボットでは無害なので無視する。
+                        // The action lost a race (e.g. call resolution);
+                        // harmless for a tsumogiri bot.
                     }
                     ServerMessage::Error { code, message } => {
                         panic!("予期しないエラー: {code:?} {message}");
@@ -273,7 +273,7 @@ impl TestClient {
     }
 }
 
-/// 2人の人間 + CPU2人で東風戦を最後まで打ち切れることを確認する
+/// Two humans plus two CPUs must finish an East-only game.
 #[tokio::test]
 async fn test_full_game_with_two_humans() {
     tokio::time::timeout(Duration::from_secs(120), async {
@@ -289,12 +289,10 @@ async fn test_full_game_with_two_humans() {
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
 
-        // ゲストは自分の入室を反映した RoomState を受け取る
         match guest.recv().await {
             ServerMessage::RoomState { your_seat, .. } => assert_eq!(your_seat, 1),
             other => panic!("RoomStateでないメッセージ: {other:?}"),
         }
-        // ホストにも更新された RoomState が届く
         match host.recv().await {
             ServerMessage::RoomState { seats, .. } => {
                 assert!(matches!(
@@ -313,7 +311,7 @@ async fn test_full_game_with_two_humans() {
             guest.play_until_game_over(true),
         );
 
-        // 両者が同じ最終得点を観測し、点数の整合性が取れている
+        // Both observe the same, consistent final scores.
         assert_eq!(host_scores, guest_scores);
         assert_scores_consistent(host_scores);
     })
@@ -321,7 +319,8 @@ async fn test_full_game_with_two_humans() {
     .expect("テスト全体がタイムアウトした");
 }
 
-/// ReadyNextRound を誰も送らなくても自動進行で GameOver まで到達することを確認する
+/// The auto-advance must reach GameOver even when nobody sends
+/// ReadyNextRound.
 #[tokio::test]
 async fn test_ready_timeout_auto_advances() {
     tokio::time::timeout(Duration::from_secs(120), async {
@@ -340,7 +339,7 @@ async fn test_ready_timeout_auto_advances() {
     .expect("テスト全体がタイムアウトした");
 }
 
-/// ホストが指定したCPUの強さ・性格が各座席に反映される
+/// The host's CPU configs must reach the seats.
 #[tokio::test]
 async fn test_host_chosen_cpu_configs_apply() {
     use mahjong_server::cpu::client::{CpuLevel, CpuPersonality};
@@ -371,17 +370,15 @@ async fn test_host_chosen_cpu_configs_apply() {
         })
         .await;
 
-        // 対局開始時に届く RoomState で各CPU席の設定を確認する
         let seats = loop {
             if let ServerMessage::RoomState { seats, .. } = host.recv().await {
                 break seats;
             }
         };
 
-        // 座席0 はホスト（人間）
         assert!(matches!(seats[0], SeatInfo::Human { .. }));
-        // 座席1〜3にホストの指定した3構成が入る（席順はランダムなので
-        // どの席にどれが座るかは問わず、過不足がないことを確認する）
+        // Seats 1-3 carry the host's three configs; seats are shuffled,
+        // so check the multiset rather than positions.
         for spec in &specs {
             let count = seats[1..]
                 .iter()
@@ -400,7 +397,7 @@ async fn test_host_chosen_cpu_configs_apply() {
     .expect("テスト全体がタイムアウトした");
 }
 
-/// ホストの SetCpuConfigs が全参加者の RoomState に共有される（#245）
+/// The host's SetCpuConfigs must reach everyone's RoomState (#245).
 #[tokio::test]
 async fn test_set_cpu_configs_shared_in_lobby() {
     use mahjong_server::cpu::client::{CpuLevel, CpuPersonality};
@@ -417,7 +414,7 @@ async fn test_set_cpu_configs_shared_in_lobby() {
         guest
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
-        // 入室による RoomState を読み飛ばす（既定のCPU設定が入っている）
+        // Skip the join RoomStates (they carry the default configs).
         match guest.recv().await {
             ServerMessage::RoomState { cpu_configs, .. } => {
                 assert!(
@@ -444,13 +441,13 @@ async fn test_set_cpu_configs_shared_in_lobby() {
             },
         ];
 
-        // ホスト以外は変更できない
+        // Non-hosts must not be able to change the configs.
         guest
             .send(&ClientMessage::SetCpuConfigs { cpu_configs: specs })
             .await;
         assert_eq!(guest.recv_error().await, ErrorCode::NotHost);
 
-        // ホストの変更は全員へ新しい RoomState として届く
+        // The host's change reaches everyone as a fresh RoomState.
         host.send(&ClientMessage::SetCpuConfigs { cpu_configs: specs })
             .await;
         for client in [&mut host, &mut guest] {
@@ -459,7 +456,8 @@ async fn test_set_cpu_configs_shared_in_lobby() {
                     cpu_configs, seats, ..
                 } => {
                     assert_eq!(cpu_configs, Some(specs));
-                    // 対局開始前なので空席は Empty のまま（表示側で補う）
+                    // Pre-game, empty seats stay Empty; the UI decorates
+                    // them.
                     assert!(matches!(seats[2], SeatInfo::Empty));
                 }
                 other => panic!("RoomStateでないメッセージ: {other:?}"),
@@ -470,7 +468,7 @@ async fn test_set_cpu_configs_shared_in_lobby() {
     .expect("テスト全体がタイムアウトした");
 }
 
-/// プロトコルバージョン不一致は VersionMismatch エラーになる
+/// A protocol-version mismatch errors with VersionMismatch.
 #[tokio::test]
 async fn test_version_mismatch() {
     let addr = start_server(fast_config()).await;
@@ -485,7 +483,7 @@ async fn test_version_mismatch() {
     assert_eq!(client.recv_error().await, ErrorCode::VersionMismatch);
 }
 
-/// Hello 以外の最初のメッセージは BadMessage になる
+/// A first message other than Hello errors with BadMessage.
 #[tokio::test]
 async fn test_message_before_hello() {
     let addr = start_server(fast_config()).await;
@@ -496,7 +494,7 @@ async fn test_message_before_hello() {
     assert_eq!(client.recv_error().await, ErrorCode::BadMessage);
 }
 
-/// 存在しないルームコードへの参加は RoomNotFound になる
+/// Joining a nonexistent room errors with RoomNotFound.
 #[tokio::test]
 async fn test_join_unknown_room() {
     let addr = start_server(fast_config()).await;
@@ -510,7 +508,7 @@ async fn test_join_unknown_room() {
     assert_eq!(client.recv_error().await, ErrorCode::RoomNotFound);
 }
 
-/// 満席のルームへの参加は RoomFull になる
+/// Joining a full room errors with RoomFull.
 #[tokio::test]
 async fn test_room_full() {
     let addr = start_server(fast_config()).await;
@@ -541,7 +539,7 @@ async fn test_room_full() {
     assert_eq!(fifth.recv_error().await, ErrorCode::RoomFull);
 }
 
-/// 三麻ルームは3人で満席になる（4人目は RoomFull）
+/// A three-player room fills at three; the fourth gets RoomFull.
 #[tokio::test]
 async fn test_sanma_room_full_at_three() {
     let addr = start_server(fast_config()).await;
@@ -564,7 +562,6 @@ async fn test_sanma_room_full_at_three() {
         guests.push(guest);
     }
 
-    // 4人目はシート3が使用不可のため満席エラーになる
     let mut fourth = TestClient::connect(addr).await;
     fourth.hello("4人目").await;
     fourth
@@ -573,7 +570,8 @@ async fn test_sanma_room_full_at_three() {
     assert_eq!(fourth.recv_error().await, ErrorCode::RoomFull);
 }
 
-/// 三麻ルームで 2人の人間 + CPU1人が東風戦（東1〜3局）を打ち切れることを確認する
+/// A three-player room with two humans and one CPU must finish an
+/// East-only game (East 1-3).
 #[tokio::test]
 async fn test_sanma_full_game_with_two_humans() {
     tokio::time::timeout(Duration::from_secs(120), async {
@@ -592,7 +590,6 @@ async fn test_sanma_full_game_with_two_humans() {
             ServerMessage::RoomState { your_seat, .. } => assert_eq!(your_seat, 1),
             other => panic!("RoomStateでないメッセージ: {other:?}"),
         }
-        // ホスト側の更新 RoomState を読み捨てる
         match host.recv().await {
             ServerMessage::RoomState { .. } => {}
             other => panic!("RoomStateでないメッセージ: {other:?}"),
@@ -606,11 +603,10 @@ async fn test_sanma_full_game_with_two_humans() {
             guest.play_until_game_over(true),
         );
 
-        // 両者が同じ最終得点を観測している
         assert_eq!(host_scores, guest_scores);
-        // ダミー席（シート3）の点数は常に0
+        // The dummy seat's score stays 0.
         assert_eq!(host_scores[3], 0, "三麻でシート3に点数が入っている");
-        // 総和は 35000×3 以下で、差は供託（1000点）単位
+        // The total is at most 35000 x 3, short only by whole deposits.
         let sum: i32 = host_scores.iter().sum();
         assert!(
             sum <= 35000 * 3,
@@ -626,7 +622,7 @@ async fn test_sanma_full_game_with_two_humans() {
     .expect("テスト全体がタイムアウトした");
 }
 
-/// ホスト以外の StartGame は NotHost になる
+/// StartGame from a non-host errors with NotHost.
 #[tokio::test]
 async fn test_non_host_cannot_start() {
     let addr = start_server(fast_config()).await;
@@ -646,7 +642,7 @@ async fn test_non_host_cannot_start() {
     assert_eq!(guest.recv_error().await, ErrorCode::NotHost);
 }
 
-/// 手番でないプレイヤーのアクションは InvalidAction になる
+/// An out-of-turn action errors with InvalidAction.
 #[tokio::test]
 async fn test_out_of_turn_action_rejected() {
     let addr = start_server(fast_config()).await;
@@ -661,14 +657,14 @@ async fn test_out_of_turn_action_rejected() {
         .send(&ClientMessage::JoinRoom { code: code.clone() })
         .await;
 
-    host.recv().await; // ゲスト入室の RoomState
+    host.recv().await;
     host.send(&ClientMessage::StartGame { cpu_configs: None })
         .await;
 
-    // 起家はランダムであり、CPUが起家だと打牌遅延なしで即座に手番が進んで
-    // しまうため、「開始直後はホストの手番」という決め打ちはできない。
-    // 実際に自分の TileDrawn を受け取った方が今の手番なので、それを待って
-    // から、もう一方（手番でない側）のアクションが拒否されることを確認する。
+    // The dealer is random, and a CPU dealer races ahead with no
+    // discard delay, so "the host acts first" cannot be assumed.
+    // Whoever receives their own TileDrawn holds the turn; wait for
+    // that, then check the other side's action is rejected.
     let host_turn;
     loop {
         tokio::select! {
@@ -694,7 +690,7 @@ async fn test_out_of_turn_action_rejected() {
     assert_eq!(non_dealer.recv_error().await, ErrorCode::InvalidAction);
 }
 
-/// 対局開始後の参加は GameInProgress になる
+/// Joining after the game starts errors with GameInProgress.
 #[tokio::test]
 async fn test_join_after_start_rejected() {
     let addr = start_server(fast_config()).await;
@@ -712,7 +708,7 @@ async fn test_join_after_start_rejected() {
     assert_eq!(late.recv_error().await, ErrorCode::GameInProgress);
 }
 
-/// 対局が始まらないルームは期限切れで破棄される
+/// A room that never starts is discarded on expiry.
 #[tokio::test]
 async fn test_lobby_room_expires() {
     let config = RoomConfig {
@@ -735,7 +731,8 @@ async fn test_lobby_room_expires() {
     assert_eq!(guest.recv_error().await, ErrorCode::RoomNotFound);
 }
 
-/// 対局中に片方が切断しても CPU が代打ちして対局が完走することを確認する
+/// The game must finish with a CPU substituting for a mid-game
+/// disconnect.
 #[tokio::test]
 async fn test_disconnect_mid_game_cpu_takes_over() {
     tokio::time::timeout(Duration::from_secs(120), async {
@@ -751,11 +748,11 @@ async fn test_disconnect_mid_game_cpu_takes_over() {
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
 
-        host.recv().await; // ゲスト入室の RoomState
+        host.recv().await;
         host.send(&ClientMessage::StartGame { cpu_configs: None })
             .await;
 
-        // ゲストはゲーム開始を確認してから切断する
+        // The guest disconnects after seeing the game start.
         loop {
             if let ServerMessage::Event(ServerEvent::GameStarted { .. }) = guest.recv().await {
                 break;
@@ -763,7 +760,7 @@ async fn test_disconnect_mid_game_cpu_takes_over() {
         }
         drop(guest);
 
-        // ホストは最後まで打ち切れる（ゲスト座席はCPUが代打ち）
+        // The host plays to the end; the CPU covers the guest's seat.
         let scores = host.play_until_game_over(true).await;
         assert_scores_consistent(scores);
     })
@@ -771,7 +768,7 @@ async fn test_disconnect_mid_game_cpu_takes_over() {
     .expect("テスト全体がタイムアウトした");
 }
 
-/// 操作しない（AFK）プレイヤーがいてもタイムアウトで対局が完走することを確認する
+/// The game must finish despite an AFK player, via the turn timeout.
 #[tokio::test]
 async fn test_action_timeout_auto_acts() {
     tokio::time::timeout(Duration::from_secs(120), async {
@@ -787,9 +784,9 @@ async fn test_action_timeout_auto_acts() {
         host.send(&ClientMessage::StartGame { cpu_configs: None })
             .await;
 
-        // ホストは一切操作せず受信し続ける。
-        // サーバが既定アクション（ツモ切り/パス）を代行して対局が進む。
-        // 制限時間は 100ms なので表示秒数は 0 に丸められる（サーバは実時間で強制）
+        // The host only receives, never acts; the server's default
+        // actions (tsumogiri/pass) keep the game moving. The 100ms limit
+        // shows as 0 seconds (enforcement uses real time).
         let mut saw_turn_timer = false;
         loop {
             match host.recv().await {
@@ -809,11 +806,11 @@ async fn test_action_timeout_auto_acts() {
     .expect("テスト全体がタイムアウトした");
 }
 
-/// 無効なアクションの連投で手番の制限時間が延長されないことを確認する
+/// Spamming invalid actions must not extend the turn timer.
 ///
-/// かつては任意のメッセージ処理のたびに期限を張り直していたため、
-/// 制限時間より短い間隔でメッセージを送り続けると永遠にタイムアウトせず、
-/// 対局を止められた。同じ操作待ちが続く間は期限を維持する回帰テスト。
+/// The deadline used to be re-armed on every processed message, so
+/// sending faster than the limit stalled the game forever. Regression:
+/// the deadline persists while the same wait continues.
 #[tokio::test]
 async fn test_action_timeout_not_extended_by_invalid_actions() {
     tokio::time::timeout(Duration::from_secs(30), async {
@@ -829,15 +826,14 @@ async fn test_action_timeout_not_extended_by_invalid_actions() {
         host.send(&ClientMessage::StartGame { cpu_configs: None })
             .await;
 
-        // 自分のツモ（打牌待ち）まで読み進める
         loop {
             if let ServerMessage::Event(ServerEvent::TileDrawn { .. }) = host.recv().await {
                 break;
             }
         }
 
-        // 打牌せずに、制限時間より短い間隔で無効なアクションを送り続ける。
-        // それでもタイムアウトは発火し、サーバが代行打牌（ツモ切り）する
+        // Spam invalid actions faster than the limit without
+        // discarding; the timeout still fires and the server discards.
         let start = std::time::Instant::now();
         loop {
             assert!(
@@ -868,14 +864,14 @@ async fn test_action_timeout_not_extended_by_invalid_actions() {
     .expect("テスト全体がタイムアウトした");
 }
 
-/// 同一IPからの入室試行が多すぎると RateLimited で拒否されることを確認する
+/// Too many join attempts from one IP get RateLimited.
 #[tokio::test]
 async fn test_join_rate_limit() {
     let addr = start_server(fast_config()).await;
     let mut client = TestClient::connect(addr).await;
     client.hello("スパマー").await;
 
-    // 上限（10回）までは存在しないルームとして RoomNotFound
+    // Up to the cap (10), a missing room answers RoomNotFound.
     for _ in 0..10 {
         client
             .send(&ClientMessage::JoinRoom {
@@ -885,7 +881,7 @@ async fn test_join_rate_limit() {
         assert_eq!(client.recv_error().await, ErrorCode::RoomNotFound);
     }
 
-    // 11回目はレート制限で拒否される
+    // The 11th attempt is rate limited.
     client
         .send(&ClientMessage::JoinRoom {
             code: "ZZZZZZ".to_string(),
@@ -894,15 +890,16 @@ async fn test_join_rate_limit() {
     assert_eq!(client.recv_error().await, ErrorCode::RateLimited);
 }
 
-/// 切断したプレイヤーがトークンで再入室し、Resync で状態を再同期できることを確認する
+/// A disconnected player must rejoin by token and resync via Resync.
 ///
-/// ホストは継続して打ち、その裏でゲストが切断→再入室する。ホストが手番を
-/// 進め続けないと対局が止まるため、両者を `tokio::join!` で並行に動かす。
+/// The host keeps playing while the guest disconnects and rejoins; the
+/// game stalls unless the host keeps taking turns, so both run
+/// concurrently under `tokio::join!`.
 #[tokio::test]
 async fn test_reconnect_resyncs_and_resumes() {
     tokio::time::timeout(Duration::from_secs(120), async {
-        // CPU をわずかに遅延させ、再入室するまで対局が終わらないようにする
-        // （即時進行だと 300ms のスリープ中に終局してしまう）
+        // Delay the CPUs slightly so the game outlives the rejoin;
+        // immediate progress would end it during the 300ms sleep.
         let config = RoomConfig {
             cpu_action_delay: Duration::from_millis(50),
             tick_interval: Duration::from_millis(10),
@@ -920,14 +917,15 @@ async fn test_reconnect_resyncs_and_resumes() {
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
 
-        host.recv().await; // ゲスト入室の RoomState
+        host.recv().await;
         host.send(&ClientMessage::StartGame { cpu_configs: None })
             .await;
 
-        // ホスト: 最後まで打ち続ける
+        // Host: keep playing to the end.
         let host_fut = host.play_until_game_over(true);
 
-        // ゲスト: 開始確認 → 切断 → 再入室 → Resync 検証 → 再び切断
+        // Guest: see the start, disconnect, rejoin, verify the Resync,
+        // disconnect again.
         let guest_fut = async {
             loop {
                 if let ServerMessage::Event(ServerEvent::GameStarted { .. }) = guest.recv().await {
@@ -935,17 +933,16 @@ async fn test_reconnect_resyncs_and_resumes() {
                 }
             }
             drop(guest);
-            // CPU 代打ちで少し進める
+            // Let the CPU substitution advance a little.
             tokio::time::sleep(Duration::from_millis(300)).await;
 
-            // トークンを提示して再入室する
             let mut rejoin = TestClient::connect(addr).await;
             rejoin.hello_with_token("ゲスト", Some(guest_token)).await;
             rejoin
                 .send(&ClientMessage::JoinRoom { code: code.clone() })
                 .await;
 
-            // RoomState と Resync（現在の局の再生）を受け取る
+            // Receive RoomState plus the Resync (current-hand replay).
             let mut saw_room_state = false;
             let mut resync_events = None;
             for _ in 0..100 {
@@ -963,7 +960,8 @@ async fn test_reconnect_resyncs_and_resumes() {
             }
             assert!(saw_room_state, "再入室で RoomState が届かなかった");
             let events = resync_events.expect("Resync が届かなかった");
-            // 再生は現在の局の GameStarted から始まる（履歴は局ごとにリセット）
+            // The replay starts at the current hand's GameStarted;
+            // histories reset per hand.
             assert_eq!(
                 events
                     .iter()
@@ -973,8 +971,8 @@ async fn test_reconnect_resyncs_and_resumes() {
                 "Resync に GameStarted がちょうど1つ含まれるべき"
             );
 
-            // 検証が目的のため、再接続後の操作は行わず再び切断する
-            // （CPU が代打ちして対局はホスト主導で完走する）
+            // Verification done, disconnect again without acting; the
+            // CPU substitutes and the host finishes the game.
             drop(rejoin);
         };
 
@@ -985,10 +983,9 @@ async fn test_reconnect_resyncs_and_resumes() {
     .expect("テスト全体がタイムアウトした");
 }
 
-/// 古い接続からの遅延切断通知が再接続済みの座席を誤って切断しないことを確認する
-///
-/// ここでは順序どおり（切断 → 再接続）の正常系として、再接続後に対局が
-/// 継続することを確認する。
+/// A stale disconnect notice from an old connection must not disconnect
+/// a reconnected seat; the ordered case (disconnect, then reconnect) is
+/// verified to keep the game going.
 #[tokio::test]
 async fn test_reconnect_keeps_seat_connected() {
     tokio::time::timeout(Duration::from_secs(120), async {
@@ -1014,20 +1011,19 @@ async fn test_reconnect_keeps_seat_connected() {
         drop(guest);
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        // 再入室
         let mut rejoin = TestClient::connect(addr).await;
         rejoin.hello_with_token("ゲスト", Some(guest_token)).await;
         rejoin
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
-        // Resync まで読み飛ばす
+        // Skip ahead to the Resync.
         loop {
             if let ServerMessage::Resync { .. } = rejoin.recv().await {
                 break;
             }
         }
 
-        // ホストへ再接続が通知される
+        // The host is notified of the reconnection.
         let mut saw_reconnect = false;
         for _ in 0..50 {
             if let ServerMessage::PlayerConnectionChanged {

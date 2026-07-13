@@ -1,44 +1,45 @@
-//! クライアントUIの多言語化（i18n）
+//! Client UI internationalization.
 //!
-//! 表示言語は [`mahjong_core::settings::Lang`] を再利用する。固定の文言は
-//! [`Key`] 列挙型にキーごとへ全言語まとめて定義し（翻訳の取りこぼし防止）、
-//! 数値や牌などを含む可変の文言は [`Translator`] のメソッドで組み立てる
-//! （言語ごとの語順差を吸収するため）。
+//! The display language reuses [`mahjong_core::settings::Lang`]. Fixed
+//! strings live in the [`Key`] enum with every language defined per key
+//! (so missing translations cannot slip through); parameterized strings
+//! (with numbers, tiles, ...) are built by [`Translator`] methods to
+//! absorb word-order differences between languages.
 //!
-//! 役名・点数等級・風・ドラなどゲーム由来の用語は `mahjong-core` 側の
-//! ローカライズ関数を正典とし、ここでは UI 固有の文言のみを扱う。
+//! Game terms - yaku names, score ranks, winds, dora - are canonically
+//! localized in `mahjong-core`; this module covers UI-only strings.
 
 use mahjong_core::settings::Lang;
 use mahjong_core::tile::Wind;
 use mahjong_server::cpu::client::{CpuLevel, CpuPersonality};
 use mahjong_server::protocol::DrawReason;
 
-/// 現在の表示言語を保持し、文言を解決する軽量ハンドル。
+/// Lightweight handle holding the current language and resolving strings.
 ///
-/// [`GameState`](crate::game::GameState) が保持し、描画関数へ `&GameState`
-/// 経由で渡る。`Copy` なので自由に複製してよい。
+/// Owned by [`GameState`](crate::game::GameState) and passed to render
+/// functions via `&GameState`; `Copy`, so duplicate freely.
 #[derive(Debug, Clone, Copy)]
 pub struct Translator {
     lang: Lang,
 }
 
 impl Translator {
-    /// 指定言語の [`Translator`] を作る。
+    /// Creates a [`Translator`] for the language.
     pub fn new(lang: Lang) -> Self {
         Self { lang }
     }
 
-    /// 固定文言を解決する。
+    /// Resolves a fixed string.
     pub fn get(&self, key: Key) -> &'static str {
         key.text(self.lang)
     }
 
-    /// 現在の表示言語。
+    /// The current display language.
     pub fn lang(&self) -> Lang {
         self.lang
     }
 
-    /// CPU の強さラベル（0=弱い, 1=普通, 2=強い）。
+    /// CPU level label (0 = weak, 1 = normal, 2 = strong).
     pub fn strength_label(&self, idx: usize) -> &'static str {
         match self.lang {
             Lang::Ja => ["弱い", "普通", "強い"],
@@ -49,7 +50,8 @@ impl Translator {
         .unwrap_or("")
     }
 
-    /// CPU の性格ラベル（0=バランス, 1=スピード, 2=高得点, 3=守備的）。
+    /// CPU personality label (0 = balanced, 1 = speedy, 2 = high value,
+    /// 3 = defensive).
     pub fn personality_label(&self, idx: usize) -> &'static str {
         match self.lang {
             Lang::Ja => ["バランス", "スピード", "高得点", "守備的"],
@@ -60,16 +62,14 @@ impl Translator {
         .unwrap_or("")
     }
 
-    /// 設定画面の CPU カード名（例: 「CPU 1」）。
-    ///
-    /// 席順は対局開始時にランダムで決まるため、相対位置ではなく番号で表す。
+    /// CPU card name on the setup screen (e.g. "CPU 1"); numbered rather
+    /// than positional because seats are randomized at game start.
     pub fn cpu_slot(&self, idx: usize) -> String {
         format!("CPU {}", idx + 1)
     }
 
-    /// 局表示（例: 日「東1局」/ 英「East 1」）。`round_number` は 0 始まり。
-    ///
-    /// `rounds_per_wind` は場風あたりの局数（＝プレイヤー人数。四麻=4、三麻=3）。
+    /// Hand label (JA 「東1局」 / EN "East 1"); `round_number` is 0-based
+    /// and `rounds_per_wind` equals the player count.
     pub fn round_label(&self, round_number: usize, rounds_per_wind: usize) -> String {
         let wind = Wind::from_index(round_number / rounds_per_wind).name(self.lang);
         let num = (round_number % rounds_per_wind) + 1;
@@ -79,7 +79,7 @@ impl Translator {
         }
     }
 
-    /// 本場数の表記（例: 日「{n}本場」/ 英「{n} honba」）。上部バーの局表示に付す。
+    /// Honba caption (JA 「{n}本場」 / EN "{n} honba") on the top bar.
     pub fn honba_suffix(&self, n: usize) -> String {
         match self.lang {
             Lang::Ja => format!("{n}本場"),
@@ -87,7 +87,7 @@ impl Translator {
         }
     }
 
-    /// 残り枚数を強調する表記（例: 日「残{n}枚」/ 英「{n} left」）。中央表示用。
+    /// Remaining-tiles caption (JA 「残{n}枚」 / EN "{n} left").
     pub fn wall_remaining(&self, n: usize) -> String {
         match self.lang {
             Lang::Ja => format!("残{n}枚"),
@@ -95,7 +95,7 @@ impl Translator {
         }
     }
 
-    /// 翻数（例: 日「{n}飜」/ 英「{n} han」）。
+    /// Han caption (JA 「{n}飜」 / EN "{n} han").
     pub fn han(&self, n: u32) -> String {
         match self.lang {
             Lang::Ja => format!("{n}飜"),
@@ -103,7 +103,7 @@ impl Translator {
         }
     }
 
-    /// 翻符のまとめ表記（例: 日「{han}飜 {fu}符」/ 英「{han} han {fu} fu」）。
+    /// Combined han/fu caption (JA 「{han}飜 {fu}符」 / EN "{han} han {fu} fu").
     pub fn han_fu(&self, han: u32, fu: u32) -> String {
         match self.lang {
             Lang::Ja => format!("{han}飜 {fu}符"),
@@ -111,7 +111,7 @@ impl Translator {
         }
     }
 
-    /// 供託リーチ棒の本数（例: 日「供託 {n}本」/ 英「Deposit {n}」）。
+    /// Riichi-deposit caption (JA 「供託 {n}本」 / EN "Deposit {n}").
     pub fn riichi_deposit(&self, n: usize) -> String {
         match self.lang {
             Lang::Ja => format!("供託 {n}本"),
@@ -119,7 +119,7 @@ impl Translator {
         }
     }
 
-    /// 点数表記（例: 日「{s}点」/ 英「{s} pts」）。`s` は桁区切り済みの文字列。
+    /// Points caption (JA 「{s}点」 / EN "{s} pts"); `s` is pre-formatted.
     pub fn points(&self, s: &str) -> String {
         match self.lang {
             Lang::Ja => format!("{s}点"),
@@ -127,7 +127,7 @@ impl Translator {
         }
     }
 
-    /// ロビーのルームコード見出し（例: 日「ルームコード  {code}」/ 英「Room code  {code}」）。
+    /// Lobby room-code heading.
     pub fn room_code(&self, code: &str) -> String {
         match self.lang {
             Lang::Ja => format!("ルームコード  {code}"),
@@ -135,7 +135,7 @@ impl Translator {
         }
     }
 
-    /// CPU の強さ名（`CpuLevel` から）。
+    /// CPU level name from `CpuLevel`.
     pub fn cpu_level_name(&self, level: CpuLevel) -> &'static str {
         let idx = match level {
             CpuLevel::Weak => 0,
@@ -145,7 +145,7 @@ impl Translator {
         self.strength_label(idx)
     }
 
-    /// CPU の性格名（`CpuPersonality` から）。
+    /// CPU personality name from `CpuPersonality`.
     pub fn cpu_personality_name(&self, personality: CpuPersonality) -> &'static str {
         let idx = match personality {
             CpuPersonality::Balanced => 0,
@@ -156,7 +156,8 @@ impl Translator {
         self.personality_label(idx)
     }
 
-    /// ロビーの座席に表示する CPU ラベル（例: 日「CPU (普通・バランス)」/ 英「CPU (Normal, Balanced)」）。
+    /// Lobby CPU seat label (JA 「CPU (普通・バランス)」 /
+    /// EN "CPU (Normal, Balanced)").
     pub fn cpu_seat_label(&self, level: CpuLevel, personality: CpuPersonality) -> String {
         let lv = self.cpu_level_name(level);
         let ps = self.cpu_personality_name(personality);
@@ -166,9 +167,8 @@ impl Translator {
         }
     }
 
-    /// ロビーの空席行（空席をどのCPUが埋めるかを添える）。
-    ///
-    /// 例: 日「空席（CPU: 普通・バランス）」/ 英「Empty (CPU: Normal, Balanced)」。
+    /// Lobby empty-seat row, noting which CPU would fill it
+    /// (JA 「空席（CPU: 普通・バランス）」 / EN "Empty (CPU: ...)").
     pub fn empty_seat_cpu_label(&self, level: CpuLevel, personality: CpuPersonality) -> String {
         let lv = self.cpu_level_name(level);
         let ps = self.cpu_personality_name(personality);
@@ -178,20 +178,19 @@ impl Translator {
         }
     }
 
-    /// ロビーの参加者行（例: 日「1: {who}{marks}」/ 英「1: {who}{marks}」）。
-    ///
-    /// 席順（風）は対局開始時にランダムで決まるため、風ではなく
-    /// 参加順の番号（1始まり）で表示する。
+    /// Lobby member row ("1: {who}{marks}"); numbered by join order
+    /// (1-based) rather than wind, since seats are randomized at start.
     pub fn seat_row(&self, number: usize, who: &str, marks: &str) -> String {
         format!("{number}: {who}{marks}")
     }
 
-    /// 切断中プレイヤーの席表記（例: 日「{name}（切断中）」/ 英「{name} (offline)」）。
+    /// Disconnected-player seat caption (JA 「{name}（切断中）」 /
+    /// EN "{name} (offline)").
     pub fn disconnected_name(&self, name: &str) -> String {
         format!("{name}{}", self.get(Key::MarkerDisconnected))
     }
 
-    /// 流局理由の名称。
+    /// Names of the draw reasons.
     pub fn draw_reason(&self, reason: DrawReason) -> &'static str {
         match self.lang {
             Lang::Ja => match reason {
@@ -213,7 +212,7 @@ impl Translator {
         }
     }
 
-    /// 流局の見出し（例: 日「流局（{理由}）」/ 英「Draw ({reason})」）。
+    /// Draw heading (JA 「流局（{reason}）」 / EN "Draw ({reason})").
     pub fn draw_headline(&self, reason: DrawReason) -> String {
         let reason = self.draw_reason(reason);
         match self.lang {
@@ -222,7 +221,7 @@ impl Translator {
         }
     }
 
-    /// テンパイ者の一覧行（例: 日「テンパイ: {names}」/ 英「Tenpai: {names}」）。
+    /// Tenpai-players line (JA 「テンパイ: {names}」 / EN "Tenpai: {names}").
     pub fn tenpai_list(&self, names: &str) -> String {
         match self.lang {
             Lang::Ja => format!("テンパイ: {names}"),
@@ -230,7 +229,7 @@ impl Translator {
         }
     }
 
-    /// 供託本数の行（例: 日「供託: {n}本」/ 英「Deposits: {n}」）。
+    /// Deposits line (JA 「供託: {n}本」 / EN "Deposits: {n}").
     pub fn deposit_line(&self, n: usize) -> String {
         match self.lang {
             Lang::Ja => format!("供託: {n}本"),
@@ -238,7 +237,7 @@ impl Translator {
         }
     }
 
-    /// 放銃者の注記（例: 日「（{name}が放銃）」/ 英「 (dealt in by {name})」）。
+    /// Deal-in note (JA 「（{name}が放銃）」 / EN " (dealt in by {name})").
     pub fn dealt_in_by(&self, name: &str) -> String {
         match self.lang {
             Lang::Ja => format!("（{name}が放銃）"),
@@ -246,7 +245,8 @@ impl Translator {
         }
     }
 
-    /// 和了の見出し（例: 日「{winner}が{type}和了！」/ 英「{winner} wins by {type}!」）。
+    /// Win heading (JA 「{winner}が{type}和了！」 /
+    /// EN "{winner} wins by {type}!").
     pub fn win_headline(&self, winner: &str, win_type: &str) -> String {
         match self.lang {
             Lang::Ja => format!("{winner}が{win_type}和了！"),
@@ -254,7 +254,7 @@ impl Translator {
         }
     }
 
-    /// 手番制限時間の残り秒数（例: 日「残り {n} 秒」/ 英「{n}s left」）。
+    /// Turn-timer caption (JA 「残り {n} 秒」 / EN "{n}s left").
     pub fn seconds_left(&self, n: u32) -> String {
         match self.lang {
             Lang::Ja => format!("残り {n} 秒"),
@@ -262,7 +262,7 @@ impl Translator {
         }
     }
 
-    /// 順位の接尾辞（日は常に「位」、英は序数接尾辞）。`rank` は 0 始まり。
+    /// Rank suffix (JA always 「位」, EN ordinal suffixes); `rank` is 0-based.
     pub fn place_suffix(&self, rank: usize) -> &'static str {
         match self.lang {
             Lang::Ja => "位",
@@ -276,158 +276,159 @@ impl Translator {
     }
 }
 
-/// 引数を取らない固定 UI 文言のキー。
+/// Keys for fixed, parameterless UI strings.
 ///
-/// 各バリアントの訳は [`Key::text`] にまとめて定義する。言語を増やすときは
-/// `Lang` に追加し、各 `match` 腕へ訳を足す（コンパイル時に網羅性が保証される）。
+/// Every variant's translations live together in [`Key::text`]. Adding a
+/// language means extending `Lang` and each `match` arm; exhaustiveness
+/// is compiler-checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
-    /// トップ画面: CPU対戦ボタン
+    /// Title: local CPU game button
     CpuBattle,
-    /// トップ画面: 設定ボタン（ルール設定。未実装）
+    /// Title: rules-settings button (not yet implemented)
     SettingsMenu,
-    /// 未実装機能の注記
+    /// Not-yet-implemented note
     ComingSoon,
-    /// トップ画面: 言語設定の見出し
+    /// Title: language heading
     LanguageLabel,
-    /// モード選択画面のタイトル
+    /// Mode-selection screen title
     ModeSelectTitle,
-    /// 北抜きドラが三麻のみ有効である旨の注記
+    /// Note that pei dora applies to three-player games only
     SanmaOnlyNote,
-    /// CPU設定画面のタイトル・ロビーのCPU設定ボタン
+    /// CPU-setup screen title / lobby CPU-setup button
     CpuSetupTitle,
-    /// 決定ボタン（オンラインのCPU設定確定）
+    /// Confirm button (online CPU setup)
     Confirm,
-    /// 対局モード: 四人東風
+    /// Mode: four-player East-only
     ModeFourEast,
-    /// 対局モード: 四人半荘
+    /// Mode: four-player hanchan
     ModeFourHanchan,
-    /// 対局モード: 三人東風
+    /// Mode: three-player East-only
     ModeThreeEast,
-    /// 対局モード: 三人半荘
+    /// Mode: three-player hanchan
     ModeThreeHanchan,
-    /// 北抜きドラトグル
+    /// Pei dora toggle
     NukiDoraToggle,
-    /// CPU の強さ見出し
+    /// CPU level heading
     CpuStrengthLabel,
-    /// CPU の性格見出し
+    /// CPU personality heading
     CpuPersonalityLabel,
-    /// ローカル対局を開始するボタン
+    /// Start-local-game button
     StartGame,
-    /// オンライン対戦へ進むボタン
+    /// Go-online button
     OnlinePlay,
-    /// 対局開始待ちの表示
+    /// Waiting-for-start caption
     GameStarting,
-    /// 得点チップなどでの自分の表示名
+    /// Our own name on score chips etc.
     You,
-    /// 振聴バッジ
+    /// Furiten badge
     Furiten,
-    /// リーチ中バッジ
+    /// Riichi badge
     RiichiActive,
-    /// リーチ宣言牌の選択を促すバッジ
+    /// Badge prompting the riichi discard choice
     SelectDiscard,
-    /// 選択牌で振聴になる警告バッジ
+    /// Warning badge: the selected tile causes furiten
     WillBeFuriten,
-    /// 禁止牌を選択したときの「喰い替えです！」警告バッジ
+    /// Swap-calling warning badge
     IsSwapCalling,
-    /// ツモ（自摸和了／ツモ牌ラベル）
+    /// Tsumo (win/tile label)
     Tsumo,
-    /// ロン（出和了）
+    /// Ron
     Ron,
-    /// 次の和了へ進む（複数和了時）
+    /// Next winner (multiple ron)
     NextWin,
-    /// 次へ進む
+    /// Next
     Next,
-    /// 流局
+    /// Draw
     RoundDraw,
-    /// ゲーム終了
+    /// Game over
     GameOver,
-    /// もう一度遊ぶ
+    /// Play again
     PlayAgain,
-    /// 和了ボタン
+    /// Win button
     Win,
-    /// 他家の手番待ちヒント
+    /// Waiting-for-others hint
     WaitingOtherPlayer,
-    /// リーチ宣言時の打牌選択ヒント
+    /// Riichi discard-choice hint
     RiichiSelectHint,
-    /// リーチ中の自動ツモ切りヒント
+    /// Auto-tsumogiri-under-riichi hint
     RiichiAutoDiscard,
-    /// 通常時の打牌操作ヒント
+    /// Normal discard hint
     NormalPlayHint,
-    /// リーチ宣言ボタン
+    /// Riichi button
     Riichi,
-    /// ポン
+    /// Pon
     Pon,
-    /// カン
+    /// Kan
     Kan,
-    /// チー
+    /// Chii
     Chi,
-    /// 北抜き（三麻の抜きドラ宣言ボタン）
+    /// Pei (North extraction button)
     Pei,
-    /// パス
+    /// Pass
     Pass,
-    /// キャンセル
+    /// Cancel
     Cancel,
-    /// チーの組み合わせ選択の見出し
+    /// Chii option-picker heading
     ChiSelectTitle,
-    /// ポンの組み合わせ選択の見出し
+    /// Pon option-picker heading
     PonSelectTitle,
-    /// 九種九牌の見出し
+    /// Nine-terminals heading
     NineTerminals,
-    /// 九種九牌で流局するか確認
+    /// Nine-terminals confirmation prompt
     DeclareDrawPrompt,
-    /// 九種九牌で流局を宣言するボタン
+    /// Declare-the-draw button
     DeclareDraw,
-    /// 続ける（九種九牌で続行）
+    /// Continue (decline nine terminals)
     Continue,
-    /// 名前入力欄の見出し
+    /// Name-field heading
     NameLabel,
-    /// ルームコード入力欄の見出し
+    /// Room-code-field heading
     RoomCodeJoinLabel,
-    /// ルーム作成ボタン
+    /// Create-room button
     CreateRoom,
-    /// ルーム参加ボタン
+    /// Join-room button
     JoinRoom,
-    /// 戻るボタン
+    /// Back button
     Back,
-    /// ロビーの見出し
+    /// Lobby heading
     Lobby,
-    /// ルーム情報取得中の表示
+    /// Fetching-room-info caption
     LoadingRoom,
-    /// ルームコード共有の案内
+    /// Share-the-room-code hint
     ShareCodeHint,
-    /// 空席はCPUが埋める旨の注記
+    /// Note that CPUs fill empty seats
     EmptySeatsCpu,
-    /// ホストの開始待ち表示
+    /// Waiting-for-host caption
     WaitingHost,
-    /// 退出ボタン
+    /// Leave button
     Leave,
-    /// 座席ラベルの「自分」マーカー
+    /// "You" seat marker
     MarkerYou,
-    /// 座席ラベルの「ホスト」マーカー
+    /// "Host" seat marker
     MarkerHost,
-    /// 座席ラベルの「切断中」マーカー
+    /// "Offline" seat marker
     MarkerDisconnected,
-    /// サーバ接続中の表示
+    /// Connecting caption
     Connecting,
-    /// サーバ切断の表示
+    /// Disconnected caption
     Disconnected,
-    /// 空席
+    /// Empty seat
     EmptySeat,
-    /// 既定の表示名
+    /// Default display name
     DefaultPlayerName,
-    /// ルームコードの桁数エラー
+    /// Room-code length error
     RoomCodeLengthError,
-    /// 再接続中の表示
+    /// Reconnecting caption
     Reconnecting,
-    /// 他プレイヤー切断・CPU代打ちの表示
+    /// Opponent-disconnected / CPU-substitution caption
     PeerDisconnected,
-    /// 通信エラーの汎用表示（技術的な詳細はログに出す）
+    /// Generic transport-error caption (details go to the log)
     NetworkError,
 }
 
 impl Key {
-    /// 指定言語での文言を返す。
+    /// The string in the given language.
     pub fn text(self, lang: Lang) -> &'static str {
         match self {
             Key::CpuBattle => match lang {
@@ -584,12 +585,12 @@ impl Key {
             },
             Key::Kan => match lang {
                 Lang::Ja => "カン",
-                // 用語集（docs/glossary.md）に合わせ呼称「kan」を用いる
+                // "kan" per the glossary (docs/glossary.md).
                 Lang::En => "Kan",
             },
             Key::Chi => match lang {
                 Lang::Ja => "チー",
-                // 用語集（docs/glossary.md）に合わせ "chii" を用いる
+                // "chii" per the glossary (docs/glossary.md).
                 Lang::En => "Chii",
             },
             Key::Pei => match lang {
@@ -742,7 +743,7 @@ mod tests {
         assert_eq!(en.cpu_slot(2), "CPU 3");
     }
 
-    /// 空席行にCPU設定が言語に応じて添えられること（#245）
+    /// The empty-seat row must localize its CPU config note (#245).
     #[test]
     fn empty_seat_cpu_label_localizes() {
         let ja = Translator::new(Lang::Ja);
@@ -763,15 +764,15 @@ mod tests {
         assert_eq!(t.strength_label(9), "");
     }
 
-    /// 局表示が場風あたりの局数（四麻=4、三麻=3）を反映すること（#271）
+    /// The hand label must respect hands-per-wind (4 or 3) (#271).
     #[test]
     fn round_label_respects_rounds_per_wind() {
         let ja = Translator::new(Lang::Ja);
         let en = Translator::new(Lang::En);
-        // 四麻: 東4局の次が南1局
+        // Four-player: South 1 follows East 4.
         assert_eq!(ja.round_label(3, 4), "東4局");
         assert_eq!(ja.round_label(4, 4), "南1局");
-        // 三麻: 東3局の次が南1局
+        // Three-player: South 1 follows East 3.
         assert_eq!(ja.round_label(2, 3), "東3局");
         assert_eq!(ja.round_label(3, 3), "南1局");
         assert_eq!(en.round_label(3, 3), "South 1");

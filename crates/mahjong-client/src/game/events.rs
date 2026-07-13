@@ -1,9 +1,9 @@
-//! サーバイベントの処理と結果画面の状態更新
+//! Server-event handling and result-screen state updates.
 
 use super::*;
 
 impl GameState {
-    /// サーバイベントを処理する
+    /// Applies a server event.
     pub fn handle_event(&mut self, event: ServerEvent) {
         match event {
             ServerEvent::GameStarted {
@@ -24,8 +24,10 @@ impl GameState {
                 self.pei_counts = [0; 4];
                 self.can_pei = false;
                 self.seat_wind = Some(seat_wind);
-                // 起家の座席を逆算する: 現在の親の座席（自分の風から求まる）を
-                // 局番号ぶん巻き戻す。連荘では局番号が進まないため常に一致する。
+                // Recover the starting dealer's seat by rewinding the
+                // current dealer (derived from our wind) by the hand
+                // number; continuations do not advance it, so this always
+                // matches.
                 let n = self.player_count;
                 let dealer_seat = (self.my_seat + n - seat_wind.to_index()) % n;
                 self.initial_dealer_seat = (dealer_seat + n - round_number % n) % n;
@@ -79,7 +81,7 @@ impl GameState {
                 is_furiten,
             } => {
                 self.drawn = Some(tile);
-                // 新しいツモに対して自動ツモ切りの待ち時間を取り直す
+                // Restart the auto-tsumogiri delay for the new draw.
                 self.riichi_auto_discard_at = None;
                 self.remaining_tiles = remaining_tiles;
                 self.is_my_turn = true;
@@ -93,7 +95,7 @@ impl GameState {
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
                 self.refresh_can_pei();
-                // ツモ後は喰い替え制限が解除される
+                // A draw lifts the swap-calling restriction.
                 self.forbidden_discards.clear();
                 self.selected_forbidden_swap = false;
             }
@@ -110,7 +112,8 @@ impl GameState {
                 self.turn_player = Some(player);
                 let relative_idx = self.relative_player_index(player);
                 if relative_idx > 0 {
-                    // ツモ牌は手牌の右に張り出して表示する（手牌の枚数には含めない）
+                    // The drawn tile hangs to the right of the hand and
+                    // is not part of its count.
                     self.other_players[relative_idx - 1].has_drawn = true;
                 }
             }
@@ -122,8 +125,9 @@ impl GameState {
                 hand_index,
             } => {
                 self.last_discarder = Some(player);
-                // 新しい打牌が出たら、過去の鳴き打診で残った call_discarder を捨てる。
-                // （パスして鳴かなかった場合に古い値が残り、次の鳴き元判定を誤らせていた）
+                // A new discard clears any call_discarder left from an
+                // earlier call offer; a stale value (after passing) used to
+                // misattribute the next call's source.
                 self.call_discarder = None;
                 let relative_idx = self.relative_player_index(player);
                 let is_riichi = self.pending_riichi_player == Some(player);
@@ -137,14 +141,13 @@ impl GameState {
                     is_called: false,
                 });
 
-                // 他プレイヤーが捨てた場合、隠し手牌の表示を更新
                 if relative_idx > 0 {
                     let started_at = self.clock;
                     let other = &mut self.other_players[relative_idx - 1];
                     let had_drawn = other.has_drawn;
                     other.consume_tiles(1);
-                    // 手出しなら、抜かれた位置の空白を詰めるアニメーションを開始する
-                    // （ツモ切りは手牌が動かないので演出なし）
+                    // On a hand discard, animate closing the gap; a
+                    // tsumogiri leaves the hand untouched.
                     other.tedashi_anim = if is_tsumogiri {
                         None
                     } else {
@@ -156,7 +159,6 @@ impl GameState {
                     };
                 }
 
-                // 自分が捨てた場合
                 if Some(player) == self.seat_wind {
                     self.is_my_turn = false;
                     self.drawn = None;
@@ -165,7 +167,7 @@ impl GameState {
                     self.clear_riichi_selection();
                     self.self_kan_options.clear();
                     self.can_pei = false;
-                    // 打牌が完了したので喰い替え制限を解除する
+                    // The discard completes, lifting the restriction.
                     self.forbidden_discards.clear();
                     self.selected_forbidden_swap = false;
                 }
@@ -187,20 +189,17 @@ impl GameState {
                 called_tile,
                 tiles,
             } => {
-                // 鳴き選択肢をクリア
                 self.available_calls.clear();
                 self.call_target_tile = None;
                 self.refresh_self_kan_options();
 
-                // 鳴いたプレイヤーに手番が移る（ロンは局が終わるので対象外）
+                // The caller takes the turn (ron ends the hand instead).
                 if !matches!(call_type, CallType::Ron) {
                     self.turn_player = Some(player);
                 }
 
-                // CallType → MeldType 変換
                 let category = Self::call_type_to_meld_type(&call_type);
 
-                // 鳴き元の判定
                 let meld_from = match call_type {
                     CallType::Ankan => MeldFrom::Myself,
                     CallType::Kakan => MeldFrom::Myself,
@@ -213,8 +212,9 @@ impl GameState {
                     }
                 };
 
-                // 鳴かれた牌（ポン・チー・大明槓）を河で薄く表示するためマークする。
-                // 取られた牌は鳴いた側の手番直前に捨てられた、放銃元の河の最後の該当牌。
+                // Mark the called tile so the discard pool dims it. The
+                // taken tile is the last matching tile in the discarder's
+                // pool.
                 if matches!(
                     call_type,
                     CallType::Pon | CallType::Chi | CallType::Daiminkan
@@ -232,7 +232,6 @@ impl GameState {
 
                 self.call_discarder = None;
 
-                // 他プレイヤーが鳴いた場合、副露情報を記録
                 let relative_idx = self.relative_player_index(player);
                 if relative_idx > 0 {
                     let other_idx = relative_idx - 1;
@@ -247,7 +246,7 @@ impl GameState {
                             }) {
                                 meld.category = MeldType::Kakan;
                                 meld.tiles = tiles.clone();
-                                // from はポン時のままにする
+                                // Keep the pon's original `from`.
                             } else {
                                 other.melds.push(Meld {
                                     category,
@@ -256,7 +255,8 @@ impl GameState {
                                     called_tile: Some(called_tile),
                                 });
                             }
-                            // 加カンは手牌かツモ牌から1枚を副露へ移す
+                            // A kakan moves one tile from the hand or
+                            // drawn tile into the meld.
                             other.consume_tiles(1);
                         }
                         CallType::Ankan => {
@@ -266,7 +266,7 @@ impl GameState {
                                 from: MeldFrom::Myself,
                                 called_tile: None,
                             });
-                            // 暗カンは手牌＋ツモ牌から4枚を副露へ移す
+                            // An ankan moves four tiles into the meld.
                             other.consume_tiles(4);
                         }
                         CallType::Pon | CallType::Chi => {
@@ -290,7 +290,6 @@ impl GameState {
                     }
                 }
 
-                // 自分が鳴いた場合、副露情報を保存し打牌待ちへ
                 if Some(player) == self.seat_wind {
                     match call_type {
                         CallType::Ron => {}
@@ -305,8 +304,9 @@ impl GameState {
                             self.drawn = None;
                             self.clear_riichi_selection();
                             self.self_kan_options.clear();
-                            // チー・ポン直後の打牌では喰い替え牌を捨てられない。
-                            // （大明槓は嶺上ツモになるため対象外）
+                            // The post-call discard must respect the
+                            // swap-calling rule (called quads draw a
+                            // replacement instead).
                             self.forbidden_discards = match call_type {
                                 CallType::Pon | CallType::Chi => self
                                     .melds
@@ -359,7 +359,8 @@ impl GameState {
 
             ServerEvent::PeiDeclared { player, pei_counts } => {
                 self.pei_counts = pei_counts;
-                // 他家の北抜きは手牌かツモ牌から北が1枚消える（補充ツモで戻る）
+                // An opponent's pei removes one North from their hidden
+                // hand; the replacement draw restores the count.
                 let relative_idx = self.relative_player_index(player);
                 if relative_idx > 0 {
                     self.other_players[relative_idx - 1].consume_tiles(1);
@@ -374,10 +375,8 @@ impl GameState {
                 self.scores = scores;
                 self.riichi_sticks = riichi_sticks;
 
-                // 次の打牌をリーチ宣言牌としてマーク
                 self.pending_riichi_player = Some(player);
 
-                // 自分がリーチした場合
                 if Some(player) == self.seat_wind {
                     self.is_riichi = true;
                     self.can_riichi = false;
@@ -409,7 +408,6 @@ impl GameState {
                 self.scores = scores;
                 self.riichi_sticks = 0;
 
-                // 手牌情報を取得
                 let (win_hand, win_melds) =
                     if let Some(info) = player_hands.iter().find(|p| p.wind == winner) {
                         let hand = info.hand.clone();
@@ -441,7 +439,8 @@ impl GameState {
                     String::new()
                 };
 
-                // 構造化された役・ドラ・等級を表示言語へ解決する。
+                // Resolve the structured yaku/dora/rank into the
+                // display language.
                 let yaku: Vec<(String, u32)> = yaku_list
                     .iter()
                     .map(|(item, y_han)| (item.name(has_opened, lang).to_string(), *y_han))
@@ -495,7 +494,7 @@ impl GameState {
                     riichi_sticks,
                 });
 
-                // 最初のRoundWonでフェーズ遷移・表示を初期化
+                // The first RoundWon initializes the phase and display.
                 if self.phase != GamePhase::RoundResult {
                     self.win_result_index = 0;
                     self.apply_current_win_result();
@@ -548,12 +547,12 @@ impl GameState {
         }
     }
 
-    /// 現在表示中の和了結果ページを返す（流局時は None）。
+    /// The win-result page being shown; None on a draw.
     pub fn current_win_result(&self) -> Option<&WinResult> {
         self.win_results.get(self.win_result_index)
     }
 
-    /// 現在の win_result_index が指すページを GameState の表示用フィールドに反映する
+    /// Copies the page at win_result_index into the display fields.
     pub(super) fn apply_current_win_result(&mut self) {
         if let Some(wr) = self.win_results.get(self.win_result_index) {
             let wr = wr.clone();
@@ -566,10 +565,10 @@ impl GameState {
         }
     }
 
-    /// 次の和了結果ページへ進む
+    /// Advances to the next win-result page.
     ///
-    /// 次のページがある場合: 表示を更新して true を返す
-    /// 最後のページだった場合: false を返す（呼び出し元が next_round() を呼ぶ）
+    /// Returns true after updating the display, or false past the final
+    /// page (the caller then requests the next hand).
     pub fn advance_win_result(&mut self) -> bool {
         let next = self.win_result_index + 1;
         if next < self.win_results.len() {
@@ -581,7 +580,7 @@ impl GameState {
         }
     }
 
-    /// 和了時に他プレイヤーの手牌を更新する（和了者の手牌を公開）
+    /// Updates opponents' hands on a win, revealing the winner's.
     pub(super) fn update_other_player_hands_on_win(
         &mut self,
         player_hands: &[PlayerHandInfo],
@@ -590,10 +589,10 @@ impl GameState {
         for info in player_hands {
             let relative_idx = self.relative_player_index(info.wind);
             if relative_idx == 0 {
-                continue; // 自分はスキップ
+                continue;
             }
             let other = &mut self.other_players[relative_idx - 1];
-            // 副露を更新（既存の from 情報を保持）
+            // Update melds, keeping any known `from` info.
             if other.melds.is_empty() {
                 other.melds = info
                     .melds
@@ -601,12 +600,11 @@ impl GameState {
                     .map(|m| Meld {
                         category: Self::call_type_to_meld_type(&m.call_type),
                         tiles: m.tiles.clone(),
-                        from: MeldFrom::Unknown, // フォールバック
+                        from: MeldFrom::Unknown,
                         called_tile: None,
                     })
                     .collect();
             }
-            // 和了者の手牌を公開
             if info.wind == winner {
                 other.hand = info.hand.clone();
                 other.revealed = true;
@@ -614,7 +612,8 @@ impl GameState {
         }
     }
 
-    /// 流局時に他プレイヤーの手牌を更新する（テンパイ者・九種九牌宣言者の手牌を公開）
+    /// Updates opponents' hands on a draw, revealing tenpai players'
+    /// and the nine-terminals declarer's.
     pub(super) fn update_other_player_hands_on_draw(
         &mut self,
         player_hands: &[PlayerHandInfo],
@@ -624,10 +623,10 @@ impl GameState {
         for info in player_hands {
             let relative_idx = self.relative_player_index(info.wind);
             if relative_idx == 0 {
-                continue; // 自分はスキップ
+                continue;
             }
             let other = &mut self.other_players[relative_idx - 1];
-            // 副露を更新（既存の from 情報を保持）
+            // Update melds, keeping any known `from` info.
             if other.melds.is_empty() {
                 other.melds = info
                     .melds
@@ -635,12 +634,11 @@ impl GameState {
                     .map(|m| Meld {
                         category: Self::call_type_to_meld_type(&m.call_type),
                         tiles: m.tiles.clone(),
-                        from: MeldFrom::Unknown, // フォールバック
+                        from: MeldFrom::Unknown,
                         called_tile: None,
                     })
                     .collect();
             }
-            // テンパイ者または九種九牌宣言者の手牌を公開
             if tenpai.contains(&info.wind) || declarer == Some(info.wind) {
                 other.hand = info.hand.clone();
                 other.revealed = true;

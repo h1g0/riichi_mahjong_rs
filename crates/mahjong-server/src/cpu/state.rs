@@ -1,87 +1,87 @@
-//! CPUが保持するゲーム状態
+//! The game state a CPU maintains.
 //!
-//! ServerEvent のストリームだけから構築される、プレイヤー視点のゲーム状態。
-//! プレイヤーが画面から読み取れる情報と同等の情報のみを保持する。
+//! Reconstructed purely from the ServerEvent stream: it holds only what a
+//! human player could read off the screen.
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, Wind};
 
 use crate::protocol::{AvailableCall, CallType, ServerEvent};
 
-/// CPUが保持するゲーム状態（全て ServerEvent から構築）
+/// CPU-side game state, built entirely from ServerEvents.
 #[derive(Debug, Clone)]
 pub struct CpuGameState {
-    // --- 自分の情報 ---
-    /// 自分の手牌
+    // --- Own info ---
+    /// Own hand
     pub my_hand: Vec<Tile>,
-    /// ツモった牌
+    /// The drawn tile
     pub my_drawn: Option<Tile>,
-    /// 自分の座席の風
+    /// Own seat wind
     pub my_seat_wind: Wind,
-    /// 自分がリーチしているか
+    /// Whether we have declared riichi
     pub is_riichi: bool,
 
-    // --- TileDrawn イベントで受け取るフラグ ---
-    /// ツモ和了可能か
+    // --- Flags carried by TileDrawn ---
+    /// Whether tsumo is possible
     pub can_tsumo: bool,
-    /// リーチ宣言可能か
+    /// Whether riichi may be declared
     pub can_riichi: bool,
-    /// フリテン状態か
+    /// Whether we are furiten
     pub is_furiten: bool,
 
-    // --- 公開情報（全員分）---
-    /// 各プレイヤーの得点
+    // --- Public info for all players ---
+    /// Scores
     pub scores: [i32; 4],
-    /// 各プレイヤーの捨て牌（風のインデックス順: 東=0, 南=1, 西=2, 北=3）
+    /// Discards per player, indexed by wind (East = 0, ...)
     pub all_discards: [Vec<Tile>; 4],
-    /// 鳴かれて副露側にも現れる捨て牌
+    /// Discards that were called and now also appear in a meld
     called_discards: Vec<Tile>,
-    /// 各プレイヤーのリーチ状態
+    /// Riichi state per player
     pub player_riichi: [bool; 4],
-    /// 各プレイヤーの副露情報
+    /// Melds per player
     pub player_melds: [Vec<Meld>; 4],
-    /// ドラ表示牌
+    /// Dora indicators
     pub dora_indicators: Vec<Tile>,
-    /// 場風
+    /// Round wind
     pub round_wind: Wind,
-    /// 山の残り枚数
+    /// Tiles left in the live wall
     pub remaining_tiles: usize,
-    /// 局番号（東1局=0, 東2局=1, ...）
+    /// Hand number (East 1 = 0, East 2 = 1, ...)
     pub round_number: usize,
-    /// ゲーム全体の局数（東風戦=4, 東南戦=8。0なら不明）
+    /// Hands in the whole game (0 = unknown)
     pub total_rounds: usize,
-    /// 本場数
+    /// Continuance counter (honba)
     pub honba: usize,
-    /// 供託リーチ棒
+    /// Riichi deposits on the table
     pub riichi_sticks: usize,
-    /// 三麻かどうか（牌集合・ドラチェーンの解釈に使用）
+    /// Three-player game: affects the tile set and dora chain
     pub three_player: bool,
-    /// 北抜きドラが有効か（三麻のみ true になり得る）
+    /// Whether pei dora is enabled (three-player only)
     pub nuki_dora: bool,
-    /// 各プレイヤーの北抜き枚数（風のインデックス順: 東=0, 南=1, 西=2）
+    /// Extracted North count per player, indexed by wind
     pub pei_counts: [u8; 4],
 
-    // --- 鳴き関連 ---
-    /// 現在利用可能な鳴きアクション
+    // --- Pending calls ---
+    /// Calls currently available to us
     pub pending_calls: Vec<AvailableCall>,
-    /// 鳴き対象の牌
+    /// The tile the calls are on
     pub pending_call_tile: Option<Tile>,
 
-    // --- 鳴き後打牌フラグ ---
-    /// 鳴き後に打牌が必要か
+    // --- Post-call discard flags ---
+    /// Whether a discard is due after our call
     pub need_discard_after_call: bool,
-    /// 直前の鳴きがカン系（嶺上ツモ待ち）か
+    /// Whether the last call was a kan (waiting for the replacement draw)
     pub pending_kan_draw: bool,
-    /// 自分のポン・チーが成立し、直後の HandUpdated で打牌判断が必要か
+    /// Whether our own pon/chii succeeded and the next HandUpdated should
+    /// trigger a discard decision.
     ///
-    /// HandUpdated は打牌却下時の再同期（#294）にも使われるため、
-    /// 受信しただけでは打牌が必要とは限らない。自分の PlayerCalled
-    /// （ポン・チー）に続く HandUpdated のみを打牌トリガーにする。
+    /// HandUpdated is also used to resync after a rejected discard (#294),
+    /// so receiving one does not by itself mean a discard is due; only a
+    /// HandUpdated following our own pon/chii PlayerCalled does.
     pub pending_call_discard: bool,
 }
 
 impl CpuGameState {
-    /// 空の初期状態を作成する
     pub fn new() -> Self {
         CpuGameState {
             my_hand: Vec::new(),
@@ -114,12 +114,11 @@ impl CpuGameState {
         }
     }
 
-    /// プレイヤー人数を返す（四麻=4、三麻=3）
     pub fn player_count(&self) -> usize {
         if self.three_player { 3 } else { 4 }
     }
 
-    /// 風からプレイヤーインデックス（0=東, 1=南, 2=西, 3=北）を取得する
+    /// Maps a wind to a player index (East = 0, ..., North = 3).
     pub fn wind_to_index(wind: Wind) -> usize {
         match wind {
             Wind::East => 0,
@@ -129,7 +128,7 @@ impl CpuGameState {
         }
     }
 
-    /// ServerEvent を処理してゲーム状態を更新する
+    /// Applies a ServerEvent to the state.
     pub fn update(&mut self, event: &ServerEvent) {
         match event {
             ServerEvent::GameStarted {
@@ -146,7 +145,7 @@ impl CpuGameState {
                 nuki_dora,
                 ..
             } => {
-                // 新しい局の開始: 状態をリセット
+                // A new hand: reset everything.
                 self.my_hand = hand.clone();
                 self.my_drawn = None;
                 self.my_seat_wind = *seat_wind;
@@ -164,8 +163,8 @@ impl CpuGameState {
                 self.three_player = *three_player;
                 self.nuki_dora = *nuki_dora;
                 self.pei_counts = [0; 4];
-                // 四麻: 136 - 14(王牌) - 13*4(配牌) = 70
-                // 三麻: 108 - 14(王牌) - 13*3(配牌) = 55
+                // Four-player: 136 - 14 dead wall - 4 x 13 dealt = 70.
+                // Three-player: 108 - 14 - 3 x 13 = 55.
                 self.remaining_tiles = if *three_player { 55 } else { 70 };
                 self.round_number = *round_number;
                 self.total_rounds = *total_rounds;
@@ -209,13 +208,12 @@ impl CpuGameState {
                 let idx = Self::wind_to_index(*player);
                 self.all_discards[idx].push(*tile);
 
-                // 自分が捨てた場合、手牌を正しく更新する
                 if *player == self.my_seat_wind {
                     if *is_tsumogiri {
-                        // ツモ切り: ツモ牌を捨てるだけ
                         self.my_drawn = None;
                     } else {
-                        // 手出し: 手牌から捨てた牌を除去し、ツモ牌を手牌に加える
+                        // Hand discard: remove the tile and merge in the
+                        // drawn tile.
                         if let Some(pos) = self.my_hand.iter().position(|t| *t == *tile) {
                             self.my_hand.remove(pos);
                         }
@@ -246,7 +244,7 @@ impl CpuGameState {
                     CallType::Pon => MeldType::Pon,
                     CallType::Ankan | CallType::Daiminkan => MeldType::Kan,
                     CallType::Kakan => MeldType::Kakan,
-                    CallType::Ron => MeldType::Pon, // フォールバック（使われない）
+                    CallType::Ron => MeldType::Pon, // Unused fallback.
                 };
                 let from = match call_type {
                     CallType::Ankan => MeldFrom::Myself,
@@ -286,12 +284,12 @@ impl CpuGameState {
 
                 self.pending_calls.clear();
                 self.pending_call_tile = None;
-                // カン系（嶺上ツモ待ち）かどうかを記録する
                 self.pending_kan_draw = matches!(
                     call_type,
                     CallType::Ankan | CallType::Daiminkan | CallType::Kakan
                 );
-                // 自分のポン・チーなら直後の HandUpdated で打牌判断が必要
+                // Our own pon/chii means the next HandUpdated needs a
+                // discard decision.
                 self.pending_call_discard = *player == self.my_seat_wind
                     && matches!(call_type, CallType::Pon | CallType::Chi);
             }
@@ -317,8 +315,9 @@ impl CpuGameState {
             ServerEvent::PeiDeclared { player, pei_counts } => {
                 self.pei_counts = *pei_counts;
                 if *player == self.my_seat_wind {
-                    // 自分の北抜き: 補充ツモ（TileDrawn）が来るまで打牌不要
-                    // （直後の HandUpdated で打牌判断を始めないようにする）
+                    // Our own extraction: no discard until the replacement
+                    // TileDrawn arrives, so the HandUpdated that follows
+                    // must not trigger one.
                     self.pending_kan_draw = true;
                 }
             }
@@ -327,16 +326,16 @@ impl CpuGameState {
                 self.my_hand = hand.clone();
                 self.my_drawn = None;
                 if self.pending_kan_draw {
-                    // カン系: 嶺上ツモ（TileDrawn）が来るまで打牌不要
+                    // After a kan, wait for the replacement TileDrawn.
                     self.pending_kan_draw = false;
                 } else if self.pending_call_discard {
-                    // ポン/チー後: 打牌が必要
                     self.pending_call_discard = false;
                     self.need_discard_after_call = true;
                 }
-                // それ以外は打牌却下時の再同期（#294）など手牌の同期のみで、
-                // 打牌してはいけない。ここで打牌すると「却下 → 再同期 →
-                // 再打牌 → 却下」の無限ループで局が停止する。
+                // Any other HandUpdated is a pure resync (e.g. after a
+                // rejected discard, #294) and must NOT trigger a discard:
+                // doing so loops reject -> resync -> re-discard -> reject
+                // forever and stalls the hand.
             }
 
             ServerEvent::RoundWon { scores, .. } => {
@@ -348,38 +347,36 @@ impl CpuGameState {
             }
 
             ServerEvent::NineTerminalsAvailable => {
-                // 状態更新不要（decide_nine_terminals で対応）
+                // No state change; decide_nine_terminals handles the reply.
             }
         }
     }
 
-    /// 自分の捨て牌を返す
     pub fn my_discards(&self) -> &[Tile] {
         &self.all_discards[Self::wind_to_index(self.my_seat_wind)]
     }
 
-    /// オーラス（最終局）か。総局数が不明（0）なら false
+    /// Whether this is the final hand; false when total_rounds is unknown.
     pub fn is_final_round(&self) -> bool {
         self.total_rounds > 0 && self.round_number + 1 >= self.total_rounds
     }
 
-    /// ゲーム後半（東南戦の南場など）か。総局数が不明なら false
+    /// Whether the game is in its second half; false when unknown.
     pub fn is_second_half(&self) -> bool {
         self.total_rounds > 0 && self.round_number >= self.total_rounds / 2
     }
 
-    /// 自分の得点
     pub fn my_score(&self) -> i32 {
         self.scores[Self::wind_to_index(self.my_seat_wind)]
     }
 
-    /// 自分がトップ目か（同点トップを含む）
+    /// Whether we are in (possibly shared) first place.
     pub fn is_top(&self) -> bool {
         let my = self.my_score();
         self.scores.iter().all(|&s| s <= my)
     }
 
-    /// 順位を1つ上げるのに必要な最小点差（トップなら None）
+    /// Minimum points needed to climb one place; None when leading.
     pub fn gap_to_next_rank(&self) -> Option<i32> {
         let my = self.my_score();
         self.scores
@@ -389,15 +386,12 @@ impl CpuGameState {
             .min()
     }
 
-    /// 自分の副露を返す
     pub fn my_melds(&self) -> &[Meld] {
         &self.player_melds[Self::wind_to_index(self.my_seat_wind)]
     }
 
-    /// 自分の副露を手牌分析用に取得する（カンは3枚に切り詰める）
-    ///
-    /// `HandAnalyzer` は副露を3枚の面子として扱うため、
-    /// 向聴数計算に渡す際はこちらを使用する。
+    /// Own melds with quads truncated to three tiles, as `HandAnalyzer`
+    /// expects; use this for shanten computations.
     pub fn my_melds_for_analysis(&self) -> Vec<Meld> {
         self.my_melds()
             .iter()
@@ -411,19 +405,17 @@ impl CpuGameState {
             .collect()
     }
 
-    /// 現在の巡目（1始まり）を返す
-    ///
-    /// 自分の捨て牌の数から導出する。打牌前に呼べば「これから何巡目の打牌か」になる。
+    /// The current turn number, 1-based, derived from our discard count.
+    /// Called before discarding, it is the turn about to be played.
     pub fn turn(&self) -> usize {
         self.my_discards().len() + 1
     }
 
-    /// 場に見えている牌の枚数を種類ごとにカウントする
-    /// （自分の手牌 + 全員の捨て牌 + 全員の副露）
+    /// Counts visible tiles per kind: own hand, everyone's discards,
+    /// everyone's melds, and the dora indicators.
     pub fn visible_tile_counts(&self) -> [u8; 34] {
         let mut counts = [0u8; 34];
 
-        // 自分の手牌
         for tile in &self.my_hand {
             counts[tile.get() as usize] += 1;
         }
@@ -431,14 +423,12 @@ impl CpuGameState {
             counts[drawn.get() as usize] += 1;
         }
 
-        // 全員の捨て牌
         for discards in &self.all_discards {
             for tile in discards {
                 counts[tile.get() as usize] += 1;
             }
         }
 
-        // 全員の副露
         for melds in &self.player_melds {
             for meld in melds {
                 for tile in &meld.tiles {
@@ -447,23 +437,25 @@ impl CpuGameState {
             }
         }
 
-        // ドラ表示牌
         for tile in &self.dora_indicators {
             counts[tile.get() as usize] += 1;
         }
 
+        // Called discards appear both in the discard pool and in a meld;
+        // subtract once to avoid double counting.
         for tile in &self.called_discards {
             let count = &mut counts[tile.get() as usize];
             *count = count.saturating_sub(1);
         }
 
-        // 北抜きで晒された北風牌（手牌にも河にも現れないため個別に加算）
+        // Extracted North tiles appear in neither hands nor discards,
+        // so add them separately.
         let total_pei: u8 = self.pei_counts.iter().sum();
         counts[Tile::Z4 as usize] = (counts[Tile::Z4 as usize] + total_pei).min(4);
 
-        // 三麻ではゲームに存在しない萬子2〜8を「全て見えている」扱いにする。
-        // これにより受け入れ枚数（4 - visible）や死に牌判定（visible >= 4）が
-        // 存在しない牌を生牌としてカウントしなくなる。
+        // In three-player games treat the nonexistent 2m-8m as fully
+        // visible, so acceptance counts (4 - visible) and dead-tile checks
+        // (visible >= 4) never treat them as live tiles.
         if self.three_player {
             for tile_type in Tile::M2..=Tile::M8 {
                 counts[tile_type as usize] = 4;
@@ -839,7 +831,7 @@ mod tests {
     fn test_hand_updated_after_open_call_requires_discard() {
         let mut state = CpuGameState::new();
         state.my_drawn = Some(Tile::new(Tile::S9));
-        // 自分のポン・チー（PlayerCalled）を受けた直後の状態
+        // State right after our own pon/chii PlayerCalled.
         state.pending_call_discard = true;
 
         state.update(&ServerEvent::HandUpdated {
@@ -856,9 +848,10 @@ mod tests {
         assert!(!state.pending_kan_draw);
     }
 
-    /// 回帰テスト: 自分の鳴きを伴わない HandUpdated（打牌却下時の再同期 #294）
-    /// では打牌判断を始めないこと。ここで打牌すると「却下 → 再同期 →
-    /// 再打牌 → 却下」の無限ループでCPU代打ち中の局が停止していた。
+    /// Regression: a HandUpdated without our own call (the post-rejection
+    /// resync, #294) must not trigger a discard. Discarding here looped
+    /// reject -> resync -> re-discard -> reject and stalled hands under
+    /// CPU substitution.
     #[test]
     fn test_hand_updated_without_own_call_is_resync_only() {
         let mut state = CpuGameState::new();
@@ -868,7 +861,6 @@ mod tests {
             hand: vec![Tile::new(Tile::M1), Tile::new(Tile::M2)],
         });
 
-        // 手牌は同期されるが、打牌は要求されない
         assert_eq!(
             state.my_hand,
             vec![Tile::new(Tile::M1), Tile::new(Tile::M2)]
@@ -877,13 +869,12 @@ mod tests {
         assert!(!state.need_discard_after_call);
     }
 
-    /// 自分のポン・チーの PlayerCalled だけが pending_call_discard を立てること
+    /// Only our own pon/chii PlayerCalled may set pending_call_discard.
     #[test]
     fn test_pending_call_discard_set_only_by_own_open_call() {
         let mut state = CpuGameState::new();
         state.my_seat_wind = Wind::South;
 
-        // 他家（西）のポンでは立たない
         state.update(&ServerEvent::PlayerCalled {
             player: Wind::West,
             call_type: CallType::Pon,
@@ -892,7 +883,6 @@ mod tests {
         });
         assert!(!state.pending_call_discard);
 
-        // 自分（南）のポンで立つ
         state.update(&ServerEvent::PlayerCalled {
             player: Wind::South,
             call_type: CallType::Pon,
@@ -901,7 +891,7 @@ mod tests {
         });
         assert!(state.pending_call_discard);
 
-        // 自分のカンでは立たない（嶺上ツモ待ち）
+        // Our own kan waits for the replacement draw instead.
         state.update(&ServerEvent::PlayerCalled {
             player: Wind::South,
             call_type: CallType::Ankan,
@@ -980,23 +970,20 @@ mod tests {
     #[test]
     fn test_round_position_helpers() {
         let mut state = CpuGameState::new();
-        state.total_rounds = 4; // 東風戦
+        state.total_rounds = 4;
 
-        // 東1局: 前半・オーラスでない
         state.round_number = 0;
         assert!(!state.is_final_round());
         assert!(!state.is_second_half());
 
-        // 東3局: 後半
         state.round_number = 2;
         assert!(!state.is_final_round());
         assert!(state.is_second_half());
 
-        // 東4局: オーラス
         state.round_number = 3;
         assert!(state.is_final_round());
 
-        // 総局数が不明（0）なら常に false
+        // Unknown total_rounds must never report final/second half.
         state.total_rounds = 0;
         assert!(!state.is_final_round());
         assert!(!state.is_second_half());
@@ -1012,13 +999,12 @@ mod tests {
         assert!(state.is_top());
         assert_eq!(state.gap_to_next_rank(), None);
 
-        // 3着のとき: 次の順位（東 25000）までの差
         state.scores = [25000, 22000, 30000, 23000];
         assert_eq!(state.my_score(), 22000);
         assert!(!state.is_top());
         assert_eq!(state.gap_to_next_rank(), Some(1000));
 
-        // 同点トップはトップ扱い
+        // A tied lead still counts as leading.
         state.scores = [30000, 30000, 20000, 20000];
         assert!(state.is_top());
         assert_eq!(state.gap_to_next_rank(), None);
@@ -1029,11 +1015,10 @@ mod tests {
         let mut state = CpuGameState::new();
         state.my_seat_wind = Wind::South;
 
-        // 配牌直後は1巡目
         assert_eq!(state.turn(), 1);
         assert!(state.my_discards().is_empty());
 
-        // 他家の捨て牌は巡目に影響しない
+        // Other players' discards must not advance our turn counter.
         state.update(&ServerEvent::TileDiscarded {
             player: Wind::East,
             tile: Tile::new(Tile::M1),
@@ -1042,7 +1027,6 @@ mod tests {
         });
         assert_eq!(state.turn(), 1);
 
-        // 自分が捨てると巡目が進む
         state.update(&ServerEvent::TileDiscarded {
             player: Wind::South,
             tile: Tile::new(Tile::P5),
@@ -1170,7 +1154,6 @@ mod tests {
         ];
         state.my_drawn = Some(Tile::new(Tile::P5));
 
-        // 手出し: M1を捨てる → 手牌からM1が消え、P5が手牌に入る
         state.update(&ServerEvent::TileDiscarded {
             player: Wind::East,
             tile: Tile::new(Tile::M1),
@@ -1195,7 +1178,6 @@ mod tests {
         ];
         state.my_drawn = Some(Tile::new(Tile::P5));
 
-        // ツモ切り: P5を捨てる → 手牌はそのまま
         state.update(&ServerEvent::TileDiscarded {
             player: Wind::East,
             tile: Tile::new(Tile::P5),

@@ -1,8 +1,7 @@
-//! ローカルアダプター
-//!
-//! サーバとクライアントを同一プロセス内で直接接続する。
-//! ゲーム進行とCPU処理は mahjong_server::driver::GameDriver に委譲し、
-//! CPUの打牌には思考時間を演出する遅延を入れる。
+//! Local adapter: wires the server and client together in-process.
+//! Game flow and CPU handling are delegated to
+//! mahjong_server::driver::GameDriver, with a delay on CPU discards to
+//! simulate thinking time.
 
 use macroquad::miniquad::date;
 use mahjong_server::cpu::client::CpuConfig;
@@ -12,21 +11,22 @@ use mahjong_server::table::GameSettings;
 
 use super::GameAdapter;
 
-/// 人間プレイヤーの座席インデックス（0 = 東家/親）
+/// The human player's seat index (0 = East / dealer).
 const HUMAN_SEAT: usize = 0;
 
-/// CPUアクションの適用間隔（秒）
+/// Delay between CPU actions, in seconds.
 const CPU_ACTION_DELAY_SECONDS: f64 = 1.0;
 
-/// ローカルアダプター: サーバを内蔵し、直接通信する
+/// Local adapter embedding the server.
 pub struct LocalAdapter {
     driver: GameDriver,
 }
 
 impl LocalAdapter {
-    /// 指定したゲーム設定とCPU設定でアダプターを作成する
+    /// Creates an adapter with the given game and CPU settings.
     ///
-    /// 人間は座席0、CPUは座席1〜3（三麻では1〜2）に割り当てる。
+    /// The human sits at seat 0; CPUs fill seats 1-3 (1-2 in
+    /// three-player games).
     pub fn with_settings(settings: GameSettings, cpu_configs: [CpuConfig; 3]) -> Self {
         let player_count = settings.rules.player_count();
         let mut driver = GameDriver::new(settings);
@@ -37,7 +37,7 @@ impl LocalAdapter {
         LocalAdapter { driver }
     }
 
-    /// ゲームを開始する（最初の局を開始）
+    /// Starts the game (deals the first hand).
     pub fn start_game(&mut self) {
         self.driver.start_game();
     }

@@ -1,25 +1,24 @@
-//! 設定画面・オンラインUIの状態
+//! State for the setup screen and the online UI.
 
 use super::*;
 use mahjong_server::table::GameLength;
 
-/// 対局モード（プレイヤー人数 × 対局の長さ）
-///
-/// 設定画面・オンラインメニューのモードトグルで選ぶ組み合わせ。
+/// Game mode: player count x game length, as picked by the mode toggle
+/// on the setup screen and online menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameMode {
-    /// 四人東風
+    /// Four-player East-only
     FourEast,
-    /// 四人半荘
+    /// Four-player hanchan
     FourHanchan,
-    /// 三人東風
+    /// Three-player East-only
     ThreeEast,
-    /// 三人半荘
+    /// Three-player hanchan
     ThreeHanchan,
 }
 
 impl GameMode {
-    /// 全モード（モードトグルの表示順）
+    /// Every mode, in toggle display order.
     pub const ALL: [GameMode; 4] = [
         GameMode::FourEast,
         GameMode::FourHanchan,
@@ -27,7 +26,7 @@ impl GameMode {
         GameMode::ThreeHanchan,
     ];
 
-    /// 三麻フラグと対局の長さからモードを求める
+    /// Mode from the three-player flag and game length.
     pub fn from_parts(three_player: bool, length: GameLength) -> Self {
         match (three_player, length) {
             (false, GameLength::EastOnly) => GameMode::FourEast,
@@ -37,12 +36,12 @@ impl GameMode {
         }
     }
 
-    /// 三麻（3人打ち）か
+    /// Whether this is a three-player mode.
     pub fn three_player(self) -> bool {
         matches!(self, GameMode::ThreeEast | GameMode::ThreeHanchan)
     }
 
-    /// 対局の長さ（東風戦か半荘戦か）
+    /// The game length.
     pub fn length(self) -> GameLength {
         match self {
             GameMode::FourEast | GameMode::ThreeEast => GameLength::EastOnly,
@@ -50,7 +49,7 @@ impl GameMode {
         }
     }
 
-    /// モードトグル・ロビーに表示するラベルのキー
+    /// Label key shown on the mode toggle and in the lobby.
     pub fn label_key(self) -> Key {
         match self {
             GameMode::FourEast => Key::ModeFourEast,
@@ -61,33 +60,33 @@ impl GameMode {
     }
 }
 
-/// オンライン対戦UI（メニュー・ロビー）の状態
+/// State of the online UI (menu and lobby).
 #[derive(Debug, Clone)]
 pub struct OnlineUiState {
-    /// 表示名の入力欄
+    /// Display-name input field
     pub name_input: String,
-    /// ルームコードの入力欄
+    /// Room-code input field
     pub code_input: String,
-    /// true ならルームコード欄、false なら名前欄にフォーカス
+    /// Focus: true = room-code field, false = name field
     pub code_focused: bool,
-    /// 接続状況・エラーの表示文言
+    /// Connection status / error text
     pub status_line: Option<String>,
-    /// status_line がエラーか（赤色で表示する）
+    /// Whether status_line is an error (shown in red)
     pub status_is_error: bool,
-    /// 入室中のルーム表示（メインループがアダプターからコピーする）
+    /// The joined room's display info, copied from the adapter
     pub room: Option<RoomViewUi>,
-    /// 手番の制限時間の残り秒数（オンラインで自分の手番のときのみ Some）
+    /// Seconds left on the turn timer; Some only on our own online turn
     pub turn_remaining: Option<u32>,
-    /// ルーム作成時の対局モード
+    /// Mode used when creating a room
     pub mode: GameMode,
-    /// ルーム作成時に北抜きドラありにするか（三麻のみ有効）
+    /// Whether pei dora is on when creating a room (three-player only)
     pub nuki_dora: bool,
 }
 
 impl OnlineUiState {
     pub fn new() -> Self {
         OnlineUiState {
-            // 既定の表示名は送信時に display_name() が言語に応じて補う
+            // display_name() fills the language-appropriate default on send.
             name_input: String::new(),
             code_input: String::new(),
             code_focused: false,
@@ -100,10 +99,10 @@ impl OnlineUiState {
         }
     }
 
-    /// ルーム作成時に送るルール設定を組み立てる
+    /// Builds the rule settings sent when creating a room.
     ///
-    /// UIで選択できないルールは既定値のまま。ルール選択UIを増やす場合は
-    /// ここに反映すればサーバへそのまま伝わる。
+    /// Rules without UI stay at their defaults; new rule pickers only
+    /// need to be reflected here to reach the server.
     pub fn build_rules(&self) -> mahjong_core::settings::Settings {
         mahjong_core::settings::Settings {
             three_player: self.mode.three_player(),
@@ -112,35 +111,35 @@ impl OnlineUiState {
         }
     }
 
-    /// ルーム作成時に送る対局の長さ（東風戦か半荘戦か）
+    /// The game length sent when creating a room.
     pub fn length(&self) -> GameLength {
         self.mode.length()
     }
 }
 
-/// ロビー画面に表示するルーム情報
+/// Room info shown on the lobby screen.
 #[derive(Debug, Clone)]
 pub struct RoomViewUi {
-    /// ルームコード
+    /// Room code
     pub code: String,
-    /// 各座席の表示文言（東南西北の順）
+    /// Seat captions in wind order
     pub seat_labels: [String; 4],
-    /// 自分がホストか（対局開始ボタンの表示に使う）
+    /// Whether we are the host (controls the start button)
     pub is_host: bool,
-    /// このルームの対局モード
+    /// The room's game mode
     pub mode: GameMode,
 }
 
-/// 対局開始前の設定画面の状態
+/// State of the pre-game setup screen.
 #[derive(Debug, Clone)]
 pub struct SetupState {
-    /// 対局モード
+    /// Game mode
     pub mode: GameMode,
-    /// 北抜きドラありか（三麻のみ有効）
+    /// Whether pei dora is on (three-player only)
     pub nuki_dora: bool,
-    /// 各CPUの強さ設定（下家, 対面, 上家）
+    /// CPU levels (right, across, left)
     pub cpu_levels: [usize; 3],
-    /// 各CPUの性格設定（下家, 対面, 上家）
+    /// CPU personalities (right, across, left)
     pub cpu_personalities: [usize; 3],
 }
 
@@ -149,20 +148,20 @@ impl SetupState {
         SetupState {
             mode: GameMode::FourEast,
             nuki_dora: true,
-            cpu_levels: [1, 1, 1],        // 全員 Normal
+            cpu_levels: [1, 1, 1],        // all Normal
             cpu_personalities: [0, 1, 2], // Balanced, Speedy, HighValue
         }
     }
 
-    /// このモードで設定するCPUの人数（四麻=3、三麻=2）
+    /// Number of CPUs to configure (3 four-player, 2 three-player).
     pub fn cpu_count(&self) -> usize {
         if self.mode.three_player() { 2 } else { 3 }
     }
 
-    /// 選択中のルール設定を組み立てる
+    /// Builds the selected rule settings.
     ///
-    /// UIで選択できないルールは既定値のまま。ルール選択UIを増やす場合は
-    /// ここに反映すれば、ローカル・オンラインの両方に伝わる。
+    /// Rules without UI stay at their defaults; new rule pickers only
+    /// need to be reflected here to reach both local and online play.
     pub fn build_rules(&self) -> mahjong_core::settings::Settings {
         mahjong_core::settings::Settings {
             three_player: self.mode.three_player(),
@@ -171,7 +170,7 @@ impl SetupState {
         }
     }
 
-    /// ゲーム設定を組み立てる（持ち点はルールから決まる）
+    /// Builds the game settings; the starting score follows the rules.
     pub fn build_game_settings(&self) -> mahjong_server::table::GameSettings {
         mahjong_server::table::GameSettings::with_rules(self.mode.length(), self.build_rules())
     }
@@ -183,7 +182,7 @@ impl SetupState {
         4
     }
 
-    /// 設定からCpuConfigの配列を生成する
+    /// Builds the CpuConfig array from the settings.
     pub fn build_configs(&self) -> [CpuConfig; 3] {
         let to_level = |idx: usize| -> CpuLevel {
             match idx {
@@ -216,7 +215,7 @@ impl SetupState {
         ]
     }
 
-    /// 設定から CPU 指定（オンライン対戦でホストが送る）を生成する
+    /// Builds the CPU specs the host sends in online play.
     pub fn build_cpu_specs(&self) -> [CpuSpec; 3] {
         self.build_configs()
             .map(|config| CpuSpec::from_config(&config))

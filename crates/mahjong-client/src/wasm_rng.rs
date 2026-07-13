@@ -1,19 +1,18 @@
-//! WASM用カスタム乱数バックエンド
+//! Custom randomness backend for WASM.
 //!
-//! miniquad（Macroquad）のWASMローダーはwasm-bindgenを使わないため、
-//! getrandomのwasm_jsバックエンドが使えない。
-//! 代わりにXorShift64ベースのPRNGを使い、miniquadのdate::now()でシードする。
+//! Miniquad's (Macroquad's) WASM loader does not use wasm-bindgen, so
+//! getrandom's wasm_js backend is unavailable. An XorShift64 PRNG seeded
+//! from miniquad's date::now() stands in instead.
 
 use core::cell::Cell;
 use getrandom::Error;
 
-// XorShift64 の状態（スレッドローカル）
-// WASM はシングルスレッドなので Cell で十分。
+// XorShift64 state; WASM is single-threaded, so a Cell suffices.
 thread_local! {
     static RNG_STATE: Cell<u64> = Cell::new(0);
 }
 
-/// XorShift64 一ステップ
+/// One XorShift64 step.
 fn xorshift64(state: u64) -> u64 {
     let mut s = state;
     s ^= s << 13;
@@ -22,18 +21,17 @@ fn xorshift64(state: u64) -> u64 {
     s
 }
 
-/// 初期シードを生成する。
-/// miniquad の date::now() は JS の Date.now()/1000.0 を返すので、
-/// そのビットパターンをシードにする。
+/// Produces the initial seed from the bit pattern of miniquad's
+/// date::now() (JS Date.now() / 1000.0).
 fn init_seed() -> u64 {
     let now = macroquad::miniquad::date::now();
     let bits = now.to_bits();
-    // 0にならないようにする（XorShift は 0 が固定点）
+    // Zero is a fixed point of XorShift; avoid it.
     if bits == 0 { 1 } else { bits }
 }
 
-/// getrandom 0.4 カスタムバックエンド用のエントリポイント。
-/// `getrandom_backend = "custom"` 時に getrandom がリンクするシンボル。
+/// Entry point for getrandom 0.4's custom backend: the symbol getrandom
+/// links against under `getrandom_backend = "custom"`.
 #[unsafe(no_mangle)]
 pub unsafe fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), Error> {
     RNG_STATE.with(|cell| {

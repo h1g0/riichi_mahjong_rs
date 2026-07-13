@@ -4,21 +4,21 @@ use std::cmp::Ordering;
 
 use crate::tile::*;
 
-/// ブロック（対子、順子、刻子）の振る舞いを定義する
+/// Common queries over blocks (pairs, sequences, triplets).
 pub trait BlockProperty {
-    /// 么九牌が含まれているか
+    /// Whether the block contains a terminal (1 or 9)
     fn has_1_or_9(&self) -> Result<bool>;
-    /// 字牌が含まれているか
+    /// Whether the block contains an honour tile
     fn has_honour(&self) -> Result<bool>;
-    /// 特定の風牌が含まれているか
+    /// Whether the block contains the given wind
     fn has_wind(&self, wind: Wind) -> Result<bool>;
-    /// 特定の三元牌が含まれているか
+    /// Whether the block contains the given dragon
     fn has_dragon(&self, dragon: Dragon) -> Result<bool>;
-    /// 萬子のブロックか
+    /// Whether the block is made of characters (萬子)
     fn is_character(&self) -> Result<bool>;
-    /// 筒子のブロックか
+    /// Whether the block is made of circles (筒子)
     fn is_circle(&self) -> Result<bool>;
-    /// 索子のブロックか
+    /// Whether the block is made of bamboos (索子)
     fn is_bamboo(&self) -> Result<bool>;
 }
 
@@ -101,7 +101,7 @@ fn is_same_suit(t1: TileType, t2: TileType) -> Result<bool> {
     }
 }
 
-/// 対子（同じ2枚）
+/// A pair (toitsu / 対子): two identical tiles.
 #[derive(Debug, Eq, Clone, Copy)]
 pub struct Same2 {
     tiles: [TileType; 2],
@@ -160,7 +160,7 @@ impl Ord for Same2 {
     }
 }
 
-/// 刻子（同じ3枚）
+/// A triplet (kōtsu / 刻子): three identical tiles.
 #[derive(Debug, Eq, Clone, Copy)]
 pub struct Same3 {
     tiles: [TileType; 3],
@@ -225,7 +225,8 @@ impl Ord for Same3 {
     }
 }
 
-/// 塔子（連続した牌2枚）または嵌張（1枚飛ばしの牌2枚）
+/// A partial sequence: two adjacent tiles (tātsu / 塔子)
+/// or a gapped pair (kanchan / 嵌張).
 #[derive(Debug, Eq, Clone, Copy)]
 pub struct Sequential2 {
     tiles: [TileType; 2],
@@ -305,7 +306,7 @@ impl Ord for Sequential2 {
     }
 }
 
-/// 順子（連続した3枚）
+/// A sequence (shuntsu / 順子): three consecutive tiles of one suit.
 #[derive(Debug, Eq, Clone, Copy)]
 pub struct Sequential3 {
     tiles: [TileType; 3],
@@ -347,9 +348,10 @@ impl Sequential3 {
         self.tiles
     }
 
-    /// 指定した牌がこの順子の両面待ち牌かを返す
+    /// Whether the given tile completes this sequence as a two-sided wait.
     ///
-    /// 辺張（123の3待ち・789の7待ち）と嵌張は両面待ちではない
+    /// Edge waits (3 completing 1-2, 7 completing 8-9) and closed waits
+    /// are not two-sided.
     pub fn is_two_sided_wait(&self, winning_tile: TileType) -> bool {
         if winning_tile == self.tiles[0] && suit_rank(self.tiles[0]) != Some(7) {
             return true;
@@ -551,44 +553,36 @@ mod tests {
         Sequential3::new(t1, t2, t3).unwrap()
     }
 
-    // is_two_sided_wait: 両面待ち
     #[test]
     fn test_two_sided_wait_low_end() {
-        // 456の4待ち — 低位端、両面成立
         assert!(seq3(Tile::M4, Tile::M5, Tile::M6).is_two_sided_wait(Tile::M4));
     }
     #[test]
     fn test_two_sided_wait_high_end() {
-        // 456の6待ち — 高位端、両面成立
         assert!(seq3(Tile::M4, Tile::M5, Tile::M6).is_two_sided_wait(Tile::M6));
     }
 
-    // is_two_sided_wait: 辺張（両面でない）
+    // Edge waits are not two-sided.
     #[test]
     fn test_penchan_low_end_not_two_sided() {
-        // 123の3待ち — 高位端が % 9 == 2 なので辺張
         assert!(!seq3(Tile::M1, Tile::M2, Tile::M3).is_two_sided_wait(Tile::M3));
     }
     #[test]
     fn test_penchan_high_end_not_two_sided() {
-        // 789の7待ち — 低位端が % 9 == 6 なので辺張
         assert!(!seq3(Tile::M7, Tile::M8, Tile::M9).is_two_sided_wait(Tile::M7));
     }
 
-    // is_two_sided_wait: 嵌張（両面でない）
+    // Closed (middle) waits are not two-sided.
     #[test]
     fn test_kanchan_not_two_sided() {
-        // 456の5待ち — 中牌は低位端でも高位端でもない
         assert!(!seq3(Tile::M4, Tile::M5, Tile::M6).is_two_sided_wait(Tile::M5));
     }
 
-    // is_two_sided_wait: 上がり牌がこの順子に含まれない
     #[test]
     fn test_unrelated_tile_not_two_sided() {
         assert!(!seq3(Tile::M4, Tile::M5, Tile::M6).is_two_sided_wait(Tile::M1));
     }
 
-    // is_two_sided_wait: 筒子・索子でも正しく動作する
     #[test]
     fn test_two_sided_wait_pinzu() {
         assert!(seq3(Tile::P5, Tile::P6, Tile::P7).is_two_sided_wait(Tile::P5));
@@ -1000,7 +994,6 @@ mod tests {
 
     #[test]
     fn test_sequential2_has_1_or_9_first_tile() {
-        // tiles[0] が 1
         assert!(
             Sequential2::new(Tile::M1, Tile::M2)
                 .unwrap()
@@ -1023,7 +1016,7 @@ mod tests {
 
     #[test]
     fn test_sequential2_has_1_or_9_second_tile() {
-        // tiles[0] が 1でも9でもなく、tiles[1] が 9
+        // The 9 sits in tiles[1], so tiles[0] alone must not decide.
         assert!(
             Sequential2::new(Tile::M8, Tile::M9)
                 .unwrap()
@@ -1062,7 +1055,7 @@ mod tests {
 
     #[test]
     fn test_sequential2_has_honour() {
-        // 字牌は塔子にならないので常に false
+        // Honours cannot form partial sequences, so this is always false.
         assert!(
             !Sequential2::new(Tile::M2, Tile::M3)
                 .unwrap()
@@ -1198,7 +1191,6 @@ mod tests {
 
     #[test]
     fn test_sequential3_has_1_or_9_first_tile() {
-        // tiles[0] が 1
         assert!(seq3(Tile::M1, Tile::M2, Tile::M3).has_1_or_9().unwrap());
         assert!(seq3(Tile::P1, Tile::P2, Tile::P3).has_1_or_9().unwrap());
         assert!(seq3(Tile::S1, Tile::S2, Tile::S3).has_1_or_9().unwrap());
@@ -1206,7 +1198,7 @@ mod tests {
 
     #[test]
     fn test_sequential3_has_1_or_9_last_tile() {
-        // tiles[0] が 1でも9でもなく、tiles[2] が 9
+        // The 9 sits in tiles[2], so tiles[0] alone must not decide.
         assert!(seq3(Tile::M7, Tile::M8, Tile::M9).has_1_or_9().unwrap());
         assert!(seq3(Tile::P7, Tile::P8, Tile::P9).has_1_or_9().unwrap());
         assert!(seq3(Tile::S7, Tile::S8, Tile::S9).has_1_or_9().unwrap());
@@ -1220,7 +1212,7 @@ mod tests {
 
     #[test]
     fn test_sequential3_has_honour() {
-        // 字牌は順子にならないので常に false
+        // Honours cannot form sequences, so this is always false.
         assert!(!seq3(Tile::M2, Tile::M3, Tile::M4).has_honour().unwrap());
     }
 

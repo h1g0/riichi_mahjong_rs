@@ -1,7 +1,7 @@
-//! CPU AI プレイヤーモジュール
+//! CPU AI players.
 //!
-//! CPUはプレイヤーと同じプロトコル（ServerEvent / ClientAction）で
-//! サーバとやり取りする。サーバ内部に直接アクセスしない。
+//! CPUs talk to the server through the same protocol as human players
+//! (ServerEvent / ClientAction); they never reach into server internals.
 
 pub mod client;
 pub mod defense;

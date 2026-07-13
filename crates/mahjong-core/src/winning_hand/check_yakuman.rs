@@ -8,7 +8,7 @@ use crate::settings::*;
 use crate::tile::{Dragon, Tile, Wind};
 use crate::winning_hand::name::*;
 
-/// 国士無双
+/// Thirteen Orphans (Kokushi Musō / 国士無双)
 pub fn check_thirteen_orphans(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -37,7 +37,7 @@ fn is_four_concealed_triplets_pair_wait(hand_analyzer: &HandAnalyzer, hand: &Han
     })
 }
 
-/// 四暗刻
+/// Four Concealed Triplets (Sūankō / 四暗刻)
 pub fn check_four_concealed_triplets(
     hand_analyzer: &HandAnalyzer,
     hand: &Hand,
@@ -66,7 +66,7 @@ pub fn check_four_concealed_triplets(
     }
 }
 
-/// 四暗刻単騎待ち
+/// Four Concealed Triplets with a pair wait (Sūankō tanki / 四暗刻単騎)
 pub fn check_four_concealed_triplets_pair_wait(
     hand_analyzer: &HandAnalyzer,
     hand: &Hand,
@@ -91,7 +91,7 @@ pub fn check_four_concealed_triplets_pair_wait(
         Ok((name, false, 0))
     }
 }
-/// 大三元
+/// Big Dragons (Daisangen / 大三元)
 pub fn check_big_dragons(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -105,7 +105,6 @@ pub fn check_big_dragons(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 大三元: 三元牌（白・發・中）の3つすべてが刻子
     let mut dragon_count = 0;
     for same in &hand_analyzer.same3 {
         if same.has_dragon(Dragon::White)?
@@ -121,7 +120,7 @@ pub fn check_big_dragons(
         Ok((name, false, 0))
     }
 }
-/// 小四喜
+/// Little Winds (Shōsūshii / 小四喜)
 pub fn check_little_winds(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -135,7 +134,7 @@ pub fn check_little_winds(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 小四喜: 風牌のうち3つが刻子、1つが雀頭
+    // Three wind triplets plus a wind pair.
     let mut wind_triplet_count = 0;
     let mut wind_pair = false;
     for same in &hand_analyzer.same3 {
@@ -162,7 +161,7 @@ pub fn check_little_winds(
         Ok((name, false, 0))
     }
 }
-/// 大四喜
+/// Big Winds (Daisūshii / 大四喜)
 pub fn check_big_winds(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -176,7 +175,6 @@ pub fn check_big_winds(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 大四喜: 風牌4つすべてが刻子
     let mut wind_triplet_count = 0;
     for same in &hand_analyzer.same3 {
         if same.has_wind(Wind::East)?
@@ -193,7 +191,7 @@ pub fn check_big_winds(
         Ok((name, false, 0))
     }
 }
-/// 字一色
+/// All Honours (Tsūiisō / 字一色)
 pub fn check_all_honours(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -207,7 +205,6 @@ pub fn check_all_honours(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 字一色: すべての牌が字牌で構成される
     for same in &hand_analyzer.same3 {
         if !same.has_honour()? {
             return Ok((name, false, 0));
@@ -218,11 +215,10 @@ pub fn check_all_honours(
             return Ok((name, false, 0));
         }
     }
-    // 順子があったら字一色ではない
     if !hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
-    // 七対子形の場合もチェック（same2が7つの場合）
+    // A seven-pairs hand also qualifies when every pair is an honour.
     if hand_analyzer.form == Form::SevenPairs {
         for head in &hand_analyzer.same2 {
             if !head.has_honour()? {
@@ -232,7 +228,7 @@ pub fn check_all_honours(
     }
     Ok((name, true, 13))
 }
-/// 清老頭
+/// Perfect Terminals (Chinrōtō / 清老頭)
 pub fn check_perfect_terminals(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -246,7 +242,6 @@ pub fn check_perfect_terminals(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 清老頭: すべての牌が数牌の1と9のみで構成される（字牌なし・順子なし）
     if !hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
     }
@@ -262,7 +257,7 @@ pub fn check_perfect_terminals(
     }
     Ok((name, true, 13))
 }
-/// 緑一色
+/// All Green (Ryūiisō / 緑一色)
 pub fn check_all_green(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -276,7 +271,8 @@ pub fn check_all_green(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 緑一色: 2s, 3s, 4s, 6s, 8s, 6z（發）のみで構成される
+    // Only tiles drawn entirely in green qualify:
+    // 2s, 3s, 4s, 6s, 8s, and the Green dragon (發).
     let is_green_tile = |t: u32| -> bool {
         matches!(
             t,
@@ -303,7 +299,7 @@ pub fn check_all_green(
     }
     Ok((name, true, 13))
 }
-/// 九蓮宝燈
+/// Nine Gates (Chūren Pōto / 九蓮宝燈)
 pub fn check_nine_gates(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -317,11 +313,11 @@ pub fn check_nine_gates(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 九蓮宝燈: 門前で同一種の数牌のみで、1112345678999+同種1枚の形
+    // Closed hands only.
     if status.has_claimed_open {
         return Ok((name, false, 0));
     }
-    // 全ブロックが同じ種類の数牌であること
+    // Every block must be from a single suit with no honours.
     let mut has_character = false;
     let mut has_circle = false;
     let mut has_bamboo = false;
@@ -378,8 +374,7 @@ pub fn check_nine_gates(
         return Ok((name, false, 0));
     }
 
-    // 牌の数を集計して九蓮宝燈のパターンかチェック
-    // 基本形: 1が3枚以上, 2~8が各1枚以上, 9が3枚以上
+    // Tally tile counts and match them against the Nine Gates pattern.
     let offset = if has_character {
         0
     } else if has_circle {
@@ -408,7 +403,8 @@ pub fn check_nine_gates(
         }
     }
 
-    // 九蓮宝燈: 1が3枚以上、2~8が各1枚以上、9が3枚以上、合計14枚
+    // 1112345678999 + one more tile of the same suit: at least three 1s,
+    // at least three 9s, at least one each of 2-8, and 14 tiles in total.
     if counts[0] >= 3
         && counts[8] >= 3
         && counts[1] >= 1
@@ -426,7 +422,7 @@ pub fn check_nine_gates(
     }
     Ok((name, false, 0))
 }
-/// 四槓子
+/// Four Quads (Sūkantsu / 四槓子)
 pub fn check_four_quads(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -440,14 +436,13 @@ pub fn check_four_quads(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 四槓子: 4つの槓子を持っている
     if status.kan_count == 4 {
         Ok((name, true, 13))
     } else {
         Ok((name, false, 0))
     }
 }
-/// 天和
+/// Blessing of Heaven (Tenhō / 天和)
 pub fn check_blessing_of_heaven(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -461,7 +456,7 @@ pub fn check_blessing_of_heaven(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 天和: 親の配牌時点で和了している（第一ツモ・親・自摸）
+    // The dealer's starting hand is already complete.
     if status.is_dealer && status.is_first_turn && status.is_self_drawn && !status.has_claimed_open
     {
         Ok((name, true, 13))
@@ -469,7 +464,7 @@ pub fn check_blessing_of_heaven(
         Ok((name, false, 0))
     }
 }
-/// 地和
+/// Blessing of Earth (Chihō / 地和)
 pub fn check_blessing_of_earth(
     hand_analyzer: &HandAnalyzer,
     status: &Status,
@@ -483,7 +478,7 @@ pub fn check_blessing_of_earth(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    // 地和: 子の第一ツモで和了している（第一ツモ・子・自摸）
+    // A non-dealer wins on their very first draw.
     if !status.is_dealer && status.is_first_turn && status.is_self_drawn && !status.has_claimed_open
     {
         Ok((name, true, 13))
@@ -492,7 +487,6 @@ pub fn check_blessing_of_earth(
     }
 }
 
-/// ユニットテスト
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,7 +494,6 @@ mod tests {
     use rstest::rstest;
 
     #[test]
-    /// 国士無双で和了った
     fn test_win_by_thirteen_orphans() {
         let test_str = "19m19p19s1234567z 1m";
         let test = Hand::from(test_str);
@@ -519,7 +512,7 @@ mod tests {
     #[case::shanpon_tsumo("111333m444s55s77z 5s", true, ("四暗刻単騎待ち", false, 0), ("四暗刻", true, 13), false)]
     #[case::shanpon_ron("111333m444s55s77z 5s", false, ("四暗刻単騎待ち", false, 0), ("四暗刻", false, 0), false)]
     #[case::open_tanki_tsumo("111333m444s1777z 1z", true, ("四暗刻単騎待ち", false, 0), ("四暗刻", false, 0), true)]
-    /// 四暗刻と四暗刻単騎待ちの振り分けを確認する
+    /// The pair-wait variant and the plain yakuman must never both apply.
     fn test_four_concealed_triplets(
         #[case] test_str: &str,
         #[case] is_self_drawn: bool,
@@ -545,7 +538,6 @@ mod tests {
         );
     }
     #[test]
-    /// 大三元で和了った
     fn test_win_by_big_dragons() {
         let test_str = "555666777z234m1p 1p";
         let test = Hand::from(test_str);
@@ -558,7 +550,6 @@ mod tests {
         );
     }
     #[test]
-    /// 小四喜で和了った
     fn test_win_by_little_winds() {
         let test_str = "11122233344z23m 4m";
         let test = Hand::from(test_str);
@@ -571,7 +562,6 @@ mod tests {
         );
     }
     #[test]
-    /// 大四喜で和了った
     fn test_win_by_big_winds() {
         let test_str = "5m 111z 222z 333z 444z 5m";
         let test = Hand::from(test_str);
@@ -584,7 +574,6 @@ mod tests {
         );
     }
     #[test]
-    /// 字一色で和了った
     fn test_win_by_all_honours() {
         let test_str = "111222333z5z 777z 5z";
         let test = Hand::from(test_str);
@@ -597,7 +586,6 @@ mod tests {
         );
     }
     #[test]
-    /// 清老頭で和了った
     fn test_win_by_perfect_terminals() {
         let test_str = "111999m1p 111s 999p 1p";
         let test = Hand::from(test_str);
@@ -610,7 +598,6 @@ mod tests {
         );
     }
     #[test]
-    /// 緑一色で和了った
     fn test_win_by_all_green() {
         let test_str = "22233344s66z 888s 6z";
         let test = Hand::from(test_str);
@@ -623,7 +610,6 @@ mod tests {
         );
     }
     #[test]
-    /// 九蓮宝燈で和了った
     fn test_win_by_nine_gates() {
         let test_str = "1112345678999m 5m";
         let test = Hand::from(test_str);
@@ -637,7 +623,6 @@ mod tests {
         );
     }
     #[test]
-    /// 四槓子で和了った
     fn test_win_by_four_quads() {
         let test_str = "111333m444s1777z 1z";
         let test = Hand::from(test_str);
@@ -652,7 +637,6 @@ mod tests {
         );
     }
     #[test]
-    /// 天和で和了った
     fn test_win_by_blessing_of_heaven() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -668,7 +652,6 @@ mod tests {
         );
     }
     #[test]
-    /// 天和は子では成立しない（地和になる）
     fn test_not_win_by_blessing_of_heaven_if_not_dealer() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -684,7 +667,6 @@ mod tests {
         );
     }
     #[test]
-    /// 地和で和了った
     fn test_win_by_blessing_of_earth() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);
@@ -700,7 +682,6 @@ mod tests {
         );
     }
     #[test]
-    /// 地和は親では成立しない（天和になる）
     fn test_not_win_by_blessing_of_earth_if_dealer() {
         let test_str = "123m45678p999s11z 9p";
         let test = Hand::from(test_str);

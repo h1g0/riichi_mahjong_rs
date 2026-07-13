@@ -1,4 +1,4 @@
-//! 定石（heuristics）のユニットテスト
+//! Unit tests for the heuristics.
 
 use super::*;
 use mahjong_core::hand::Hand;
@@ -32,7 +32,7 @@ fn fixed_bonus_heuristic(
 
 #[test]
 fn test_registry_returns_zero_when_disabled() {
-    // 定石無効なら実レジストリでも補正は常に0（A/Bベースライン）
+    // With heuristics disabled the real registry always yields 0 (A/B baseline).
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[Tile::M1, Tile::Z3, Tile::M5, Tile::M6]);
     let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced).without_heuristics();
@@ -56,7 +56,7 @@ fn test_level_gating() {
     let state = CpuGameState::new();
     let candidate = make_candidate(Tile::M1);
 
-    // Weak: 弱以上の定石のみ
+    // Weak: only weak-and-up heuristics.
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let ctx = DiscardContext {
         state: &state,
@@ -65,7 +65,7 @@ fn test_level_gating() {
     };
     assert_eq!(discard_adjustment_with(&heuristics, &ctx, &candidate), 1.0);
 
-    // Normal: 弱以上 + 中以上
+    // Normal: weak-and-up plus normal-and-up.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = DiscardContext {
         state: &state,
@@ -74,7 +74,7 @@ fn test_level_gating() {
     };
     assert_eq!(discard_adjustment_with(&heuristics, &ctx, &candidate), 11.0);
 
-    // Strong: 全て
+    // Strong: everything.
     let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
     let ctx = DiscardContext {
         state: &state,
@@ -89,7 +89,7 @@ fn test_level_gating() {
 
 #[test]
 fn test_heuristics_disabled_config_returns_zero() {
-    // heuristics_enabled=false なら全定石が無効（新旧比較用のベースライン）
+    // heuristics_enabled=false disables everything (A/B baseline).
     let heuristics = [fixed_bonus_heuristic(
         "weak-rule",
         CpuLevel::Weak,
@@ -106,7 +106,7 @@ fn test_heuristics_disabled_config_returns_zero() {
     assert_eq!(discard_adjustment_with(&heuristics, &ctx, &candidate), 0.0);
 }
 
-// --- 打牌定石 ---
+// --- Discard heuristics ---
 
 fn attack_ctx<'a>(state: &'a CpuGameState, config: &'a CpuConfig) -> DiscardContext<'a> {
     DiscardContext {
@@ -118,11 +118,11 @@ fn attack_ctx<'a>(state: &'a CpuGameState, config: &'a CpuConfig) -> DiscardCont
 
 #[test]
 fn test_isolated_tile_bonus_ordering() {
-    // 孤立牌の切りやすさ: 客風 > 1/9 > 役牌 > 2/8 > 中張牌
+    // Isolated-tile discard order: guest wind > 1/9 > value honour > 2/8 > inside.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::East;
     state.round_wind = Wind::East;
-    // Z3=客風(西), Z5=白(役牌), M1=孤立1, S8=孤立8, M5=孤立中張, P7P7=対子
+    // Z3 guest wind, Z5 value honour, M1/S8 isolated terminals, M5 isolated inside, P7P7 pair.
     state.my_hand = tiles(&[
         Tile::Z3,
         Tile::Z5,
@@ -147,24 +147,24 @@ fn test_isolated_tile_bonus_ordering() {
 
 #[test]
 fn test_isolated_tile_bonus_requires_isolation() {
-    // 前後2つ以内に牌があれば孤立ではない
+    // A neighbour within two ranks means not isolated.
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[Tile::M1, Tile::M3, Tile::M9, Tile::S9]);
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let ctx = attack_ctx(&state, &config);
 
-    // M1 は M3 と嵌張候補 → 孤立ではない
+    // M1 forms a closed-shape candidate with M3, so it is not isolated.
     assert_eq!(isolated_tile_bonus(&ctx, &make_candidate(Tile::M1)), 0.0);
-    // M9 / S9 は孤立
+    // M9 and S9 are isolated.
     assert!(isolated_tile_bonus(&ctx, &make_candidate(Tile::M9)) > 0.0);
     assert!(isolated_tile_bonus(&ctx, &make_candidate(Tile::S9)) > 0.0);
 }
 
 #[test]
 fn test_shape_protection_bonus() {
-    // 両面はマイナス（守る）、辺張・嵌張はプラス（整理しやすい）
+    // Two-sided shapes score negative (kept); edge/closed positive (shed).
     let mut state = CpuGameState::new();
-    // M2M3=両面, P1P2=辺張, S3S5=嵌張, S8S8=対子
+    // M2M3 two-sided, P1P2 edge, S3S5 closed, S8S8 pair.
     state.my_hand = tiles(&[
         Tile::M2,
         Tile::M3,
@@ -204,23 +204,23 @@ fn test_shape_protection_inactive_when_defending() {
 #[test]
 fn test_dora_protection_bonus() {
     let mut state = CpuGameState::new();
-    state.dora_indicators = vec![Tile::new(Tile::P8)]; // ドラは P9
+    state.dora_indicators = vec![Tile::new(Tile::P8)]; // dora is P9
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let ctx = attack_ctx(&state, &config);
 
-    // ドラはペナルティ
+    // Dora carries a penalty.
     assert!(dora_protection_bonus(&ctx, &make_candidate(Tile::P9)) < 0.0);
-    // 非ドラは補正なし
+    // Non-dora is unaffected.
     assert_eq!(dora_protection_bonus(&ctx, &make_candidate(Tile::S9)), 0.0);
 
-    // 赤ドラもペナルティ
+    // Red fives too.
     let red_five = DiscardCandidate {
         tile: Tile::new_red(Tile::M5),
         ..make_candidate(Tile::M5)
     };
     assert!(dora_protection_bonus(&ctx, &red_five) < 0.0);
 
-    // 守備時は補正なし（安全度を優先）
+    // No adjustment while defending; safety takes over.
     let defending = DiscardContext {
         state: &state,
         config: &config,
@@ -240,11 +240,11 @@ fn test_defense_safety_bonus() {
     let mut candidate = make_candidate(Tile::M5);
     candidate.safety = 1.0;
 
-    // 攻撃中は補正なし
+    // No adjustment while attacking.
     let attacking = attack_ctx(&state, &config);
     assert_eq!(defense_safety_bonus(&attacking, &candidate), 0.0);
 
-    // 守備時は安全度に大きな重み（向聴数3段階分 = 300）
+    // While defending, safety weighs 300 (three shanten steps).
     let defending = DiscardContext {
         state: &state,
         config: &config,
@@ -252,15 +252,15 @@ fn test_defense_safety_bonus() {
     };
     assert_eq!(defense_safety_bonus(&defending, &candidate), 300.0);
 
-    // 現物(1.0)と無筋中張牌(0.15)の差は向聴数2段階を超える
+    // Genbutsu (1.0) vs off-suji inside (0.15) exceeds two shanten steps.
     candidate.safety = 0.15;
     let dangerous = defense_safety_bonus(&defending, &candidate);
     assert!(300.0 - dangerous > 200.0);
 }
 
-// --- ブロック理論（#149 #150 #151 #153）---
+// --- Block theory (#149 #150 #151 #153) ---
 
-/// 6ブロックの手牌（2面子 + 嵌張 + 両面 + 両面 + 対子）
+/// Six-block hand: 2 groups + closed + two-sided x2 + pair.
 fn six_block_state() -> CpuGameState {
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[
@@ -285,10 +285,10 @@ fn six_block_state() -> CpuGameState {
 #[test]
 fn test_count_blocks() {
     let state = six_block_state();
-    // M234 + M789 + P1P3 + S67 + S23 + Z5Z5 = 6ブロック
+    // M234 + M789 + P1P3 + S67 + S23 + Z5Z5 = six blocks.
     assert_eq!(count_blocks(&state), 6);
 
-    // 5ブロックの手牌
+    // Five-block hand.
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[
         Tile::M2,
@@ -306,7 +306,7 @@ fn test_count_blocks() {
         Tile::Z3,
     ]);
     state.my_drawn = Some(Tile::new(Tile::S9));
-    assert_eq!(count_blocks(&state), 4); // 3面子 + 対子（浮き牌は数えない）
+    assert_eq!(count_blocks(&state), 4); // 3 groups + pair; floaters do not count
 }
 
 #[test]
@@ -317,19 +317,19 @@ fn test_five_block_bonus_dismantles_weak_blocks() {
 
     let bonus = |t: u32| five_block_bonus(&ctx, &make_candidate(t));
 
-    // 嵌張の構成牌は整理対象
+    // Closed-shape tiles may be shed.
     assert!(bonus(Tile::P1) > 0.0);
     assert!(bonus(Tile::P3) > 0.0);
-    // 両面は対象外
+    // Two-sided shapes are exempt.
     assert_eq!(bonus(Tile::S6), 0.0);
     assert_eq!(bonus(Tile::S2), 0.0);
-    // 対子は1つしかないので余剰対子扱いしない
+    // A single pair is not surplus.
     assert_eq!(bonus(Tile::Z5), 0.0);
 }
 
 #[test]
 fn test_five_block_bonus_inactive_under_six_blocks() {
-    // 5ブロック以下なら嵌張でも補正しない
+    // At five blocks or fewer even closed shapes get no bonus.
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[
         Tile::M2,
@@ -352,9 +352,9 @@ fn test_five_block_bonus_inactive_under_six_blocks() {
 
 #[test]
 fn test_five_block_bonus_surplus_pair() {
-    // 6ブロックで対子が2つあれば、対子の整理も許容する
+    // At six blocks with two pairs, shedding a pair is allowed.
     let mut state = six_block_state();
-    // S23 を S3S3 に変えて対子2つに（M234 M789 P1P3 S67 S3S3 Z5Z5）
+    // Turn S23 into S3S3 for a second pair (M234 M789 P1P3 S67 S3S3 Z5Z5).
     state.my_hand = tiles(&[
         Tile::M2,
         Tile::M3,
@@ -394,17 +394,17 @@ fn test_sole_pair_protection() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = attack_ctx(&state, &config);
 
-    // 唯一の対子は保護
+    // The only pair is protected.
     assert!(sole_pair_protection(&ctx, &make_candidate(Tile::M9)) < 0.0);
-    // 対子以外は対象外
+    // Non-pairs are exempt.
     assert_eq!(sole_pair_protection(&ctx, &make_candidate(Tile::P9)), 0.0);
 
-    // 対子が2つあれば保護しない
+    // Two pairs lift the protection.
     state.my_hand.push(Tile::new(Tile::P9));
     let ctx = attack_ctx(&state, &config);
     assert_eq!(sole_pair_protection(&ctx, &make_candidate(Tile::M9)), 0.0);
 
-    // 刻子があれば雀頭候補は他にもあるので保護しない
+    // A triplet supplies another head candidate, lifting the protection.
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[Tile::M9, Tile::M9, Tile::S5, Tile::S5, Tile::S5, Tile::P2]);
     let ctx = attack_ctx(&state, &config);
@@ -414,34 +414,34 @@ fn test_sole_pair_protection() {
 #[test]
 fn test_dead_shape_bonus_kanchan() {
     let mut state = CpuGameState::new();
-    // S2S4 の嵌張（待ちは S3）
+    // S2S4 closed shape waiting on S3.
     state.my_hand = tiles(&[Tile::S2, Tile::S4, Tile::M5, Tile::M5]);
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
 
-    // S3 が見えていない → 生きたターツ
+    // No S3 visible: the shape is alive.
     let ctx = attack_ctx(&state, &config);
     assert_eq!(dead_shape_bonus(&ctx, &make_candidate(Tile::S2)), 0.0);
 
-    // S3 が3枚見えている → 死にターツ
+    // Three S3 visible: the shape is dead.
     state.all_discards[1] = tiles(&[Tile::S3, Tile::S3, Tile::S3]);
     let ctx = attack_ctx(&state, &config);
     assert!(dead_shape_bonus(&ctx, &make_candidate(Tile::S2)) > 0.0);
     assert!(dead_shape_bonus(&ctx, &make_candidate(Tile::S4)) > 0.0);
-    // 対子側は対象外
+    // Pairs are exempt.
     assert_eq!(dead_shape_bonus(&ctx, &make_candidate(Tile::M5)), 0.0);
 }
 
 #[test]
 fn test_dead_shape_bonus_ryanmen_both_waits_dead() {
     let mut state = CpuGameState::new();
-    // S6S7 の両面（待ちは S5/S8）
+    // S6S7 two-sided shape waiting on S5/S8.
     state.my_hand = tiles(&[Tile::S6, Tile::S7]);
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
 
     let ctx = attack_ctx(&state, &config);
     assert_eq!(dead_shape_bonus(&ctx, &make_candidate(Tile::S6)), 0.0);
 
-    // S5 が4枚 + S8 が3枚見えている → 残り1枚 → ほぼ死に
+    // Four S5 and three S8 visible leave one wait: nearly dead.
     state.all_discards[1] = tiles(&[
         Tile::S5,
         Tile::S5,
@@ -458,7 +458,7 @@ fn test_dead_shape_bonus_ryanmen_both_waits_dead() {
 #[test]
 fn test_excess_pair_bonus() {
     let mut state = CpuGameState::new();
-    // 3対子 + 2面子: 一般形1向聴、七対子2向聴 → 一般形寄り
+    // 3 pairs + 2 groups: standard 1-shanten vs seven pairs 2 - lean standard.
     state.my_hand = tiles(&[
         Tile::M5,
         Tile::M5,
@@ -476,7 +476,7 @@ fn test_excess_pair_bonus() {
     ]);
     state.my_drawn = Some(Tile::new(Tile::S9));
 
-    // 強レベル: 中張牌対子 > 1/9対子 > 字牌対子(0) の順でほぐす
+    // Strong breaks pairs in order inside > terminal > honour (0).
     let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
     let ctx = attack_ctx(&state, &config);
     let m5 = excess_pair_bonus(&ctx, &make_candidate(Tile::M5));
@@ -486,14 +486,14 @@ fn test_excess_pair_bonus() {
     assert!(m9 > z2, "字牌対子は残す");
     assert_eq!(z2, 0.0);
 
-    // 対子でない牌は対象外
+    // Non-pair tiles are exempt.
     assert_eq!(excess_pair_bonus(&ctx, &make_candidate(Tile::P4)), 0.0);
 }
 
 #[test]
 fn test_excess_pair_bonus_inactive_when_seven_pairs_close() {
     let mut state = CpuGameState::new();
-    // 5対子: 七対子2向聴 <= 一般形 → ほぐさない
+    // Five pairs: seven pairs is at least as close, so no break-up.
     state.my_hand = tiles(&[
         Tile::M5,
         Tile::M5,
@@ -517,7 +517,7 @@ fn test_excess_pair_bonus_inactive_when_seven_pairs_close() {
 #[test]
 fn test_excess_pair_bonus_requires_three_pairs() {
     let mut state = CpuGameState::new();
-    // 2対子ではほぐさない
+    // Two pairs are never broken up.
     state.my_hand = tiles(&[
         Tile::M5,
         Tile::M5,
@@ -532,11 +532,11 @@ fn test_excess_pair_bonus_requires_three_pairs() {
     assert_eq!(excess_pair_bonus(&ctx, &make_candidate(Tile::M5)), 0.0);
 }
 
-// --- 七対子・対々和の路線判断（#154 #155 #156 #157）---
+// --- Route selection: seven pairs / toitoi (#154 #155 #156 #157) ---
 
 #[test]
 fn test_preferred_form_normal_under_four_pairs() {
-    // #154: 3対子では七対子を本線にしない
+    // #154: three pairs never make seven pairs the main route.
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[
         Tile::Z1,
@@ -558,7 +558,7 @@ fn test_preferred_form_normal_under_four_pairs() {
 
 #[test]
 fn test_preferred_form_seven_pairs_with_stiff_pairs() {
-    // #156: 字牌・么九牌・孤立対子が4つ → 七対子寄り
+    // #156: four stiff pairs (honours/terminals/isolated) lean seven pairs.
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[
         Tile::Z1,
@@ -580,7 +580,7 @@ fn test_preferred_form_seven_pairs_with_stiff_pairs() {
 
 #[test]
 fn test_preferred_form_normal_with_flexible_pairs() {
-    // #155: 連続対子（M334455）は順子手としての伸びが強い → 一般形
+    // #155: consecutive pairs (M334455) extend well as sequences - standard.
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[
         Tile::M3,
@@ -602,7 +602,7 @@ fn test_preferred_form_normal_with_flexible_pairs() {
 
 #[test]
 fn test_preferred_form_normal_with_melds() {
-    // 副露があれば七対子は不可能
+    // Any meld rules out seven pairs.
     let mut state = CpuGameState::new();
     state.my_hand = tiles(&[
         Tile::Z1,
@@ -623,10 +623,10 @@ fn test_preferred_form_normal_with_melds() {
 #[test]
 fn test_is_stiff_pair() {
     let mut counts = [0u8; 34];
-    counts[Tile::Z1 as usize] = 2; // 字牌対子
-    counts[Tile::M9 as usize] = 2; // 么九対子
-    counts[Tile::P5 as usize] = 2; // 孤立した中張対子
-    counts[Tile::S5 as usize] = 2; // 周囲に牌がある中張対子
+    counts[Tile::Z1 as usize] = 2; // honour pair
+    counts[Tile::M9 as usize] = 2; // terminal pair
+    counts[Tile::P5 as usize] = 2; // isolated inside pair
+    counts[Tile::S5 as usize] = 2; // inside pair with neighbours
     counts[Tile::S6 as usize] = 1;
 
     assert!(is_stiff_pair(&counts, Tile::Z1));
@@ -637,10 +637,10 @@ fn test_is_stiff_pair() {
 
 #[test]
 fn test_route_lock_penalizes_off_route_discards() {
-    // #154: 3対子（七対子の方が向聴数は近い）でも一般形を選び、
-    // ターツを壊す打牌（七対子追従）にペナルティを与える
+    // #154: even at three pairs (where seven pairs is closer) the route
+    // is standard, and shape-breaking discards get penalized
     let mut state = CpuGameState::new();
-    // 対子: Z1Z1 Z2Z2 P3P3（3つ）+ ターツ M8M9 S4S5 + 浮き牌
+    // Pairs Z1Z1 Z2Z2 P3P3 + shapes M8M9 S4S5 + floaters.
     state.my_hand = tiles(&[
         Tile::Z1,
         Tile::Z1,
@@ -660,9 +660,9 @@ fn test_route_lock_penalizes_off_route_discards() {
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = attack_ctx(&state, &config);
 
-    // ターツ(M8M9)を壊す打牌は一般形視点で損 → 大きなペナルティ
+    // Breaking the M8M9 shape hurts the standard route: big penalty.
     let break_taatsu = route_lock_bonus(&ctx, &make_candidate(Tile::M8));
-    // 浮き牌を切る打牌は両形でロスなし → ペナルティなし
+    // Discarding a floater loses nothing either way: no penalty.
     let cut_float = route_lock_bonus(&ctx, &make_candidate(Tile::M1));
     assert!(
         break_taatsu < cut_float,
@@ -673,12 +673,12 @@ fn test_route_lock_penalizes_off_route_discards() {
 
 #[test]
 fn test_route_lock_follows_seven_pairs_route() {
-    // 七対子路線では、一般形へドリフトする打牌（対子壊し）にペナルティを与える。
-    // 対子壊しによる向聴数自体の悪化は基礎スコアが罰するため、
-    // ここでは一般形のバックアップがある手（向聴数が変わらない打牌）で
-    // ルートロックの差分が出ることを確認する。
+    // On the seven-pairs route, pair-breaking discards (drifting towards
+    // the standard form) are penalized. The base score already punishes
+    // shanten loss, so this uses a hand with a standard-form backup where
+    // the discard keeps the shanten and only the route lock differs.
     let mut state = CpuGameState::new();
-    // 硬い対子4つ + 完成面子 + ターツ → 七対子・一般形とも2向聴
+    // Four stiff pairs + a group + a shape: both forms 2-shanten.
     state.my_hand = tiles(&[
         Tile::Z1,
         Tile::Z1,
@@ -699,10 +699,10 @@ fn test_route_lock_follows_seven_pairs_route() {
     let ctx = attack_ctx(&state, &config);
     assert_eq!(preferred_form(&state), Form::SevenPairs);
 
-    // 対子壊しは総合向聴数こそ保つ（一般形2向聴のまま）が、
-    // 七対子からは遠ざかる → ペナルティ
+    // Breaking a pair keeps the overall shanten (standard stays 2)
+    // but drifts from seven pairs: penalty.
     let break_pair = route_lock_bonus(&ctx, &make_candidate(Tile::Z1));
-    // 浮き牌切りは両形ともロスなし
+    // A floater discard loses nothing either way.
     let cut_float = route_lock_bonus(&ctx, &make_candidate(Tile::M2));
     assert!(
         break_pair < cut_float,
@@ -713,33 +713,34 @@ fn test_route_lock_follows_seven_pairs_route() {
 
 #[test]
 fn test_toitoi_prospect_by_blocks() {
-    // #157: 中以上では副露+対子・刻子が4ブロック以上で対々和候補
+    // #157 (normal+): toitoi needs melds + pairs/triplets >= 4 blocks.
     let seat = Wind::East;
     let prev = Wind::East;
 
-    // 3ブロック（副露2 + 対子1）+ 浮き牌多数 → 見込みなし
+    // Three blocks (2 melds + 1 pair) plus floaters: no prospect.
     let hand = tiles(&[Tile::P1, Tile::P1, Tile::M2, Tile::S3, Tile::M6, Tile::P7]);
     let melds = vec![pon_meld(Tile::M9), pon_meld(Tile::S9)];
     assert!(!has_yaku_prospect(&hand, &melds, seat, prev, true));
 
-    // 4ブロック（副露2 + 対子2）→ 対々和の見込みあり
+    // Four blocks (2 melds + 2 pairs): toitoi prospect.
     let hand = tiles(&[Tile::P1, Tile::P1, Tile::S3, Tile::S3, Tile::M2, Tile::M6]);
     assert!(has_yaku_prospect(&hand, &melds, seat, prev, true));
 
-    // 弱（従来ルール）: 浮き牌2種以下なら見込みあり
+    // Weak (legacy rule): prospect with two or fewer floaters.
     assert!(has_yaku_prospect(&hand, &melds, seat, prev, false));
 }
 
-// --- 仕掛けの高度化（#164 #165）---
+// --- Smarter calling (#164 #165) ---
 
 #[test]
 fn test_tanyao_prospect_strict_conditions() {
-    // #164: 中以上の喰いタン見込みは「么九牌2枚以下 + タンヤオ圏内に複数ブロック」
+    // #164 (normal+): kuitan prospect needs <=2 orphans and multiple
+    // blocks inside the tanyao range.
     let seat = Wind::East;
     let prev = Wind::East;
-    let melds = vec![chi_meld(Tile::S2)]; // S234（中張牌のみ）
+    let melds = vec![chi_meld(Tile::S2)]; // S234, inside tiles only
 
-    // 么九牌3枚: 緩い条件では見込みあり、厳しい条件ではなし
+    // Three orphans: prospect under the loose rule, none under strict.
     let hand = tiles(&[
         Tile::M2,
         Tile::M3,
@@ -753,7 +754,7 @@ fn test_tanyao_prospect_strict_conditions() {
     assert!(has_yaku_prospect(&hand, &melds, seat, prev, false));
     assert!(!has_yaku_prospect(&hand, &melds, seat, prev, true));
 
-    // 么九牌2枚 + タンヤオ圏内に2ブロック（M2M3, P4P5）→ 厳しい条件でも見込みあり
+    // Two orphans + two tanyao-range blocks (M2M3, P4P5): prospect even strict.
     let hand = tiles(&[
         Tile::M2,
         Tile::M3,
@@ -765,18 +766,18 @@ fn test_tanyao_prospect_strict_conditions() {
     ]);
     assert!(has_yaku_prospect(&hand, &melds, seat, prev, true));
 
-    // 么九牌なしでもタンヤオ圏内がバラバラ（ブロック1つ以下）なら見込みなし
+    // No orphans but scattered tanyao range (<=1 block): no prospect.
     let hand = tiles(&[Tile::M2, Tile::M5, Tile::P5, Tile::S8]);
     assert!(!has_yaku_prospect(&hand, &melds, seat, prev, true));
 }
 
 #[test]
 fn test_cheap_distant_call_detection() {
-    // #165: 2向聴以上 + 打点要素なし + 子 → 安くて遠い仕掛け
+    // #165: 2+ shanten, no value element, non-dealer: cheap and distant.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::South;
     let melds = vec![chi_meld(Tile::S2)];
-    // 3色バラバラの2向聴超の手（ドラ・役牌なし）
+    // Scattered three-suit hand above 2-shanten, no dora or value honours.
     let hand = tiles(&[
         Tile::M2,
         Tile::M3,
@@ -791,18 +792,18 @@ fn test_cheap_distant_call_detection() {
     ]);
     assert!(is_cheap_distant_call(&state, &hand, &melds, false));
 
-    // 親なら例外
+    // The dealer is exempt.
     let mut dealer_state = CpuGameState::new();
     dealer_state.my_seat_wind = Wind::East;
     assert!(!is_cheap_distant_call(&dealer_state, &hand, &melds, false));
 
-    // ドラがあれば打点要素あり
+    // Dora counts as a value element.
     let mut dora_state = CpuGameState::new();
     dora_state.my_seat_wind = Wind::South;
-    dora_state.dora_indicators = vec![Tile::new(Tile::M1)]; // ドラは M2（手牌にある）
+    dora_state.dora_indicators = vec![Tile::new(Tile::M1)]; // dora M2 is in hand
     assert!(!is_cheap_distant_call(&dora_state, &hand, &melds, false));
 
-    // 役牌対子があれば打点要素あり
+    // A value-honour pair counts as a value element.
     let hand_with_yakuhai = tiles(&[
         Tile::Z5,
         Tile::Z5,
@@ -825,11 +826,11 @@ fn test_cheap_distant_call_detection() {
 
 #[test]
 fn test_cheap_distant_call_requires_two_shanten() {
-    // 鳴いて1向聴以内に入る仕掛けは「遠い」扱いしない
+    // A call reaching 1-shanten or better is not distant.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::South;
     let melds = vec![chi_meld(Tile::S2)];
-    // 2面子 + 対子 + ターツ: チー後1向聴相当
+    // 2 groups + pair + shape: about 1-shanten after the chii.
     let hand = tiles(&[
         Tile::M2,
         Tile::M3,
@@ -845,9 +846,9 @@ fn test_cheap_distant_call_requires_two_shanten() {
     assert!(!is_cheap_distant_call(&state, &hand, &melds, false));
 }
 
-// --- 国士無双ルート（#158 #159 #160 #161）---
+// --- Thirteen Orphans route (#158 #159 #160 #161) ---
 
-/// 么九牌 n 種 + 中張牌の埋め草で13枚の手牌を作る
+/// Builds a 13-tile hand with n orphan kinds padded with inside tiles.
 fn orphan_hand(kinds: usize) -> Vec<Tile> {
     let fillers = [Tile::M4, Tile::M5, Tile::P5, Tile::S5, Tile::S6, Tile::P3];
     let mut hand: Vec<Tile> = ORPHAN_TYPES
@@ -861,7 +862,7 @@ fn orphan_hand(kinds: usize) -> Vec<Tile> {
 
 #[test]
 fn test_preferred_form_kokushi_with_ten_kinds() {
-    // #160: 么九牌10種以上は国士無双を本線にする
+    // #160: 10+ orphan kinds make Thirteen Orphans the main route.
     let mut state = CpuGameState::new();
     state.my_hand = orphan_hand(10);
     assert_eq!(preferred_form(&state), Form::ThirteenOrphans);
@@ -869,7 +870,7 @@ fn test_preferred_form_kokushi_with_ten_kinds() {
 
 #[test]
 fn test_preferred_form_kokushi_nine_kinds_when_closer() {
-    // #158: 9種は他形より明確に近いとき国士無双を採用する
+    // #158: 9 kinds qualify when clearly closer than the other forms.
     let mut state = CpuGameState::new();
     state.my_hand = orphan_hand(9);
     assert_eq!(preferred_form(&state), Form::ThirteenOrphans);
@@ -877,7 +878,7 @@ fn test_preferred_form_kokushi_nine_kinds_when_closer() {
 
 #[test]
 fn test_preferred_form_normal_with_seven_kinds_and_decent_hand() {
-    // #158: 7種でも通常手に見込みがあるなら国士無双に向かわない
+    // #158: 7 kinds do not qualify while the normal hand has prospects.
     let mut state = CpuGameState::new();
     let mut hand: Vec<Tile> = ORPHAN_TYPES.iter().take(7).map(|&t| Tile::new(t)).collect();
     hand.extend(tiles(&[
@@ -894,16 +895,16 @@ fn test_preferred_form_normal_with_seven_kinds_and_decent_hand() {
 
 #[test]
 fn test_kokushi_route_abandoned_when_missing_type_dead() {
-    // #161: 未所持の必要牌が4枚見えたら国士無双は成立しない
+    // #161: a missing requirement with 4 visible makes the form impossible.
     let mut state = CpuGameState::new();
-    state.my_hand = orphan_hand(10); // Z5/Z6/Z7 を持っていない
+    state.my_hand = orphan_hand(10); // holds no Z5/Z6/Z7
     state.all_discards[1] = vec![Tile::new(Tile::Z5); 4];
     assert_eq!(preferred_form(&state), Form::Normal);
 }
 
 #[test]
 fn test_kokushi_route_abandoned_when_needed_tiles_thin_late() {
-    // #161: 中盤以降、未所持の必要牌が残り1枚以下の種類が2つ以上なら見切る
+    // #161: from mid-game, two missing kinds with <=1 copy left abandon it.
     let mut state = CpuGameState::new();
     state.my_hand = orphan_hand(10);
     state.all_discards[1] = vec![
@@ -915,39 +916,39 @@ fn test_kokushi_route_abandoned_when_needed_tiles_thin_late() {
     ];
     state.all_discards[2] = vec![Tile::new(Tile::Z6)];
 
-    // 序盤（1巡目）はまだ見切らない
+    // Turn 1 is too early to abandon.
     assert_eq!(preferred_form(&state), Form::ThirteenOrphans);
 
-    // 7巡目以降は見切る
+    // From turn 7 the chase is abandoned.
     state.all_discards[0] = vec![Tile::new(Tile::P5); 6];
     assert_eq!(preferred_form(&state), Form::Normal);
 }
 
 #[test]
 fn test_is_far_behind() {
-    // トップと16000点差以上
+    // 16000+ points behind the leader.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::East;
     state.scores = [8000, 42000, 25000, 25000];
     assert!(is_far_behind(&state));
 
-    // 平場
+    // Flat scores.
     state.scores = [25000; 4];
     assert!(!is_far_behind(&state));
 
-    // ラス目でも僅差なら対象外
+    // A close last place does not qualify.
     state.scores = [20000, 26000, 27000, 27000];
     assert!(!is_far_behind(&state));
 
-    // ラス目で8000点以上離されている
+    // Last place, 8000+ behind.
     state.scores = [17000, 27000, 28000, 28000];
     assert!(is_far_behind(&state));
 }
 
 #[test]
 fn test_preferred_form_kokushi_seven_kinds_when_far_behind() {
-    // #159: 大きく負けているなら7種から、多少遠くても国士無双を狙う。
-    // 通常形に見込みがある手で点棒状況だけを変えて比較する
+    // #159: when far behind, chase from 7 kinds even if slightly farther.
+    // Compare identical hands with only the score situation changed.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::East;
     let mut hand: Vec<Tile> = ORPHAN_TYPES.iter().take(7).map(|&t| Tile::new(t)).collect();
@@ -961,22 +962,22 @@ fn test_preferred_form_kokushi_seven_kinds_when_far_behind() {
     ]));
     state.my_hand = hand;
 
-    // 平場では狙わない（国士は通常形より遠い）
+    // Flat scores: no chase (the orphans are farther than standard).
     state.scores = [25000; 4];
     assert_ne!(preferred_form(&state), Form::ThirteenOrphans);
 
-    // 大差のラス目なら狙う
+    // A distant last place chases.
     state.scores = [5000, 45000, 25000, 25000];
     assert_eq!(preferred_form(&state), Form::ThirteenOrphans);
 }
 
-// --- 押し引き（#178）・まわし打ち（#179）---
+// --- Push/fold (#178) and mawashi (#179) ---
 
 #[test]
 fn test_judge_push_folds_cheap_bad_shape_tenpai() {
-    // #178: 愚形安手の聴牌は脅威がいれば降りる
+    // #178: a bad-shape cheap tenpai folds against a threat.
     let mut state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
-    state.my_seat_wind = Wind::South; // 親の例外を避ける
+    state.my_seat_wind = Wind::South; // avoid the dealer exemption
     state.player_riichi[2] = true;
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = CallContext {
@@ -985,7 +986,7 @@ fn test_judge_push_folds_cheap_bad_shape_tenpai() {
     };
     assert_eq!(judge_push(&ctx, 1), PushJudgement::Fold);
 
-    // 弱レベルは対象外
+    // The weak level is exempt.
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let ctx = CallContext {
         state: &state,
@@ -996,7 +997,7 @@ fn test_judge_push_folds_cheap_bad_shape_tenpai() {
 
 #[test]
 fn test_judge_push_pushes_good_shape_tenpai() {
-    // #178: 良形聴牌は安手でも1人リーチには押す
+    // #178: a good-shape tenpai pushes one riichi even when cheap.
     let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     state.my_seat_wind = Wind::South;
     state.player_riichi[2] = true;
@@ -1010,10 +1011,10 @@ fn test_judge_push_pushes_good_shape_tenpai() {
 
 #[test]
 fn test_judge_push_pushes_high_value_against_multiple_threats() {
-    // #178: 満貫級の良形聴牌は2人リーチでも押す
+    // #178: a mangan-class good shape pushes even two riichi.
     let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     state.my_seat_wind = Wind::South;
-    state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)]; // ドラ3
+    state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)]; // three dora
     state.player_riichi[2] = true;
     state.player_riichi[3] = true;
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
@@ -1026,7 +1027,7 @@ fn test_judge_push_pushes_high_value_against_multiple_threats() {
 
 #[test]
 fn test_judge_push_dealer_pushes_good_shape() {
-    // #178: 親は良形聴牌なら2人リーチでも押す（連荘価値）
+    // #178: the dealer pushes a good shape even against two riichi.
     let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     state.my_seat_wind = Wind::East;
     state.player_riichi[2] = true;
@@ -1041,7 +1042,7 @@ fn test_judge_push_dealer_pushes_good_shape() {
 
 #[test]
 fn test_judge_push_two_shanten_with_value() {
-    // #178: 2向聴でも満貫級（ドラ3相当）なら単独の脅威には押す
+    // #178: a mangan-class 2-shanten pushes a single threat.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::South;
     state.my_hand = tiles(&[
@@ -1059,7 +1060,7 @@ fn test_judge_push_two_shanten_with_value() {
         Tile::Z3,
         Tile::Z4,
     ]);
-    state.dora_indicators = vec![Tile::new(Tile::M4), Tile::new(Tile::M4)]; // ドラ M5×2重
+    state.dora_indicators = vec![Tile::new(Tile::M4), Tile::new(Tile::M4)]; // M5 double dora
     state.player_riichi[2] = true;
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = CallContext {
@@ -1068,7 +1069,7 @@ fn test_judge_push_two_shanten_with_value() {
     };
     assert_eq!(judge_push(&ctx, 1), PushJudgement::Push);
 
-    // ドラなしの安手2向聴は対象外（従来の撤退判断に委ねる）
+    // A cheap dora-less 2-shanten defers to the legacy retreat judgement.
     state.dora_indicators = vec![];
     let ctx = CallContext {
         state: &state,
@@ -1090,15 +1091,15 @@ fn test_judge_push_neutral_without_threats() {
 
 #[test]
 fn test_mawashi_reduces_safety_weight_when_close() {
-    // #179: 強レベルは聴牌・1向聴で降りるとき安全度の重みを下げる
+    // #179: Strong lowers the safety weight when folding at tenpai/1-shanten.
     let mut candidate = make_candidate(Tile::M5);
     candidate.safety = 1.0;
 
-    // 聴牌形の手牌（山はまだ十分残っている）
+    // A tenpai hand with plenty of wall left.
     let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     state.remaining_tiles = 40;
 
-    // 強レベル + 聴牌 → 重み150（まわし打ち）
+    // Strong at tenpai: weight 150 (mawashi).
     let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
     let defending = DiscardContext {
         state: &state,
@@ -1107,7 +1108,7 @@ fn test_mawashi_reduces_safety_weight_when_close() {
     };
     assert_eq!(defense_safety_bonus(&defending, &candidate), 150.0);
 
-    // 中レベルは常にベタオリ（重み300）
+    // Normal always folds fully (weight 300).
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let defending = DiscardContext {
         state: &state,
@@ -1116,7 +1117,7 @@ fn test_mawashi_reduces_safety_weight_when_close() {
     };
     assert_eq!(defense_safety_bonus(&defending, &candidate), 300.0);
 
-    // 強レベルでも手が遠ければベタオリ（重み300）
+    // Even Strong folds fully when the hand is far (weight 300).
     let mut far_state = CpuGameState::new();
     far_state.remaining_tiles = 40;
     far_state.my_hand = tiles(&[
@@ -1145,18 +1146,18 @@ fn test_mawashi_reduces_safety_weight_when_close() {
 
 #[test]
 fn test_keishiki_tenpai_weights_at_endgame() {
-    // #184/#185: 流局間際の聴牌・1向聴は形式聴牌を狙って重みを下げる
+    // #184/#185: near the draw, tenpai/1-shanten chases formal tenpai.
     let mut candidate = make_candidate(Tile::M5);
     candidate.safety = 1.0;
 
     let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     state.my_seat_wind = Wind::South;
-    state.scores = [26000, 25000, 25000, 24000]; // 自分(南)は2着
+    state.scores = [26000, 25000, 25000, 24000]; // we (South) are second
     state.remaining_tiles = 6;
     state.round_number = 1;
     state.total_rounds = 4;
 
-    // #184（中以上）: 流局間際 → 重み150
+    // #184 (normal+): near the draw, weight 150.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let defending = DiscardContext {
         state: &state,
@@ -1165,7 +1166,7 @@ fn test_keishiki_tenpai_weights_at_endgame() {
     };
     assert_eq!(defense_safety_bonus(&defending, &candidate), 150.0);
 
-    // #185（強以上）: オーラスでトップ目でない → さらに聴牌維持重視（重み120）
+    // #185 (strong): final hand, not leading: weight 120.
     state.round_number = 3;
     let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
     let defending = DiscardContext {
@@ -1175,7 +1176,7 @@ fn test_keishiki_tenpai_weights_at_endgame() {
     };
     assert_eq!(defense_safety_bonus(&defending, &candidate), 120.0);
 
-    // #185: 親番でも聴牌維持重視
+    // #185: the dealer also values keeping tenpai.
     let mut dealer_state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     dealer_state.my_seat_wind = Wind::East;
     dealer_state.remaining_tiles = 6;
@@ -1187,28 +1188,28 @@ fn test_keishiki_tenpai_weights_at_endgame() {
     assert_eq!(defense_safety_bonus(&defending, &candidate), 120.0);
 }
 
-// --- 終盤処理・点棒状況（#183〜#191）---
+// --- Endgame and score situation (#183-#191) ---
 
 #[test]
 fn test_last_discard_safety_bonus() {
-    // #186: 山が空の最終打牌は、脅威がいれば攻撃中でも安全度を重視する
+    // #186: the final discard weighs safety even while attacking.
     let mut candidate = make_candidate(Tile::M5);
     candidate.safety = 1.0;
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
 
-    // 山が残っていれば補正なし
+    // With wall left, no adjustment.
     let mut state = CpuGameState::new();
     state.remaining_tiles = 10;
     state.player_riichi[1] = true;
     let ctx = attack_ctx(&state, &config);
     assert_eq!(last_discard_safety_bonus(&ctx, &candidate), 0.0);
 
-    // 山が空 + リーチ者あり → 攻撃中でも補正
+    // Empty wall + a riichi: adjusted even while attacking.
     state.remaining_tiles = 0;
     let ctx = attack_ctx(&state, &config);
     assert_eq!(last_discard_safety_bonus(&ctx, &candidate), 200.0);
 
-    // 脅威がいなければ補正なし
+    // No threat, no adjustment.
     let mut state = CpuGameState::new();
     state.remaining_tiles = 0;
     let ctx = attack_ctx(&state, &config);
@@ -1217,10 +1218,11 @@ fn test_last_discard_safety_bonus() {
 
 #[test]
 fn test_cheap_call_allowed_when_final_round_speed_matters() {
-    // #187: オーラスで安手和了でも順位が上がるなら速度優先（抑制解除）
+    // #187: in the final hand a cheap win that climbs a place lifts
+    // the suppression.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::South;
-    state.scores = [25000, 24000, 26000, 25000]; // 自分(南)は2000点差の3着
+    state.scores = [25000, 24000, 26000, 25000]; // we (South) are third by 2000
     state.round_number = 3;
     state.total_rounds = 4;
     let melds = vec![chi_meld(Tile::S2)];
@@ -1236,24 +1238,25 @@ fn test_cheap_call_allowed_when_final_round_speed_matters() {
         Tile::S4,
         Tile::M7,
     ]);
-    // 通常なら安くて遠い仕掛けだが、オーラスの僅差なので許容
+    // Normally cheap-and-distant, but the final-hand margin allows it.
     assert!(!is_cheap_distant_call(&state, &hand, &melds, false));
 
-    // オーラスでなければ抑制される
+    // Outside the final hand it is suppressed.
     state.round_number = 1;
     assert!(is_cheap_distant_call(&state, &hand, &melds, false));
 }
 
 #[test]
 fn test_cheap_call_suppressed_when_mangan_needed() {
-    // #187: オーラスで満貫級が必要なら、近い（1向聴）仕掛けでも安手は控える
+    // #187: needing a mangan-class win, even a close (1-shanten) cheap
+    // call is suppressed.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::South;
-    state.scores = [25000, 15000, 35000, 25000]; // 自分(南)はトップと2万点差
+    state.scores = [25000, 15000, 35000, 25000]; // we (South) trail the leader by 20000
     state.round_number = 3;
     state.total_rounds = 4;
     let melds = vec![chi_meld(Tile::S2)];
-    // チー後1向聴相当の手（2面子 + 対子 + ターツ）
+    // About 1-shanten after the chii (2 groups + pair + shape).
     let hand = tiles(&[
         Tile::M2,
         Tile::M3,
@@ -1268,17 +1271,17 @@ fn test_cheap_call_suppressed_when_mangan_needed() {
     ]);
     assert!(is_cheap_distant_call(&state, &hand, &melds, false));
 
-    // 平場なら1向聴の仕掛けは抑制されない
+    // With flat scores a 1-shanten call is not suppressed.
     state.round_number = 1;
     assert!(!is_cheap_distant_call(&state, &hand, &melds, false));
 }
 
 #[test]
 fn test_cheap_call_allowed_with_large_stakes() {
-    // #191（強以上）: 供託・本場が大きければ安手仕掛けも許容
+    // #191 (strong): big stakes allow cheap calls.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::South;
-    state.riichi_sticks = 2; // 供託2000点
+    state.riichi_sticks = 2; // 2000 points on the table
     let melds = vec![chi_meld(Tile::S2)];
     let hand = tiles(&[
         Tile::M2,
@@ -1292,18 +1295,18 @@ fn test_cheap_call_allowed_with_large_stakes() {
         Tile::S4,
         Tile::M7,
     ]);
-    // 強（供託考慮あり）: 許容
+    // Strong considers the stakes: allowed.
     assert!(!is_cheap_distant_call(&state, &hand, &melds, true));
-    // 中（供託考慮なし）: 従来どおり抑制
+    // Normal ignores them: still suppressed.
     assert!(is_cheap_distant_call(&state, &hand, &melds, false));
 }
 
 #[test]
 fn test_judge_push_top_in_second_half_folds() {
-    // #188: 後半のトップ目は安手の良形聴牌でも降りる
+    // #188: a second-half leader folds even a cheap good-shape tenpai.
     let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     state.my_seat_wind = Wind::South;
-    state.scores = [25000, 40000, 20000, 15000]; // 自分(南)が大差トップ
+    state.scores = [25000, 40000, 20000, 15000]; // we (South) lead by far
     state.round_number = 3;
     state.total_rounds = 4;
     state.player_riichi[2] = true;
@@ -1314,15 +1317,15 @@ fn test_judge_push_top_in_second_half_folds() {
     };
     assert_eq!(judge_push(&ctx, 1), PushJudgement::Fold);
 
-    // 満貫級の良形聴牌だけは押す
-    state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)]; // ドラ3
+    // Only a mangan-class good shape pushes.
+    state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)]; // three dora
     let ctx = CallContext {
         state: &state,
         config: &config,
     };
     assert_eq!(judge_push(&ctx, 1), PushJudgement::Push);
 
-    // 前半なら通常の判断（良形 + 脅威1人 → 押す）
+    // First half keeps the normal judgement (good shape + one threat: push).
     let mut early = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     early.my_seat_wind = Wind::South;
     early.scores = [25000, 40000, 20000, 15000];
@@ -1338,7 +1341,7 @@ fn test_judge_push_top_in_second_half_folds() {
 
 #[test]
 fn test_judge_push_far_behind_lowers_value_threshold() {
-    // #189: 大きく負けているときは2向聴の押し基準を下げる
+    // #189: far behind, the 2-shanten push bar drops.
     let mut state = CpuGameState::new();
     state.my_seat_wind = Wind::South;
     state.my_hand = tiles(&[
@@ -1356,11 +1359,11 @@ fn test_judge_push_far_behind_lowers_value_threshold() {
         Tile::Z3,
         Tile::Z4,
     ]);
-    state.dora_indicators = vec![Tile::new(Tile::M4)]; // ドラ M5×2 = 推定4点相当
+    state.dora_indicators = vec![Tile::new(Tile::M4)]; // two M5 dora, ~4.0 value
     state.player_riichi[2] = true;
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
 
-    // 平場: 基準（6.0）未満 → Neutral
+    // Flat scores: below the 6.0 bar, Neutral.
     state.scores = [25000; 4];
     let ctx = CallContext {
         state: &state,
@@ -1368,7 +1371,7 @@ fn test_judge_push_far_behind_lowers_value_threshold() {
     };
     assert_eq!(judge_push(&ctx, 1), PushJudgement::Neutral);
 
-    // 大差のラス目: 基準が下がり押す
+    // Distant last place: the bar drops and it pushes.
     state.scores = [42000, 8000, 25000, 25000];
     let ctx = CallContext {
         state: &state,
@@ -1379,7 +1382,7 @@ fn test_judge_push_far_behind_lowers_value_threshold() {
 
 #[test]
 fn test_judge_push_dealer_keeps_pushing_cheap_tenpai() {
-    // #190: 親は愚形安手聴牌でも単独脅威には降り推奨しない（連荘価値）
+    // #190: the dealer's bad-shape cheap tenpai defers against one threat.
     let mut state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
     state.my_seat_wind = Wind::East;
     state.player_riichi[2] = true;
@@ -1388,13 +1391,13 @@ fn test_judge_push_dealer_keeps_pushing_cheap_tenpai() {
         state: &state,
         config: &config,
     };
-    // 子なら Fold（既存テスト）、親なら Neutral（従来判断 = 押す）
+    // Non-dealer folds; the dealer is Neutral (legacy pushes).
     assert_eq!(judge_push(&ctx, 1), PushJudgement::Neutral);
 }
 
 #[test]
 fn test_judge_push_stakes_keep_cheap_tenpai_alive() {
-    // #191（強以上）: 供託・本場が大きければ愚形安手聴牌でも降り推奨しない
+    // #191 (strong): big stakes remove the fold recommendation.
     let mut state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
     state.my_seat_wind = Wind::South;
     state.riichi_sticks = 2;
@@ -1407,7 +1410,7 @@ fn test_judge_push_stakes_keep_cheap_tenpai_alive() {
     };
     assert_eq!(judge_push(&ctx, 1), PushJudgement::Neutral);
 
-    // 中レベルは供託を考慮しない → Fold
+    // Normal ignores the stakes: Fold.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = CallContext {
         state: &state,
@@ -1418,11 +1421,11 @@ fn test_judge_push_stakes_keep_cheap_tenpai_alive() {
 
 #[test]
 fn test_judge_riichi_far_behind_declares_over_damaten() {
-    // #189: 大きく負けているときは満貫確定でもダマにせずリーチで打点を伸ばす
+    // #189: far behind, even a locked mangan declares instead of damaten.
     let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     state.my_seat_wind = Wind::South;
-    state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)]; // ドラ3
-    state.scores = [42000, 8000, 25000, 25000]; // 自分(南)は大差ラス
+    state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)]; // three dora
+    state.scores = [42000, 8000, 25000, 25000]; // we (South) are a distant last
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = CallContext {
         state: &state,
@@ -1431,9 +1434,9 @@ fn test_judge_riichi_far_behind_declares_over_damaten() {
     assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Declare);
 }
 
-// --- リーチ・ダマ判断（#168〜#172）---
+// --- Riichi vs damaten (#168-#172) ---
 
-/// 聴牌済みの13枚 + ツモ切り対象の浮き牌で判定用の状態を作る
+/// Builds a judgement state: a tenpai 13 tiles plus a floater to tsumogiri.
 fn riichi_state(hand: &[u32], drawn: u32) -> CpuGameState {
     let mut state = CpuGameState::new();
     state.my_hand = tiles(hand);
@@ -1441,7 +1444,7 @@ fn riichi_state(hand: &[u32], drawn: u32) -> CpuGameState {
     state
 }
 
-/// 役なし聴牌（M8カンチャン待ち、ピンフ・タンヤオなし）
+/// Yakuless tenpai: closed wait on M8, no pinfu or tanyao.
 const NO_YAKU_TENPAI: [u32; 13] = [
     Tile::M2,
     Tile::M3,
@@ -1458,7 +1461,7 @@ const NO_YAKU_TENPAI: [u32; 13] = [
     Tile::Z3,
 ];
 
-/// タンヤオ・ピンフ確定の両面聴牌（M3/M6待ち）
+/// Two-sided tenpai with tanyao + pinfu locked (waiting M3/M6).
 const GOOD_SHAPE_TENPAI: [u32; 13] = [
     Tile::P2,
     Tile::P3,
@@ -1475,7 +1478,7 @@ const GOOD_SHAPE_TENPAI: [u32; 13] = [
     Tile::M5,
 ];
 
-/// タンヤオのみのカンチャン聴牌（M7待ち）
+/// Tanyao-only closed-wait tenpai (waiting M7).
 const CHEAP_KANCHAN_TENPAI: [u32; 13] = [
     Tile::M2,
     Tile::M3,
@@ -1494,7 +1497,7 @@ const CHEAP_KANCHAN_TENPAI: [u32; 13] = [
 
 #[test]
 fn test_judge_riichi_declares_with_no_yaku() {
-    // #168: 役なし聴牌はリーチしないと和了できない → 宣言
+    // #168: a yakuless tenpai cannot win without riichi: declare.
     let state = riichi_state(&NO_YAKU_TENPAI, Tile::Z4);
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let ctx = CallContext {
@@ -1506,9 +1509,9 @@ fn test_judge_riichi_declares_with_no_yaku() {
 
 #[test]
 fn test_judge_riichi_damaten_with_mangan() {
-    // #170: 全ての待ちでダマ満貫（タンヤオ+ピンフ+ドラ3）→ ダマ
+    // #170: damaten mangan on every wait (tanyao+pinfu+3 dora): damaten.
     let mut state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
-    // ドラ: S8×2（表示牌S7）+ M4×1（表示牌M3）= 3枚
+    // Dora: two S8 (indicator S7) + one M4 (indicator M3) = 3.
     state.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)];
 
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
@@ -1518,7 +1521,7 @@ fn test_judge_riichi_damaten_with_mangan() {
     };
     assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Damaten);
 
-    // 弱レベルは #170 対象外 → 良形先制として宣言（#169）
+    // Weak skips #170 and declares as an uncontested good shape (#169).
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let ctx = CallContext {
         state: &state,
@@ -1529,7 +1532,7 @@ fn test_judge_riichi_damaten_with_mangan() {
 
 #[test]
 fn test_judge_riichi_declares_good_shape() {
-    // #169: 安手でも先制の良形聴牌はリーチ
+    // #169: an uncontested good shape declares even when cheap.
     let state = riichi_state(&GOOD_SHAPE_TENPAI, Tile::Z3);
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = CallContext {
@@ -1541,10 +1544,11 @@ fn test_judge_riichi_declares_good_shape() {
 
 #[test]
 fn test_judge_riichi_cheap_kanchan_depends_on_turn() {
-    // #171: 愚形安手は早巡の先制なら宣言、中終盤はダマ
+    // #171: a cheap bad shape declares early and uncontested,
+    // stays damaten later.
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
 
-    // 早巡（1巡目）→ 宣言
+    // Turn 1: declare.
     let state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
     let ctx = CallContext {
         state: &state,
@@ -1552,7 +1556,7 @@ fn test_judge_riichi_cheap_kanchan_depends_on_turn() {
     };
     assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Declare);
 
-    // 中終盤（11巡目）→ ダマ
+    // Turn 11: damaten.
     let mut state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
     state.all_discards[0] = vec![Tile::new(Tile::Z4); 10];
     let ctx = CallContext {
@@ -1564,7 +1568,7 @@ fn test_judge_riichi_cheap_kanchan_depends_on_turn() {
 
 #[test]
 fn test_judge_riichi_strong_defers_with_many_upgrades() {
-    // #172: 強レベルは序盤の愚形を、良形変化が多ければ一巡待つ
+    // #172: Strong waits a turn on an early bad shape with many upgrades.
     let state = riichi_state(&CHEAP_KANCHAN_TENPAI, Tile::Z4);
 
     let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced);
@@ -1574,7 +1578,7 @@ fn test_judge_riichi_strong_defers_with_many_upgrades() {
     };
     assert_eq!(judge_riichi(&ctx, None), RiichiJudgement::Damaten);
 
-    // 中レベルは #172 対象外 → 早巡先制の宣言（#171）
+    // Normal skips #172 and declares early uncontested (#171).
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = CallContext {
         state: &state,
@@ -1596,7 +1600,7 @@ fn test_judge_riichi_neutral_when_disabled() {
 
 #[test]
 fn test_estimate_ron_han() {
-    // タンヤオ+ピンフ+ドラ3 = 5翻
+    // tanyao + pinfu + 3 dora = 5 han
     let state = {
         let mut s = CpuGameState::new();
         s.dora_indicators = vec![Tile::new(Tile::S7), Tile::new(Tile::M3)];
@@ -1606,7 +1610,7 @@ fn test_estimate_ron_han() {
     let han = estimate_ron_han(&state, &remaining, &[], Tile::M3);
     assert_eq!(han, Some(5));
 
-    // 役なし → None
+    // No yaku: None.
     let state = CpuGameState::new();
     let remaining = tiles(&NO_YAKU_TENPAI);
     assert_eq!(estimate_ron_han(&state, &remaining, &[], Tile::M8), None);
@@ -1638,7 +1642,7 @@ fn chi_meld(start: u32) -> Meld {
 
 #[test]
 fn test_yaku_prospect_yakuhai_pair() {
-    // 白の対子があれば役牌の見込みあり
+    // A White dragon pair gives a value-honour prospect.
     let hand = tiles(&[Tile::Z5, Tile::Z5, Tile::M1, Tile::M9, Tile::P1, Tile::S9]);
     let melds = vec![chi_meld(Tile::P2)];
     assert!(has_yaku_prospect(
@@ -1652,7 +1656,7 @@ fn test_yaku_prospect_yakuhai_pair() {
 
 #[test]
 fn test_yaku_prospect_tanyao() {
-    // 副露も手牌も中張牌中心なら断么九の見込みあり
+    // Inside-only melds and hand give a tanyao prospect.
     let hand = tiles(&[Tile::M2, Tile::M3, Tile::P4, Tile::P5, Tile::S6, Tile::M9]);
     let melds = vec![chi_meld(Tile::S2)];
     assert!(has_yaku_prospect(
@@ -1666,7 +1670,7 @@ fn test_yaku_prospect_tanyao() {
 
 #[test]
 fn test_yaku_prospect_honitsu() {
-    // 萬子+字牌のみなら混一色の見込みあり
+    // Characters plus honours only: a flush prospect.
     let hand = tiles(&[Tile::M1, Tile::M2, Tile::M3, Tile::M7, Tile::Z2, Tile::Z3]);
     let melds = vec![chi_meld(Tile::M4)];
     assert!(has_yaku_prospect(
@@ -1680,7 +1684,7 @@ fn test_yaku_prospect_honitsu() {
 
 #[test]
 fn test_yaku_prospect_toitoi() {
-    // 副露が全て刻子で手牌が対子中心なら対々和の見込みあり
+    // All-triplet melds with a pair-heavy hand: a toitoi prospect.
     let hand = tiles(&[Tile::M9, Tile::M9, Tile::P1, Tile::P1, Tile::S9]);
     let melds = vec![pon_meld(Tile::M1), pon_meld(Tile::S1)];
     assert!(has_yaku_prospect(
@@ -1694,7 +1698,7 @@ fn test_yaku_prospect_toitoi() {
 
 #[test]
 fn test_yaku_prospect_none_for_junk_hand() {
-    // 3色バラバラ + 么九牌副露 + 役牌なし → 見込みなし
+    // Three scattered suits, orphan meld, no value honours: no prospect.
     let hand = tiles(&[
         Tile::M2,
         Tile::M3,
@@ -1728,7 +1732,7 @@ fn call_state_with_hand(hand: Vec<Tile>) -> CpuGameState {
 
 #[test]
 fn test_judge_pon_forbids_yakuless_call() {
-    // 3面子完成 + M9対子: M9ポンは向聴数を下げるが役の見込みがない
+    // 3 groups + M9 pair: the pon lowers shanten but leaves no yaku.
     let state = call_state_with_hand(tiles(&[
         Tile::M2,
         Tile::M3,
@@ -1754,7 +1758,7 @@ fn test_judge_pon_forbids_yakuless_call() {
 
 #[test]
 fn test_judge_pon_forbids_fourth_meld() {
-    // 既に3副露 → 裸単騎になるポンは禁止
+    // Already three melds: a pon into a bare pair is forbidden.
     let mut state = call_state_with_hand(tiles(&[Tile::S3, Tile::S3, Tile::M5, Tile::M9]));
     state.player_melds[0] = vec![chi_meld(Tile::M1), pon_meld(Tile::P5), pon_meld(Tile::S9)];
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
@@ -1767,7 +1771,7 @@ fn test_judge_pon_forbids_fourth_meld() {
 
 #[test]
 fn test_judge_pon_encourages_yakuhai() {
-    // 白対子のポンは推奨
+    // A White dragon pon is encouraged.
     let state = call_state_with_hand(tiles(&[
         Tile::Z5,
         Tile::Z5,
@@ -1796,7 +1800,7 @@ fn test_judge_pon_encourages_yakuhai() {
 
 #[test]
 fn test_judge_pon_neutral_for_tanyao_call() {
-    // 中張牌中心の手の中張牌ポンは中立（性格判断に委ねる）
+    // An inside pon in an inside-heavy hand is neutral.
     let state = call_state_with_hand(tiles(&[
         Tile::M2,
         Tile::M3,
@@ -1822,7 +1826,7 @@ fn test_judge_pon_neutral_for_tanyao_call() {
 
 #[test]
 fn test_judge_pon_neutral_when_heuristics_disabled() {
-    // 定石無効なら3副露でも Neutral（従来挙動の維持）
+    // With heuristics off, even three melds stay Neutral (legacy).
     let mut state = call_state_with_hand(tiles(&[Tile::S3, Tile::S3, Tile::M5, Tile::M9]));
     state.player_melds[0] = vec![chi_meld(Tile::M1), pon_meld(Tile::P5), pon_meld(Tile::S9)];
     let config = CpuConfig::new(CpuLevel::Strong, CpuPersonality::Balanced).without_heuristics();
@@ -1837,8 +1841,8 @@ fn test_judge_pon_neutral_when_heuristics_disabled() {
 
 #[test]
 fn test_judge_chi_forbids_yakuless_call() {
-    // バラバラの3色手で么九牌絡みのチーは役の見込みがない
-    // 手牌: M789 + P345 + S456 + M9M9 + S2 S7 → M7M8 で M9 をチー
+    // In a scattered three-suit hand an orphan chii leaves no yaku.
+    // Hand: M789 + P345 + S456 + M9M9 + S2 S7; chii M9 with M7M8.
     let state = call_state_with_hand(tiles(&[
         Tile::M7,
         Tile::M8,
@@ -1859,7 +1863,8 @@ fn test_judge_chi_forbids_yakuless_call() {
         state: &state,
         config: &config,
     };
-    // M9チー（M7M8使用）: 副露に么九牌 → タンヤオ消滅、役牌なし、3色 → Forbid
+    // The M9 chii kills tanyao (orphan in the meld), no value honours,
+    // three suits: Forbid.
     assert_eq!(
         judge_chi(
             &ctx,
@@ -1872,7 +1877,7 @@ fn test_judge_chi_forbids_yakuless_call() {
 
 #[test]
 fn test_judge_chi_neutral_for_tanyao_call() {
-    // 中張牌のみのチーで断么九の見込みが残る → Neutral
+    // An inside-only chii keeps the tanyao prospect: Neutral.
     let state = call_state_with_hand(tiles(&[
         Tile::M3,
         Tile::M4,
@@ -1905,7 +1910,8 @@ fn test_judge_chi_neutral_for_tanyao_call() {
 
 // --- judge_ankan ---
 
-/// 暗カンすると手が壊れる手牌（S5×4を順子+刻子に使っている聴牌形）
+/// A hand a concealed kan would break: the four S5 serve a sequence
+/// plus a triplet in a tenpai shape.
 fn hand_breaking_kan_state() -> CpuGameState {
     let mut state = call_state_with_hand(tiles(&[
         Tile::M2,
@@ -1928,7 +1934,7 @@ fn hand_breaking_kan_state() -> CpuGameState {
 
 #[test]
 fn test_judge_ankan_forbids_hand_breaking_kan() {
-    // S5×4 を S456 + S555 に使っている聴牌形: カンすると1向聴に落ちる
+    // The four S5 form S456 + S555 at tenpai; the kan drops to 1-shanten.
     let state = hand_breaking_kan_state();
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = CallContext {
@@ -1940,7 +1946,7 @@ fn test_judge_ankan_forbids_hand_breaking_kan() {
 
 #[test]
 fn test_judge_ankan_neutral_for_weak_level() {
-    // 弱レベルは対象外（初心者らしい雑なカンを許容）
+    // Weak is exempt, allowing beginner-style careless kans.
     let state = hand_breaking_kan_state();
     let config = CpuConfig::new(CpuLevel::Weak, CpuPersonality::Balanced);
     let ctx = CallContext {
@@ -1950,7 +1956,8 @@ fn test_judge_ankan_neutral_for_weak_level() {
     assert_eq!(judge_ankan(&ctx, Tile::S5), CallJudgement::Neutral);
 }
 
-/// カンしても向聴数が変わらない1向聴の手牌（P2×4が浮き刻子+1枚）
+/// A 1-shanten hand where the kan keeps the shanten (four P2 as a
+/// floating triplet plus one).
 fn shanten_keeping_kan_state() -> CpuGameState {
     let mut state = call_state_with_hand(tiles(&[
         Tile::M2,
@@ -1984,9 +1991,10 @@ fn test_judge_ankan_neutral_when_shanten_kept_and_no_riichi() {
 
 #[test]
 fn test_judge_ankan_forbids_kan_during_opponent_riichi_without_tenpai() {
-    // 他家リーチ中、カン後も聴牌でない → 新ドラリスクを取らない
+    // Under an opponent's riichi and not tenpai after the kan:
+    // the new-dora risk is not worth it.
     let mut state = shanten_keeping_kan_state();
-    state.player_riichi[2] = true; // 西家がリーチ（自分は東家）
+    state.player_riichi[2] = true; // West declared; we are East
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced);
     let ctx = CallContext {
         state: &state,
@@ -1997,7 +2005,7 @@ fn test_judge_ankan_forbids_kan_during_opponent_riichi_without_tenpai() {
 
 #[test]
 fn test_heuristic_can_reference_candidate_and_context() {
-    // 候補とコンテキストの両方を参照する定石が書けることを確認する
+    // A heuristic may read both the candidate and the context.
     let heuristics = [fixed_bonus_heuristic(
         "honour-in-defense",
         CpuLevel::Weak,

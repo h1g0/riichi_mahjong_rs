@@ -1,8 +1,8 @@
-//! 麻雀クライアント（Macroquad）
+//! Mahjong client (Macroquad).
 //!
-//! ブラウザ上で動作する4人打ち日本式リーチ麻雀。
-//! GameAdapterを通してサーバとやり取りする
-//! （ローカル対戦はLocalAdapter、オンライン対戦はRemoteAdapter）。
+//! Japanese riichi mahjong playable in the browser. Talks to the server
+//! through GameAdapter: LocalAdapter for local play, RemoteAdapter for
+//! online play.
 
 use macroquad::miniquad::conf::Icon;
 use macroquad::prelude::*;
@@ -14,7 +14,7 @@ mod persistence;
 mod renderer;
 mod transport;
 
-// WASM用カスタム乱数バックエンド（wasm-bindgen不要）
+// Custom WASM randomness backend (no wasm-bindgen).
 #[cfg(target_arch = "wasm32")]
 mod wasm_rng;
 
@@ -26,7 +26,7 @@ use renderer::{
     ModeSelectAction, OnlineLobbyAction, OnlineMenuAction, SetupAction, TileTextures, TopMenuAction,
 };
 
-/// ウィンドウ/タスクバー用アイコン（16/32/64pxのRGBAを埋め込みPNGから復元）
+/// Window/taskbar icon: 16/32/64px RGBA decoded from embedded PNGs.
 fn app_icon() -> Icon {
     fn rgba(png: &[u8]) -> Vec<u8> {
         Image::from_file_with_format(png, Some(ImageFormat::Png))
@@ -57,7 +57,7 @@ fn window_conf() -> Conf {
     }
 }
 
-/// 入力された表示名を整形する（空なら既定値）
+/// Normalizes the entered display name; empty falls back to the default.
 fn display_name(state: &GameState) -> String {
     let name = state.online_state.name_input.trim();
     if name.is_empty() {
@@ -67,24 +67,25 @@ fn display_name(state: &GameState) -> String {
     }
 }
 
-/// ステータス行を設定する
+/// Sets the status line.
 fn set_status(state: &mut GameState, message: &str, is_error: bool) {
     state.online_state.status_line = Some(message.to_string());
     state.online_state.status_is_error = is_error;
 }
 
-/// ロビー画面用の座席表示文言を組み立てる
+/// Builds the lobby's per-seat captions.
 fn build_seat_labels(room: &RoomView, lang: Lang) -> [String; 4] {
     let tr = i18n::Translator::new(lang);
     std::array::from_fn(|i| {
-        // 三麻ルームでは使用しないシート3を表示しない
+        // Hide the unused seat 3 in three-player rooms.
         if i >= room.player_count() {
             return String::new();
         }
         let who = match &room.seats[i] {
             SeatInfo::Empty => match room.cpu_configs {
-                // 空席を埋めるCPUの設定を添える（サーバの config_for_seat と
-                // 同じ規則: 座席1〜3 → configs[0..3]）
+                // Attach the CPU config that would fill the seat, using
+                // the server's config_for_seat rule (seats 1-3 map to
+                // configs[0..3]).
                 Some(configs) => {
                     let spec = configs[i.saturating_sub(1).min(2)];
                     tr.empty_seat_cpu_label(spec.level, spec.personality)
@@ -111,7 +112,7 @@ fn build_seat_labels(room: &RoomView, lang: Lang) -> [String; 4] {
     })
 }
 
-/// ルーム情報から各座席のプレイヤー種別（座席インデックス順）を組み立てる
+/// Builds the per-seat player types from the room info.
 fn build_online_player_labels(room: &RoomView) -> [PlayerLabel; 4] {
     std::array::from_fn(|s| {
         if s == room.your_seat {
@@ -129,7 +130,7 @@ fn build_online_player_labels(room: &RoomView) -> [PlayerLabel; 4] {
     })
 }
 
-/// リモートアダプターの状態をUI表示用にコピーする
+/// Copies the remote adapter's state for UI display.
 fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
     let lang = state.lang;
     state.online_state.room = remote.room().map(|room| RoomViewUi {
@@ -143,7 +144,7 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
         let message = match err.code {
             Some(code) => error_code_message(code, lang).to_string(),
             None => {
-                // 通信層のエラー: 詳細はログに残し、表示は汎用文言にする
+                // Transport errors: log the detail, show a generic message.
                 macroquad::logging::warn!("network error: {}", err.message);
                 i18n::Key::NetworkError.text(lang).to_string()
             }
@@ -152,7 +153,7 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
         return;
     }
 
-    // エラー表示中は接続ステータスで上書きしない
+    // Never overwrite a visible error with a mere status update.
     if state.online_state.status_is_error {
         return;
     }
@@ -182,47 +183,49 @@ async fn main() {
         eprintln!("警告: 日本語フォントを読み込めませんでした。デフォルトフォントで表示します。");
     }
 
-    // フォントアトラスを起動時に作り切る（ネイティブで対局画面の文字が
-    // 黒い■に化けるのを防ぐ。詳細は renderer::prewarm_fonts を参照）。
+    // Build the font atlas up front on native, where lazily cached glyphs
+    // used to render as black squares in-game (see
+    // renderer::prewarm_fonts).
     //
-    // WASM ビルドでは呼ばない: 一度に大量のグリフ×サイズをまとめてキャッシュ
-    // すると、macroquad 0.4.15 のフォントアトラスが grow を繰り返し、
-    // wasm32 では usize が 32bit のため `Image::gen_image_color` の
-    // `width as usize * height as usize * 4` が 32768×32768 でちょうど 2^32
-    // に達してオーバーフローし、起動直後に黒画面のまま固まることがあった
-    // （macroquad 側の既存バグ）。WASM では prewarm を行わず、実際に画面へ
-    // 現れた文字だけを都度キャッシュさせることで、一度に大量の再パッキング
-    // が発生する事態を避ける。
+    // Never call this on WASM: caching many glyph/size combinations at
+    // once makes macroquad 0.4.15's font atlas grow repeatedly, and on
+    // wasm32 (32-bit usize) `Image::gen_image_color`'s
+    // `width * height * 4` hits exactly 2^32 at 32768x32768 and
+    // overflows, freezing on a black screen at startup (a macroquad bug).
+    // Skipping the prewarm lets glyphs cache one at a time as they
+    // appear, avoiding the mass repacking.
     #[cfg(not(target_arch = "wasm32"))]
     renderer::prewarm_fonts(font.as_ref());
 
-    // 対局中のアダプター（ローカル or リモート）
+    // The in-game adapter (local or remote).
     let mut adapter: Option<Box<dyn GameAdapter>> = None;
-    // ロビー段階のリモート接続（対局開始時に adapter へ引き継ぐ）
+    // The lobby-stage remote connection, handed to `adapter` at
+    // game start.
     let mut online: Option<RemoteAdapter> = None;
     let mut game_state = GameState::new();
 
     loop {
         clear_background(Color::from_rgba(6, 14, 9, 255));
 
-        // 設計座標系(DESIGN_W×DESIGN_H)を実キャンバスに合わせて拡大縮小して描画する
+        // Scale the design coordinate system (DESIGN_W x DESIGN_H) to
+        // the actual canvas.
         renderer::set_design_camera();
 
-        // 描画前に動的テキスト（相手名など）のグリフをアトラスへ載せておく
+        // Cache glyphs of dynamic text (opponent names etc.) before
+        // drawing.
         renderer::cache_dynamic_text(font.as_ref(), &game_state);
 
         let overlay_click = renderer::draw_game(&game_state, font.as_ref(), &tile_textures);
 
-        // ロビー段階のリモート接続を進める
         if let Some(remote) = &mut online {
             remote.tick();
             sync_online_ui(remote, &mut game_state);
 
             if remote.game_started() {
-                // 対局開始: ゲームアダプターとして引き継ぐ
+                // Game start: promote to the in-game adapter.
                 game_state.online_state.status_line = None;
                 game_state.online_state.status_is_error = false;
-                // 各座席のプレイヤー種別（強さ・性格）を取り込む
+
                 if let Some(room) = remote.room() {
                     let labels = build_online_player_labels(room);
                     let your_seat = room.your_seat;
@@ -232,18 +235,19 @@ async fn main() {
             }
         }
 
-        // アダプターを毎フレーム進め、イベントを反映する
-        // （宣言バナー表示中は process_events が後続イベントの適用を保留する）
+        // Advance the adapter every frame and apply its events;
+        // process_events holds later events while a declaration banner
+        // is showing.
         if let Some(adp) = &mut adapter {
             adp.tick();
             for event in adp.poll_events() {
                 game_state.queue_event(event);
             }
             game_state.process_events(get_time());
-            // 対局中の接続バナー（ローカル対戦では常に None）
+            // The in-game connection banner (always None locally).
             game_state.online_state.status_line = adp.status_text(game_state.lang);
             game_state.online_state.status_is_error = game_state.online_state.status_line.is_some();
-            // 手番の残り時間（オンラインのみ）
+            // Turn timer (online only).
             game_state.online_state.turn_remaining = adp.turn_remaining_secs();
         }
 
@@ -268,11 +272,9 @@ async fn main() {
                 if let Some(action) = renderer::handle_mode_select_input(&mut game_state, origin) {
                     match (action, origin) {
                         (ModeSelectAction::ModeChosen(_), MenuOrigin::Local) => {
-                            // 選んだモードでCPU設定へ（モードは setup_state に反映済み）
                             game_state.phase = GamePhase::CpuSetup(MenuOrigin::Local);
                         }
                         (ModeSelectAction::ModeChosen(_), MenuOrigin::Online) => {
-                            // 選んだモードでルームを作成する（online_state に反映済み）
                             let url = transport::default_server_url();
                             let name = display_name(&game_state);
                             let rules = game_state.online_state.build_rules();
@@ -280,7 +282,8 @@ async fn main() {
                             online = Some(RemoteAdapter::create_room(&url, &name, length, rules));
                             let msg = i18n::Key::Connecting.text(game_state.lang);
                             set_status(&mut game_state, msg, false);
-                            // 接続状況の表示と入室待ちはオンラインメニューが担う
+                            // The online menu handles status display
+                            // and the join wait.
                             game_state.phase = GamePhase::OnlineMenu;
                         }
                         (ModeSelectAction::Back, MenuOrigin::Local) => {
@@ -299,11 +302,12 @@ async fn main() {
                 {
                     match action {
                         SetupAction::StartLocal(mut configs) => {
-                            // ローカル対局開始（三麻設定は setup_state から反映される）
                             let settings = game_state.setup_state.build_game_settings();
-                            // 席順ランダム化: 対局に参加するCPUの席をシャッフルする
-                            // （起家のランダム化は GameDriver::start_game が行う）。
-                            // ラベルと座席の対応を保つため set_local_players より先に行う。
+                            // Shuffle the participating CPUs' seats
+                            // (GameDriver::start_game randomizes the
+                            // dealer). Must happen before
+                            // set_local_players so labels stay aligned
+                            // with seats.
                             let cpu_count = settings.rules.player_count() - 1;
                             mahjong_server::cpu::client::shuffle_cpu_configs(
                                 &mut configs[..cpu_count],
@@ -319,7 +323,8 @@ async fn main() {
                             adapter = Some(Box::new(new_adapter));
                         }
                         SetupAction::ApplyOnline => {
-                            // CPU設定をサーバへ送って全員のロビー表示に反映する
+                            // Send the CPU configs so everyone's lobby
+                            // reflects them.
                             if let Some(remote) = &mut online {
                                 let specs = game_state.setup_state.build_cpu_specs();
                                 remote.set_cpu_configs(specs);
@@ -340,7 +345,7 @@ async fn main() {
                 if let Some(action) = renderer::handle_online_menu_input(&mut game_state) {
                     match action {
                         OnlineMenuAction::CreateRoom => {
-                            // ルーム作成の前に対局モードを選ぶ
+                            // Pick the game mode before creating the room.
                             game_state.phase = GamePhase::ModeSelect(MenuOrigin::Online);
                         }
                         OnlineMenuAction::JoinRoom => {
@@ -365,7 +370,6 @@ async fn main() {
                     }
                 }
 
-                // 入室できたらロビーへ
                 if game_state.online_state.room.is_some() {
                     game_state.online_state.status_line = None;
                     game_state.online_state.status_is_error = false;
@@ -377,7 +381,8 @@ async fn main() {
                 if let Some(action) = renderer::handle_online_lobby_input(&game_state) {
                     match action {
                         OnlineLobbyAction::OpenCpuSettings => {
-                            // ルームのモードに合わせてCPU人数を揃えてから開く
+                            // Match the CPU count to the room's mode
+                            // before opening.
                             if let Some(room) = &game_state.online_state.room {
                                 game_state.setup_state.mode = room.mode;
                             }
@@ -385,7 +390,7 @@ async fn main() {
                         }
                         OnlineLobbyAction::StartGame => {
                             if let Some(remote) = &mut online {
-                                // ホストが設定画面で選んだCPUの強さ・性格を送る
+                                // Send the host's chosen CPU configs.
                                 let specs = game_state.setup_state.build_cpu_specs();
                                 remote.start_game(Some(specs));
                             }
@@ -415,7 +420,8 @@ async fn main() {
 
             GamePhase::RoundResult => {
                 if is_mouse_button_pressed(MouseButton::Left) {
-                    // まだ表示していない和了者がいれば次のページへ、なければ次の局へ
+                    // Show the next winner's page, or move to the
+                    // next hand.
                     if !game_state.advance_win_result()
                         && let Some(ref mut adp) = adapter
                     {
@@ -430,7 +436,6 @@ async fn main() {
 
             GamePhase::GameOver => {
                 if is_mouse_button_pressed(MouseButton::Left) {
-                    // トップ画面に戻る
                     game_state = GameState::new();
                     adapter = None;
                     online = None;
