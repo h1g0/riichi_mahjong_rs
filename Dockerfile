@@ -1,23 +1,23 @@
-# mahjong-net-server（オンライン対戦サーバ）のコンテナイメージ
+# Container image for the online mahjong-net-server.
 #
-# クライアント（macroquad）はビルドしない。`-p mahjong-net-server` で
-# 対象を絞るため、依存グラフ上の mahjong-server / mahjong-core のみ
-# コンパイルされる。
+# The package selection deliberately excludes the macroquad client, so only
+# mahjong-net-server and its mahjong-server/mahjong-core dependencies compile.
 
-# --- ビルドステージ ---
+# Build stage
 FROM rust:1-slim-bookworm AS builder
 WORKDIR /app
-# ワークスペース全体をコピーしてサーバだけをリリースビルドする
 COPY . .
 RUN cargo build --release -p mahjong-net-server
 
-# --- 実行ステージ ---
+# Runtime stage
 FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=builder /app/target/release/mahjong-net-server /usr/local/bin/mahjong-net-server
 
-# PORT で待ち受ける（ホスティング側が割り当てる）。TLS は前段のプロキシが終端する。
+# The hosting platform assigns PORT and terminates TLS at its proxy.
 ENV PORT=8080
 EXPOSE 8080
+
+USER 10001:10001
 
 CMD ["mahjong-net-server"]

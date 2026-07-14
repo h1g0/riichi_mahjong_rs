@@ -4,6 +4,7 @@
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{calc_shanten_number, calc_shanten_number_by_form};
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+use mahjong_core::settings::Settings;
 use mahjong_core::tile::Tile;
 use mahjong_core::winning_hand::name::Form;
 use serde::{Deserialize, Serialize};
@@ -145,16 +146,23 @@ pub struct CpuClient {
 
 impl CpuClient {
     pub fn new(config: CpuConfig) -> Self {
-        CpuClient {
-            config,
-            state: CpuGameState::new(),
-        }
+        Self::new_with_rules(config, &Settings::new())
+    }
+
+    /// Creates a CPU with immutable table rules that are not repeated in
+    /// every gameplay event.
+    pub fn new_with_rules(config: CpuConfig, rules: &Settings) -> Self {
+        let mut state = CpuGameState::new();
+        state.three_player = rules.three_player;
+        state.nuki_dora = rules.three_player && rules.nuki_dora;
+        state.opened_all_inside = rules.opened_all_inside;
+        CpuClient { config, state }
     }
 
     /// Handles a ServerEvent, returning a ClientAction when one is due.
     ///
-    /// This is the CPU's entire interface to the server: like a human
-    /// watching the screen, it learns only from events.
+    /// This is the CPU's gameplay interface to the server: like a human
+    /// watching the screen, it learns changing state only from events.
     pub fn handle_event(&mut self, event: &ServerEvent) -> Option<ClientAction> {
         self.state.update(event);
 
@@ -430,6 +438,10 @@ impl CpuClient {
 
     /// Considers a concealed kan.
     fn consider_ankan(&self) -> Option<ClientAction> {
+        if self.state.remaining_tiles == 0 {
+            return None;
+        }
+
         let mut all_tiles = self.state.my_hand.clone();
         if let Some(drawn) = self.state.my_drawn {
             all_tiles.push(drawn);

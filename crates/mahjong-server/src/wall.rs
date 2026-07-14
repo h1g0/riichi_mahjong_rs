@@ -92,8 +92,14 @@ impl Wall {
     /// Draws a replacement tile (rinshan / 嶺上牌) from the dead wall.
     pub fn draw_rinshan(&mut self) -> Option<Tile> {
         if self.rinshan_index >= 4 {
-            return None; // Only four replacement tiles exist.
+            return None;
         }
+
+        // A kan keeps the dead wall at 14 tiles by moving the live wall's
+        // tail into it. The moved tile is never exposed by this representation,
+        // but removing it is essential: every kan reduces the number of future
+        // live-wall draws by one.
+        self.tiles.pop_back()?;
         let tile = self.dead_wall[self.rinshan_index];
         self.rinshan_index += 1;
         Some(tile)
@@ -326,15 +332,26 @@ mod tests {
     #[test]
     fn test_draw_rinshan() {
         let mut wall = Wall::new(false);
+        let before = wall.remaining();
 
         for i in 0..4 {
             let tile = wall.draw_rinshan();
             assert!(tile.is_some(), "Rinshan draw {} should succeed", i);
+            assert_eq!(wall.remaining(), before - i - 1);
         }
 
         // The fifth replacement draw must fail.
         let tile = wall.draw_rinshan();
         assert!(tile.is_none());
+    }
+
+    #[test]
+    fn test_draw_rinshan_requires_a_live_wall_tile() {
+        let mut wall = Wall::new(false);
+        while wall.draw().is_some() {}
+
+        assert!(wall.draw_rinshan().is_none());
+        assert_eq!(wall.rinshan_index, 0);
     }
 
     #[test]

@@ -84,6 +84,8 @@ enum LobbyIntent {
 
 /// Reconnect backoff steps in seconds, capped by attempt count.
 const RECONNECT_BACKOFF: [f64; 5] = [1.0, 2.0, 4.0, 8.0, 10.0];
+/// Maximum time for a reconnect handshake, including the resync.
+const RECONNECT_HANDSHAKE_TIMEOUT: f64 = 15.0;
 
 /// Factory for new transports, used on reconnection.
 ///
@@ -118,6 +120,8 @@ pub struct RemoteAdapter {
     reconnecting: bool,
     /// When the next reconnect attempt fires
     reconnect_at: Option<f64>,
+    /// Deadline for the current reconnect handshake
+    reconnect_timeout_at: Option<f64>,
     /// Reconnect attempt count
     reconnect_attempts: u32,
     /// Human players' connection state per seat (None = non-human/unknown)
@@ -152,6 +156,7 @@ impl RemoteAdapter {
             ready_sent: false,
             reconnecting: false,
             reconnect_at: None,
+            reconnect_timeout_at: None,
             reconnect_attempts: 0,
             peer_connected: [None; 4],
             turn_deadline: None,
@@ -282,6 +287,8 @@ impl RemoteAdapter {
                 self.enter_reconnect();
             } else {
                 self.status = ConnStatus::Disconnected;
+                self.reconnect_timeout_at = None;
+                self.schedule_reconnect();
             }
             return;
         }
@@ -304,7 +311,14 @@ impl RemoteAdapter {
         self.reconnecting = true;
         self.reconnect_attempts = 0;
         self.status = ConnStatus::Disconnected;
-        self.reconnect_at = Some((self.clock)() + RECONNECT_BACKOFF[0]);
+        self.reconnect_timeout_at = None;
+        self.schedule_reconnect();
+    }
+
+    /// Schedules the next attempt after the backoff for its attempt number.
+    fn schedule_reconnect(&mut self) {
+        let idx = (self.reconnect_attempts as usize).min(RECONNECT_BACKOFF.len() - 1);
+        self.reconnect_at = Some((self.clock)() + RECONNECT_BACKOFF[idx]);
     }
 
     /// Opens a new connection once the backoff expires.
@@ -312,16 +326,27 @@ impl RemoteAdapter {
         if !self.reconnecting {
             return;
         }
+        let now = (self.clock)();
+        if self.reconnect_timeout_at.is_some_and(|at| now >= at) {
+            // A transport may neither open nor report an error (for
+            // example, a black-holed TCP connection). Give it a generous
+            // deadline, then enter the normal backoff before replacing it.
+            self.status = ConnStatus::Disconnected;
+            self.reconnect_timeout_at = None;
+            self.schedule_reconnect();
+            return;
+        }
         let Some(at) = self.reconnect_at else {
             return;
         };
-        if (self.clock)() < at {
+        if now < at {
             return;
         }
         let Some(code) = self.room_code.clone() else {
             // Without a room code there is nothing to rejoin.
             self.reconnecting = false;
             self.reconnect_at = None;
+            self.reconnect_timeout_at = None;
             return;
         };
 
@@ -330,24 +355,30 @@ impl RemoteAdapter {
         self.transport = (self.connector)(Some(&code));
         self.status = ConnStatus::Connecting;
         self.pending_intent = Some(LobbyIntent::Join { code });
-
-        let idx = (self.reconnect_attempts as usize + 1).min(RECONNECT_BACKOFF.len() - 1);
-        self.reconnect_attempts += 1;
-        self.reconnect_at = Some((self.clock)() + RECONNECT_BACKOFF[idx]);
+        self.reconnect_attempts = self.reconnect_attempts.saturating_add(1);
+        // A new retry is scheduled only if this transport reports a
+        // failure. Replacing an in-flight handshake after the next
+        // backoff interval can prevent slow but healthy connections from
+        // ever completing.
+        self.reconnect_at = None;
+        self.reconnect_timeout_at = Some(now + RECONNECT_HANDSHAKE_TIMEOUT);
     }
 
     /// Whether this error kind should abort reconnection.
     fn is_terminal_reconnect_error(code: ErrorCode) -> bool {
         matches!(
             code,
-            ErrorCode::RoomNotFound
-                | ErrorCode::GameInProgress
-                | ErrorCode::NotInRoom
-                | ErrorCode::VersionMismatch
+            ErrorCode::RoomNotFound | ErrorCode::NotInRoom | ErrorCode::VersionMismatch
         )
     }
 
     fn handle_server_message(&mut self, msg: ServerMessage) {
+        // A subsequent successful message is evidence that an earlier
+        // in-game protocol error is no longer the current status. Lobby
+        // code normally consumes errors immediately via `take_error`.
+        if !matches!(&msg, ServerMessage::Error { .. }) {
+            self.last_error = None;
+        }
         match msg {
             ServerMessage::Welcome { session_token, .. } => {
                 self.session_token = Some(session_token);
@@ -403,6 +434,7 @@ impl RemoteAdapter {
                 // is complete, so return to the normal state.
                 self.reconnecting = false;
                 self.reconnect_at = None;
+                self.reconnect_timeout_at = None;
                 self.status = ConnStatus::Connected;
                 for event in events {
                     if matches!(event, ServerEvent::GameStarted { .. }) {
@@ -428,12 +460,24 @@ impl RemoteAdapter {
                 self.game_over = true;
                 self.reconnecting = false;
                 self.reconnect_at = None;
+                self.reconnect_timeout_at = None;
             }
             ServerMessage::Error { code, message } => {
+                if self.reconnecting && code == ErrorCode::GameInProgress {
+                    // The replacement socket can reach the room before the
+                    // server observes the old socket closing. Retry instead
+                    // of turning that ordering race into a permanent failure.
+                    self.last_error = None;
+                    self.status = ConnStatus::Disconnected;
+                    self.reconnect_timeout_at = None;
+                    self.schedule_reconnect();
+                    return;
+                }
                 if self.reconnecting && Self::is_terminal_reconnect_error(code) {
                     // An unrejoinable error aborts the reconnection.
                     self.reconnecting = false;
                     self.reconnect_at = None;
+                    self.reconnect_timeout_at = None;
                     self.status = ConnStatus::Disconnected;
                 }
                 self.last_error = Some(RemoteError {
@@ -501,6 +545,17 @@ impl GameAdapter for RemoteAdapter {
 
     fn status_text(&self, lang: Lang) -> Option<String> {
         use crate::i18n::Key;
+        // Lobby errors are consumed by sync_online_ui; after promotion
+        // to GameAdapter this is the only user-visible error channel.
+        if self.game_started
+            && let Some(error) = &self.last_error
+        {
+            let text = match error.code {
+                Some(code) => error_code_message(code, lang),
+                None => Key::NetworkError.text(lang),
+            };
+            return Some(text.to_string());
+        }
         if self.reconnecting {
             return Some(Key::Reconnecting.text(lang).to_string());
         }
@@ -887,6 +942,31 @@ mod tests {
     }
 
     #[test]
+    fn test_in_game_server_error_is_visible_until_recovery() {
+        let (mut adapter, handle) = create_adapter();
+        handle.push(WsEvent::Opened);
+        handle.push_msg(&welcome());
+        handle.push_msg(&room_state(1));
+        handle.push_msg(&ServerMessage::Event(game_started_event()));
+        adapter.tick();
+        assert!(adapter.status_text(Lang::En).is_none());
+
+        handle.push_msg(&ServerMessage::Error {
+            code: ErrorCode::InvalidAction,
+            message: "rejected".to_string(),
+        });
+        adapter.tick();
+        assert_eq!(
+            adapter.status_text(Lang::En).as_deref(),
+            Some("Invalid action")
+        );
+
+        handle.push_msg(&ServerMessage::TurnTimer { seconds: 30 });
+        adapter.tick();
+        assert!(adapter.status_text(Lang::En).is_none());
+    }
+
+    #[test]
     fn test_transport_error_disconnects() {
         let (mut adapter, handle) = create_adapter();
         handle.push(WsEvent::Error("接続に失敗しました".to_string()));
@@ -1187,6 +1267,112 @@ mod tests {
     }
 
     #[test]
+    fn test_hung_reconnect_uses_handshake_timeout_then_backoff() {
+        let (t1, h1) = mock_pair();
+        let (t2, _h2) = mock_pair();
+        let (t3, h3) = mock_pair();
+        let now = Rc::new(RefCell::new(0.0_f64));
+        let now_clock = now.clone();
+
+        let (connector, connector_calls) = queued_connector(vec![t2, t3]);
+        let mut adapter = RemoteAdapter::build(
+            t1,
+            connector,
+            Box::new(move || *now_clock.borrow()),
+            "テスト",
+            LobbyIntent::Join {
+                code: "ABC234".to_string(),
+            },
+        );
+
+        h1.push(WsEvent::Opened);
+        h1.push_msg(&welcome());
+        h1.push_msg(&room_state(1));
+        h1.push_msg(&ServerMessage::Event(game_started_event()));
+        adapter.tick();
+
+        h1.push(WsEvent::Closed);
+        adapter.tick();
+        *now.borrow_mut() = 1.5;
+        adapter.tick();
+        assert_eq!(adapter.status(), ConnStatus::Connecting);
+        assert_eq!(connector_calls.borrow().len(), 1);
+
+        // The ordinary two-second backoff must not replace a slow
+        // in-flight handshake.
+        *now.borrow_mut() = 16.4;
+        adapter.tick();
+        assert_eq!(adapter.status(), ConnStatus::Connecting);
+        assert_eq!(connector_calls.borrow().len(), 1);
+
+        // Once the explicit handshake deadline expires, the next retry
+        // still waits for its normal backoff.
+        *now.borrow_mut() = 16.6;
+        adapter.tick();
+        assert_eq!(adapter.status(), ConnStatus::Disconnected);
+        assert_eq!(connector_calls.borrow().len(), 1);
+        *now.borrow_mut() = 18.5;
+        adapter.tick();
+        assert_eq!(connector_calls.borrow().len(), 1);
+
+        *now.borrow_mut() = 18.7;
+        h3.push(WsEvent::Opened);
+        adapter.tick();
+        assert_eq!(connector_calls.borrow().len(), 2);
+        assert!(matches!(
+            h3.sent().first(),
+            Some(ClientMessage::Hello { .. })
+        ));
+    }
+
+    #[test]
+    fn test_failed_reconnect_schedules_the_next_backoff() {
+        let (t1, h1) = mock_pair();
+        let (t2, h2) = mock_pair();
+        let (t3, h3) = mock_pair();
+        let now = Rc::new(RefCell::new(0.0_f64));
+        let now_clock = now.clone();
+
+        let (connector, connector_calls) = queued_connector(vec![t2, t3]);
+        let mut adapter = RemoteAdapter::build(
+            t1,
+            connector,
+            Box::new(move || *now_clock.borrow()),
+            "テスト",
+            LobbyIntent::Join {
+                code: "ABC234".to_string(),
+            },
+        );
+
+        h1.push(WsEvent::Opened);
+        h1.push_msg(&welcome());
+        h1.push_msg(&room_state(1));
+        h1.push_msg(&ServerMessage::Event(game_started_event()));
+        adapter.tick();
+        h1.push(WsEvent::Closed);
+        adapter.tick();
+
+        // The first retry fails, so the second step (two seconds) starts
+        // from the failure time.
+        *now.borrow_mut() = 1.5;
+        h2.push(WsEvent::Error("retry failed".to_string()));
+        adapter.tick();
+        assert_eq!(connector_calls.borrow().len(), 1);
+        *now.borrow_mut() = 3.4;
+        adapter.tick();
+        assert_eq!(connector_calls.borrow().len(), 1);
+
+        *now.borrow_mut() = 3.6;
+        h3.push(WsEvent::Opened);
+        adapter.tick();
+        assert_eq!(connector_calls.borrow().len(), 2);
+        assert!(matches!(
+            h3.sent().first(),
+            Some(ClientMessage::Hello { .. })
+        ));
+    }
+
+    #[test]
     fn test_reconnect_stops_on_terminal_error() {
         let (t1, h1) = mock_pair();
         let (t2, h2) = mock_pair();
@@ -1227,10 +1413,68 @@ mod tests {
         assert_eq!(adapter.status(), ConnStatus::Disconnected);
         assert_eq!(
             adapter.status_text(Lang::Ja).as_deref(),
-            Some("サーバとの接続が切れました")
+            Some("ルームが見つかりません")
         );
         let err = adapter.take_error().expect("エラーが記録されていない");
         assert_eq!(err.code, Some(ErrorCode::RoomNotFound));
+    }
+
+    #[test]
+    fn test_reconnect_retries_game_in_progress_race() {
+        let (t1, h1) = mock_pair();
+        let (t2, h2) = mock_pair();
+        let (t3, h3) = mock_pair();
+        let now = Rc::new(RefCell::new(0.0_f64));
+        let now_clock = now.clone();
+
+        let (connector, connector_calls) = queued_connector(vec![t2, t3]);
+        let mut adapter = RemoteAdapter::build(
+            t1,
+            connector,
+            Box::new(move || *now_clock.borrow()),
+            "テスト",
+            LobbyIntent::Join {
+                code: "ABC234".to_string(),
+            },
+        );
+
+        h1.push(WsEvent::Opened);
+        h1.push_msg(&welcome());
+        h1.push_msg(&room_state(1));
+        h1.push_msg(&ServerMessage::Event(game_started_event()));
+        adapter.tick();
+        h1.push(WsEvent::Closed);
+        adapter.tick();
+
+        // The server has not processed the old socket's close yet.
+        *now.borrow_mut() = 1.5;
+        h2.push(WsEvent::Opened);
+        h2.push_msg(&welcome());
+        h2.push_msg(&ServerMessage::Error {
+            code: ErrorCode::GameInProgress,
+            message: "old connection still active".to_string(),
+        });
+        adapter.tick();
+
+        assert_eq!(
+            adapter.status_text(Lang::Ja).as_deref(),
+            Some("再接続中...")
+        );
+        assert!(adapter.take_error().is_none());
+        assert_eq!(connector_calls.borrow().len(), 1);
+
+        // GameInProgress uses the next normal backoff and tries again.
+        *now.borrow_mut() = 3.4;
+        adapter.tick();
+        assert_eq!(connector_calls.borrow().len(), 1);
+        *now.borrow_mut() = 3.6;
+        h3.push(WsEvent::Opened);
+        adapter.tick();
+        assert_eq!(connector_calls.borrow().len(), 2);
+        assert!(matches!(
+            h3.sent().first(),
+            Some(ClientMessage::Hello { .. })
+        ));
     }
 
     #[test]

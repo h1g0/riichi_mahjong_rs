@@ -25,6 +25,17 @@ pub fn check(
         result.insert(hand_kind, ("Unknown", false, 0));
     }
 
+    // Nagashi Mangan settles an exhaustive draw rather than a tile-shape
+    // win, so it cannot combine with ordinary yaku even if a caller supplies
+    // a complete analyzer or unrelated status flags.
+    if status.is_nagashi_mangan {
+        result.insert(
+            Kind::NagashiMangan,
+            check_nagashi_mangan(analyzer, status, settings)?,
+        );
+        return Ok(result);
+    }
+
     result.insert(Kind::Riichi, check_riichi(analyzer, status, settings)?);
     result.insert(
         Kind::SevenPairs,

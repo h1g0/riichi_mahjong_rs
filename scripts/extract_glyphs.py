@@ -1,6 +1,10 @@
-"""Collect every non-ASCII glyph the client can draw, so the font atlas can be
-pre-built at startup (avoids native font-atlas corruption / black boxes)."""
-import glob
+"""Collect every non-ASCII glyph the client can draw.
+
+The generated atlas avoids native font corruption and black boxes.
+"""
+
+from pathlib import Path
+
 
 def string_literals(src):
     """Yield the contents of double-quoted string literals (rough, escape-aware)."""
@@ -20,28 +24,27 @@ def string_literals(src):
         i += 1
     return out
 
+
 chars = set()
-files = glob.glob('crates/mahjong-client/src/renderer/*.rs') + [
-    'crates/mahjong-client/src/game.rs',
-    'crates/mahjong-client/src/main.rs',
-]
-for f in files:
-    for lit in string_literals(open(f, encoding='utf-8').read()):
+source_root = Path('crates/mahjong-client/src')
+files = [path for path in source_root.rglob('*.rs') if path.name != 'tests.rs']
+files.extend(
+    Path(path)
+    for path in (
+        'crates/mahjong-core/src/scoring/score.rs',
+        'crates/mahjong-core/src/winning_hand/name.rs',
+    )
+)
+for path in files:
+    for lit in string_literals(path.read_text(encoding='utf-8')):
         for ch in lit:
             if ord(ch) > 127:
                 chars.add(ch)
 
-# Dynamic text from core/server: yaku names, rank names, draw reasons, winds.
-extra = (
-    '立直ダブル一発門前清自摸和平断么九盃口役牌場風自中發白三色同順気通貫'
-    '七対々暗刻混全帯純老頭小元二大四字緑国士無双蓮宝燈槓子喜天地人流'
-    '海底撈月河魚嶺上開花搶単騎待満跳倍荒局連打種散了供託本符飜点'
-    'ドラ裏枚残東南西北家面下上'
-    '…'  # ellipsis for truncated names (a char literal, so the string scan misses it)
-)
-for ch in extra:
-    chars.add(ch)
+# These are built from character literals or a dependency API, so the string
+# scanner cannot discover them from client source.
+chars.update('…東南西北')
 
 out = ''.join(sorted(chars))
-open('crates/mahjong-client/glyphs.txt', 'w', encoding='utf-8').write(out)
+Path('crates/mahjong-client/glyphs.txt').write_text(out, encoding='utf-8')
 print('count', len(chars))

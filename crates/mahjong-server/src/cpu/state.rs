@@ -1,7 +1,7 @@
 //! The game state a CPU maintains.
 //!
-//! Reconstructed purely from the ServerEvent stream: it holds only what a
-//! human player could read off the screen.
+//! Reconstructed from the `ServerEvent` stream plus immutable table rules:
+//! it holds only information available to a human player.
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, Wind};
@@ -58,6 +58,8 @@ pub struct CpuGameState {
     pub three_player: bool,
     /// Whether pei dora is enabled (three-player only)
     pub nuki_dora: bool,
+    /// Whether All Inside is valid after opening the hand
+    pub opened_all_inside: bool,
     /// Extracted North count per player, indexed by wind
     pub pei_counts: [u8; 4],
 
@@ -105,6 +107,7 @@ impl CpuGameState {
             riichi_sticks: 0,
             three_player: false,
             nuki_dora: false,
+            opened_all_inside: true,
             pei_counts: [0; 4],
             pending_calls: Vec::new(),
             pending_call_tile: None,
@@ -342,6 +345,10 @@ impl CpuGameState {
                 self.scores = *scores;
             }
 
+            ServerEvent::RoundNagashiMangan { scores, .. } => {
+                self.scores = *scores;
+            }
+
             ServerEvent::RoundDraw { scores, .. } => {
                 self.scores = *scores;
             }
@@ -488,6 +495,7 @@ mod tests {
         assert_eq!(state.my_drawn, None);
         assert_eq!(state.my_seat_wind, Wind::East);
         assert_eq!(state.scores, [0; 4]);
+        assert!(state.opened_all_inside);
         assert_eq!(CpuGameState::wind_to_index(Wind::East), 0);
         assert_eq!(CpuGameState::wind_to_index(Wind::South), 1);
         assert_eq!(CpuGameState::wind_to_index(Wind::West), 2);

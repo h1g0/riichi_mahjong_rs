@@ -3,6 +3,40 @@
 use super::*;
 
 impl GameState {
+    /// Applies the optimistic UI state for an action that consumes our turn.
+    ///
+    /// The server remains authoritative, but hiding the now-stale controls
+    /// prevents a second click from submitting another action before the
+    /// first response arrives over a remote connection.
+    fn submit_turn_action(&mut self, action: ClientAction) -> Option<ClientAction> {
+        self.is_my_turn = false;
+        self.can_tsumo = false;
+        self.can_riichi = false;
+        self.self_kan_options.clear();
+        self.can_pei = false;
+        Some(action)
+    }
+
+    /// Revalidates an own-turn overlay click against the latest state.
+    ///
+    /// Rendering happens before network events are applied in a frame,
+    /// so the click can refer to a button that a just-arrived event made
+    /// stale.
+    fn can_submit_turn_action(&self, action: &ClientAction) -> bool {
+        match action {
+            ClientAction::Tsumo => self.is_my_turn && self.can_tsumo,
+            ClientAction::Kan { tile_index } => {
+                self.is_my_turn
+                    && self
+                        .self_kan_options
+                        .iter()
+                        .any(|tile| tile.get() as usize == *tile_index)
+            }
+            ClientAction::Pei => self.is_my_turn && self.can_pei,
+            _ => false,
+        }
+    }
+
     pub(super) fn clear_riichi_selection(&mut self) {
         self.riichi_selection_mode = false;
         self.riichi_selectable_tiles.clear();
@@ -234,7 +268,7 @@ impl GameState {
             }
             self.riichi_auto_discard_at = None;
             self.drawn.take();
-            return Some(ClientAction::Discard { tile: None });
+            return self.submit_turn_action(ClientAction::Discard { tile: None });
         }
 
         // Overlay clicks, as reported by draw_game.
@@ -243,7 +277,8 @@ impl GameState {
                 match click {
                     OverlayClick::NineTerminalsDeclare => {
                         self.nine_terminals_pending = false;
-                        return Some(ClientAction::NineTerminals { declare: true });
+                        return self
+                            .submit_turn_action(ClientAction::NineTerminals { declare: true });
                     }
                     OverlayClick::NineTerminalsPass => {
                         self.nine_terminals_pending = false;
@@ -311,14 +346,19 @@ impl GameState {
             }
 
             match click {
-                OverlayClick::Action(action) => return Some(action),
+                OverlayClick::Action(action) => {
+                    if self.can_submit_turn_action(&action) {
+                        return self.submit_turn_action(action);
+                    }
+                    return None;
+                }
                 OverlayClick::PassSelfCall => {
                     // Declining the pei offer under riichi falls back to
                     // the usual automatic tsumogiri.
                     if self.is_riichi && self.drawn.is_some() {
                         self.can_pei = false;
                         self.drawn.take();
-                        return Some(ClientAction::Discard { tile: None });
+                        return self.submit_turn_action(ClientAction::Discard { tile: None });
                     }
                     return None;
                 }
@@ -383,11 +423,11 @@ impl GameState {
                     let discarded_tile = self.apply_local_discard_from_hand(i);
                     if self.riichi_selection_mode {
                         self.clear_riichi_selection();
-                        return Some(ClientAction::Riichi {
+                        return self.submit_turn_action(ClientAction::Riichi {
                             tile: Some(discarded_tile),
                         });
                     }
-                    return Some(ClientAction::Discard {
+                    return self.submit_turn_action(ClientAction::Discard {
                         tile: Some(discarded_tile),
                     });
                 }
@@ -413,9 +453,9 @@ impl GameState {
                     self.drawn.take();
                     if self.riichi_selection_mode {
                         self.clear_riichi_selection();
-                        return Some(ClientAction::Riichi { tile: None });
+                        return self.submit_turn_action(ClientAction::Riichi { tile: None });
                     }
-                    return Some(ClientAction::Discard { tile: None });
+                    return self.submit_turn_action(ClientAction::Discard { tile: None });
                 }
 
                 self.selected_drawn = true;

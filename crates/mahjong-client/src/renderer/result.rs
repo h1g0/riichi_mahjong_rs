@@ -245,11 +245,11 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
 
 /// The draw panel.
 pub(super) fn draw_draw_panel(state: &GameState, font: Option<&Font>) {
-    let tr = state.tr();
+    let heading = state.message_result_heading();
     let lines: Vec<&str> = state
         .result_message
         .as_deref()
-        .unwrap_or_else(|| tr.get(Key::RoundDraw))
+        .unwrap_or(heading)
         .lines()
         .collect();
     let panel_w = 560.0;
@@ -258,7 +258,7 @@ pub(super) fn draw_draw_panel(state: &GameState, font: Option<&Font>) {
     let cx = panel_x + panel_w / 2.0;
     let mut y = panel_y + 40.0;
 
-    theme::draw_text_centered(font, tr.get(Key::RoundDraw), cx, y, 12, theme::GOLD);
+    theme::draw_text_centered(font, heading, cx, y, 12, theme::GOLD);
     y += 30.0;
     for (i, line) in lines.iter().enumerate() {
         let (size, color) = if i == 0 {

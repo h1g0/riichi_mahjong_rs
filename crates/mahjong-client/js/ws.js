@@ -31,9 +31,12 @@ const mahjong_ws = {
 // Opens a connection and returns its handle.
 function mahjong_ws_connect(url_ptr, url_len) {
     const url = mahjong_ws.read_str(url_ptr, url_len);
-    const handle = mahjong_ws.sockets.length;
+    let handle = mahjong_ws.sockets.findIndex((socket) => socket === null);
+    if (handle < 0) {
+        handle = mahjong_ws.sockets.length;
+    }
     const entry = { ws: null, status: MAHJONG_WS_CONNECTING, queue: [] };
-    mahjong_ws.sockets.push(entry);
+    mahjong_ws.sockets[handle] = entry;
 
     try {
         const ws = new WebSocket(url);
@@ -105,8 +108,8 @@ function mahjong_ws_read_msg(handle, buf_ptr) {
     new Uint8Array(wasm_memory.buffer, buf_ptr, msg.length).set(msg);
 }
 
-// Closes the connection and frees its resources. Each reconnect mints a
-// new handle, so stale references and queues must not linger.
+// Closes the connection and frees its resources. The vacant handle can
+// then be reused by a later reconnect.
 function mahjong_ws_close(handle) {
     const entry = mahjong_ws.sockets[handle];
     if (!entry) {
@@ -125,6 +128,7 @@ function mahjong_ws_close(handle) {
     if (entry.status !== MAHJONG_WS_ERROR) {
         entry.status = MAHJONG_WS_CLOSED;
     }
+    mahjong_ws.sockets[handle] = null;
 }
 
 // Writes the page-configured server URL (window.MAHJONG_SERVER_URL) into

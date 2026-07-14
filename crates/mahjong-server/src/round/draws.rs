@@ -2,14 +2,19 @@
 
 use mahjong_core::tile::Wind;
 
-use crate::protocol::{DrawReason, ServerEvent};
+use crate::protocol::{DrawReason, NagashiManganWinner, ServerEvent};
 use crate::scoring;
 
-use super::{Round, RoundResult, TurnPhase};
+use super::{RIICHI_STICK_VALUE, Round, RoundResult, TurnPhase};
 
 impl Round {
     /// Handles an exhaustive draw, including the noten penalty.
     pub(super) fn do_exhaustive_draw(&mut self) {
+        let nagashi_winners = self.nagashi_mangan_players();
+        if !nagashi_winners.is_empty() && self.do_nagashi_mangan(nagashi_winners) {
+            return;
+        }
+
         let mut tenpai_players = Vec::new();
         let mut noten_players = Vec::new();
 
@@ -64,6 +69,116 @@ impl Round {
                 },
             ));
         }
+    }
+
+    /// Players whose entire non-empty discard pool consists of unclaimed
+    /// terminals and honours. Calling another player's tile is allowed; the
+    /// defining condition concerns only the player's own discard pool.
+    pub(super) fn nagashi_mangan_players(&self) -> Vec<usize> {
+        let mut winners: Vec<usize> = self
+            .players
+            .iter()
+            .enumerate()
+            .take(self.player_count)
+            .filter_map(|(seat, player)| {
+                (!player.discards.is_empty()
+                    && player
+                        .discards
+                        .iter()
+                        .all(|discard| discard.tile.is_1_9_honour() && !discard.is_called))
+                .then_some(seat)
+            })
+            .collect();
+        winners.sort_by_key(|&seat| (seat + self.player_count - self.dealer) % self.player_count);
+        winners
+    }
+
+    /// Settles one or more simultaneous Nagashi Mangan wins.
+    ///
+    /// Each winner receives an independent tsumo-mangan payment. As with
+    /// multiple ron, only the first winner receives continuance bonuses and
+    /// riichi deposits.
+    fn do_nagashi_mangan(&mut self, winners: Vec<usize>) -> bool {
+        struct WinnerData {
+            seat: usize,
+            deltas: [i32; 4],
+            score_points: i32,
+        }
+
+        let riichi_sticks = self.riichi_sticks;
+        let mut winner_data = Vec::with_capacity(winners.len());
+        for &winner in &winners {
+            let result = scoring::check_nagashi_mangan(
+                &self.players[winner],
+                self.round_wind,
+                &self.settings,
+            );
+            let Some(score_result) = result.score_result else {
+                continue;
+            };
+            let is_first_winner = winner_data.is_empty();
+            let honba = if is_first_winner { self.honba } else { 0 };
+            let deltas = scoring::calculate_tsumo_score_deltas(
+                winner,
+                &score_result,
+                self.players[winner].is_dealer(),
+                self.dealer,
+                honba,
+                self.player_count,
+            );
+            let riichi_bonus = if is_first_winner {
+                riichi_sticks as i32 * RIICHI_STICK_VALUE
+            } else {
+                0
+            };
+            winner_data.push(WinnerData {
+                seat: winner,
+                score_points: deltas[winner] + riichi_bonus,
+                deltas,
+            });
+        }
+
+        if winner_data.is_empty() {
+            return false;
+        }
+
+        for data in &winner_data {
+            for (player, delta) in self.players.iter_mut().zip(data.deltas) {
+                player.score += delta;
+            }
+        }
+        if riichi_sticks > 0 {
+            self.players[winner_data[0].seat].score += riichi_sticks as i32 * RIICHI_STICK_VALUE;
+            self.riichi_sticks = 0;
+        }
+
+        let event_winners: Vec<NagashiManganWinner> = winner_data
+            .iter()
+            .map(|data| NagashiManganWinner {
+                wind: self.players[data.seat].seat_wind,
+                score_points: data.score_points,
+            })
+            .collect();
+        let result_winners = winner_data.iter().map(|data| data.seat).collect();
+        let scores = self.get_scores();
+        let player_hands = self.build_player_hands();
+        for seat in 0..self.player_count {
+            self.events.push((
+                seat,
+                ServerEvent::RoundNagashiMangan {
+                    winners: event_winners.clone(),
+                    scores,
+                    riichi_sticks,
+                    player_hands: player_hands.clone(),
+                },
+            ));
+        }
+
+        self.phase = TurnPhase::RoundOver;
+        self.result = Some(RoundResult::NagashiMangan {
+            winners: result_winners,
+        });
+        true
     }
 
     /// Checks for abortive draws: four winds (四風連打) and four riichi (四家立直).

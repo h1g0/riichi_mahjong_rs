@@ -1,7 +1,8 @@
 //! CPU AI players.
 //!
-//! CPUs talk to the server through the same protocol as human players
-//! (ServerEvent / ClientAction); they never reach into server internals.
+//! CPUs talk to the server through the same gameplay protocol as human
+//! players (`ServerEvent` / `ClientAction`). Immutable table rules are
+//! supplied when a CPU is created; CPUs never reach into live server state.
 
 pub mod client;
 pub mod defense;

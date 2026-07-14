@@ -17,4 +17,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 mahjong-core = { path = "../mahjong-core" }
-tokio-tungstenite = "0.27"
+tokio-tungstenite = "0.29"

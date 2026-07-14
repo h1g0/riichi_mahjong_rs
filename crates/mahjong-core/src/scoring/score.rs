@@ -143,8 +143,53 @@ impl DoraLabel {
 
 /// Calculates the score of a winning hand.
 ///
+/// For an ordinary complete hand, `analyzer` supplies the initial win state;
+/// every legal form, decomposition, and winning-tile placement is then scored,
+/// and the interpretation that pays the winner the most is returned. The form
+/// selected in the passed analyzer is therefore not a constraint. Nagashi
+/// Mangan and non-complete shapes use the passed analyzer directly.
+///
 /// Returns `None` when the hand has no yaku.
 pub fn calculate_score(
+    analyzer: &HandAnalyzer,
+    hand: &Hand,
+    status: &Status,
+    settings: &Settings,
+) -> Result<Option<ScoreResult>> {
+    // Nagashi Mangan deliberately uses an incomplete hand shape, so there is
+    // no alternative tile decomposition to compare.
+    if status.is_nagashi_mangan || !analyzer.shanten.has_won() {
+        return calculate_score_for_decomposition(analyzer, hand, status, settings);
+    }
+
+    let variants = HandAnalyzer::winning_variants(hand)?;
+    if variants.is_empty() {
+        // The fast shanten search must not turn a rearrangement of fixed meld
+        // tiles into a win when no legal complete decomposition exists.
+        return Ok(None);
+    }
+
+    let mut best: Option<ScoreResult> = None;
+    for variant in &variants {
+        let Some(candidate) = calculate_score_for_decomposition(variant, hand, status, settings)?
+        else {
+            continue;
+        };
+
+        let candidate_key = score_selection_key(&candidate, status, settings);
+        let replace = best
+            .as_ref()
+            .is_none_or(|current| candidate_key > score_selection_key(current, status, settings));
+        if replace {
+            best = Some(candidate);
+        }
+    }
+
+    Ok(best)
+}
+
+/// Scores one fixed interpretation of a complete hand.
+fn calculate_score_for_decomposition(
     analyzer: &HandAnalyzer,
     hand: &Hand,
     status: &Status,
@@ -167,7 +212,18 @@ pub fn calculate_score(
 
     let rank = determine_rank(han, fu, has_yakuman);
 
-    let base_points = calculate_base_points(han, fu, rank);
+    // Counted yakuman is capped at one, while independently awarded yakuman
+    // stack. Deriving the multiplier from total han would incorrectly turn a
+    // 26-han counted hand into double yakuman.
+    let yakuman_count: u32 = yaku_list
+        .iter()
+        .filter_map(|(_, han)| (*han >= 13).then_some(*han / 13))
+        .sum();
+    let base_points = if yakuman_count > 0 {
+        8000 * yakuman_count
+    } else {
+        calculate_base_points(han, fu, rank)
+    };
 
     let dealer_ron = round_up_to_100(base_points * 6);
     let dealer_tsumo_all = round_up_to_100(base_points * 2);
@@ -188,6 +244,32 @@ pub fn calculate_score(
         has_opened: status.has_claimed_open,
         fu_result,
     }))
+}
+
+/// Orders interpretations by the points the winner actually receives.
+///
+/// Equal payments prefer more han, then more fu. Candidate enumeration is
+/// stable, so a complete tie retains the first canonical decomposition.
+fn score_selection_key(
+    score: &ScoreResult,
+    status: &Status,
+    settings: &Settings,
+) -> (u64, u32, u32) {
+    let player_count = settings.player_count() as u64;
+    let points = if status.is_self_drawn {
+        if status.is_dealer {
+            score.dealer_tsumo_all as u64 * (player_count - 1)
+        } else {
+            score.non_dealer_tsumo_dealer as u64
+                + score.non_dealer_tsumo_non_dealer as u64 * (player_count - 2)
+        }
+    } else if status.is_dealer {
+        score.dealer_ron as u64
+    } else {
+        score.non_dealer_ron as u64
+    };
+
+    (points, score.han, score.fu)
 }
 
 /// Extracts the awarded yaku from the checker result.
@@ -269,7 +351,7 @@ mod tests {
     use crate::hand_info::hand_analyzer::HandAnalyzer;
     use crate::hand_info::status::Status;
     use crate::settings::Settings;
-    use crate::tile::Wind;
+    use crate::tile::{Tile, Wind};
 
     /// Mangan, non-dealer ron: 8000 points.
     #[test]
@@ -501,8 +583,204 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(result.rank, ScoreRank::Yakuman);
+        assert_eq!(result.han, 13);
+        assert_eq!(
+            result.yaku_list,
+            vec![(ScoreItem::Yaku(Kind::ThirteenOrphans), 13)]
+        );
         assert_eq!(result.non_dealer_ron, 32000);
         assert_eq!(result.dealer_ron, 48000);
+    }
+
+    #[test]
+    fn test_calculate_score_stacks_independent_yakuman() {
+        let hand = Hand::from("222333444z5z 111z 5z");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+        let mut status = Status::new();
+        status.has_claimed_open = true;
+        let result = calculate_score(&analyzer, &hand, &status, &Settings::new())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.han, 26);
+        assert_eq!(result.rank, ScoreRank::Yakuman);
+        assert!(
+            result
+                .yaku_list
+                .contains(&(ScoreItem::Yaku(Kind::BigWinds), 13))
+        );
+        assert!(
+            result
+                .yaku_list
+                .contains(&(ScoreItem::Yaku(Kind::AllHonours), 13))
+        );
+        assert_eq!(result.non_dealer_ron, 64_000);
+        assert_eq!(result.dealer_ron, 96_000);
+    }
+
+    #[test]
+    fn test_calculate_score_nagashi_mangan_without_winning_shape() {
+        let hand = Hand::from("147m258p369s1234z");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+        let mut status = Status::new();
+        status.is_nagashi_mangan = true;
+
+        let result = calculate_score(&analyzer, &hand, &status, &Settings::new())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.han, 5);
+        assert_eq!(result.fu, 30);
+        assert_eq!(result.rank, ScoreRank::Mangan);
+        assert_eq!(result.non_dealer_ron, 8_000);
+        assert_eq!(
+            result.yaku_list,
+            vec![(ScoreItem::Yaku(Kind::NagashiMangan), 5)]
+        );
+    }
+
+    #[test]
+    fn test_nagashi_mangan_is_exclusive_even_with_a_winning_shape() {
+        let hand = Hand::from("123456m234p6799s 5s");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+        let mut status = Status::new();
+        status.is_nagashi_mangan = true;
+        status.has_claimed_riichi = true;
+
+        let result = calculate_score(&analyzer, &hand, &status, &Settings::new())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.han, 5);
+        assert_eq!(result.fu, 30);
+        assert_eq!(result.rank, ScoreRank::Mangan);
+        assert_eq!(
+            result.yaku_list,
+            vec![(ScoreItem::Yaku(Kind::NagashiMangan), 5)]
+        );
+    }
+
+    #[test]
+    fn test_calculate_score_chooses_highest_value_normal_decomposition() {
+        // The same tiles can be read as three concealed triplets (3200 points)
+        // or as three 123 sequences with Twin Sequences + Perfect Ends
+        // (mangan). The first decomposition found is not necessarily best.
+        let hand = Hand::from("111222333m89p99s 7p");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+
+        let result = calculate_score(&analyzer, &hand, &Status::new(), &Settings::new())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.rank, ScoreRank::Mangan);
+        assert_eq!(result.han, 4);
+        assert_eq!(result.non_dealer_ron, 8_000);
+        assert!(
+            result
+                .yaku_list
+                .contains(&(ScoreItem::Yaku(Kind::TwinSequences), 1))
+        );
+        assert!(
+            result
+                .yaku_list
+                .contains(&(ScoreItem::Yaku(Kind::PerfectEnds), 3))
+        );
+        assert!(
+            !result
+                .yaku_list
+                .iter()
+                .any(|(item, _)| *item == ScoreItem::Yaku(Kind::ThreeConcealedTriplets))
+        );
+    }
+
+    #[test]
+    fn test_score_tie_prefers_more_han_deterministically() {
+        // Both interpretations are Baiman: triplets give 8 han, while the
+        // sequence interpretation gives 10. Payments tie, so han breaks it.
+        let hand = Hand::from("1112223338999m 7m");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+
+        let result = calculate_score(&analyzer, &hand, &Status::new(), &Settings::new())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.rank, ScoreRank::Baiman);
+        assert_eq!(result.han, 10);
+        assert_eq!(result.non_dealer_ron, 16_000);
+        assert!(
+            result
+                .yaku_list
+                .contains(&(ScoreItem::Yaku(Kind::PerfectEnds), 3))
+        );
+    }
+
+    #[test]
+    fn test_score_compares_normal_form_with_seven_pairs() {
+        let hand = Hand::from("1122334455667m 7m");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+
+        let result = calculate_score(&analyzer, &hand, &Status::new(), &Settings::new())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.rank, ScoreRank::Baiman);
+        assert_eq!(result.han, 10);
+        assert!(
+            result
+                .yaku_list
+                .contains(&(ScoreItem::Yaku(Kind::DoubleTwinSequences), 3))
+        );
+        assert!(
+            !result
+                .yaku_list
+                .iter()
+                .any(|(item, _)| *item == ScoreItem::Yaku(Kind::SevenPairs))
+        );
+    }
+
+    #[test]
+    fn test_score_chooses_consistent_winning_tile_placement() {
+        // The winning 5m can complete either the pair or the 345m sequence.
+        // Only the sequence placement is a two-sided Pinfu wait.
+        let hand = Hand::from("3455m123456p789s 5m");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+        let mut status = Status::new();
+        status.has_claimed_riichi = true;
+
+        let result = calculate_score(&analyzer, &hand, &status, &Settings::new())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.han, 2);
+        assert_eq!(result.fu, 30);
+        assert_eq!(result.non_dealer_ron, 2_000);
+        assert!(
+            result
+                .yaku_list
+                .contains(&(ScoreItem::Yaku(Kind::Pinfu), 1))
+        );
+    }
+
+    #[test]
+    fn test_red_winning_tile_uses_normalized_kind_for_placement() {
+        let concealed = Hand::from("3455m123456p789s").tiles().to_vec();
+        let hand = Hand::new(concealed, Some(Tile::new_red(Tile::M5)));
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+        let mut status = Status::new();
+        status.has_claimed_riichi = true;
+
+        let result = calculate_score(&analyzer, &hand, &status, &Settings::new())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.han, 2);
+        assert_eq!(result.fu, 30);
+        assert_eq!(result.non_dealer_ron, 2_000);
+        assert!(
+            result
+                .yaku_list
+                .contains(&(ScoreItem::Yaku(Kind::Pinfu), 1))
+        );
     }
 
     /// 2 han 40 fu, dealer ron: 3900 points.

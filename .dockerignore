@@ -1,9 +1,9 @@
-# ビルド成果物・VCS・サーバビルドに不要なものを除外してコンテキストを小さくする
+# Keep build output, VCS data, and server-irrelevant assets out of the context.
 /target
 /public
 .git
 .github
-# サーバ（mahjong-net-server）のビルドには不要（クライアントはビルドしない）
+# The server image does not build the macroquad client.
 /assets
 *.md
 index.html

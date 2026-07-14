@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::hand::Hand;
-use crate::hand_info::hand_analyzer::HandAnalyzer;
+use crate::hand_info::hand_analyzer::{HandAnalyzer, WinningTilePlacement};
 use crate::hand_info::meld::{MeldFrom, MeldType};
 use crate::hand_info::status::Status;
 use crate::tile::{Dragon, Tile, TileType, Wind, suit_rank};
@@ -29,6 +29,18 @@ pub struct FuDetail {
 ///
 /// Returns the rounded-up total together with the itemized breakdown.
 pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Result<FuResult> {
+    // Nagashi Mangan is not a tile-shape win and has no intrinsic fu. Keep
+    // the same conventional 30-fu representation used for Thirteen Orphans.
+    if status.is_nagashi_mangan {
+        return Ok(FuResult {
+            total: 30,
+            details: vec![FuDetail {
+                name: "流し満貫",
+                fu: 30,
+            }],
+        });
+    }
+
     // Seven Pairs is always exactly 25 fu.
     if analyzer.form == Form::SevenPairs {
         return Ok(FuResult {
@@ -116,16 +128,20 @@ fn is_pinfu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> bool {
             return false;
         }
     }
-    // Pinfu requires a two-sided wait.
-    if let Some(winning_tile) = hand.drawn() {
-        for seq in &analyzer.sequential3 {
-            if seq.is_two_sided_wait(winning_tile.get()) {
-                return true;
-            }
-        }
+    // Pinfu requires the winning tile to belong to a two-sided sequence.
+    let Some(winning_tile) = hand.drawn() else {
         return false;
+    };
+    match analyzer.winning_tile_placement {
+        Some(WinningTilePlacement::Sequence(sequence)) => {
+            sequence.is_two_sided_wait(winning_tile.get())
+        }
+        Some(WinningTilePlacement::Pair | WinningTilePlacement::Triplet) => false,
+        None => analyzer
+            .sequential3
+            .iter()
+            .any(|sequence| sequence.is_two_sided_wait(winning_tile.get())),
     }
-    false
 }
 
 /// Whether the tile is a value honour (yakuhai / 役牌).
@@ -169,15 +185,16 @@ fn calculate_mentsu_fu(
         let is_terminal_or_honour = Tile::new(tile).is_1_9_honour();
 
         // A triplet completed by a ron tile counts as open.
-        let is_concealed = if !status.is_self_drawn {
-            if let Some(drawn) = hand.drawn() {
-                drawn.get() != tile
-            } else {
-                true
-            }
-        } else {
-            true
-        };
+        let is_concealed = status.is_self_drawn
+            || match analyzer.winning_tile_placement {
+                Some(WinningTilePlacement::Triplet) => hand
+                    .drawn()
+                    .is_none_or(|winning_tile| winning_tile.get() != tile),
+                Some(WinningTilePlacement::Pair | WinningTilePlacement::Sequence(_)) => true,
+                None => hand
+                    .drawn()
+                    .is_none_or(|winning_tile| winning_tile.get() != tile),
+            };
 
         let fu = if is_concealed {
             if is_terminal_or_honour { 8 } else { 4 }
@@ -289,6 +306,22 @@ fn calculate_machi_fu(
     if let Some(winning_tile) = hand.drawn() {
         let wt = winning_tile.get();
 
+        match analyzer.winning_tile_placement {
+            Some(WinningTilePlacement::Pair) => {
+                details.push(FuDetail {
+                    name: "単騎待ち",
+                    fu: 2,
+                });
+                return Ok(());
+            }
+            Some(WinningTilePlacement::Triplet) => return Ok(()),
+            Some(WinningTilePlacement::Sequence(sequence)) => {
+                add_sequence_wait_fu(sequence.get(), wt, details);
+                return Ok(());
+            }
+            None => {}
+        }
+
         // Pair wait (tanki / 単騎).
         for head in &analyzer.same2 {
             if head.get()[0] == wt {
@@ -301,28 +334,7 @@ fn calculate_machi_fu(
         }
 
         for seq in &analyzer.sequential3 {
-            let tiles = seq.get();
-            // Closed wait (kanchan / 嵌張): won on the middle tile.
-            if wt == tiles[1] {
-                details.push(FuDetail {
-                    name: "嵌張待ち",
-                    fu: 2,
-                });
-                return Ok(());
-            }
-            // Edge wait (penchan / 辺張): 3 completing 1-2, or 7 completing 8-9.
-            if wt == tiles[2] && suit_rank(tiles[2]) == Some(3) {
-                details.push(FuDetail {
-                    name: "辺張待ち",
-                    fu: 2,
-                });
-                return Ok(());
-            }
-            if wt == tiles[0] && suit_rank(tiles[0]) == Some(7) {
-                details.push(FuDetail {
-                    name: "辺張待ち",
-                    fu: 2,
-                });
+            if add_sequence_wait_fu(seq.get(), wt, details) {
                 return Ok(());
             }
         }
@@ -331,6 +343,35 @@ fn calculate_machi_fu(
     }
 
     Ok(())
+}
+
+/// Adds fu for a closed or edge wait and reports whether any fu was added.
+fn add_sequence_wait_fu(
+    tiles: [TileType; 3],
+    winning_tile: TileType,
+    details: &mut Vec<FuDetail>,
+) -> bool {
+    // Closed wait (kanchan / 嵌張): won on the middle tile.
+    if winning_tile == tiles[1] {
+        details.push(FuDetail {
+            name: "嵌張待ち",
+            fu: 2,
+        });
+        return true;
+    }
+
+    // Edge wait (penchan / 辺張): 3 completing 1-2, or 7 completing 8-9.
+    if (winning_tile == tiles[2] && suit_rank(tiles[2]) == Some(3))
+        || (winning_tile == tiles[0] && suit_rank(tiles[0]) == Some(7))
+    {
+        details.push(FuDetail {
+            name: "辺張待ち",
+            fu: 2,
+        });
+        return true;
+    }
+
+    false
 }
 
 /// Fu from winning by self-draw.

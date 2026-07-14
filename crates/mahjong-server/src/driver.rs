@@ -77,7 +77,7 @@ impl GameDriver {
     pub fn set_cpu(&mut self, seat: usize, config: CpuConfig) {
         if seat < 4 {
             self.cpus[seat] = Some(CpuSeat {
-                client: CpuClient::new(config),
+                client: CpuClient::new_with_rules(config, &self.table.settings.rules),
                 controlled: true,
                 mirror: false,
             });
@@ -94,7 +94,7 @@ impl GameDriver {
     pub fn set_shadow_cpu(&mut self, seat: usize, config: CpuConfig) {
         if seat < 4 {
             self.cpus[seat] = Some(CpuSeat {
-                client: CpuClient::new(config),
+                client: CpuClient::new_with_rules(config, &self.table.settings.rules),
                 controlled: false,
                 mirror: true,
             });
@@ -307,7 +307,7 @@ impl GameDriver {
     /// terminals), or None when the seat is not being waited on.
     fn default_action_for(&self, seat: usize) -> Option<ClientAction> {
         let round = self.table.current_round()?;
-        if round.is_over() {
+        if round.is_over() || seat >= round.player_count {
             return None;
         }
         match round.phase {
@@ -581,7 +581,17 @@ impl GameDriver {
                 && let Some(action) = cpu.client.handle_event(event)
                 && cpu.controlled
             {
-                actions.push((*seat, action));
+                // Later events in the same server batch carry the final
+                // phase. In particular, NineTerminalsAvailable follows
+                // TileDrawn and must supersede the speculative draw action.
+                if let Some((_, queued)) = actions
+                    .iter_mut()
+                    .find(|(queued_seat, _)| seat == queued_seat)
+                {
+                    *queued = action;
+                } else {
+                    actions.push((*seat, action));
+                }
             }
         }
 
@@ -596,6 +606,24 @@ mod tests {
     use crate::player::Player;
     use mahjong_core::hand::Hand;
     use mahjong_core::tile::Tile;
+
+    #[test]
+    fn test_cpu_receives_open_tanyao_rule() {
+        let mut settings = GameSettings::default();
+        settings.rules.opened_all_inside = false;
+        let mut driver = GameDriver::new(settings);
+
+        driver.set_cpu(0, default_cpu_configs()[0].clone());
+
+        assert!(
+            !driver.cpus[0]
+                .as_ref()
+                .unwrap()
+                .client
+                .state
+                .opened_all_inside
+        );
+    }
 
     /// Driver with seat 0 human and the rest CPUs.
     fn driver_with_three_cpus() -> GameDriver {
@@ -646,6 +674,35 @@ mod tests {
         for seat in 1..4 {
             assert!(driver.drain_events(seat).is_empty());
         }
+    }
+
+    #[test]
+    fn test_nine_terminals_event_supersedes_draw_action_in_same_batch() {
+        let mut driver = GameDriver::new(GameSettings::default());
+        driver.set_cpu(0, default_cpu_configs()[0].clone());
+        let cpu = driver.cpus[0].as_mut().unwrap();
+        cpu.client.state.my_hand = mahjong_core::hand::Hand::from("1m9m1p9p1s9s1z2z3z4z5z6z5m")
+            .tiles()
+            .to_vec();
+
+        let actions = driver.collect_cpu_actions(&[
+            (
+                0,
+                ServerEvent::TileDrawn {
+                    tile: Tile::new(Tile::Z7),
+                    remaining_tiles: 69,
+                    can_tsumo: false,
+                    can_riichi: false,
+                    is_furiten: false,
+                },
+            ),
+            (0, ServerEvent::NineTerminalsAvailable),
+        ]);
+
+        assert_eq!(
+            actions,
+            vec![(0, ClientAction::NineTerminals { declare: false })]
+        );
     }
 
     /// The hand must run to completion with a tsumogiri-only human.

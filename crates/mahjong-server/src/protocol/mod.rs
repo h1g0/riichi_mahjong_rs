@@ -64,6 +64,16 @@ pub struct MeldTiles {
     pub tiles: Vec<Tile>,
 }
 
+/// One recipient of a Nagashi Mangan payment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NagashiManganWinner {
+    /// Seat wind of the winner
+    pub wind: Wind,
+    /// Points gained from this win, including any continuance and riichi
+    /// deposits assigned to this winner
+    pub score_points: i32,
+}
+
 /// A call the player may make, carried by the CallAvailable event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AvailableCall {
@@ -232,6 +242,20 @@ pub enum ServerEvent {
         /// Ura dora indicators (revealed only on a riichi win)
         uradora_indicators: Vec<Tile>,
         /// Riichi deposits on the table before the win
+        riichi_sticks: usize,
+        /// Every player's revealed hand
+        player_hands: Vec<PlayerHandInfo>,
+    },
+
+    /// The live wall was exhausted and one or more players completed
+    /// Nagashi Mangan. This is separate from `RoundWon` because there is no
+    /// winning tile.
+    RoundNagashiMangan {
+        /// Qualifying players in turn order from the dealer
+        winners: Vec<NagashiManganWinner>,
+        /// Scores after every Nagashi Mangan payment
+        scores: [i32; 4],
+        /// Riichi deposits on the table before they were awarded
         riichi_sticks: usize,
         /// Every player's revealed hand
         player_hands: Vec<PlayerHandInfo>,

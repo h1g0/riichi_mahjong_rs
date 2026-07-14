@@ -6,7 +6,9 @@ use mahjong_core::tile::Tile;
 use crate::protocol::ServerEvent;
 use crate::scoring;
 
-use super::{RIICHI_MIN_SCORE, RIICHI_STICK_VALUE, Round, RoundResult, TurnPhase};
+use super::{
+    RIICHI_MIN_SCORE, RIICHI_STICK_VALUE, Round, RoundResult, TurnPhase, diagnostics_enabled,
+};
 
 impl Round {
     pub(super) fn can_player_riichi_with_discard(
@@ -54,9 +56,10 @@ impl Round {
     pub(super) fn can_player_riichi(&self, player_idx: usize) -> bool {
         let player = &self.players[player_idx];
 
-        // In debug builds, log why the human player's riichi was rejected.
+        // Verbose rejection logging is opt-in because this check runs for
+        // every discard candidate and otherwise dominates debug simulations.
         let log_reject = |detail: std::fmt::Arguments| {
-            if cfg!(debug_assertions) && player_idx == 0 {
+            if player_idx == 0 && diagnostics_enabled() {
                 eprintln!("[riichi-reject] {detail}");
             }
         };
@@ -167,7 +170,7 @@ impl Round {
             return false;
         }
         let player = &self.players[self.current_player];
-        let is_last_tile = self.wall.is_empty();
+        let is_last_tile = self.wall.is_empty() && !self.last_draw_was_dead_wall;
         let result = scoring::check_win_with_settings(
             player,
             self.round_wind,
@@ -186,7 +189,7 @@ impl Round {
         }
 
         let player = &self.players[self.current_player];
-        let is_last_tile = self.wall.is_empty();
+        let is_last_tile = self.wall.is_empty() && !self.last_draw_was_dead_wall;
         let win_result = scoring::check_win_with_settings(
             player,
             self.round_wind,
@@ -227,19 +230,16 @@ impl Round {
 
         // Three-player games use tsumo loss: the absent player's share
         // is simply not received.
-        let mut deltas = scoring::calculate_tsumo_score_deltas(
+        let pao_players = self.pao_players_for_win(winner, &score_result.yaku_list);
+        let deltas = scoring::calculate_tsumo_score_deltas_with_pao(
             winner,
             &score_result,
             winner_is_dealer,
             self.dealer,
             self.honba,
             self.player_count,
+            &pao_players,
         );
-        // Liability payment (pao / 包): the liable player pays the full
-        // amount when a qualifying yakuman was completed.
-        if let Some(pao_player) = self.pao_player_for_win(winner, &score_result.yaku_list) {
-            scoring::apply_pao_to_tsumo_deltas(&mut deltas, winner, pao_player);
-        }
         let riichi_sticks = self.riichi_sticks;
 
         for (player, &delta) in self.players.iter_mut().zip(deltas.iter()) {

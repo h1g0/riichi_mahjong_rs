@@ -169,22 +169,30 @@ pub fn check_three_concealed_triplets(
         }
     }
 
-    if !status.is_self_drawn
-        && let Some(winning_tile) = hand.drawn()
-    {
-        let winning_tile_type = winning_tile.get();
-        let completes_open_triplet = hand.melds().iter().any(|open| {
-            open.tiles[0].get() == winning_tile_type
-                && (matches!(open.category, MeldType::Pon)
-                    || (open.category.is_kan() && open.from != MeldFrom::Myself))
-        });
-        let completes_concealed_triplet = hand_analyzer
-            .same3
-            .iter()
-            .any(|triplet| triplet.get()[0] == winning_tile_type);
+    if !status.is_self_drawn {
+        match hand_analyzer.winning_tile_placement {
+            Some(WinningTilePlacement::Triplet) => {
+                concealed_triplet_count = concealed_triplet_count.saturating_sub(1);
+            }
+            Some(WinningTilePlacement::Pair | WinningTilePlacement::Sequence(_)) => {}
+            None => {
+                if let Some(winning_tile) = hand.drawn() {
+                    let winning_tile_type = winning_tile.get();
+                    let completes_open_triplet = hand.melds().iter().any(|open| {
+                        open.tiles[0].get() == winning_tile_type
+                            && (matches!(open.category, MeldType::Pon)
+                                || (open.category.is_kan() && open.from != MeldFrom::Myself))
+                    });
+                    let completes_concealed_triplet = hand_analyzer
+                        .same3
+                        .iter()
+                        .any(|triplet| triplet.get()[0] == winning_tile_type);
 
-        if completes_concealed_triplet && !completes_open_triplet {
-            concealed_triplet_count = concealed_triplet_count.saturating_sub(1);
+                    if completes_concealed_triplet && !completes_open_triplet {
+                        concealed_triplet_count = concealed_triplet_count.saturating_sub(1);
+                    }
+                }
+            }
         }
     }
 
@@ -541,6 +549,53 @@ mod tests {
         assert_eq!(
             check_three_concealed_triplets(&test_analyzer, &test, &status, &settings).unwrap(),
             expected
+        );
+    }
+
+    #[test]
+    fn test_three_concealed_triplets_respects_ambiguous_winning_tile_placement() {
+        // The winning 5m can belong to either 555m or 345m. On ron only the
+        // former opens the triplet; on tsumo both interpretations stay closed.
+        let hand = Hand::from("34555m111p222s77z 5m");
+        let variants = HandAnalyzer::winning_variants(&hand).unwrap();
+        let triplet_variant = variants
+            .iter()
+            .find(|variant| variant.winning_tile_placement == Some(WinningTilePlacement::Triplet))
+            .unwrap();
+        let sequence_variant = variants
+            .iter()
+            .find(|variant| {
+                matches!(
+                    variant.winning_tile_placement,
+                    Some(WinningTilePlacement::Sequence(_))
+                )
+            })
+            .unwrap();
+        let settings = Settings::new();
+
+        let mut status = Status::new();
+        status.is_self_drawn = false;
+        assert!(
+            !check_three_concealed_triplets(triplet_variant, &hand, &status, &settings)
+                .unwrap()
+                .1
+        );
+        assert!(
+            check_three_concealed_triplets(sequence_variant, &hand, &status, &settings)
+                .unwrap()
+                .1
+        );
+
+        status.is_self_drawn = true;
+        assert!(
+            check_three_concealed_triplets(triplet_variant, &hand, &status, &settings)
+                .unwrap()
+                .1
+        );
+        assert!(
+            check_three_concealed_triplets(sequence_variant, &hand, &status, &settings)
+                .unwrap()
+                .1
         );
     }
 

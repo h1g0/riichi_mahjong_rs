@@ -2,6 +2,8 @@
 
 use super::*;
 
+use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+
 use crate::protocol::DrawReason;
 
 #[test]
@@ -33,6 +35,113 @@ fn test_round_draw() {
     // One TileDrawn plus three OtherPlayerDrew = four events.
     let events = round.drain_events();
     assert_eq!(events.len(), 4);
+}
+
+fn nagashi_discard(tile: Tile, is_called: bool) -> crate::player::Discard {
+    crate::player::Discard {
+        tile,
+        is_tsumogiri: false,
+        is_riichi_declaration: false,
+        is_called,
+    }
+}
+
+#[test]
+fn test_nagashi_mangan_single_winner_settlement() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 1, 2, 0, 4, Settings::new());
+    round.drain_events();
+    round.players[1].discards = vec![
+        nagashi_discard(Tile::new(Tile::M1), false),
+        nagashi_discard(Tile::new(Tile::Z7), false),
+    ];
+
+    round.do_exhaustive_draw();
+
+    assert_eq!(round.get_scores(), [20900, 35300, 22900, 22900]);
+    assert_eq!(round.riichi_sticks, 0);
+    assert!(matches!(
+        round.result,
+        Some(RoundResult::NagashiMangan { ref winners }) if winners == &[1]
+    ));
+    let events = round.drain_events();
+    assert_eq!(events.len(), 4);
+    assert!(events.iter().all(|(_, event)| matches!(
+        event,
+        ServerEvent::RoundNagashiMangan {
+            winners,
+            scores: [20900, 35300, 22900, 22900],
+            riichi_sticks: 2,
+            ..
+        } if winners.len() == 1
+            && winners[0].wind == Wind::South
+            && winners[0].score_points == 10300
+    )));
+}
+
+#[test]
+fn test_multiple_nagashi_mangan_winners_share_payments_independently() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 1, 1, 0, 4, Settings::new());
+    round.drain_events();
+    round.players[2].discards = vec![nagashi_discard(Tile::new(Tile::S9), false)];
+    round.players[0].discards = vec![nagashi_discard(Tile::new(Tile::Z1), false)];
+
+    round.do_exhaustive_draw();
+
+    // Winners are ordered from the dealer, so East receives the honba and
+    // riichi deposit even though West was discovered first in the setup.
+    assert_eq!(round.get_scores(), [34300, 18900, 28900, 18900]);
+    assert!(matches!(
+        round.result,
+        Some(RoundResult::NagashiMangan { ref winners }) if winners == &[0, 2]
+    ));
+    let events = round.drain_events();
+    let Some((_, ServerEvent::RoundNagashiMangan { winners, .. })) = events.first() else {
+        panic!("expected Nagashi Mangan event");
+    };
+    assert_eq!(winners.len(), 2);
+    assert_eq!(winners[0].wind, Wind::East);
+    assert_eq!(winners[0].score_points, 13300);
+    assert_eq!(winners[1].wind, Wind::West);
+    assert_eq!(winners[1].score_points, 8000);
+}
+
+#[test]
+fn test_nagashi_mangan_qualification_allows_own_open_call() {
+    use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.players[1].discards = vec![nagashi_discard(Tile::new(Tile::M9), false)];
+    round.players[1].hand.add_meld(Meld {
+        tiles: vec![Tile::new(Tile::P2); 3],
+        category: MeldType::Pon,
+        from: MeldFrom::Previous,
+        called_tile: Some(Tile::new(Tile::P2)),
+    });
+
+    assert_eq!(round.nagashi_mangan_players(), vec![1]);
+
+    round.players[1].discards[0].is_called = true;
+    assert!(round.nagashi_mangan_players().is_empty());
+    round.players[1].discards[0].is_called = false;
+    round.players[1]
+        .discards
+        .push(nagashi_discard(Tile::new(Tile::M2), false));
+    assert!(round.nagashi_mangan_players().is_empty());
+}
+
+#[test]
+fn test_sanma_nagashi_mangan_uses_tsumo_loss() {
+    let mut round = sanma_round(42, 0);
+    round.drain_events();
+    round.players[1].discards = vec![nagashi_discard(Tile::new(Tile::P1), false)];
+
+    round.do_exhaustive_draw();
+
+    assert_eq!(round.get_scores(), [31000, 41000, 33000, 0]);
+    assert!(matches!(
+        round.result,
+        Some(RoundResult::NagashiMangan { ref winners }) if winners == &[1]
+    ));
 }
 
 #[test]
@@ -236,6 +345,71 @@ fn test_check_available_calls_offers_pon_but_not_ron_for_5z() {
     );
 }
 
+fn player_with_three_open_melds(seat_wind: Wind, tiles: Vec<Tile>) -> Player {
+    let mut player = Player::new(seat_wind, tiles, 25000);
+    for meld_tiles in [
+        [Tile::P1, Tile::P2, Tile::P3],
+        [Tile::P4, Tile::P5, Tile::P6],
+        [Tile::S7, Tile::S8, Tile::S9],
+    ] {
+        player.hand.add_meld(Meld {
+            tiles: meld_tiles.map(Tile::new).to_vec(),
+            category: MeldType::Chi,
+            from: MeldFrom::Previous,
+            called_tile: Some(Tile::new(meld_tiles[1])),
+        });
+    }
+    player
+}
+
+#[test]
+fn test_chi_not_offered_when_swap_calling_leaves_no_legal_discard() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    let seat_wind = round.players[1].seat_wind;
+    round.players[1] = player_with_three_open_melds(
+        seat_wind,
+        vec![
+            Tile::new(Tile::M7),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::M8),
+            Tile::new(Tile::M8),
+        ],
+    );
+
+    let call_state = round.check_available_calls(Tile::new(Tile::M8), 0);
+
+    assert!(
+        !call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Chi { .. }))
+    );
+}
+
+#[test]
+fn test_chi_with_no_post_call_discard_is_allowed_when_swap_calling_is_disabled() {
+    let mut settings = Settings::new();
+    settings.forbid_swap_calling = false;
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, settings);
+    let seat_wind = round.players[1].seat_wind;
+    round.players[1] = player_with_three_open_melds(
+        seat_wind,
+        vec![
+            Tile::new(Tile::M7),
+            Tile::new(Tile::M9),
+            Tile::new(Tile::M8),
+            Tile::new(Tile::M8),
+        ],
+    );
+
+    let call_state = round.check_available_calls(Tile::new(Tile::M8), 0);
+
+    assert!(
+        call_state.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Chi { .. }))
+    );
+}
+
 fn open_tanyao_player(seat_wind: Wind, with_drawn: bool) -> Player {
     use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 
@@ -352,6 +526,72 @@ fn test_check_available_calls_offers_daiminkan() {
 }
 
 #[test]
+fn test_first_pon_declaration_is_not_overwritten() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    for player_idx in 1..4 {
+        let seat_wind = round.players[player_idx].seat_wind;
+        let hand = mahjong_core::hand::Hand::from("11m234p567s789m12z");
+        round.players[player_idx] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+    }
+
+    let call_state = round.check_available_calls(Tile::new(Tile::M1), 0);
+    let pon_option = |player_idx: usize| {
+        call_state.available_calls[player_idx]
+            .iter()
+            .find_map(|call| match call {
+                AvailableCall::Pon { options } => options.first().copied(),
+                _ => None,
+            })
+            .expect("expected pon option")
+    };
+    let player_two_option = pon_option(2);
+    let player_one_option = pon_option(1);
+    round.call_state = Some(call_state);
+    round.phase = TurnPhase::WaitForCalls;
+
+    assert!(round.respond_to_call(
+        2,
+        CallResponse::Pon {
+            hand_tile_types: player_two_option,
+        },
+    ));
+    assert!(round.respond_to_call(
+        1,
+        CallResponse::Pon {
+            hand_tile_types: player_one_option,
+        },
+    ));
+    assert!(round.respond_to_call(3, CallResponse::Pass));
+
+    assert_eq!(round.current_player, 2);
+    assert_eq!(round.players[2].hand.melds().len(), 1);
+    assert!(round.players[1].hand.melds().is_empty());
+}
+
+#[test]
+fn test_final_discard_offers_only_ron() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    let seat_wind = round.players[1].seat_wind;
+    let hand = mahjong_core::hand::Hand::from("11123m456p789s11z");
+    round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+    let before_last_tile = round.check_available_calls(Tile::new(Tile::M1), 0);
+    assert!(
+        before_last_tile.available_calls[1]
+            .iter()
+            .any(|call| !matches!(call, AvailableCall::Ron))
+    );
+    while round.wall.draw().is_some() {}
+
+    let call_state = round.check_available_calls(Tile::new(Tile::M1), 0);
+
+    assert!(
+        call_state.available_calls[1]
+            .iter()
+            .all(|call| matches!(call, AvailableCall::Ron))
+    );
+}
+
+#[test]
 fn test_do_ankan_draws_rinshan_and_reveals_dora() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
     let seat_wind = round.players[0].seat_wind;
@@ -361,12 +601,97 @@ fn test_do_ankan_draws_rinshan_and_reveals_dora() {
     round.current_player = 0;
     round.phase = TurnPhase::WaitForDiscard;
     round.drain_events();
+    let remaining_before_kan = round.wall.remaining();
 
     assert!(round.do_kan(Tile::M1));
     assert_eq!(round.phase, TurnPhase::WaitForDiscard);
     assert!(round.players[0].hand.drawn().is_some());
     assert_eq!(round.players[0].hand.melds().len(), 1);
     assert_eq!(round.wall.dora_indicators().len(), 2);
+    assert_eq!(round.wall.remaining(), remaining_before_kan - 1);
+}
+
+#[test]
+fn test_kan_is_rejected_after_the_final_live_wall_draw() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    let seat_wind = round.players[0].seat_wind;
+    let hand = mahjong_core::hand::Hand::from("111m234p567s789m 1m");
+    round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+    round.players[0].draw(hand.drawn().unwrap());
+    round.current_player = 0;
+    round.phase = TurnPhase::WaitForDiscard;
+    while round.wall.draw().is_some() {}
+
+    assert!(!round.do_kan(Tile::M1));
+    assert!(round.players[0].hand.melds().is_empty());
+    assert_eq!(round.players[0].hand.drawn(), Some(Tile::new(Tile::M1)));
+}
+
+#[test]
+fn test_rinshan_win_does_not_also_award_last_tile_draw() {
+    use mahjong_core::scoring::score::ScoreItem;
+
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    let seat_wind = round.players[0].seat_wind;
+    let hand = mahjong_core::hand::Hand::from("123m456p789s1112z 2z");
+    round.players[0] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+    round.players[0].draw(hand.drawn().unwrap());
+    // A real kan ends the uninterrupted first turn. Without this, the
+    // synthetic setup scores Tenhou and suppresses ordinary yaku.
+    round.players[0].is_first_turn = false;
+    round.current_player = 0;
+    round.phase = TurnPhase::WaitForDiscard;
+    round.last_draw_was_dead_wall = true;
+    while round.wall.draw().is_some() {}
+    round.drain_events();
+
+    assert!(round.do_tsumo());
+
+    let events = round.drain_events();
+    let Some((_, ServerEvent::RoundWon { yaku_list, .. })) = events.first() else {
+        panic!("expected win event");
+    };
+    assert!(yaku_list.iter().any(|(item, _)| {
+        *item == ScoreItem::Yaku(mahjong_core::winning_hand::name::Kind::AfterAQuad)
+    }));
+    assert!(!yaku_list.iter().any(|(item, _)| {
+        *item == ScoreItem::Yaku(mahjong_core::winning_hand::name::Kind::LastTileDraw)
+    }));
+}
+
+#[test]
+fn test_discard_after_rinshan_does_not_award_last_tile_claim() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    let seat_wind = round.players[1].seat_wind;
+    let hand = mahjong_core::hand::Hand::from("123456m789p234s5z");
+    round.players[1] = Player::new(seat_wind, hand.tiles().to_vec(), 25000);
+    while round.wall.draw().is_some() {}
+
+    round.last_draw_was_dead_wall = true;
+    let after_rinshan = round.check_available_calls(Tile::new(Tile::Z5), 0);
+    assert!(
+        !after_rinshan.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Ron))
+    );
+
+    round.last_draw_was_dead_wall = false;
+    let after_live_wall_draw = round.check_available_calls(Tile::new(Tile::Z5), 0);
+    assert!(
+        after_live_wall_draw.available_calls[1]
+            .iter()
+            .any(|call| matches!(call, AvailableCall::Ron))
+    );
+}
+
+#[test]
+fn test_out_of_range_call_response_is_rejected() {
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.call_state = Some(round.check_available_calls(Tile::new(Tile::M1), 0));
+    round.phase = TurnPhase::WaitForCalls;
+
+    assert!(!round.respond_to_call(4, CallResponse::Pass));
+    assert!(!round.respond_to_call(usize::MAX, CallResponse::Pass));
 }
 
 #[test]

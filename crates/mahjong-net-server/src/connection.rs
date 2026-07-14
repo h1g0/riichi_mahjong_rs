@@ -47,9 +47,17 @@ fn generate_token() -> String {
     format!("{:032x}", rand::rng().random::<u128>())
 }
 
+/// Whether a client-supplied token could have been issued by this server.
+fn is_valid_token(token: &str) -> bool {
+    token.len() == 32 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 /// Header the Fly proxy adds to replayed requests; used to stop
 /// forwarding loops.
 const FLY_REPLAY_SRC: HeaderName = HeaderName::from_static("fly-replay-src");
+
+/// Original client address supplied by Fly's HTTP proxy.
+const FLY_CLIENT_IP: HeaderName = HeaderName::from_static("fly-client-ip");
 
 /// Query parameters of `/ws`.
 ///
@@ -77,6 +85,8 @@ pub async fn ws_handler(
         return StatusCode::FORBIDDEN.into_response();
     }
 
+    let peer_ip = effective_client_ip(&headers, addr.ip(), state.peers.machine_id().is_some());
+
     // Forward to the owning machine if another one has the room.
     if let Some(code) = query.room.as_deref()
         && let Some(replay) = maybe_replay(&state, code, &headers).await
@@ -88,7 +98,7 @@ pub async fn ws_handler(
     let ws = ws
         .max_message_size(MAX_MESSAGE_SIZE)
         .max_frame_size(MAX_MESSAGE_SIZE);
-    ws.on_upgrade(move |socket| handle_socket(socket, addr.ip(), state))
+    ws.on_upgrade(move |socket| handle_socket(socket, peer_ip, state))
 }
 
 /// Locates the room code and returns a fly-replay response when another
@@ -135,6 +145,18 @@ fn origin_allowed(allowed: Option<&str>, origin: Option<&str>) -> bool {
         None => true,
         Some(allowed) => origin == Some(allowed),
     }
+}
+
+/// Selects the rate-limit key, trusting proxy metadata only on Fly.
+fn effective_client_ip(headers: &HeaderMap, direct_ip: IpAddr, trust_fly: bool) -> IpAddr {
+    if !trust_fly {
+        return direct_ip;
+    }
+    headers
+        .get(FLY_CLIENT_IP)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(direct_ip)
 }
 
 async fn handle_socket(socket: WebSocket, peer_ip: IpAddr, state: AppState) {
@@ -240,7 +262,10 @@ impl Connection {
                     .await;
                     return;
                 }
-                (session_token.unwrap_or_else(generate_token), display_name)
+                let token = session_token
+                    .filter(|token| is_valid_token(token))
+                    .unwrap_or_else(generate_token);
+                (token, display_name)
             }
             Read::Msg(_) => {
                 self.send_error(ErrorCode::BadMessage, "expected Hello")
@@ -361,7 +386,7 @@ impl Connection {
 
             match msg {
                 ClientMessage::LeaveRoom => {
-                    let _ = room_tx.send(RoomMsg::Leave { seat }).await;
+                    let _ = room_tx.send(RoomMsg::Leave { seat, conn_gen }).await;
                     return InRoomOutcome::LeftRoom;
                 }
                 ClientMessage::Hello { .. }
@@ -371,7 +396,15 @@ impl Connection {
                         .await;
                 }
                 msg => {
-                    if room_tx.send(RoomMsg::FromSeat { seat, msg }).await.is_err() {
+                    if room_tx
+                        .send(RoomMsg::FromSeat {
+                            seat,
+                            conn_gen,
+                            msg,
+                        })
+                        .await
+                        .is_err()
+                    {
                         // The room closed.
                         self.send_error(ErrorCode::RoomNotFound, "room closed")
                             .await;
@@ -475,7 +508,21 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
-    use super::origin_allowed;
+    use super::{FLY_CLIENT_IP, effective_client_ip, is_valid_token, origin_allowed};
+    use axum::http::{HeaderMap, HeaderValue};
+    use std::net::IpAddr;
+
+    fn ip(value: &str) -> IpAddr {
+        value.parse().unwrap()
+    }
+
+    #[test]
+    fn test_session_token_format() {
+        assert!(is_valid_token("0123456789abcdef0123456789ABCDEF"));
+        assert!(!is_valid_token(""));
+        assert!(!is_valid_token("deadbeef"));
+        assert!(!is_valid_token("0123456789abcdef0123456789abcdeg"));
+    }
 
     #[test]
     fn test_origin_allowed_when_unset_allows_all() {
@@ -490,5 +537,28 @@ mod tests {
         // Mismatches and missing headers are rejected.
         assert!(!origin_allowed(allowed, Some("https://evil.example.com")));
         assert!(!origin_allowed(allowed, None));
+    }
+
+    #[test]
+    fn test_effective_client_ip_trusts_fly_header_only_on_fly() {
+        let mut headers = HeaderMap::new();
+        headers.insert(FLY_CLIENT_IP, HeaderValue::from_static("203.0.113.9"));
+        let direct = ip("10.0.0.1");
+
+        assert_eq!(
+            effective_client_ip(&headers, direct, true),
+            ip("203.0.113.9")
+        );
+        assert_eq!(effective_client_ip(&headers, direct, false), direct);
+    }
+
+    #[test]
+    fn test_effective_client_ip_rejects_invalid_fly_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(FLY_CLIENT_IP, HeaderValue::from_static("not-an-ip"));
+        let direct = ip("10.0.0.1");
+
+        assert_eq!(effective_client_ip(&headers, direct, true), direct);
+        assert_eq!(effective_client_ip(&HeaderMap::new(), direct, true), direct);
     }
 }

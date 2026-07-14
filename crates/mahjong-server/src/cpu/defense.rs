@@ -4,7 +4,7 @@
 //! combined with opponent threat models (riichi, melds, flush signs,
 //! yakuman signs).
 
-use mahjong_core::tile::{Tile, TileType, dora_indicator_to_dora_in};
+use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora_in};
 
 use super::client::{CpuConfig, CpuLevel, is_yakuhai};
 use super::state::CpuGameState;
@@ -63,8 +63,14 @@ pub fn evaluate_safety(tile: Tile, state: &CpuGameState, config: &CpuConfig) -> 
             continue;
         };
 
-        let safety =
-            evaluate_safety_against_threat(tile, &state.all_discards[i], state, &threat, strict);
+        let safety = evaluate_safety_against_threat(
+            tile,
+            &state.all_discards[i],
+            state,
+            Wind::from_index(i),
+            &threat,
+            strict,
+        );
         min_safety = min_safety.min(safety);
     }
 
@@ -215,7 +221,14 @@ fn evaluate_safety_against_player(
         weight: 1.0,
         ..Threat::default()
     };
-    evaluate_safety_against_threat(tile, opponent_discards, state, &threat, false)
+    evaluate_safety_against_threat(
+        tile,
+        opponent_discards,
+        state,
+        state.my_seat_wind,
+        &threat,
+        false,
+    )
 }
 
 /// Evaluates a tile's safety against one threat.
@@ -226,6 +239,7 @@ fn evaluate_safety_against_threat(
     tile: Tile,
     opponent_discards: &[Tile],
     state: &CpuGameState,
+    opponent_seat_wind: Wind,
     threat: &Threat,
     strict: bool,
 ) -> f64 {
@@ -275,7 +289,7 @@ fn evaluate_safety_against_threat(
 
         // #177 (normal+): live value honours are extra dangerous.
         if strict
-            && is_yakuhai(tt, state.my_seat_wind, state.round_wind)
+            && is_yakuhai(tt, opponent_seat_wind, state.round_wind)
             && publicly_visible(state, tt) == 0
         {
             base = base.min(0.22);
@@ -847,6 +861,19 @@ mod tests {
         state.all_discards[1] = vec![Tile::new(Tile::M5)];
         let safety = evaluate_safety(Tile::new(Tile::M5), &state, &test_config());
         assert_eq!(safety, 1.0);
+    }
+
+    #[test]
+    fn test_evaluate_safety_uses_opponent_seat_wind_for_yakuhai() {
+        let mut state = CpuGameState::new();
+        state.my_seat_wind = Wind::East;
+        state.round_wind = Wind::West;
+        state.player_riichi[1] = true;
+
+        let opponent_seat_wind = evaluate_safety(Tile::new(Tile::Z2), &state, &test_config());
+        let my_seat_wind = evaluate_safety(Tile::new(Tile::Z1), &state, &test_config());
+
+        assert!(opponent_seat_wind < my_seat_wind);
     }
 
     #[test]

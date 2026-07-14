@@ -29,6 +29,10 @@ pub fn check_thirteen_orphans(
     }
 }
 fn is_four_concealed_triplets_pair_wait(hand_analyzer: &HandAnalyzer, hand: &Hand) -> bool {
+    if let Some(placement) = hand_analyzer.winning_tile_placement {
+        return placement == WinningTilePlacement::Pair;
+    }
+
     hand.drawn().is_some_and(|winning_tile| {
         hand_analyzer
             .same2
@@ -205,6 +209,11 @@ pub fn check_all_honours(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
+    // Thirteen Orphans intentionally has no block decomposition. Without
+    // this guard, the loops below are empty and every tile appears honour.
+    if hand_analyzer.form == Form::ThirteenOrphans {
+        return Ok((name, false, 0));
+    }
     for same in &hand_analyzer.same3 {
         if !same.has_honour()? {
             return Ok((name, false, 0));
@@ -217,14 +226,6 @@ pub fn check_all_honours(
     }
     if !hand_analyzer.sequential3.is_empty() {
         return Ok((name, false, 0));
-    }
-    // A seven-pairs hand also qualifies when every pair is an honour.
-    if hand_analyzer.form == Form::SevenPairs {
-        for head in &hand_analyzer.same2 {
-            if !head.has_honour()? {
-                return Ok((name, false, 0));
-            }
-        }
     }
     Ok((name, true, 13))
 }
@@ -240,6 +241,11 @@ pub fn check_perfect_terminals(
         settings.display_lang,
     );
     if !hand_analyzer.shanten.has_won() {
+        return Ok((name, false, 0));
+    }
+    // Thirteen Orphans has no blocks, so the universal checks below would
+    // otherwise pass without inspecting any tile.
+    if hand_analyzer.form == Form::ThirteenOrphans {
         return Ok((name, false, 0));
     }
     if !hand_analyzer.sequential3.is_empty() {
@@ -269,6 +275,11 @@ pub fn check_all_green(
         settings.display_lang,
     );
     if !hand_analyzer.shanten.has_won() {
+        return Ok((name, false, 0));
+    }
+    // Thirteen Orphans has no blocks, so the universal checks below would
+    // otherwise pass without inspecting any tile.
+    if hand_analyzer.form == Form::ThirteenOrphans {
         return Ok((name, false, 0));
     }
     // Only tiles drawn entirely in green qualify:

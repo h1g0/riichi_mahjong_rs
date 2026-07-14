@@ -11,9 +11,11 @@
 //! - `FLY_APP_NAME` - Fly.io internal DNS (`<app>.internal` AAAA records)
 //! - neither: no peers (single machine)
 
+use std::future::Future;
 use std::net::IpAddr;
 use std::time::Duration;
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -22,6 +24,9 @@ pub const DEFAULT_INTERNAL_PORT: u16 = 8081;
 
 /// Peer-query timeout (connect + response combined).
 const QUERY_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Maximum internal HTTP response size, including headers.
+const MAX_RESPONSE_SIZE: usize = 8 * 1024;
 
 /// Maximum redraws on peer collisions during room creation.
 ///
@@ -116,17 +121,14 @@ impl Peers {
             return None;
         }
         let queries = addrs.iter().map(|addr| query_peer(addr, code));
-        futures_util::future::join_all(queries)
-            .await
-            .into_iter()
-            .flatten()
-            .next()
+        first_some(queries).await
     }
 
     /// Generates a room code while checking peers for collisions.
     ///
-    /// Each locally unused candidate from `generate` is checked against
-    /// the peers; past the retry cap the last candidate wins.
+    /// Up to the retry cap, each locally unused candidate from `generate`
+    /// is checked against the peers. If every check collides, a fresh local
+    /// candidate is returned without trusting further peer responses.
     pub async fn pick_unused_code(&self, mut generate: impl FnMut() -> String) -> String {
         for _ in 0..CREATE_COLLISION_RETRIES {
             let candidate = generate();
@@ -163,6 +165,20 @@ impl Peers {
     }
 }
 
+/// Resolves with the first successful query without waiting for slower peers.
+async fn first_some<F, T>(futures: impl IntoIterator<Item = F>) -> Option<T>
+where
+    F: Future<Output = Option<T>>,
+{
+    let mut pending: FuturesUnordered<F> = futures.into_iter().collect();
+    while let Some(result) = pending.next().await {
+        if result.is_some() {
+            return result;
+        }
+    }
+    None
+}
+
 /// Internal-listener port from `INTERNAL_PORT`.
 pub fn internal_port_from_env() -> u16 {
     std::env::var("INTERNAL_PORT")
@@ -181,7 +197,11 @@ async fn query_peer(addr: &str, code: &str) -> Option<String> {
         let request = format!("GET /internal/rooms/{code} HTTP/1.0\r\nHost: {addr}\r\n\r\n");
         stream.write_all(request.as_bytes()).await.ok()?;
         let mut raw = Vec::new();
-        stream.read_to_end(&mut raw).await.ok()?;
+        stream
+            .take((MAX_RESPONSE_SIZE + 1) as u64)
+            .read_to_end(&mut raw)
+            .await
+            .ok()?;
         parse_response(&raw)
     })
     .await;
@@ -191,6 +211,9 @@ async fn query_peer(addr: &str, code: &str) -> Option<String> {
 /// Extracts the machine ID from the HTTP response; non-200 or
 /// malformed yields None.
 fn parse_response(raw: &[u8]) -> Option<String> {
+    if raw.len() > MAX_RESPONSE_SIZE {
+        return None;
+    }
     let text = std::str::from_utf8(raw).ok()?;
     let (head, body) = text.split_once("\r\n\r\n")?;
     let status_line = head.lines().next()?;
@@ -206,6 +229,7 @@ fn parse_response(raw: &[u8]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::future::BoxFuture;
 
     #[test]
     fn test_parse_response_ok() {
@@ -234,6 +258,13 @@ mod tests {
         assert_eq!(parse_response(&[0xff, 0xfe]), None);
     }
 
+    #[test]
+    fn test_parse_response_rejects_oversized_body() {
+        let mut raw = b"HTTP/1.0 200 OK\r\n\r\n".to_vec();
+        raw.resize(MAX_RESPONSE_SIZE + 1, b'a');
+        assert_eq!(parse_response(&raw), None);
+    }
+
     #[tokio::test]
     async fn test_find_room_without_peers() {
         assert_eq!(Peers::none().find_room("ABCDEF").await, None);
@@ -244,5 +275,18 @@ mod tests {
         // An unreachable peer counts as not owning.
         let peers = Peers::with_static(Some("self1"), vec!["127.0.0.1:1".to_string()]);
         assert_eq!(peers.find_room("ABCDEF").await, None);
+    }
+
+    #[tokio::test]
+    async fn test_first_some_does_not_wait_for_pending_queries() {
+        let never: BoxFuture<'static, Option<String>> = Box::pin(std::future::pending());
+        let found: BoxFuture<'static, Option<String>> =
+            Box::pin(async { Some("owner".to_string()) });
+
+        let result = tokio::time::timeout(Duration::from_millis(100), first_some([never, found]))
+            .await
+            .expect("a successful peer should end the lookup immediately");
+
+        assert_eq!(result.as_deref(), Some("owner"));
     }
 }

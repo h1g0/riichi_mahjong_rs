@@ -66,7 +66,9 @@ pub fn check_unbroken(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    if !check_riichi(hand_analyzer, status, settings)?.1 {
+    // Plain Riichi is suppressed for Double Riichi, but Unbroken combines
+    // with either declaration, so checking check_riichi here would reject it.
+    if status.has_claimed_open || !status.has_claimed_riichi {
         return Ok((name, false, 0));
     }
     if status.is_unbroken {
@@ -211,14 +213,22 @@ pub fn check_pinfu(
         }
     }
     // Pinfu requires a two-sided wait; edge, closed, and pair waits do not qualify.
-    if let Some(winning_tile) = raw_hand.drawn() {
-        let has_open_wait = hand_analyzer
+    let Some(winning_tile) = raw_hand.drawn() else {
+        // A complete tile multiset alone does not identify the wait shape.
+        return Ok((name, false, 0));
+    };
+    let has_open_wait = match hand_analyzer.winning_tile_placement {
+        Some(WinningTilePlacement::Sequence(sequence)) => {
+            sequence.is_two_sided_wait(winning_tile.get())
+        }
+        Some(WinningTilePlacement::Pair | WinningTilePlacement::Triplet) => false,
+        None => hand_analyzer
             .sequential3
             .iter()
-            .any(|seq| seq.is_two_sided_wait(winning_tile.get()));
-        if !has_open_wait {
-            return Ok((name, false, 0));
-        }
+            .any(|seq| seq.is_two_sided_wait(winning_tile.get())),
+    };
+    if !has_open_wait {
+        return Ok((name, false, 0));
     }
     Ok((name, true, 1))
 }
@@ -281,6 +291,11 @@ pub fn check_all_inside(
         settings.display_lang,
     );
     if !hand_analyzer.shanten.has_won() {
+        return Ok((name, false, 0));
+    }
+    // Thirteen Orphans has no blocks to inspect; treating an empty block
+    // decomposition as "all inside" would make the predicate vacuously true.
+    if hand_analyzer.form == Form::ThirteenOrphans {
         return Ok((name, false, 0));
     }
     // Under the no-kuitan rule an open hand cannot score All Inside.
@@ -461,6 +476,21 @@ mod tests {
         status.is_unbroken = true;
         assert_eq!(
             check_unbroken(&test_analyzer, &status, &settings).unwrap(),
+            ("一発", true, 1)
+        );
+    }
+
+    #[test]
+    fn test_unbroken_combines_with_double_riichi() {
+        let test = Hand::from("123m45678p999s11z 9p");
+        let test_analyzer = HandAnalyzer::new(&test).unwrap();
+        let mut status = Status::new();
+        status.has_claimed_riichi = true;
+        status.is_double_riichi = true;
+        status.is_unbroken = true;
+
+        assert_eq!(
+            check_unbroken(&test_analyzer, &status, &Settings::new()).unwrap(),
             ("一発", true, 1)
         );
     }
@@ -688,6 +718,18 @@ mod tests {
         status.round_wind = Wind::East;
         assert_eq!(
             check_pinfu(&analyzer, &test, &status, &settings).unwrap(),
+            ("平和", false, 0)
+        );
+    }
+
+    #[test]
+    fn test_not_win_by_pinfu_without_winning_tile() {
+        let test = Hand::from("123567m234p56799s");
+        let analyzer = HandAnalyzer::new(&test).unwrap();
+
+        assert!(analyzer.shanten.has_won());
+        assert_eq!(
+            check_pinfu(&analyzer, &test, &Status::new(), &Settings::new()).unwrap(),
             ("平和", false, 0)
         );
     }

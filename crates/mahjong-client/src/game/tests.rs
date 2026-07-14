@@ -139,31 +139,32 @@ fn sanma_game_started_at(seat_wind: Wind, round_number: usize) -> ServerEvent {
 
 #[test]
 fn test_sanma_initial_wind_index_is_fixed_across_rounds() {
-    // 東1局: 自分（座席0）が西家 → 開始時の風インデックスは西（2）
+    // East 1: we (seat 0) are West, so our initial wind index is 2.
     let mut state = GameState::new();
     state.handle_event(sanma_game_started_at(Wind::West, 0));
     assert_eq!(state.my_initial_wind_index(), 2);
 
-    // 東2局: 自分の風は南へ回るが、開始時の風インデックスは変わらない
-    // （描画スロットはこの値で固定され、各家の表示位置が動かない）
+    // East 2: our current wind rotates to South, but the initial wind
+    // index remains fixed so each seat stays in the same screen slot.
     state.handle_event(sanma_game_started_at(Wind::South, 1));
     assert_eq!(state.seat_wind, Some(Wind::South));
     assert_eq!(state.my_initial_wind_index(), 2);
 
-    // 東3局: 自分が親（東家）になっても同様
+    // East 3: the index remains fixed even when we become East.
     state.handle_event(sanma_game_started_at(Wind::East, 2));
     assert_eq!(state.my_initial_wind_index(), 2);
 }
 
-/// 三麻の鳴き方向は「東1局開始時の風の差分」で決まること（#311 の回帰テスト）。
+/// Sanma meld direction is based on the wind difference at the start
+/// of East 1 (regression test for #311).
 ///
-/// 席は東1局開始時の位置で固定表示されるため（#309）、現在の局の風で
-/// mod 4 の差分を取ると、風が回った局で倒す牌の位置が画面上の鳴き元の
-/// 席とずれる。
+/// Seats remain in their East 1 screen positions (#309). Using the
+/// current winds modulo four after winds rotate would place the sideways
+/// tile away from the caller's displayed source seat.
 #[test]
 fn test_sanma_meld_direction_uses_initial_winds() {
-    // 自分（座席0）が東1局で東家: 下家（開始時南家）は画面右、
-    // 上家（開始時西家）は画面対面に固定表示される。
+    // We (seat 0) start East 1 as East. The initial South is fixed on
+    // the right, and the initial West is fixed across the screen.
     let mut state = GameState::new();
     state.handle_event(sanma_game_started_at(Wind::East, 0));
     assert_eq!(
@@ -175,9 +176,9 @@ fn test_sanma_meld_direction_uses_initial_winds() {
         MeldFrom::Opposite
     );
 
-    // 東2局: 自分は西家に回り、画面右の相手は東家、画面対面の相手は南家になる。
-    // 現在の風で計算すると右の相手が Opposite・対面の相手が Following になり、
-    // 倒す位置が席と一致しなくなる。
+    // In East 2 we rotate to West; the right opponent is now East and
+    // the opponent across is South. Current winds would incorrectly map
+    // them to Opposite and Following respectively.
     state.handle_event(sanma_game_started_at(Wind::West, 1));
     assert_eq!(
         state.compute_meld_direction(Wind::West, Wind::East),
@@ -188,7 +189,7 @@ fn test_sanma_meld_direction_uses_initial_winds() {
         MeldFrom::Opposite
     );
 
-    // 東3局: 自分は南家、画面右は西家、画面対面は東家。
+    // In East 3 we are South, the right seat is West, and across is East.
     state.handle_event(sanma_game_started_at(Wind::South, 2));
     assert_eq!(
         state.compute_meld_direction(Wind::South, Wind::West),
@@ -200,28 +201,31 @@ fn test_sanma_meld_direction_uses_initial_winds() {
     );
 }
 
-/// 他家同士の鳴きでも、倒す位置が固定表示の席の位置関係と一致すること。
+/// Calls between opponents also orient the sideways tile according to
+/// their fixed screen positions.
 #[test]
 fn test_sanma_meld_direction_between_opponents() {
-    // 自分が東1局で東家、東2局で西家に回った局面。
-    // 画面右の相手（開始時南家）は東家、画面対面の相手（開始時西家）は南家。
+    // We start East 1 as East and rotate to West in East 2. The right
+    // opponent (initial South) is now East; the opponent across is South.
     let mut state = GameState::new();
     state.handle_event(sanma_game_started_at(Wind::East, 0));
     state.handle_event(sanma_game_started_at(Wind::West, 1));
 
-    // 画面右の相手が自分から鳴く: 自分（画面下）は右の席から見て上家の位置
+    // The right opponent calls from us at the bottom: we are their
+    // previous player on screen.
     assert_eq!(
         state.compute_meld_direction(Wind::East, Wind::West),
         MeldFrom::Previous
     );
-    // 画面対面の相手が画面右の相手から鳴く: 対面の席から見て右の席は上家の位置
+    // The opponent across calls from the right opponent, who is their
+    // previous player on screen.
     assert_eq!(
         state.compute_meld_direction(Wind::South, Wind::East),
         MeldFrom::Previous
     );
 }
 
-/// 四麻の鳴き方向は従来どおり現在の風の差分で決まること（挙動不変の確認）。
+/// Four-player meld direction continues to use current-wind differences.
 #[test]
 fn test_4p_meld_direction_uses_current_winds() {
     let mut state = GameState::new();
@@ -239,7 +243,8 @@ fn test_4p_meld_direction_uses_current_winds() {
         MeldFrom::Following
     );
 
-    // 四麻は風の差分 mod 4 が局によらず不変なので、局が進んでも結果は同じ
+    // In four-player games wind differences modulo four remain stable
+    // as hands advance.
     state.handle_event(game_started_4p(Wind::North, 1));
     assert_eq!(
         state.compute_meld_direction(Wind::East, Wind::North),
@@ -260,6 +265,81 @@ fn test_sanma_game_started_sets_player_count() {
     assert!(state.is_three_player());
     assert!(state.nuki_dora);
     assert_eq!(state.pei_counts, [0; 4]);
+}
+
+#[test]
+fn test_game_started_uses_authoritative_mode_and_clears_turn_state() {
+    let mut state = GameState::new();
+    state.is_my_turn = true;
+    state.forbidden_discards.push(Tile::M1);
+    state.selected_forbidden_swap = true;
+
+    let mut event = sanma_game_started(Wind::East);
+    let ServerEvent::GameStarted { total_rounds, .. } = &mut event else {
+        unreachable!("helper always returns GameStarted")
+    };
+    *total_rounds = 6;
+    state.handle_event(event);
+
+    assert_eq!(state.setup_state.mode, GameMode::ThreeHanchan);
+    assert!(state.setup_state.nuki_dora);
+    assert!(!state.is_my_turn);
+    assert!(state.forbidden_discards.is_empty());
+    assert!(!state.selected_forbidden_swap);
+
+    let mut event = game_started_4p(Wind::East, 0);
+    let ServerEvent::GameStarted { total_rounds, .. } = &mut event else {
+        unreachable!("helper always returns GameStarted")
+    };
+    *total_rounds = 8;
+    state.handle_event(event);
+    assert_eq!(state.setup_state.mode, GameMode::FourHanchan);
+}
+
+#[test]
+fn test_self_turn_action_hides_stale_controls_until_server_event() {
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started(Wind::East));
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::Z4),
+        remaining_tiles: 48,
+        can_tsumo: true,
+        can_riichi: true,
+        is_furiten: false,
+    });
+    state.self_kan_options.push(Tile::new(Tile::P1));
+    assert!(state.is_my_turn);
+    assert!(state.can_pei);
+
+    let action = state.handle_input(
+        Some(crate::renderer::OverlayClick::Action(ClientAction::Tsumo)),
+        100.0,
+    );
+    assert!(matches!(action, Some(ClientAction::Tsumo)));
+    assert!(!state.is_my_turn);
+    assert!(!state.can_tsumo);
+    assert!(!state.can_riichi);
+    assert!(!state.can_pei);
+    assert!(state.self_kan_options.is_empty());
+    assert!(
+        state
+            .handle_input(
+                Some(crate::renderer::OverlayClick::Action(ClientAction::Tsumo)),
+                100.1,
+            )
+            .is_none(),
+        "a stale overlay click resubmitted the action"
+    );
+
+    // A server event authoritatively opens the next available action.
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::P2),
+        remaining_tiles: 47,
+        can_tsumo: false,
+        can_riichi: false,
+        is_furiten: false,
+    });
+    assert!(state.is_my_turn);
 }
 
 #[test]
@@ -778,6 +858,49 @@ fn test_round_won_deferred_until_banner_hold_elapses() {
     // The result screen appears once the hold ends.
     state.process_events(100.0 + WIN_HOLD_SECS);
     assert_eq!(state.phase, GamePhase::RoundResult);
+}
+
+#[test]
+fn test_nagashi_mangan_uses_tileless_result_panel() {
+    let mut state = GameState::new();
+    state.lang = Lang::En;
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.riichi_sticks = 2;
+
+    state.handle_event(ServerEvent::RoundNagashiMangan {
+        winners: vec![
+            mahjong_server::protocol::NagashiManganWinner {
+                wind: Wind::South,
+                score_points: 10_000,
+            },
+            mahjong_server::protocol::NagashiManganWinner {
+                wind: Wind::West,
+                score_points: 8_000,
+            },
+        ],
+        scores: [9_000, 35_000, 33_000, 23_000],
+        riichi_sticks: 2,
+        player_hands: vec![PlayerHandInfo {
+            wind: Wind::South,
+            hand: vec![Tile::new(Tile::M1); 13],
+            melds: vec![],
+            pei: vec![],
+        }],
+    });
+
+    assert_eq!(state.phase, GamePhase::RoundResult);
+    assert_eq!(state.message_result_heading(), "Nagashi Mangan");
+    assert!(state.current_win_result().is_none());
+    assert!(state.win_tile.is_none());
+    assert_eq!(state.scores, [9_000, 35_000, 33_000, 23_000]);
+    assert_eq!(state.riichi_sticks, 0);
+    assert!(state.other_players[0].revealed);
+    let message = state.result_message.as_deref().expect("result message");
+    assert!(message.contains("CPU1"));
+    assert!(message.contains("10000 pts"));
+    assert!(message.contains("CPU2"));
+    assert!(message.contains("8000 pts"));
+    assert!(message.contains("Deposits: 2"));
 }
 
 #[test]
