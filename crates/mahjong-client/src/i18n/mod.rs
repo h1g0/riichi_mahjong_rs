@@ -127,6 +127,15 @@ impl Translator {
         }
     }
 
+    /// Deposit-points caption shown under the score (JA 「＋供託 {s}点」 /
+    /// EN "+deposit {s} pts"); `s` is pre-formatted.
+    pub fn deposit_points(&self, s: &str) -> String {
+        match self.lang {
+            Lang::Ja => format!("＋供託 {s}点"),
+            Lang::En => format!("+deposit {s} pts"),
+        }
+    }
+
     /// Lobby room-code heading.
     pub fn room_code(&self, code: &str) -> String {
         match self.lang {
