@@ -111,19 +111,20 @@ impl Translator {
         }
     }
 
-    /// Riichi-deposit caption (JA 「供託 {n}本」 / EN "Deposit {n}").
-    pub fn riichi_deposit(&self, n: usize) -> String {
-        match self.lang {
-            Lang::Ja => format!("供託 {n}本"),
-            Lang::En => format!("Deposit {n}"),
-        }
-    }
-
     /// Points caption (JA 「{s}点」 / EN "{s} pts"); `s` is pre-formatted.
     pub fn points(&self, s: &str) -> String {
         match self.lang {
             Lang::Ja => format!("{s}点"),
             Lang::En => format!("{s} pts"),
+        }
+    }
+
+    /// Deposit-points caption shown under the score (JA 「＋供託{n}本　{s}点」 /
+    /// EN "+deposit {n}: {s} pts"); `s` is pre-formatted.
+    pub fn deposit_points(&self, n: usize, s: &str) -> String {
+        match self.lang {
+            Lang::Ja => format!("＋供託{n}本　{s}点"),
+            Lang::En => format!("+deposit {n}: {s} pts"),
         }
     }
 

@@ -82,8 +82,9 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     };
     let tr = state.tr();
     let yaku_count = wr.yaku.len().max(1);
+    let kyoutaku_points = wr.riichi_sticks as i32 * crate::game::RIICHI_STICK_VALUE;
     let panel_w = 700.0;
-    let panel_h = 326.0 + yaku_count as f32 * 22.0;
+    let panel_h = 326.0 + yaku_count as f32 * 22.0 + if kyoutaku_points > 0 { 26.0 } else { 0.0 };
     let (panel_x, panel_y, panel_right) = draw_overlay_panel(panel_w, panel_h);
     let cx = panel_x + panel_w / 2.0;
     let content_l = panel_x + 40.0;
@@ -206,14 +207,13 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     y += 8.0;
 
     // Totals: small han/fu on the left, rank + big score on the right.
-    let mut hanfu = tr.han_fu(wr.han, wr.fu);
-    if wr.riichi_sticks > 0 {
-        hanfu.push_str("  ");
-        hanfu.push_str(&tr.riichi_deposit(wr.riichi_sticks));
-    }
+    let hanfu = tr.han_fu(wr.han, wr.fu);
     draw_jp_text(font, &hanfu, content_l, y + 24.0, 13, theme::TEXT_DIM);
 
-    let pts = tr.points(&format_score(wr.score_points));
+    // The hand score is shown separately from any riichi deposit collected
+    // with the win, so a big number never silently includes the deposit.
+    let hand_points = wr.score_points - kyoutaku_points;
+    let pts = tr.points(&format_score(hand_points));
     let pw = theme::measure_scaled(font, &pts, 28).width;
     let pts_x = content_r - pw;
     draw_jp_text(font, &pts, pts_x, y + 28.0, 28, theme::GOLD_LT);
@@ -231,6 +231,14 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
         );
     }
     y += 44.0;
+
+    if kyoutaku_points > 0 {
+        y += 6.0;
+        let deposit_text = tr.deposit_points(wr.riichi_sticks, &format_score(kyoutaku_points));
+        let dw = theme::measure_scaled(font, &deposit_text, 13).width;
+        draw_jp_text(font, &deposit_text, content_r - dw, y, 13, theme::TEXT_DIM);
+        y += 20.0;
+    }
 
     draw_result_next_button(state, font, cx, y, panel_w - 80.0);
 }

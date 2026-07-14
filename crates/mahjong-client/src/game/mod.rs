@@ -59,6 +59,12 @@ struct Declaration {
     before_apply: bool,
 }
 
+/// Value of one riichi deposit stick, in points. Mirrors the server's
+/// private `RIICHI_STICK_VALUE`; needed here because `WinResult::score_points`
+/// only carries the merged total plus a raw stick count, and the result
+/// screen displays the deposit portion separately.
+pub(crate) const RIICHI_STICK_VALUE: i32 = 1000;
+
 /// One winner's result (one page of the result screen).
 #[derive(Debug, Clone)]
 pub struct WinResult {
