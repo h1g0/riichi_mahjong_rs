@@ -222,7 +222,10 @@ pub fn run_simulation(config: &SimulationConfig) -> Result<SimulationStats, Stri
         });
 
         let mut cpus: [CpuClient; 4] = std::array::from_fn(|seat| {
-            CpuClient::new(config.cpu_configs[config_for_seat[seat]].clone())
+            CpuClient::new_with_rules(
+                config.cpu_configs[config_for_seat[seat]].clone(),
+                &config.game_settings.rules,
+            )
         });
 
         let mut table = Table::new(config.game_settings.clone());
@@ -320,7 +323,14 @@ fn process_events(table: &mut Table, cpus: &mut [CpuClient; 4], rejected_log: &m
         let mut actions = Vec::new();
         for (player_idx, event) in &events {
             if let Some(action) = cpus[*player_idx].handle_event(event) {
-                actions.push((*player_idx, action));
+                if let Some((_, queued)) = actions
+                    .iter_mut()
+                    .find(|(queued_player, _)| queued_player == player_idx)
+                {
+                    *queued = action;
+                } else {
+                    actions.push((*player_idx, action));
+                }
             }
         }
 
@@ -358,6 +368,11 @@ fn collect_round_stats(
                 stats.per_cpu[config_for_seat[*winner]].ron_wins += 1;
             }
             stats.per_cpu[config_for_seat[*loser]].deal_ins += 1;
+        }
+        Some(RoundResult::NagashiMangan { winners }) => {
+            for winner in winners {
+                stats.per_cpu[config_for_seat[*winner]].tsumo_wins += 1;
+            }
         }
         Some(RoundResult::ExhaustiveDraw { .. }) => {
             stats.exhaustive_draws += 1;

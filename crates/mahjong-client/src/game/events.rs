@@ -13,13 +13,23 @@ impl GameState {
                 round_wind,
                 dora_indicators,
                 round_number,
-                total_rounds: _,
+                total_rounds,
                 honba,
                 riichi_sticks,
                 three_player,
                 nuki_dora,
             } => {
                 self.player_count = if three_player { 3 } else { 4 };
+                let length = if total_rounds > self.player_count {
+                    mahjong_server::table::GameLength::Hanchan
+                } else {
+                    mahjong_server::table::GameLength::EastOnly
+                };
+                // GameStarted is authoritative for both local games and
+                // online joiners, whose local setup screen may still hold
+                // its default mode.
+                self.setup_state.mode = GameMode::from_parts(three_player, length);
+                self.setup_state.nuki_dora = nuki_dora;
                 self.nuki_dora = nuki_dora;
                 self.pei_counts = [0; 4];
                 self.can_pei = false;
@@ -41,6 +51,7 @@ impl GameState {
                 self.discards = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
                 self.pending_riichi_player = None;
                 self.result_message = None;
+                self.message_result_kind = MessageResultKind::Draw;
                 self.win_results.clear();
                 self.win_result_index = 0;
                 self.phase = GamePhase::Playing;
@@ -55,8 +66,12 @@ impl GameState {
                 self.can_tsumo = false;
                 self.can_riichi = false;
                 self.self_kan_options.clear();
+                self.is_my_turn = false;
                 self.is_riichi = false;
+                self.riichi_auto_discard_at = None;
                 self.clear_riichi_selection();
+                self.forbidden_discards.clear();
+                self.selected_forbidden_swap = false;
                 self.melds.clear();
                 self.round_number = round_number;
                 self.honba = honba;
@@ -162,6 +177,9 @@ impl GameState {
                 if Some(player) == self.seat_wind {
                     self.is_my_turn = false;
                     self.drawn = None;
+                    self.can_tsumo = false;
+                    self.can_riichi = false;
+                    self.nine_terminals_pending = false;
                     self.selected_tile = None;
                     self.selected_drawn = false;
                     self.clear_riichi_selection();
@@ -507,6 +525,35 @@ impl GameState {
                 }
             }
 
+            ServerEvent::RoundNagashiMangan {
+                winners,
+                scores,
+                riichi_sticks,
+                player_hands,
+            } => {
+                self.scores = scores;
+                // As with an ordinary win, the deposits reported by the
+                // event are the amount collected by the winner, not what
+                // remains on the table.
+                self.riichi_sticks = 0;
+
+                let winner_winds: Vec<Wind> = winners.iter().map(|winner| winner.wind).collect();
+                self.update_other_player_hands_on_nagashi(&player_hands, &winner_winds);
+
+                let tr = Translator::new(self.lang);
+                let mut lines: Vec<String> = winners
+                    .iter()
+                    .map(|winner| {
+                        let name = self.player_display_name(winner.wind);
+                        format!("{}  {}", name, tr.points(&winner.score_points.to_string()))
+                    })
+                    .collect();
+                if riichi_sticks > 0 {
+                    lines.push(tr.deposit_line(riichi_sticks));
+                }
+                self.show_message_result(MessageResultKind::NagashiMangan, lines.join("\n"));
+            }
+
             ServerEvent::RoundDraw {
                 scores,
                 reason,
@@ -532,19 +579,30 @@ impl GameState {
                     msg.push_str(&tr.deposit_line(riichi_sticks));
                 }
 
-                self.win_hand.clear();
-                self.win_tile = None;
-                self.win_melds.clear();
-                self.uradora_indicators.clear();
-                self.result_message = Some(msg);
-                self.phase = GamePhase::RoundResult;
-                self.is_my_turn = false;
-                self.turn_player = None;
-                self.available_calls.clear();
-                self.clear_riichi_selection();
-                self.self_kan_options.clear();
+                self.show_message_result(MessageResultKind::Draw, msg);
             }
         }
+    }
+
+    /// Enters the result panel used by draws and tile-less wins.
+    fn show_message_result(&mut self, kind: MessageResultKind, message: String) {
+        self.win_results.clear();
+        self.win_result_index = 0;
+        self.win_hand.clear();
+        self.win_tile = None;
+        self.win_melds.clear();
+        self.uradora_indicators.clear();
+        self.result_message = Some(message);
+        self.message_result_kind = kind;
+        self.phase = GamePhase::RoundResult;
+        self.is_my_turn = false;
+        self.turn_player = None;
+        self.available_calls.clear();
+        self.can_tsumo = false;
+        self.can_riichi = false;
+        self.can_pei = false;
+        self.clear_riichi_selection();
+        self.self_kan_options.clear();
     }
 
     /// The win-result page being shown; None on a draw.
@@ -644,5 +702,14 @@ impl GameState {
                 other.revealed = true;
             }
         }
+    }
+
+    /// Updates melds and reveals Nagashi Mangan winners' hands.
+    pub(super) fn update_other_player_hands_on_nagashi(
+        &mut self,
+        player_hands: &[PlayerHandInfo],
+        winners: &[Wind],
+    ) {
+        self.update_other_player_hands_on_draw(player_hands, winners, None);
     }
 }

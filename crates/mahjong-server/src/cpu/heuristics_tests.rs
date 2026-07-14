@@ -1614,6 +1614,26 @@ fn test_estimate_ron_han() {
     let state = CpuGameState::new();
     let remaining = tiles(&NO_YAKU_TENPAI);
     assert_eq!(estimate_ron_han(&state, &remaining, &[], Tile::M8), None);
+
+    // An open tanyao-only hand cannot ron when kuitan is disabled.
+    let mut state = CpuGameState::new();
+    state.opened_all_inside = false;
+    let remaining = tiles(&[
+        Tile::M2,
+        Tile::M3,
+        Tile::M4,
+        Tile::S4,
+        Tile::S5,
+        Tile::S6,
+        Tile::S6,
+        Tile::S7,
+        Tile::P5,
+        Tile::P5,
+    ]);
+    assert_eq!(
+        estimate_ron_han(&state, &remaining, &[chi_meld(Tile::P2)], Tile::S8),
+        None
+    );
 }
 
 // --- has_yaku_prospect ---
@@ -1822,6 +1842,48 @@ fn test_judge_pon_neutral_for_tanyao_call() {
         config: &config,
     };
     assert_eq!(judge_pon(&ctx, Tile::new(Tile::S3)), CallJudgement::Neutral);
+
+    let mut no_kuitan_state = state.clone();
+    no_kuitan_state.opened_all_inside = false;
+    let no_kuitan_ctx = CallContext {
+        state: &no_kuitan_state,
+        config: &config,
+    };
+    assert_eq!(
+        judge_pon(&no_kuitan_ctx, Tile::new(Tile::S3)),
+        CallJudgement::Forbid
+    );
+}
+
+#[test]
+fn test_hand_after_pon_preserves_red_tile_identity() {
+    let mut state = call_state_with_hand(vec![
+        Tile::new_red(Tile::M5),
+        Tile::new(Tile::M5),
+        Tile::new(Tile::P1),
+    ]);
+
+    let (remaining, melds) = hand_after_pon(&state, Tile::new(Tile::M5)).unwrap();
+    assert_eq!(remaining, vec![Tile::new(Tile::P1)]);
+    assert_eq!(
+        melds[0]
+            .tiles
+            .iter()
+            .filter(|tile| tile.is_red_dora())
+            .count(),
+        1
+    );
+
+    state.my_hand = vec![Tile::new(Tile::M5), Tile::new(Tile::M5)];
+    let (_, melds) = hand_after_pon(&state, Tile::new_red(Tile::M5)).unwrap();
+    assert_eq!(
+        melds[0]
+            .tiles
+            .iter()
+            .filter(|tile| tile.is_red_dora())
+            .count(),
+        1
+    );
 }
 
 #[test]

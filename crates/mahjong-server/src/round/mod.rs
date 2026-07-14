@@ -10,6 +10,8 @@ mod test_helpers;
 mod turn;
 mod win;
 
+use std::sync::OnceLock;
+
 use mahjong_core::scoring::score::ScoreItem;
 use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, TileType, Wind};
@@ -23,6 +25,15 @@ use crate::wall::Wall;
 const RIICHI_STICK_VALUE: i32 = 1000;
 /// Minimum score required to declare riichi
 const RIICHI_MIN_SCORE: i32 = 1000;
+
+/// Whether verbose round diagnostics were explicitly enabled for this process.
+pub(super) fn diagnostics_enabled() -> bool {
+    if !cfg!(debug_assertions) {
+        return false;
+    }
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("MAHJONG_ROUND_DIAGNOSTICS").is_some())
+}
 
 /// Phase within a turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +67,11 @@ pub enum RoundResult {
     ExhaustiveDraw {
         /// Whether the dealer was tenpai (decides dealer continuation)
         dealer_tenpai: bool,
+    },
+    /// Nagashi Mangan at live-wall exhaustion, possibly for multiple players
+    NagashiMangan {
+        /// Winners in turn order from the dealer
+        winners: Vec<usize>,
     },
     /// Abortive draw (four winds, four riichi, nine terminals, ...)
     SpecialDraw,
@@ -261,23 +277,22 @@ impl Round {
         }
     }
 
-    /// Returns the liable player when the winning yaku include a
-    /// pao-qualifying yakuman. With multiple pao records the most
-    /// recently locked-in one wins.
-    pub(super) fn pao_player_for_win(
+    /// Returns one liability record for each pao-qualifying yakuman in the
+    /// winning hand. The order is the order in which liability was locked in.
+    pub(super) fn pao_players_for_win(
         &self,
         winner: usize,
         yaku_list: &[(ScoreItem, u32)],
-    ) -> Option<usize> {
+    ) -> Vec<usize> {
         self.pao[winner]
             .iter()
-            .rev()
-            .find_map(|(pao_kind, liable)| {
+            .filter_map(|(pao_kind, liable)| {
                 yaku_list
                     .iter()
                     .any(|(item, _)| matches!(item, ScoreItem::Yaku(kind) if kind == pao_kind))
                     .then_some(*liable)
             })
+            .collect()
     }
 
     /// Next seat in turn order, wrapping at the player count.

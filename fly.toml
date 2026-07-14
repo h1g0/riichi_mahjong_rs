@@ -12,19 +12,18 @@ primary_region = 'nrt'
 [http_service]
   internal_port = 8080
   force_https = true
-  # ルームはメモリ上にあり、生成されたマシンに固定される。複数マシン構成では
-  # `/ws?room=CODE` の所在をマシン間で照会し、所持マシンへ fly-replay で転送
-  # するため、`fly scale count 2` 以上でも参加・再接続が正しく届く。
-  # autostop は維持する: アクティブな接続を持つマシンは停止されず、無接続の
-  # マシンが停止してもそのマシンのルームは（従来の単一マシン運用と同様に）
-  # 消えるだけで不整合は起きない。遊んでいない時間はマシンを止めて課金を抑える
-  # （久々の初回接続は数秒のコールドスタートが入る）。
+  # Rooms live in memory on the machine that created them. In multi-machine
+  # deployments, `/ws?room=CODE` locates the owner and uses fly-replay so joins
+  # and reconnects still reach the right machine.
+  #
+  # Autostop is safe because machines with active connections stay running.
+  # Stopping an idle machine merely drops its unused rooms, matching the old
+  # single-machine behavior, while avoiding idle compute costs.
   auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
 
-  # 1マシンあたりの同時接続数。soft_limit を超えると新規接続は他の
-  # （停止中なら起動した）マシンへ振り分けられる。
+  # New connections spill to another machine once this soft limit is reached.
   [http_service.concurrency]
     type = 'connections'
     soft_limit = 20

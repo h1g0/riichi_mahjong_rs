@@ -15,7 +15,7 @@ rm -rf public
 mkdir -p public
 
 cargo build --release --target wasm32-unknown-unknown -p mahjong-client
-curl -L https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js -o public/mq_js_bundle.js
+cp mq_js_bundle.js public/mq_js_bundle.js
 cp target/wasm32-unknown-unknown/release/mahjong-client.wasm public/mahjong-client.wasm
 cp crates/mahjong-client/js/ws.js public/ws.js
 cp crates/mahjong-client/js/storage.js public/storage.js

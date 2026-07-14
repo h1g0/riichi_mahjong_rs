@@ -16,7 +16,17 @@ jobs:
 
     steps:
     - uses: actions/checkout@v7
+    - name: Install Rust components and WASM target
+      run: |
+        rustup component add clippy rustfmt
+        rustup target add wasm32-unknown-unknown
+    - name: Check formatting
+      run: cargo fmt --all -- --check
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --workspace --locked --verbose
+    - name: Run Clippy
+      run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --workspace --all-targets --all-features --locked --verbose
+    - name: Check WASM client
+      run: cargo check -p mahjong-client --target wasm32-unknown-unknown --release --locked

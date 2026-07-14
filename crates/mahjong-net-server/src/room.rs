@@ -72,6 +72,8 @@ pub enum RoomMsg {
     FromSeat {
         /// Seat index
         seat: usize,
+        /// Connection generation that sent the message
+        conn_gen: u64,
         /// The message
         msg: ClientMessage,
     },
@@ -79,6 +81,8 @@ pub enum RoomMsg {
     Leave {
         /// Seat index
         seat: usize,
+        /// Connection generation that requested the leave
+        conn_gen: u64,
     },
     /// A disconnect (socket closed)
     Disconnected {
@@ -268,19 +272,36 @@ impl Room {
                     let _ = reply.send(Err(code));
                 }
             },
-            RoomMsg::FromSeat { seat, msg } => self.handle_client_message(seat, msg),
-            RoomMsg::Leave { seat } => self.handle_departure(seat),
+            RoomMsg::FromSeat {
+                seat,
+                conn_gen,
+                msg,
+            } => {
+                if self.is_current_connection(seat, conn_gen) {
+                    self.handle_client_message(seat, msg);
+                }
+            }
+            RoomMsg::Leave { seat, conn_gen } => {
+                if self.is_current_connection(seat, conn_gen) {
+                    self.handle_departure(seat);
+                }
+            }
             RoomMsg::Disconnected { seat, conn_gen } => {
                 // Ignore a stale disconnect from an old connection;
                 // a reconnect has bumped the generation.
-                if self.seats[seat]
-                    .as_ref()
-                    .is_some_and(|s| s.conn_gen == conn_gen)
-                {
+                if self.is_current_connection(seat, conn_gen) {
                     self.handle_departure(seat);
                 }
             }
         }
+    }
+
+    /// Whether a message belongs to the seat's latest connection.
+    fn is_current_connection(&self, seat: usize, conn_gen: u64) -> bool {
+        self.seats
+            .get(seat)
+            .and_then(Option::as_ref)
+            .is_some_and(|s| s.conn_gen == conn_gen)
     }
 
     /// Hands out the next connection generation.
@@ -344,6 +365,12 @@ impl Room {
 
     /// Stops the CPU substitution and resyncs a reconnected seat.
     fn handle_reconnect(&mut self, seat: usize) {
+        // The abandonment deadline is armed only while nobody is connected;
+        // keeping it would expire an active game after a successful reconnect.
+        // A finished game's deadline remains a deliberate result-screen cap.
+        if !self.game_over_sent {
+            self.close_deadline = None;
+        }
         if let Some(driver) = self.driver.as_mut() {
             driver.set_cpu_controlled(seat, false);
         }
@@ -853,5 +880,103 @@ impl Room {
         if tx.try_send(msg).is_err() && !self.pending_departures.contains(&seat) {
             self.pending_departures.push(seat);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn room_with_connection(conn_gen: u64) -> Room {
+        let (tx, _rx) = mpsc::channel(4);
+        Room {
+            code: "ABC234".to_string(),
+            settings: GameSettings::default(),
+            config: RoomConfig::default(),
+            seats: [
+                Some(Seat {
+                    token: "token".to_string(),
+                    name: "player".to_string(),
+                    tx: Some(tx),
+                    conn_gen,
+                    history: Vec::new(),
+                }),
+                None,
+                None,
+                None,
+            ],
+            driver: None,
+            awaiting_ready: false,
+            ready: [false; 4],
+            game_over_sent: false,
+            ready_deadline: None,
+            close_deadline: None,
+            action_deadline: None,
+            deadline_seats: Vec::new(),
+            game_clock: None,
+            closing: false,
+            next_conn_gen: conn_gen + 1,
+            pending_departures: Vec::new(),
+            cpu_configs: default_cpu_configs(),
+        }
+    }
+
+    #[test]
+    fn stale_connection_cannot_act_or_leave() {
+        let current_generation = 7;
+        let mut room = room_with_connection(current_generation);
+
+        room.handle_msg(RoomMsg::FromSeat {
+            seat: HOST_SEAT,
+            conn_gen: current_generation - 1,
+            msg: ClientMessage::StartGame { cpu_configs: None },
+        });
+        assert!(room.driver.is_none(), "a stale connection started the game");
+
+        room.handle_msg(RoomMsg::Leave {
+            seat: HOST_SEAT,
+            conn_gen: current_generation - 1,
+        });
+        assert!(
+            room.seats[HOST_SEAT].is_some(),
+            "a stale connection removed the current player"
+        );
+        assert!(!room.closing, "a stale connection closed the room");
+    }
+
+    #[test]
+    fn current_connection_can_leave() {
+        let current_generation = 7;
+        let mut room = room_with_connection(current_generation);
+
+        room.handle_msg(RoomMsg::Leave {
+            seat: HOST_SEAT,
+            conn_gen: current_generation,
+        });
+
+        assert!(room.seats[HOST_SEAT].is_none());
+        assert!(room.closing);
+    }
+
+    #[test]
+    fn reconnect_clears_abandoned_deadline_during_game() {
+        let mut room = room_with_connection(7);
+        room.close_deadline = Some(Instant::now() + Duration::from_secs(1));
+
+        room.handle_reconnect(HOST_SEAT);
+
+        assert!(room.close_deadline.is_none());
+    }
+
+    #[test]
+    fn reconnect_keeps_post_game_deadline() {
+        let mut room = room_with_connection(7);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        room.game_over_sent = true;
+        room.close_deadline = Some(deadline);
+
+        room.handle_reconnect(HOST_SEAT);
+
+        assert_eq!(room.close_deadline, Some(deadline));
     }
 }

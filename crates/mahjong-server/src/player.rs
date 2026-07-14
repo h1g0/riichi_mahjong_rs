@@ -421,7 +421,7 @@ impl Player {
         let t1 = self.hand.tiles()[indices[0]];
         let t2 = self.hand.tiles()[indices[1]];
 
-        self.hand.remove_tiles_by_indices(&mut indices);
+        self.hand.remove_tiles_by_indices(&indices);
 
         self.hand.add_meld(Meld {
             tiles: vec![t1, t2, called_tile],
@@ -450,7 +450,7 @@ impl Player {
         let t1 = self.hand.tiles()[indices[0]];
         let t2 = self.hand.tiles()[indices[1]];
 
-        self.hand.remove_tiles_by_indices(&mut indices);
+        self.hand.remove_tiles_by_indices(&indices);
 
         let mut chi_tiles = [t1, t2, called_tile];
         chi_tiles.sort();
@@ -481,7 +481,7 @@ impl Player {
         let t2 = self.hand.tiles()[indices[1]];
         let t3 = self.hand.tiles()[indices[2]];
 
-        self.hand.remove_tiles_by_indices(&mut indices);
+        self.hand.remove_tiles_by_indices(&indices);
         self.hand.add_meld(Meld {
             tiles: vec![t1, t2, t3],
             category: MeldType::Kan,
@@ -515,7 +515,7 @@ impl Player {
         // Remove the kan tiles first: pushing the drawn tile back and
         // sorting would shift the positions `indices` points at and
         // delete the wrong tiles.
-        self.hand.remove_tiles_by_indices(&mut indices);
+        self.hand.remove_tiles_by_indices(&indices);
 
         if drawn_matches {
             kan_tiles.push(drawn.unwrap());

@@ -72,6 +72,11 @@ impl Round {
         if self.phase != TurnPhase::WaitForDiscard {
             return false;
         }
+        // A replacement draw must move one live-wall tile into the dead
+        // wall, so a kan is illegal after the final live-wall draw.
+        if self.wall.is_empty() {
+            return false;
+        }
 
         let player_idx = self.current_player;
         if self.players[player_idx].is_riichi {
@@ -133,9 +138,8 @@ impl Round {
     ///
     /// - A turn action, not a call, so ippatsu and first-turn flags survive.
     /// - Unlike a kan, no new dora indicator is revealed.
-    /// - The replacement comes from the live wall's tail (the dead wall is
-    ///   never replenished in this codebase; `remaining()` and haitei
-    ///   bookkeeping stay consistent for free).
+    /// - The replacement comes directly from the live wall's tail, keeping
+    ///   `remaining()` and last-tile bookkeeping consistent.
     /// - Winning on the replacement draw is not After a Quad (嶺上開花).
     pub fn do_pei(&mut self) -> bool {
         if !(self.settings.three_player && self.settings.nuki_dora) {

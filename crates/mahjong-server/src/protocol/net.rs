@@ -16,7 +16,8 @@ use crate::table::GameLength;
 /// disconnects with `ErrorCode::VersionMismatch`.
 /// v3: three-player support (CreateRoom / RoomState carry the whole
 /// `Settings`).
-pub const PROTOCOL_VERSION: u32 = 3;
+/// v4: structured Nagashi Mangan round-end events.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// A CPU's level and personality.
 ///
@@ -381,6 +382,15 @@ mod tests {
                 can_tsumo: false,
                 can_riichi: true,
                 is_furiten: false,
+            }),
+            ServerMessage::Event(ServerEvent::RoundNagashiMangan {
+                winners: vec![crate::protocol::NagashiManganWinner {
+                    wind: Wind::West,
+                    score_points: 8_000,
+                }],
+                scores: [21_000, 21_000, 37_000, 21_000],
+                riichi_sticks: 0,
+                player_hands: Vec::new(),
             }),
             ServerMessage::Resync {
                 events: vec![

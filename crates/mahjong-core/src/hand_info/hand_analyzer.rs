@@ -1,10 +1,11 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 
 use std::cmp::*;
 use std::fmt;
 
 use crate::hand::Hand;
 use crate::hand_info::block::*;
+use crate::hand_info::meld::{Meld, MeldType};
 use crate::tile::*;
 use crate::winning_hand::name::Form;
 
@@ -55,11 +56,22 @@ impl fmt::Display for ShantenNumber {
     }
 }
 
+/// Identifies the block that consumes a separately stored winning tile.
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub(crate) enum WinningTilePlacement {
+    /// The winning tile completes the pair (tanki wait).
+    Pair,
+    /// The winning tile completes a triplet (shanpon wait).
+    Triplet,
+    /// The winning tile completes this sequence.
+    Sequence(Sequential3),
+}
+
 /// The block decomposition of a hand that minimizes its shanten number.
 ///
 /// For the normal form and Seven Pairs the groups/pairs are stored in the
 /// Vecs below; for Thirteen Orphans only the shanten number is meaningful.
-#[derive(Debug, Eq)]
+#[derive(Debug, Eq, Clone)]
 pub struct HandAnalyzer {
     /// Shanten number
     pub shanten: ShantenNumber,
@@ -75,6 +87,9 @@ pub struct HandAnalyzer {
     pub sequential2: Vec<Sequential2>,
     /// Tiles that belong to no block
     pub single: Vec<TileType>,
+    /// Which block consumes the winning tile; set on complete normal-form
+    /// variants when the hand keeps the winning tile separate in `drawn`.
+    pub(crate) winning_tile_placement: Option<WinningTilePlacement>,
 }
 impl Ord for HandAnalyzer {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -104,6 +119,7 @@ impl HandAnalyzer {
             same2: Vec::new(),
             sequential2: Vec::new(),
             single: Vec::new(),
+            winning_tile_placement: None,
         }
     }
 
@@ -205,6 +221,7 @@ impl HandAnalyzer {
             same2,
             sequential2: Vec::new(),
             single,
+            winning_tile_placement: None,
         })
     }
 
@@ -226,6 +243,7 @@ impl HandAnalyzer {
             same2: Vec::new(),
             sequential2: Vec::new(),
             single: Vec::new(),
+            winning_tile_placement: None,
         })
     }
 
@@ -247,8 +265,240 @@ impl HandAnalyzer {
             same2,
             sequential2,
             single,
+            winning_tile_placement: None,
         })
     }
+
+    /// Enumerates every legal complete interpretation of the hand.
+    ///
+    /// Melded groups stay fixed: their tiles cannot be rearranged with the
+    /// concealed tiles. Normal-form decompositions come first, followed by
+    /// Seven Pairs and Thirteen Orphans, which makes score tie-breaking stable.
+    pub(crate) fn winning_variants(hand: &Hand) -> Result<Vec<HandAnalyzer>> {
+        let mut variants = HandAnalyzer::normal_winning_variants(hand)?;
+
+        if hand.melds().is_empty() {
+            let seven_pairs = HandAnalyzer::analyze_seven_pairs(hand)?;
+            if seven_pairs.shanten.has_won() {
+                variants.push(seven_pairs);
+            }
+
+            let thirteen_orphans = HandAnalyzer::analyze_thirteen_orphans(hand)?;
+            if thirteen_orphans.shanten.has_won() {
+                variants.push(thirteen_orphans);
+            }
+        }
+
+        Ok(variants)
+    }
+
+    fn normal_winning_variants(hand: &Hand) -> Result<Vec<HandAnalyzer>> {
+        if hand.melds().len() > 4 {
+            return Ok(Vec::new());
+        }
+
+        let (fixed_same3, fixed_sequential3) = fixed_meld_blocks(hand.melds())?;
+        let groups_needed = 4 - hand.melds().len();
+        let mut tiles = summarize_unmelded_tiles(hand);
+        let expected_tile_count = groups_needed * 3 + 2;
+        if tiles.iter().map(|&count| count as usize).sum::<usize>() != expected_tile_count {
+            return Ok(Vec::new());
+        }
+
+        let mut variants = Vec::new();
+        for head in 0..Tile::LEN {
+            if tiles[head] < 2 {
+                continue;
+            }
+
+            tiles[head] -= 2;
+            let pair = Same2::new(head as TileType, head as TileType)?;
+            let mut same3 = fixed_same3.clone();
+            let mut sequential3 = fixed_sequential3.clone();
+            let mut search = NormalVariantSearch {
+                fixed_same3_count: same3.len(),
+                fixed_sequential3_count: sequential3.len(),
+                pair,
+                winning_tile: hand.drawn().map(|tile| tile.get()),
+                variants: &mut variants,
+            };
+            enumerate_complete_groups(
+                &mut tiles,
+                groups_needed,
+                &mut same3,
+                &mut sequential3,
+                &mut search,
+            )?;
+            tiles[head] += 2;
+        }
+
+        Ok(variants)
+    }
+}
+
+/// Counts only the concealed portion and the winning/drawn tile.
+fn summarize_unmelded_tiles(hand: &Hand) -> TileSummarize {
+    let mut result = [0; Tile::LEN];
+    for tile in hand.tiles().iter().copied().chain(hand.drawn()) {
+        result[tile.get() as usize] += 1;
+    }
+    result
+}
+
+/// Converts the immutable melds into their fixed analyzer blocks.
+fn fixed_meld_blocks(melds: &[Meld]) -> Result<(Vec<Same3>, Vec<Sequential3>)> {
+    let mut same3 = Vec::new();
+    let mut sequential3 = Vec::new();
+
+    for meld in melds {
+        match meld.category {
+            MeldType::Chi => {
+                if meld.tiles.len() != 3 {
+                    return Err(anyhow!("a chi must contain exactly three tiles"));
+                }
+                let mut tiles = [
+                    meld.tiles[0].get(),
+                    meld.tiles[1].get(),
+                    meld.tiles[2].get(),
+                ];
+                tiles.sort_unstable();
+                sequential3.push(Sequential3::new(tiles[0], tiles[1], tiles[2])?);
+            }
+            MeldType::Pon => {
+                if meld.tiles.len() != 3 {
+                    return Err(anyhow!("a pon must store exactly three tiles"));
+                }
+                let first = &meld.tiles[0];
+                if meld.tiles.iter().any(|tile| tile.get() != first.get()) {
+                    return Err(anyhow!("a pon must contain one tile kind"));
+                }
+                same3.push(Same3::new(first.get(), first.get(), first.get())?);
+            }
+            MeldType::Kan | MeldType::Kakan => {
+                // Meld keeps three representative tiles for every group; a
+                // quad's physical fourth tile is recovered by expanded_tiles.
+                if meld.tiles.len() != 3 {
+                    return Err(anyhow!(
+                        "a kan must store exactly three representative tiles"
+                    ));
+                }
+                let first = &meld.tiles[0];
+                if meld.tiles.iter().any(|tile| tile.get() != first.get()) {
+                    return Err(anyhow!("a kan must contain one tile kind"));
+                }
+                same3.push(Same3::new(first.get(), first.get(), first.get())?);
+            }
+        }
+    }
+
+    Ok((same3, sequential3))
+}
+
+/// State shared by the recursive normal-form decomposition search.
+struct NormalVariantSearch<'a> {
+    fixed_same3_count: usize,
+    fixed_sequential3_count: usize,
+    pair: Same2,
+    winning_tile: Option<TileType>,
+    variants: &'a mut Vec<HandAnalyzer>,
+}
+
+/// Recursively partitions all remaining concealed tiles into complete groups.
+fn enumerate_complete_groups(
+    tiles: &mut TileSummarize,
+    groups_remaining: usize,
+    same3: &mut Vec<Same3>,
+    sequential3: &mut Vec<Sequential3>,
+    search: &mut NormalVariantSearch<'_>,
+) -> Result<()> {
+    let remaining_tile_count = tiles.iter().map(|&count| count as usize).sum::<usize>();
+    if remaining_tile_count != groups_remaining * 3 {
+        return Ok(());
+    }
+
+    let Some(tile) = tiles.iter().position(|&count| count > 0) else {
+        if groups_remaining == 0 {
+            let mut completed_same3 = same3.clone();
+            let mut completed_sequential3 = sequential3.clone();
+            completed_same3.sort_unstable();
+            completed_sequential3.sort_unstable();
+
+            let placements = search.winning_tile.map_or_else(
+                || vec![None],
+                |winning_tile| {
+                    let mut placements = Vec::new();
+                    if search.pair.get()[0] == winning_tile {
+                        placements.push(Some(WinningTilePlacement::Pair));
+                    }
+                    if same3[search.fixed_same3_count..]
+                        .iter()
+                        .any(|triplet| triplet.get()[0] == winning_tile)
+                    {
+                        placements.push(Some(WinningTilePlacement::Triplet));
+                    }
+                    for sequence in &sequential3[search.fixed_sequential3_count..] {
+                        if sequence.get().contains(&winning_tile) {
+                            let placement = Some(WinningTilePlacement::Sequence(*sequence));
+                            if !placements.contains(&placement) {
+                                placements.push(placement);
+                            }
+                        }
+                    }
+                    placements
+                },
+            );
+
+            for winning_tile_placement in placements {
+                search.variants.push(HandAnalyzer {
+                    shanten: ShantenNumber(-1),
+                    form: Form::Normal,
+                    same3: completed_same3.clone(),
+                    sequential3: completed_sequential3.clone(),
+                    same2: vec![search.pair],
+                    sequential2: Vec::new(),
+                    single: Vec::new(),
+                    winning_tile_placement,
+                });
+            }
+        }
+        return Ok(());
+    };
+
+    if groups_remaining == 0 {
+        return Ok(());
+    }
+
+    // Triplets are visited before sequences to preserve the historical
+    // decomposition order when two interpretations have the same score.
+    if tiles[tile] >= 3 {
+        tiles[tile] -= 3;
+        same3.push(Same3::new(
+            tile as TileType,
+            tile as TileType,
+            tile as TileType,
+        )?);
+        enumerate_complete_groups(tiles, groups_remaining - 1, same3, sequential3, search)?;
+        same3.pop();
+        tiles[tile] += 3;
+    }
+
+    if tile < 27 && tile % 9 <= 6 && tiles[tile + 1] > 0 && tiles[tile + 2] > 0 {
+        tiles[tile] -= 1;
+        tiles[tile + 1] -= 1;
+        tiles[tile + 2] -= 1;
+        sequential3.push(Sequential3::new(
+            tile as TileType,
+            (tile + 1) as TileType,
+            (tile + 2) as TileType,
+        )?);
+        enumerate_complete_groups(tiles, groups_remaining - 1, same3, sequential3, search)?;
+        sequential3.pop();
+        tiles[tile] += 1;
+        tiles[tile + 1] += 1;
+        tiles[tile + 2] += 1;
+    }
+
+    Ok(())
 }
 
 /// Computes only the shanten number, quickly.
@@ -374,8 +624,8 @@ trait PreprocessResult {
 trait ShantenAccumulator: Sized {
     type Preprocess: PreprocessResult;
 
-    /// Preprocessing: pull out independent triplets, sequences, and isolated tiles.
-    fn preprocess(t: &mut TileSummarize) -> Result<Self::Preprocess>;
+    /// Preprocessing: record fixed melds, then pull out independent blocks.
+    fn preprocess(t: &mut TileSummarize, melds: &[Meld]) -> Result<Self::Preprocess>;
 
     /// Creates an empty tracking state.
     fn new_tracking() -> Self;
@@ -430,9 +680,17 @@ struct CountOnly {
 impl ShantenAccumulator for CountOnly {
     type Preprocess = CountOnlyPreprocess;
 
-    fn preprocess(t: &mut TileSummarize) -> Result<CountOnlyPreprocess> {
-        let same3 = extract_independent_same3(t);
-        let seq3 = extract_independent_seq3(t);
+    fn preprocess(t: &mut TileSummarize, melds: &[Meld]) -> Result<CountOnlyPreprocess> {
+        let same3 = melds
+            .iter()
+            .filter(|meld| meld.category != MeldType::Chi)
+            .count()
+            + extract_independent_same3(t);
+        let seq3 = melds
+            .iter()
+            .filter(|meld| meld.category == MeldType::Chi)
+            .count()
+            + extract_independent_seq3(t);
         let _ = remove_independent_singles(t);
         Ok(CountOnlyPreprocess { same3, seq3 })
     }
@@ -544,9 +802,10 @@ struct FullTracking {
 impl ShantenAccumulator for FullTracking {
     type Preprocess = FullTrackingPreprocess;
 
-    fn preprocess(t: &mut TileSummarize) -> Result<FullTrackingPreprocess> {
-        let same3 = extract_independent_same3_full(t)?;
-        let seq3 = extract_independent_seq3_full(t)?;
+    fn preprocess(t: &mut TileSummarize, melds: &[Meld]) -> Result<FullTrackingPreprocess> {
+        let (mut same3, mut seq3) = fixed_meld_blocks(melds)?;
+        same3.extend(extract_independent_same3_full(t)?);
+        seq3.extend(extract_independent_seq3_full(t)?);
         let singles = extract_independent_singles_full(t)?;
         Ok(FullTrackingPreprocess {
             same3,
@@ -646,10 +905,14 @@ impl ShantenAccumulator for FullTracking {
 
 /// Entry point for the normal-form shanten search.
 fn calc_normal_shanten<A: ShantenAccumulator>(hand: &Hand) -> Result<(i32, A)> {
-    let mut t = hand.summarize_tiles();
+    if hand.melds().len() > 4 {
+        return Err(anyhow!("a hand cannot contain more than four melds"));
+    }
+
+    let mut t = summarize_unmelded_tiles(hand);
     let mut best = i32::MAX;
 
-    let pre = A::preprocess(&mut t)?;
+    let pre = A::preprocess(&mut t, hand.melds())?;
     let mut acc = A::new_tracking();
     let mut best_acc = A::new_tracking();
 
@@ -1002,6 +1265,57 @@ mod tests {
         );
         // The normal form still computes: tenpai waiting on 6s/9s.
         assert!(calc_shanten_number_by_form(&hand, Form::Normal).is_ready());
+    }
+
+    #[test]
+    fn fixed_meld_tiles_cannot_be_rearranged_with_concealed_tiles() {
+        use crate::hand_info::meld::{Meld, MeldFrom, MeldType};
+
+        let concealed = [
+            Tile::M1,
+            Tile::M4,
+            Tile::M7,
+            Tile::M8,
+            Tile::M8,
+            Tile::M8,
+            Tile::M8,
+            Tile::M9,
+            Tile::M9,
+            Tile::M9,
+            Tile::M9,
+        ]
+        .into_iter()
+        .map(Tile::new)
+        .collect();
+        let meld = Meld {
+            tiles: [Tile::M1, Tile::M2, Tile::M3]
+                .into_iter()
+                .map(Tile::new)
+                .collect(),
+            category: MeldType::Chi,
+            from: MeldFrom::Previous,
+            called_tile: Some(Tile::new(Tile::M1)),
+        };
+        let hand = Hand::new_with_melds(concealed, vec![meld], None);
+
+        // If the called 1-2-3 were mixed back into the concealed counts, the
+        // aggregate tiles could form 11 + 234 + 789 + 888 + 999.
+        assert!(!calc_shanten_number(&hand).has_won());
+        assert!(HandAnalyzer::winning_variants(&hand).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fixed_meld_blocks_rejects_noncanonical_lengths() {
+        let meld = |category, tile_count| Meld {
+            tiles: vec![Tile::new(Tile::M1); tile_count],
+            category,
+            from: crate::hand_info::meld::MeldFrom::Unknown,
+            called_tile: None,
+        };
+
+        assert!(fixed_meld_blocks(&[meld(MeldType::Pon, 4)]).is_err());
+        assert!(fixed_meld_blocks(&[meld(MeldType::Kan, 4)]).is_err());
+        assert!(fixed_meld_blocks(&[meld(MeldType::Kakan, 2)]).is_err());
     }
 
     /// Four of a kind counts as only one pair for Seven Pairs,

@@ -31,9 +31,11 @@ impl Hand {
     }
 
     /// Removes the tiles at the given indices from the concealed hand.
-    pub fn remove_tiles_by_indices(&mut self, indices: &mut [usize]) {
-        indices.sort_unstable_by(|a, b| b.cmp(a));
-        for &idx in indices.iter() {
+    pub fn remove_tiles_by_indices(&mut self, indices: &[usize]) {
+        let mut unique_indices = indices.to_vec();
+        unique_indices.sort_unstable_by(|a, b| b.cmp(a));
+        unique_indices.dedup();
+        for idx in unique_indices {
             if idx < self.tiles.len() {
                 self.tiles.remove(idx);
             }
@@ -66,7 +68,10 @@ impl Hand {
     pub fn sort(&mut self) {
         self.tiles.sort();
     }
-    /// Counts the tiles of each kind, including melds and the drawn tile.
+    /// Counts the physical tiles of each kind, including melds and the drawn tile.
+    ///
+    /// A quad contributes four tiles even though its canonical `Meld::tiles`
+    /// representation stores only three.
     pub fn summarize_tiles(&self) -> TileSummarize {
         let mut result: TileSummarize = [0; Tile::LEN];
 
@@ -74,12 +79,12 @@ impl Hand {
             result[self.tiles[i].get() as usize] += 1;
         }
 
-        // For analysis a meld always counts as one group of three: counting
-        // the fourth tile of a quad could make a hand with four groups, a
-        // pair, and one floating tile look like a winning shape.
-        for i in 0..self.melds.len() {
-            for j in 0..self.melds[i].tiles.len() {
-                result[self.melds[i].tiles[j].get() as usize] += 1;
+        for meld in &self.melds {
+            for tile in &meld.tiles {
+                result[tile.get() as usize] += 1;
+            }
+            if meld.category.is_kan() && meld.tiles.len() == 3 {
+                result[meld.kan_fourth_tile().get() as usize] += 1;
             }
         }
 
@@ -315,6 +320,15 @@ mod tests {
     }
 
     #[test]
+    fn remove_tiles_by_indices_ignores_duplicate_indices() {
+        let mut hand = Hand::from("1234m");
+
+        hand.remove_tiles_by_indices(&[1, 1]);
+
+        assert_eq!(hand.tiles(), Hand::str_to_tiles("134m"));
+    }
+
+    #[test]
     fn from_with_no_melds_test() {
         let test_str = "123m456p789s1115z 5z";
         let test = Hand::from(test_str);
@@ -378,5 +392,6 @@ mod tests {
         assert_eq!(test.melds[0].from, MeldFrom::Unknown);
         assert_eq!(test.drawn, Some(Tile::new(Tile::Z5)));
         assert_eq!(test.to_short_string(), test_str);
+        assert_eq!(test.summarize_tiles()[Tile::Z1 as usize], 4);
     }
 }

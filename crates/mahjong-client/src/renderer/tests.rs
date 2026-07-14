@@ -1,11 +1,28 @@
 //! Unit tests for the rendering layout.
 
 use super::{
-    PLAYER_ROTATIONS, calc_meld_width, other_meld_x_positions, rotation_index,
+    PLAYER_ROTATIONS, buffer_to_design, calc_meld_width, other_meld_x_positions, rotation_index,
     seat_at_relative_position, self_meld_x_positions,
 };
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType};
+
+#[test]
+fn buffer_to_design_scales_each_axis_independently() {
+    assert_eq!(
+        buffer_to_design(640.0, 500.0, 1280.0, 1000.0),
+        (640.0, 400.0)
+    );
+    assert_eq!(
+        buffer_to_design(800.0, 400.0, 1600.0, 800.0),
+        (640.0, 400.0)
+    );
+}
+
+#[test]
+fn buffer_to_design_handles_zero_sized_surface() {
+    assert_eq!(buffer_to_design(10.0, 20.0, 0.0, 800.0), (0.0, 0.0));
+}
 
 /// Minimal pon meld for the ordering tests.
 fn pon(tile_type: TileType) -> Meld {

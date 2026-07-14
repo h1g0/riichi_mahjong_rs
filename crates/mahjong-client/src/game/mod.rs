@@ -65,6 +65,13 @@ struct Declaration {
 /// screen displays the deposit portion separately.
 pub(crate) const RIICHI_STICK_VALUE: i32 = 1000;
 
+/// Heading used by the message-style hand result panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageResultKind {
+    Draw,
+    NagashiMangan,
+}
+
 /// One winner's result (one page of the result screen).
 #[derive(Debug, Clone)]
 pub struct WinResult {
@@ -215,6 +222,8 @@ pub struct GameState {
     pub selected_forbidden_swap: bool,
     /// The hand's result message
     pub result_message: Option<String>,
+    /// Result type for the message-style panel (draw or Nagashi Mangan)
+    message_result_kind: MessageResultKind,
     /// Win results; several on a multiple ron
     pub win_results: Vec<WinResult>,
     /// Index of the win result being shown
@@ -357,6 +366,7 @@ impl GameState {
             forbidden_discards: Vec::new(),
             selected_forbidden_swap: false,
             result_message: None,
+            message_result_kind: MessageResultKind::Draw,
             win_results: Vec::new(),
             win_result_index: 0,
             is_my_turn: false,
@@ -426,6 +436,18 @@ impl GameState {
     /// The [`Translator`](crate::i18n::Translator) for the current language.
     pub fn tr(&self) -> crate::i18n::Translator {
         crate::i18n::Translator::new(self.lang)
+    }
+
+    /// Localized heading for a message-style hand result.
+    pub fn message_result_heading(&self) -> &'static str {
+        match self.message_result_kind {
+            MessageResultKind::Draw => Key::RoundDraw.text(self.lang),
+            MessageResultKind::NagashiMangan => mahjong_core::winning_hand::name::get(
+                mahjong_core::winning_hand::name::Kind::NagashiMangan,
+                false,
+                self.lang,
+            ),
+        }
     }
 
     /// Sets local-play player types: us at seat 0, CPUs at 1-3.

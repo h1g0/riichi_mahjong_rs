@@ -825,12 +825,13 @@ pub fn judge_pon(ctx: &CallContext, called_tile: Tile) -> CallJudgement {
     }
 
     if let Some((hand_after, melds_after)) = hand_after_pon(ctx.state, called_tile) {
-        if !has_yaku_prospect(
+        if !has_yaku_prospect_with_rules(
             &hand_after,
             &melds_after,
             ctx.state.my_seat_wind,
             ctx.state.round_wind,
             ctx.config.level >= CpuLevel::Normal,
+            ctx.state.opened_all_inside,
         ) {
             return CallJudgement::Forbid;
         }
@@ -876,12 +877,13 @@ pub fn judge_chi(ctx: &CallContext, called_tile: Tile, hand_tiles: [Tile; 2]) ->
     }
 
     if let Some((hand_after, melds_after)) = hand_after_chi(ctx.state, called_tile, hand_tiles) {
-        if !has_yaku_prospect(
+        if !has_yaku_prospect_with_rules(
             &hand_after,
             &melds_after,
             ctx.state.my_seat_wind,
             ctx.state.round_wind,
             ctx.config.level >= CpuLevel::Normal,
+            ctx.state.opened_all_inside,
         ) {
             return CallJudgement::Forbid;
         }
@@ -1240,7 +1242,13 @@ fn estimate_ron_han(
         .filter(|m| matches!(m.category, MeldType::Kan | MeldType::Kakan))
         .count() as u32;
 
-    let result = calculate_score(&analyzer, &hand, &status, &Settings::new())
+    let settings = Settings {
+        opened_all_inside: state.opened_all_inside,
+        three_player: state.three_player,
+        nuki_dora: state.nuki_dora,
+        ..Settings::new()
+    };
+    let result = calculate_score(&analyzer, &hand, &status, &settings)
         .ok()
         .flatten()?;
 
@@ -1385,22 +1393,26 @@ fn is_cheap_distant_call(
 fn hand_after_pon(state: &CpuGameState, called_tile: Tile) -> Option<(Vec<Tile>, Vec<Meld>)> {
     let tt = called_tile.get();
     let mut remaining = state.my_hand.clone();
-    let mut removed = 0;
-    remaining.retain(|t| {
-        if t.get() == tt && removed < 2 {
-            removed += 1;
-            false
-        } else {
-            true
-        }
-    });
-    if removed < 2 {
+    let mut matching: Vec<Tile> = remaining
+        .iter()
+        .copied()
+        .filter(|tile| tile.get() == tt)
+        .collect();
+    if matching.len() < 2 {
         return None;
+    }
+    // The real caller prefers an option that spends a red five. Preserve
+    // those exact tile identities in the hypothetical meld as well.
+    matching.sort_by_key(|tile| !tile.is_red_dora());
+    let hand_tiles = [matching[0], matching[1]];
+    for tile in hand_tiles {
+        let position = remaining.iter().position(|candidate| *candidate == tile)?;
+        remaining.remove(position);
     }
 
     let mut melds = state.my_melds_for_analysis();
     melds.push(Meld {
-        tiles: vec![called_tile, called_tile, called_tile],
+        tiles: vec![called_tile, hand_tiles[0], hand_tiles[1]],
         category: MeldType::Pon,
         from: MeldFrom::Unknown,
         called_tile: Some(called_tile),
@@ -1454,6 +1466,17 @@ pub fn has_yaku_prospect(
     round_wind: Wind,
     strict: bool,
 ) -> bool {
+    has_yaku_prospect_with_rules(hand_tiles, melds, seat_wind, round_wind, strict, true)
+}
+
+fn has_yaku_prospect_with_rules(
+    hand_tiles: &[Tile],
+    melds: &[Meld],
+    seat_wind: Wind,
+    round_wind: Wind,
+    strict: bool,
+    opened_all_inside: bool,
+) -> bool {
     let mut counts = [0u8; 34];
     for t in hand_tiles {
         counts[t.get() as usize] += 1;
@@ -1473,7 +1496,7 @@ pub fn has_yaku_prospect(
     let melds_all_simple = melds
         .iter()
         .all(|m| m.tiles.iter().all(|t| !t.is_1_9_honour()));
-    if melds_all_simple {
+    if opened_all_inside && melds_all_simple {
         let terminal_honour_count = hand_tiles.iter().filter(|t| t.is_1_9_honour()).count();
         if strict {
             // #164: never force kuitan from an orphan-heavy hand.

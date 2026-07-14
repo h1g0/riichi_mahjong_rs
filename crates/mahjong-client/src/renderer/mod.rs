@@ -56,8 +56,8 @@ const USED_FONT_SIZES: [u16; 16] = [
 ];
 
 /// Design resolution. All UI coordinates live on this virtual canvas and
-/// scale uniformly to the real window; the HTML fixes the canvas aspect
-/// ratio to DESIGN_W:DESIGN_H, so nothing distorts.
+/// scale to the real window. The HTML keeps this aspect ratio; native
+/// windows may be resized to a different one.
 pub const DESIGN_W: f32 = 1280.0;
 pub const DESIGN_H: f32 = 800.0;
 
@@ -122,18 +122,21 @@ pub fn set_design_camera() {
     set_camera(&design_camera());
 }
 
-/// Design-to-buffer scale factor; the fixed aspect ratio makes width and
-/// height equivalent (width used).
-fn design_scale() -> f32 {
-    screen_width() / DESIGN_W
+/// Converts a buffer-space point to the coordinates used by the design
+/// camera. X and Y need independent scales when a native window is
+/// resized away from the design aspect ratio.
+fn buffer_to_design(mx: f32, my: f32, buffer_w: f32, buffer_h: f32) -> (f32, f32) {
+    if buffer_w <= 0.0 || buffer_h <= 0.0 {
+        return (0.0, 0.0);
+    }
+    (mx * DESIGN_W / buffer_w, my * DESIGN_H / buffer_h)
 }
 
 /// Mouse position converted from buffer to design coordinates, where all
 /// hit testing happens.
 pub fn mouse_position_design() -> (f32, f32) {
     let (mx, my) = mouse_position();
-    let scale = design_scale();
-    (mx / scale, my / scale)
+    buffer_to_design(mx, my, screen_width(), screen_height())
 }
 
 /// Camera2D rotating about the board center.
@@ -368,45 +371,47 @@ pub fn prewarm_fonts(font: Option<&Font>) {
 /// (see that function's comment for why).
 pub fn cache_dynamic_text(font: Option<&Font>, state: &GameState) {
     use crate::game::PlayerLabel;
-    let cache = |s: &str| {
+    let cache = |s: &str, sizes: &[u16]| {
         if s.is_empty() {
             return;
         }
-        for &base in &USED_FONT_SIZES {
+        debug_assert!(sizes.iter().all(|size| USED_FONT_SIZES.contains(size)));
+        for &base in sizes {
             let _ = theme::measure_scaled(font, s, base);
         }
     };
     for label in &state.player_labels {
         if let PlayerLabel::Human(name) = label {
-            cache(name);
+            // Score chip, center detail, ranking, and win heading.
+            cache(name, &[9, 11, 14, 21]);
         }
     }
     let online = &state.online_state;
-    cache(&online.name_input);
-    cache(&online.code_input);
+    cache(&online.name_input, &[16]);
+    cache(&online.code_input, &[16]);
     if let Some(status) = &online.status_line {
-        cache(status);
+        cache(status, &[13, 15]);
     }
     if let Some(room) = &online.room {
-        cache(&room.code);
+        cache(&room.code, &[28]);
         for label in &room.seat_labels {
-            cache(label);
+            cache(label, &[14]);
         }
     }
 
     // Round results (yaku names, ranks, winner names, draw messages)
     // are external too.
     if let Some(message) = &state.result_message {
-        cache(message);
+        cache(message, &[14, 20]);
     }
     if let Some(result) = state.current_win_result() {
-        cache(&result.winner_name);
+        cache(&result.winner_name, &[21]);
         if let Some(loser) = &result.loser_name {
-            cache(loser);
+            cache(loser, &[21]);
         }
-        cache(&result.rank_name);
+        cache(&result.rank_name, &[28]);
         for (name, _) in &result.yaku {
-            cache(name);
+            cache(name, &[14]);
         }
     }
 }

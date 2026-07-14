@@ -192,6 +192,9 @@ impl Table {
             Some(r) => r,
             None => return false,
         };
+        if player_idx >= round.player_count {
+            return false;
+        }
 
         match action {
             // Turn actions: current player only.
@@ -323,6 +326,17 @@ impl Table {
             Some(RoundResult::Ron { winners, .. }) => {
                 // The dealer keeps the deal if they are among the winners,
                 // whether single or multiple ron.
+                if winners.contains(&self.dealer) {
+                    self.honba += 1;
+                } else {
+                    self.honba = 0;
+                    self.dealer = (self.dealer + 1) % self.player_count();
+                    self.advance_round_number();
+                }
+            }
+            Some(RoundResult::NagashiMangan { winners }) => {
+                // Nagashi Mangan is settled as a win. The dealer continues
+                // when they are among simultaneous winners.
                 if winners.contains(&self.dealer) {
                     self.honba += 1;
                 } else {
@@ -943,6 +957,41 @@ mod tests {
             loser: 3,
             winning_tile: Tile::new(Tile::M1),
         });
+
+        table.finish_round();
+
+        assert_eq!(table.honba, 0);
+        assert_eq!(table.dealer, 1);
+        assert_eq!(table.round_number, 1);
+    }
+
+    #[test]
+    fn test_table_finish_round_nagashi_with_dealer_winner_continues() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::NagashiMangan {
+            winners: vec![2, 0],
+        });
+
+        table.finish_round();
+
+        assert_eq!(table.honba, 1);
+        assert_eq!(table.dealer, 0);
+        assert_eq!(table.round_number, 0);
+    }
+
+    #[test]
+    fn test_table_finish_round_nagashi_without_dealer_advances() {
+        let mut table = Table::new(GameSettings::default());
+        table.honba = 2;
+        table.start_round();
+
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::NagashiMangan { winners: vec![1] });
 
         table.finish_round();
 

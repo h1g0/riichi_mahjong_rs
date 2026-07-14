@@ -1,6 +1,6 @@
 //! Call detection and resolution (ron, pon, kan, chii).
 
-use mahjong_core::hand_info::meld::MeldType;
+use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType};
 use mahjong_core::winning_hand::name::Kind;
 
@@ -11,6 +11,37 @@ use crate::scoring;
 use super::{
     CallResolution, CallResponse, CallState, RIICHI_STICK_VALUE, Round, RoundResult, TurnPhase,
 };
+
+/// Whether applying this call leaves at least one legal discard under
+/// the swap-calling rule.
+fn call_leaves_legal_discard(
+    player: &Player,
+    called_tile: Tile,
+    hand_tiles: [Tile; 2],
+    category: MeldType,
+) -> bool {
+    let mut remaining = player.hand.tiles().to_vec();
+    for target in hand_tiles {
+        let Some(position) = remaining.iter().position(|tile| *tile == target) else {
+            return false;
+        };
+        remaining.remove(position);
+    }
+
+    let mut meld_tiles = vec![called_tile, hand_tiles[0], hand_tiles[1]];
+    meld_tiles.sort();
+    let forbidden = Meld {
+        tiles: meld_tiles,
+        category,
+        from: MeldFrom::Unknown,
+        called_tile: Some(called_tile),
+    }
+    .forbidden_swap_tiles();
+
+    remaining
+        .iter()
+        .any(|tile| !forbidden.contains(&tile.get()))
+}
 
 impl Round {
     /// Announces a discard, checks call options, and advances the phase.
@@ -70,7 +101,10 @@ impl Round {
         discarded_tile: Tile,
         discarder: usize,
     ) -> CallState {
-        let is_last_tile = self.wall.is_empty();
+        let wall_exhausted = self.wall.is_empty();
+        // A discard after a replacement draw is followed by exhaustion, but
+        // it is not the last live-wall discard and cannot award Houtei.
+        let is_last_tile_claim = wall_exhausted && !self.last_draw_was_dead_wall;
         let mut available_calls: [Vec<AvailableCall>; 4] =
             [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         // Players with no options (and the dummy seat) count as already
@@ -90,7 +124,7 @@ impl Round {
                     player,
                     discarded_tile,
                     self.round_wind,
-                    is_last_tile,
+                    is_last_tile_claim,
                     &self.settings,
                 );
                 if win_result.is_win {
@@ -98,15 +132,22 @@ impl Round {
                 }
             }
 
-            // A riichi player cannot call anything except ron.
-            if player.is_riichi {
+            // A riichi player cannot call anything except ron. The final
+            // discard likewise has no following turn in which a meld caller
+            // could discard, so only ron remains legal.
+            if player.is_riichi || wall_exhausted {
                 if !available_calls[i].is_empty() {
                     responded[i] = false;
                 }
                 continue;
             }
 
-            let pon_opts = player.pon_options(discarded_tile);
+            let mut pon_opts = player.pon_options(discarded_tile);
+            if self.settings.forbid_swap_calling {
+                pon_opts.retain(|option| {
+                    call_leaves_legal_discard(player, discarded_tile, *option, MeldType::Pon)
+                });
+            }
             if !pon_opts.is_empty() {
                 available_calls[i].push(AvailableCall::Pon { options: pon_opts });
             }
@@ -120,7 +161,12 @@ impl Round {
             // and does not exist in three-player games.
             let next_player = self.next_seat(discarder);
             if !self.settings.three_player && i == next_player {
-                let chi_opts = player.chi_options(discarded_tile);
+                let mut chi_opts = player.chi_options(discarded_tile);
+                if self.settings.forbid_swap_calling {
+                    chi_opts.retain(|option| {
+                        call_leaves_legal_discard(player, discarded_tile, *option, MeldType::Chi)
+                    });
+                }
                 if !chi_opts.is_empty() {
                     available_calls[i].push(AvailableCall::Chi { options: chi_opts });
                 }
@@ -148,6 +194,9 @@ impl Round {
     /// responses are in, resolves the calls by priority.
     pub fn respond_to_call(&mut self, player_idx: usize, response: CallResponse) -> bool {
         if self.phase != TurnPhase::WaitForCalls {
+            return false;
+        }
+        if player_idx >= self.player_count {
             return false;
         }
 
@@ -180,7 +229,11 @@ impl Round {
                     }
                 });
                 if valid {
-                    call_state.pon_declared = Some((player_idx, hand_tile_types));
+                    // A later network response must not overwrite the first
+                    // caller at the same call priority.
+                    if call_state.pon_declared.is_none() {
+                        call_state.pon_declared = Some((player_idx, hand_tile_types));
+                    }
                 } else {
                     return false;
                 }
@@ -190,7 +243,11 @@ impl Round {
                     .iter()
                     .any(|c| matches!(c, AvailableCall::Daiminkan))
                 {
-                    call_state.daiminkan_declared = Some(player_idx);
+                    // A later network response must not overwrite the first
+                    // caller at the same call priority.
+                    if call_state.daiminkan_declared.is_none() {
+                        call_state.daiminkan_declared = Some(player_idx);
+                    }
                 } else {
                     return false;
                 }
@@ -323,7 +380,7 @@ impl Round {
         winning_tile: Tile,
         is_robbing_a_quad: bool,
     ) {
-        let is_last_tile = self.wall.is_empty();
+        let is_last_tile = self.wall.is_empty() && !self.last_draw_was_dead_wall;
         let dora_indicators = self.wall.dora_indicators();
         let riichi_sticks = self.riichi_sticks;
         let player_hands = self.build_player_hands();
@@ -378,21 +435,20 @@ impl Round {
             // Liability payment (pao / 包): the liable player splits the
             // payment with the deal-in player when a qualifying yakuman
             // was completed.
-            let deltas = if let Some(pao_player) =
-                self.pao_player_for_win(winner, &score_result.yaku_list)
-            {
-                scoring::calculate_ron_score_deltas_with_pao(
+            let pao_players = self.pao_players_for_win(winner, &score_result.yaku_list);
+            let deltas = if pao_players.is_empty() {
+                scoring::calculate_ron_score_deltas(
                     winner,
                     loser,
-                    pao_player,
                     &score_result,
                     winner_is_dealer,
                     honba_for_this,
                 )
             } else {
-                scoring::calculate_ron_score_deltas(
+                scoring::calculate_ron_score_deltas_with_pao_players(
                     winner,
                     loser,
+                    &pao_players,
                     &score_result,
                     winner_is_dealer,
                     honba_for_this,

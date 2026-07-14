@@ -1,11 +1,11 @@
-//! Debug diagnostics logging, active only under `#[cfg(debug_assertions)]`.
+//! Opt-in debug diagnostics logging (`MAHJONG_ROUND_DIAGNOSTICS=1`).
 
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::settings::Lang;
 
 use crate::scoring;
 
-use super::Round;
+use super::{Round, diagnostics_enabled};
 
 impl Round {
     /// Logs the human player's win/riichi judgement state on draw, for debugging.
@@ -16,7 +16,7 @@ impl Round {
         can_tsumo: bool,
         can_riichi: bool,
     ) {
-        if player_idx != 0 {
+        if player_idx != 0 || !diagnostics_enabled() {
             return;
         }
 
