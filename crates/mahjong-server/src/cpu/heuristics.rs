@@ -1246,6 +1246,7 @@ fn estimate_ron_han(
         opened_all_inside: state.opened_all_inside,
         three_player: state.three_player,
         nuki_dora: state.nuki_dora,
+        double_yakuman: state.double_yakuman,
         ..Settings::new()
     };
     let result = calculate_score(&analyzer, &hand, &status, &settings)

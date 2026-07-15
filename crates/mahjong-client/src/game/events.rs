@@ -463,20 +463,38 @@ impl GameState {
                     .iter()
                     .map(|(item, y_han)| (item.name(has_opened, lang).to_string(), *y_han))
                     .collect();
-                let rank_name = rank.name(lang).to_string();
+                let yakuman_multiplier = yaku_list
+                    .iter()
+                    .filter_map(|(item, y_han)| {
+                        (matches!(item, ScoreItem::Yaku(_)) && *y_han >= 13).then_some(*y_han / 13)
+                    })
+                    .sum();
+                let rank_name = rank.name_for_result(lang, yakuman_multiplier);
 
                 let mut yaku_text = String::new();
-                for (name, y_han) in &yaku {
+                for ((name, y_han), (item, _)) in yaku.iter().zip(&yaku_list) {
                     if !yaku_text.is_empty() {
                         yaku_text.push_str("  ");
                     }
-                    yaku_text.push_str(&format!("{} {}", name, tr.han(*y_han)));
+                    if matches!(item, ScoreItem::Yaku(_)) && *y_han >= 13 {
+                        yaku_text.push_str(name);
+                    } else {
+                        yaku_text.push_str(&format!("{} {}", name, tr.han(*y_han)));
+                    }
                 }
 
-                let rank_display = if rank_name.is_empty() {
+                let rank_display = if rank == ScoreRank::Yakuman {
+                    rank_name.clone()
+                } else if rank_name.is_empty() {
                     tr.han_fu(han, fu)
                 } else {
                     format!("{} {}", tr.han_fu(han, fu), rank_name)
+                };
+
+                let score_summary = if yakuman_multiplier > 0 {
+                    format!("{yaku_text} {rank_display}")
+                } else {
+                    format!("{yaku_text}\n{rank_display}")
                 };
 
                 let riichi_sticks_text = if riichi_sticks == 0 {
@@ -486,12 +504,11 @@ impl GameState {
                 };
 
                 let msg = format!(
-                    "{}{}{}\n{}\n{} → {}",
+                    "{}{}{}\n{} → {}",
                     tr.win_headline(&winner_name, win_type),
                     loser_text,
                     riichi_sticks_text,
-                    yaku_text,
-                    rank_display,
+                    score_summary,
                     tr.points(&score_points.to_string())
                 );
 
@@ -509,6 +526,8 @@ impl GameState {
                     fu,
                     score_points,
                     rank_name,
+                    rank,
+                    yakuman_multiplier,
                     riichi_sticks,
                 });
 

@@ -128,6 +128,7 @@ A Japanese-language edition of this document is maintained in parallel at
 | 包 / 責任払い | pao / sekinin-barai | liability payment | — | A feeder pays the full value of Big Dragons / Big Winds / Four Quads. |
 | 喰い替え | kuikae | swap-calling | `Settings::forbid_swap_calling` | Calling then discarding the same/equivalent tile; forbidden by default. |
 | 喰いタン | kuitan | Open Tan'yao | `Settings::opened_all_inside` | Whether All Inside (Tan'yao) is allowed on an open hand. |
+| 二倍役満 | — | double yakuman | `Settings::double_yakuman` | Whether the four special yakuman variants are worth two yakuman. Enabled by default. |
 | 四槓散了 | sūkan sanra | four-quads abortive draw | `Settings::four_kans_draw` | Optional rule. |
 | 四風連打 | sūfon renda | four-winds abortive draw | `Settings::four_winds_draw` | Optional rule. |
 | 四家立直 | sūcha riichi | four-riichi abortive draw | `Settings::four_riichi_draw` | Optional rule. |
@@ -230,16 +231,18 @@ means the yaku is not currently implemented in the codebase.
 | 天和 | Tenhō | Blessing of Heaven | `BlessingOfHeaven` | Closed only; dealer self-draw on the deal. |
 | 地和 | Chihō | Blessing of Earth | `BlessingOfEarth` | Closed only; non-dealer first-draw win. |
 | 国士無双 | Kokushi Musō | Thirteen Orphans | `ThirteenOrphans` | Closed only. |
+| 国士無双十三面待ち | Kokushi Musō jūsanmen machi | Thirteen Orphans (13-sided wait) | `ThirteenOrphansThirteenWait` | Double yakuman when enabled. |
 | 九蓮宝燈 | Chūren Pōto | Nine Gates | `NineGates` | Closed only. |
+| 純正九蓮宝燈 | Junsei Chūren Pōto | Pure Nine Gates | `PureNineGates` | Double yakuman when enabled. |
 | 緑一色 | Ryūiisō | All Green | `AllGreen` | Green dragon not required. |
 | 四暗刻 | Sūankō | Four Concealed Triplets | `FourConcealedTriplets` | Closed only. |
-| 四暗刻単騎 | Sūankō tanki | Four Concealed Triplets (pair wait) | `FourConcealedTripletsPairWait` | Single-wait variant of Four Concealed Triplets. |
+| 四暗刻単騎待ち | Sūankō tanki | Four Concealed Triplets (pair wait) | `FourConcealedTripletsPairWait` | Double yakuman when enabled. |
 | 四槓子 | Sūkantsu | Four Quads | `FourQuads` | Liability payment may apply. |
 | 清老頭 | Chinrōtō | Perfect Terminals | `PerfectTerminals` | |
 | 字一色 | Tsūiisō | All Honours | `AllHonours` | |
 | 大三元 | Daisangen | Big Dragons | `BigDragons` | Liability payment may apply. |
 | 小四喜 | Shōsūshii | Little Winds | `LittleWinds` | |
-| 大四喜 | Daisūshii | Big Winds | `BigWinds` | Liability payment may apply. |
+| 大四喜 | Daisūshii | Big Winds | `BigWinds` | Double yakuman when enabled; liability payment may apply. |
 
 ### Other
 

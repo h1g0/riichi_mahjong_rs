@@ -310,6 +310,8 @@ pub enum Key {
     ModeThreeHanchan,
     /// Pei dora toggle
     NukiDoraToggle,
+    /// Double yakuman variants toggle
+    DoubleYakumanToggle,
     /// CPU level heading
     CpuStrengthLabel,
     /// CPU personality heading
@@ -483,6 +485,10 @@ impl Key {
             Key::NukiDoraToggle => match lang {
                 Lang::Ja => "北抜きドラ",
                 Lang::En => "Pei dora",
+            },
+            Key::DoubleYakumanToggle => match lang {
+                Lang::Ja => "二倍役満",
+                Lang::En => "Double yakuman",
             },
             Key::CpuStrengthLabel => match lang {
                 Lang::Ja => "強さ",

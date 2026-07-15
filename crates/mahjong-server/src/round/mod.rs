@@ -277,8 +277,9 @@ impl Round {
         }
     }
 
-    /// Returns one liability record for each pao-qualifying yakuman in the
-    /// winning hand. The order is the order in which liability was locked in.
+    /// Returns one liability entry for each pao-covered yakuman unit in the
+    /// winning hand. A double-yakuman Big Winds record therefore repeats its
+    /// liable player twice. The order follows when liability was locked in.
     pub(super) fn pao_players_for_win(
         &self,
         winner: usize,
@@ -286,11 +287,15 @@ impl Round {
     ) -> Vec<usize> {
         self.pao[winner]
             .iter()
-            .filter_map(|(pao_kind, liable)| {
-                yaku_list
+            .flat_map(|(pao_kind, liable)| {
+                let units = yaku_list
                     .iter()
-                    .any(|(item, _)| matches!(item, ScoreItem::Yaku(kind) if kind == pao_kind))
-                    .then_some(*liable)
+                    .find_map(|(item, han)| {
+                        matches!(item, ScoreItem::Yaku(kind) if kind == pao_kind)
+                            .then_some((*han / 13) as usize)
+                    })
+                    .unwrap_or(0);
+                std::iter::repeat_n(*liable, units)
             })
             .collect()
     }

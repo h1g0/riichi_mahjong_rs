@@ -64,6 +64,10 @@ pub struct Settings {
     /// Big Winds / Four Quads pays the full value on tsumo, or splits it with
     /// the deal-in player on ron.
     pub yakuman_pao: bool,
+    /// Double yakuman variants (default: on).
+    /// On: Four Concealed Triplets on a pair wait, Big Winds, Thirteen Orphans
+    /// on a 13-sided wait, and Pure Nine Gates are worth two yakuman.
+    pub double_yakuman: bool,
 }
 
 impl Default for Settings {
@@ -87,6 +91,7 @@ impl Settings {
             three_player: false,
             nuki_dora: true,
             yakuman_pao: true,
+            double_yakuman: true,
         }
     }
 
@@ -105,6 +110,7 @@ mod tests {
         let settings = Settings::new();
         assert!(!settings.three_player);
         assert!(settings.nuki_dora);
+        assert!(settings.double_yakuman);
         assert_eq!(settings.player_count(), 4);
     }
 
@@ -117,17 +123,19 @@ mod tests {
         assert_eq!(settings.player_count(), 3);
     }
 
-    /// JSON from clients that predate the three-player fields must still parse.
+    /// JSON from clients that predate newer rule fields must still parse.
     #[test]
-    fn deserialize_without_sanma_fields() {
+    fn deserialize_without_new_rule_fields() {
         let json = serde_json::to_string(&Settings::new()).unwrap();
-        // Simulate the old format by removing three_player / nuki_dora.
+        // Simulate an old format by removing fields added after the initial rules.
         let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
         value.as_object_mut().unwrap().remove("three_player");
         value.as_object_mut().unwrap().remove("nuki_dora");
+        value.as_object_mut().unwrap().remove("double_yakuman");
         let settings: Settings = serde_json::from_value(value).unwrap();
         assert!(!settings.three_player);
         assert!(settings.nuki_dora);
+        assert!(settings.double_yakuman);
     }
 
     /// The struct-level serde default must restore every field from empty JSON,

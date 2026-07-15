@@ -60,6 +60,8 @@ pub struct CpuGameState {
     pub nuki_dora: bool,
     /// Whether All Inside is valid after opening the hand
     pub opened_all_inside: bool,
+    /// Whether special double-yakuman variants are enabled
+    pub double_yakuman: bool,
     /// Extracted North count per player, indexed by wind
     pub pei_counts: [u8; 4],
 
@@ -108,6 +110,7 @@ impl CpuGameState {
             three_player: false,
             nuki_dora: false,
             opened_all_inside: true,
+            double_yakuman: true,
             pei_counts: [0; 4],
             pending_calls: Vec::new(),
             pending_call_tile: None,

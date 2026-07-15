@@ -153,7 +153,11 @@ pub fn check(
     );
     result.insert(
         Kind::ThirteenOrphans,
-        check_thirteen_orphans(analyzer, status, settings)?,
+        check_thirteen_orphans(analyzer, hand, status, settings)?,
+    );
+    result.insert(
+        Kind::ThirteenOrphansThirteenWait,
+        check_thirteen_orphans_thirteen_wait(analyzer, hand, status, settings)?,
     );
     result.insert(
         Kind::FourConcealedTripletsPairWait,
@@ -183,7 +187,11 @@ pub fn check(
     result.insert(Kind::AllGreen, check_all_green(analyzer, status, settings)?);
     result.insert(
         Kind::NineGates,
-        check_nine_gates(analyzer, status, settings)?,
+        check_nine_gates(analyzer, hand, status, settings)?,
+    );
+    result.insert(
+        Kind::PureNineGates,
+        check_pure_nine_gates(analyzer, hand, status, settings)?,
     );
     result.insert(
         Kind::FourQuads,

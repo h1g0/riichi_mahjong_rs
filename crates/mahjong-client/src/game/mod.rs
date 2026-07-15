@@ -7,6 +7,7 @@ use macroquad::prelude::*;
 use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::HandAnalyzer;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+use mahjong_core::scoring::score::{ScoreItem, ScoreRank};
 use mahjong_core::settings::Lang;
 use mahjong_core::tile::{Tile, TileType, Wind};
 
@@ -95,6 +96,10 @@ pub struct WinResult {
     pub score_points: i32,
     /// Score rank name (mangan etc.; usually empty)
     pub rank_name: String,
+    /// Structured score rank used to decide whether han/fu are displayed
+    pub rank: ScoreRank,
+    /// Number of awarded yakuman units; zero for non-yakuman and counted yakuman
+    pub yakuman_multiplier: u32,
     /// Riichi deposits collected with this win
     pub riichi_sticks: usize,
 }
