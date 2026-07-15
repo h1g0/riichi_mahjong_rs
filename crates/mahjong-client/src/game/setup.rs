@@ -81,6 +81,8 @@ pub struct OnlineUiState {
     pub mode: GameMode,
     /// Whether pei dora is on when creating a room (three-player only)
     pub nuki_dora: bool,
+    /// Whether the four special variants are worth double yakuman
+    pub double_yakuman: bool,
 }
 
 impl OnlineUiState {
@@ -96,6 +98,7 @@ impl OnlineUiState {
             turn_remaining: None,
             mode: GameMode::FourEast,
             nuki_dora: true,
+            double_yakuman: true,
         }
     }
 
@@ -107,6 +110,7 @@ impl OnlineUiState {
         mahjong_core::settings::Settings {
             three_player: self.mode.three_player(),
             nuki_dora: self.nuki_dora,
+            double_yakuman: self.double_yakuman,
             ..mahjong_core::settings::Settings::new()
         }
     }
@@ -137,6 +141,8 @@ pub struct SetupState {
     pub mode: GameMode,
     /// Whether pei dora is on (three-player only)
     pub nuki_dora: bool,
+    /// Whether the four special variants are worth double yakuman
+    pub double_yakuman: bool,
     /// CPU levels (right, across, left)
     pub cpu_levels: [usize; 3],
     /// CPU personalities (right, across, left)
@@ -148,6 +154,7 @@ impl SetupState {
         SetupState {
             mode: GameMode::FourEast,
             nuki_dora: true,
+            double_yakuman: true,
             cpu_levels: [1, 1, 1],        // all Normal
             cpu_personalities: [0, 1, 2], // Balanced, Speedy, HighValue
         }
@@ -166,6 +173,7 @@ impl SetupState {
         mahjong_core::settings::Settings {
             three_player: self.mode.three_player(),
             nuki_dora: self.nuki_dora,
+            double_yakuman: self.double_yakuman,
             ..mahjong_core::settings::Settings::new()
         }
     }

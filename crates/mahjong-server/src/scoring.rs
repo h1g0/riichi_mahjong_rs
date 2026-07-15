@@ -913,6 +913,18 @@ mod tests {
         score
     }
 
+    fn make_single_double_yakuman_score() -> ScoreResult {
+        let mut score = make_yakuman_score();
+        score.han = 26;
+        score.dealer_ron *= 2;
+        score.dealer_tsumo_all *= 2;
+        score.non_dealer_ron *= 2;
+        score.non_dealer_tsumo_dealer *= 2;
+        score.non_dealer_tsumo_non_dealer *= 2;
+        score.yaku_list = vec![(ScoreItem::Yaku(Kind::BigWinds), 26)];
+        score
+    }
+
     /// Tsumo with pao: the liable player pays everything.
     #[test]
     fn test_pao_tsumo_non_dealer_yakuman() {
@@ -934,6 +946,15 @@ mod tests {
         // Big Dragons is paid entirely by seat 2; All Honours keeps its
         // ordinary tsumo split.
         assert_eq!(deltas, [-16000, 64000, -40000, -8000]);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn test_pao_tsumo_covers_both_units_of_double_big_winds() {
+        let score = make_single_double_yakuman_score();
+        let deltas = calculate_tsumo_score_deltas_with_pao(1, &score, false, 0, 0, 4, &[2, 2]);
+
+        assert_eq!(deltas, [0, 64_000, -64_000, 0]);
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
 

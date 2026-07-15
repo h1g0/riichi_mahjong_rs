@@ -98,6 +98,8 @@ pub enum Kind {
     PerfectFlush,
     /// Kokushi Musō (国士無双)
     ThirteenOrphans,
+    /// Kokushi Musō on a 13-sided wait (国士無双十三面待ち)
+    ThirteenOrphansThirteenWait,
     /// Sūankō (四暗刻)
     FourConcealedTriplets,
     /// Sūankō tanki (四暗刻単騎待ち)
@@ -116,6 +118,8 @@ pub enum Kind {
     AllGreen,
     /// Chūren Pōto (九蓮宝燈)
     NineGates,
+    /// Pure Chūren Pōto (純正九蓮宝燈)
+    PureNineGates,
     /// Sūkantsu (四槓子)
     FourQuads,
     /// Tenhō (天和)
@@ -209,6 +213,7 @@ fn get_en(hand_kind: Kind, has_openned: bool) -> &'static str {
             openned_name!("Perfect Flush", has_openned, Lang::En)
         }
         Kind::ThirteenOrphans => "Thirteen Orphans",
+        Kind::ThirteenOrphansThirteenWait => "Thirteen Orphans (13-sided wait)",
         Kind::FourConcealedTriplets => "Four Concealed Triplets",
         Kind::FourConcealedTripletsPairWait => "Four Concealed Triplets (pair wait)",
         Kind::BigDragons => "Big Dragons",
@@ -218,6 +223,7 @@ fn get_en(hand_kind: Kind, has_openned: bool) -> &'static str {
         Kind::PerfectTerminals => "Perfect Terminals",
         Kind::AllGreen => "All Green",
         Kind::NineGates => "Nine Gates",
+        Kind::PureNineGates => "Pure Nine Gates",
         Kind::FourQuads => "Four Quads",
         Kind::BlessingOfHeaven => "Blessing of Heaven",
         Kind::BlessingOfEarth => "Blessing of Earth",
@@ -270,6 +276,7 @@ fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
             openned_name!("清一色", has_openned, Lang::Ja)
         }
         Kind::ThirteenOrphans => "国士無双",
+        Kind::ThirteenOrphansThirteenWait => "国士無双十三面待ち",
         Kind::FourConcealedTriplets => "四暗刻",
         Kind::FourConcealedTripletsPairWait => "四暗刻単騎待ち",
         Kind::BigDragons => "大三元",
@@ -279,6 +286,7 @@ fn get_ja(hand_kind: Kind, has_openned: bool) -> &'static str {
         Kind::PerfectTerminals => "清老頭",
         Kind::AllGreen => "緑一色",
         Kind::NineGates => "九蓮宝燈",
+        Kind::PureNineGates => "純正九蓮宝燈",
         Kind::FourQuads => "四槓子",
         Kind::BlessingOfHeaven => "天和",
         Kind::BlessingOfEarth => "地和",
@@ -338,6 +346,10 @@ mod tests {
             (Kind::CommonFlush, "Common Flush"),
             (Kind::PerfectFlush, "Perfect Flush"),
             (Kind::ThirteenOrphans, "Thirteen Orphans"),
+            (
+                Kind::ThirteenOrphansThirteenWait,
+                "Thirteen Orphans (13-sided wait)",
+            ),
             (Kind::FourConcealedTriplets, "Four Concealed Triplets"),
             (
                 Kind::FourConcealedTripletsPairWait,
@@ -350,6 +362,7 @@ mod tests {
             (Kind::PerfectTerminals, "Perfect Terminals"),
             (Kind::AllGreen, "All Green"),
             (Kind::NineGates, "Nine Gates"),
+            (Kind::PureNineGates, "Pure Nine Gates"),
             (Kind::FourQuads, "Four Quads"),
             (Kind::BlessingOfHeaven, "Blessing of Heaven"),
             (Kind::BlessingOfEarth, "Blessing of Earth"),
@@ -408,6 +421,10 @@ mod tests {
             (Kind::LittleDragons, "Little Dragons"),
             (Kind::ThreeQuads, "Three Quads"),
             (Kind::ThirteenOrphans, "Thirteen Orphans"),
+            (
+                Kind::ThirteenOrphansThirteenWait,
+                "Thirteen Orphans (13-sided wait)",
+            ),
             (Kind::FourConcealedTriplets, "Four Concealed Triplets"),
             (
                 Kind::FourConcealedTripletsPairWait,
@@ -420,6 +437,7 @@ mod tests {
             (Kind::PerfectTerminals, "Perfect Terminals"),
             (Kind::AllGreen, "All Green"),
             (Kind::NineGates, "Nine Gates"),
+            (Kind::PureNineGates, "Pure Nine Gates"),
             (Kind::FourQuads, "Four Quads"),
             (Kind::BlessingOfHeaven, "Blessing of Heaven"),
             (Kind::BlessingOfEarth, "Blessing of Earth"),
@@ -467,6 +485,7 @@ mod tests {
             (Kind::CommonFlush, "混一色"),
             (Kind::PerfectFlush, "清一色"),
             (Kind::ThirteenOrphans, "国士無双"),
+            (Kind::ThirteenOrphansThirteenWait, "国士無双十三面待ち"),
             (Kind::FourConcealedTriplets, "四暗刻"),
             (Kind::FourConcealedTripletsPairWait, "四暗刻単騎待ち"),
             (Kind::BigDragons, "大三元"),
@@ -476,6 +495,7 @@ mod tests {
             (Kind::PerfectTerminals, "清老頭"),
             (Kind::AllGreen, "緑一色"),
             (Kind::NineGates, "九蓮宝燈"),
+            (Kind::PureNineGates, "純正九蓮宝燈"),
             (Kind::FourQuads, "四槓子"),
             (Kind::BlessingOfHeaven, "天和"),
             (Kind::BlessingOfEarth, "地和"),
@@ -533,6 +553,7 @@ mod tests {
             (Kind::LittleDragons, "小三元"),
             (Kind::ThreeQuads, "三槓子"),
             (Kind::ThirteenOrphans, "国士無双"),
+            (Kind::ThirteenOrphansThirteenWait, "国士無双十三面待ち"),
             (Kind::FourConcealedTriplets, "四暗刻"),
             (Kind::FourConcealedTripletsPairWait, "四暗刻単騎待ち"),
             (Kind::BigDragons, "大三元"),
@@ -542,6 +563,7 @@ mod tests {
             (Kind::PerfectTerminals, "清老頭"),
             (Kind::AllGreen, "緑一色"),
             (Kind::NineGates, "九蓮宝燈"),
+            (Kind::PureNineGates, "純正九蓮宝燈"),
             (Kind::FourQuads, "四槓子"),
             (Kind::BlessingOfHeaven, "天和"),
             (Kind::BlessingOfEarth, "地和"),

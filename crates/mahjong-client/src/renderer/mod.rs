@@ -26,7 +26,7 @@ use setup::*;
 use tiles::*;
 
 use macroquad::prelude::*;
-use mahjong_core::scoring::score::DoraLabel;
+use mahjong_core::scoring::score::{DoraLabel, ScoreRank};
 use mahjong_core::settings::Lang;
 use mahjong_core::tile::Tile;
 use mahjong_server::cpu::client::CpuConfig;

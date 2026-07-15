@@ -8,9 +8,32 @@ use crate::settings::*;
 use crate::tile::{Dragon, Tile, Wind};
 use crate::winning_hand::name::*;
 
+fn double_yakuman_han(settings: &Settings) -> u32 {
+    if settings.double_yakuman { 26 } else { 13 }
+}
+
+fn is_thirteen_orphans_thirteen_wait(hand: &Hand) -> bool {
+    if !hand.melds().is_empty() || hand.tiles().len() != 13 {
+        return false;
+    }
+
+    let mut seen = [false; Tile::LEN];
+    for tile in hand.tiles() {
+        let index = tile.get() as usize;
+        if !tile.is_1_9_honour() || seen[index] {
+            return false;
+        }
+        seen[index] = true;
+    }
+
+    hand.drawn()
+        .is_some_and(|tile| tile.is_1_9_honour() && seen[tile.get() as usize])
+}
+
 /// Thirteen Orphans (Kokushi Musō / 国士無双)
 pub fn check_thirteen_orphans(
     hand_analyzer: &HandAnalyzer,
+    hand: &Hand,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -22,8 +45,34 @@ pub fn check_thirteen_orphans(
     if !hand_analyzer.shanten.has_won() {
         return Ok((name, false, 0));
     }
-    if hand_analyzer.form == Form::ThirteenOrphans {
+    if hand_analyzer.form == Form::ThirteenOrphans
+        && !(settings.double_yakuman && is_thirteen_orphans_thirteen_wait(hand))
+    {
         Ok((name, true, 13))
+    } else {
+        Ok((name, false, 0))
+    }
+}
+
+/// Thirteen Orphans on a 13-sided wait (Kokushi Musō jūsanmen machi /
+/// 国士無双十三面待ち)
+pub fn check_thirteen_orphans_thirteen_wait(
+    hand_analyzer: &HandAnalyzer,
+    hand: &Hand,
+    status: &Status,
+    settings: &Settings,
+) -> Result<(&'static str, bool, u32)> {
+    let name = get(
+        Kind::ThirteenOrphansThirteenWait,
+        status.has_claimed_open,
+        settings.display_lang,
+    );
+    if settings.double_yakuman
+        && hand_analyzer.shanten.has_won()
+        && hand_analyzer.form == Form::ThirteenOrphans
+        && is_thirteen_orphans_thirteen_wait(hand)
+    {
+        Ok((name, true, 26))
     } else {
         Ok((name, false, 0))
     }
@@ -70,7 +119,7 @@ pub fn check_four_concealed_triplets(
     }
 }
 
-/// Four Concealed Triplets with a pair wait (Sūankō tanki / 四暗刻単騎)
+/// Four Concealed Triplets with a pair wait (Sūankō tanki / 四暗刻単騎待ち)
 pub fn check_four_concealed_triplets_pair_wait(
     hand_analyzer: &HandAnalyzer,
     hand: &Hand,
@@ -90,7 +139,7 @@ pub fn check_four_concealed_triplets_pair_wait(
     }
 
     if is_four_concealed_triplets_pair_wait(hand_analyzer, hand) {
-        Ok((name, true, 13))
+        Ok((name, true, double_yakuman_han(settings)))
     } else {
         Ok((name, false, 0))
     }
@@ -190,7 +239,7 @@ pub fn check_big_winds(
         }
     }
     if wind_triplet_count == 4 {
-        Ok((name, true, 13))
+        Ok((name, true, double_yakuman_han(settings)))
     } else {
         Ok((name, false, 0))
     }
@@ -313,6 +362,7 @@ pub fn check_all_green(
 /// Nine Gates (Chūren Pōto / 九蓮宝燈)
 pub fn check_nine_gates(
     hand_analyzer: &HandAnalyzer,
+    hand: &Hand,
     status: &Status,
     settings: &Settings,
 ) -> Result<(&'static str, bool, u32)> {
@@ -428,10 +478,62 @@ pub fn check_nine_gates(
     {
         let total: u32 = counts.iter().sum();
         if total == 14 {
+            if settings.double_yakuman && is_pure_nine_gates(hand) {
+                return Ok((name, false, 0));
+            }
             return Ok((name, true, 13));
         }
     }
     Ok((name, false, 0))
+}
+
+fn is_pure_nine_gates(hand: &Hand) -> bool {
+    if !hand.melds().is_empty() || hand.tiles().len() != 13 {
+        return false;
+    }
+
+    let Some(winning_tile) = hand.drawn() else {
+        return false;
+    };
+    let offset = match winning_tile.get() {
+        Tile::M1..=Tile::M9 => Tile::M1,
+        Tile::P1..=Tile::P9 => Tile::P1,
+        Tile::S1..=Tile::S9 => Tile::S1,
+        _ => return false,
+    };
+
+    let mut counts = [0u32; 9];
+    for tile in hand.tiles() {
+        let tile_type = tile.get();
+        if tile_type < offset || tile_type > offset + 8 {
+            return false;
+        }
+        counts[(tile_type - offset) as usize] += 1;
+    }
+    counts == [3, 1, 1, 1, 1, 1, 1, 1, 3]
+}
+
+/// Pure Nine Gates (Junsei Chūren Pōto / 純正九蓮宝燈)
+pub fn check_pure_nine_gates(
+    hand_analyzer: &HandAnalyzer,
+    hand: &Hand,
+    status: &Status,
+    settings: &Settings,
+) -> Result<(&'static str, bool, u32)> {
+    let name = get(
+        Kind::PureNineGates,
+        status.has_claimed_open,
+        settings.display_lang,
+    );
+    if settings.double_yakuman
+        && hand_analyzer.shanten.has_won()
+        && !status.has_claimed_open
+        && is_pure_nine_gates(hand)
+    {
+        Ok((name, true, 26))
+    } else {
+        Ok((name, false, 0))
+    }
 }
 /// Four Quads (Sūkantsu / 四槓子)
 pub fn check_four_quads(
@@ -506,20 +608,62 @@ mod tests {
 
     #[test]
     fn test_win_by_thirteen_orphans() {
-        let test_str = "19m19p19s1234567z 1m";
+        let test_str = "19m19p19s1123456z 7z";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
         assert_eq!(
-            check_thirteen_orphans(&test_analyzer, &status, &settings).unwrap(),
+            check_thirteen_orphans(&test_analyzer, &test, &status, &settings).unwrap(),
             ("国士無双", true, 13)
         );
     }
 
+    #[test]
+    fn test_thirteen_orphans_thirteen_wait_double_yakuman_toggle() {
+        let thirteen_wait = Hand::from("19m19p19s1234567z 1m");
+        let analyzer = HandAnalyzer::new(&thirteen_wait).unwrap();
+        let status = Status::new();
+        let mut settings = Settings::new();
+
+        assert_eq!(
+            check_thirteen_orphans(&analyzer, &thirteen_wait, &status, &settings).unwrap(),
+            ("国士無双", false, 0)
+        );
+        assert_eq!(
+            check_thirteen_orphans_thirteen_wait(&analyzer, &thirteen_wait, &status, &settings)
+                .unwrap(),
+            ("国士無双十三面待ち", true, 26)
+        );
+
+        let single_wait = Hand::from("19m19p19s1123456z 7z");
+        let analyzer = HandAnalyzer::new(&single_wait).unwrap();
+        assert_eq!(
+            check_thirteen_orphans(&analyzer, &single_wait, &status, &settings).unwrap(),
+            ("国士無双", true, 13)
+        );
+        assert_eq!(
+            check_thirteen_orphans_thirteen_wait(&analyzer, &single_wait, &status, &settings)
+                .unwrap(),
+            ("国士無双十三面待ち", false, 0)
+        );
+
+        settings.double_yakuman = false;
+        let analyzer = HandAnalyzer::new(&thirteen_wait).unwrap();
+        assert_eq!(
+            check_thirteen_orphans(&analyzer, &thirteen_wait, &status, &settings).unwrap(),
+            ("国士無双", true, 13)
+        );
+        assert_eq!(
+            check_thirteen_orphans_thirteen_wait(&analyzer, &thirteen_wait, &status, &settings)
+                .unwrap(),
+            ("国士無双十三面待ち", false, 0)
+        );
+    }
+
     #[rstest]
-    #[case::tanki_tsumo("111333m444s1777z 1z", true, ("四暗刻単騎待ち", true, 13), ("四暗刻", false, 0), false)]
-    #[case::tanki_ron("111333m444s1777z 1z", false, ("四暗刻単騎待ち", true, 13), ("四暗刻", false, 0), false)]
+    #[case::tanki_tsumo("111333m444s1777z 1z", true, ("四暗刻単騎待ち", true, 26), ("四暗刻", false, 0), false)]
+    #[case::tanki_ron("111333m444s1777z 1z", false, ("四暗刻単騎待ち", true, 26), ("四暗刻", false, 0), false)]
     #[case::shanpon_tsumo("111333m444s55s77z 5s", true, ("四暗刻単騎待ち", false, 0), ("四暗刻", true, 13), false)]
     #[case::shanpon_ron("111333m444s55s77z 5s", false, ("四暗刻単騎待ち", false, 0), ("四暗刻", false, 0), false)]
     #[case::open_tanki_tsumo("111333m444s1777z 1z", true, ("四暗刻単騎待ち", false, 0), ("四暗刻", false, 0), true)]
@@ -546,6 +690,25 @@ mod tests {
         assert_eq!(
             check_four_concealed_triplets(&test_analyzer, &test, &status, &settings).unwrap(),
             expected_four_concealed_triplets
+        );
+    }
+
+    #[test]
+    fn test_four_concealed_triplets_pair_wait_double_yakuman_toggle() {
+        let hand = Hand::from("111333m444s1777z 1z");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+        let status = Status::new();
+        let mut settings = Settings::new();
+
+        assert_eq!(
+            check_four_concealed_triplets_pair_wait(&analyzer, &hand, &status, &settings).unwrap(),
+            ("四暗刻単騎待ち", true, 26)
+        );
+
+        settings.double_yakuman = false;
+        assert_eq!(
+            check_four_concealed_triplets_pair_wait(&analyzer, &hand, &status, &settings).unwrap(),
+            ("四暗刻単騎待ち", true, 13)
         );
     }
     #[test]
@@ -579,6 +742,15 @@ mod tests {
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let status = Status::new();
         let settings = Settings::new();
+        assert_eq!(
+            check_big_winds(&test_analyzer, &status, &settings).unwrap(),
+            ("大四喜", true, 26)
+        );
+
+        let settings = Settings {
+            double_yakuman: false,
+            ..Settings::new()
+        };
         assert_eq!(
             check_big_winds(&test_analyzer, &status, &settings).unwrap(),
             ("大四喜", true, 13)
@@ -622,15 +794,54 @@ mod tests {
     }
     #[test]
     fn test_win_by_nine_gates() {
-        let test_str = "1112345678999m 5m";
+        let test_str = "1112355678999m 4m";
         let test = Hand::from(test_str);
         let test_analyzer = HandAnalyzer::new(&test).unwrap();
         let mut status = Status::new();
         let settings = Settings::new();
         status.has_claimed_open = false;
         assert_eq!(
-            check_nine_gates(&test_analyzer, &status, &settings).unwrap(),
+            check_nine_gates(&test_analyzer, &test, &status, &settings).unwrap(),
             ("九蓮宝燈", true, 13)
+        );
+    }
+
+    #[test]
+    fn test_pure_nine_gates_double_yakuman_toggle() {
+        let pure = Hand::from("1112345678999m 5m");
+        let analyzer = HandAnalyzer::new(&pure).unwrap();
+        let status = Status::new();
+        let mut settings = Settings::new();
+
+        assert_eq!(
+            check_nine_gates(&analyzer, &pure, &status, &settings).unwrap(),
+            ("九蓮宝燈", false, 0)
+        );
+        assert_eq!(
+            check_pure_nine_gates(&analyzer, &pure, &status, &settings).unwrap(),
+            ("純正九蓮宝燈", true, 26)
+        );
+
+        let ordinary = Hand::from("1112355678999m 4m");
+        let analyzer = HandAnalyzer::new(&ordinary).unwrap();
+        assert_eq!(
+            check_nine_gates(&analyzer, &ordinary, &status, &settings).unwrap(),
+            ("九蓮宝燈", true, 13)
+        );
+        assert_eq!(
+            check_pure_nine_gates(&analyzer, &ordinary, &status, &settings).unwrap(),
+            ("純正九蓮宝燈", false, 0)
+        );
+
+        settings.double_yakuman = false;
+        let analyzer = HandAnalyzer::new(&pure).unwrap();
+        assert_eq!(
+            check_nine_gates(&analyzer, &pure, &status, &settings).unwrap(),
+            ("九蓮宝燈", true, 13)
+        );
+        assert_eq!(
+            check_pure_nine_gates(&analyzer, &pure, &status, &settings).unwrap(),
+            ("純正九蓮宝燈", false, 0)
         );
     }
     #[test]

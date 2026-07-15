@@ -1892,6 +1892,16 @@ fn test_pei_win_adds_pei_dora() {
 
 // ===== Yakuman liability payment (pao, #134) =====
 
+#[test]
+fn test_double_yakuman_pao_covers_both_units() {
+    let mut round =
+        Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    round.pao[1].push((Kind::BigWinds, 2));
+
+    let players = round.pao_players_for_win(1, &[(ScoreItem::Yaku(Kind::BigWinds), 26)]);
+    assert_eq!(players, vec![2, 2]);
+}
+
 /// Feeding the third dragon triplet records the feeder as liable.
 #[test]
 fn test_pao_recorded_on_third_dragon_pon() {

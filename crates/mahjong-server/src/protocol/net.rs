@@ -17,7 +17,8 @@ use crate::table::GameLength;
 /// v3: three-player support (CreateRoom / RoomState carry the whole
 /// `Settings`).
 /// v4: structured Nagashi Mangan round-end events.
-pub const PROTOCOL_VERSION: u32 = 4;
+/// v5: double-yakuman settings and dedicated special-yakuman score items.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// A CPU's level and personality.
 ///
@@ -276,6 +277,7 @@ mod tests {
                     three_player: true,
                     nuki_dora: false,
                     triple_ron_draw: true,
+                    double_yakuman: false,
                     ..Settings::new()
                 },
             },

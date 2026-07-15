@@ -103,6 +103,44 @@ impl ScoreRank {
             },
         }
     }
+
+    /// Returns the display name for a particular winning result.
+    ///
+    /// [`ScoreRank::Yakuman`] represents both counted yakuman and one or more
+    /// awarded yakuman yaku. `yakuman_multiplier` is zero for counted yakuman
+    /// and otherwise contains the awarded number of yakuman units.
+    pub fn name_for_result(&self, lang: Lang, yakuman_multiplier: u32) -> String {
+        match (*self, yakuman_multiplier) {
+            (ScoreRank::Yakuman, 0) => match lang {
+                Lang::En => "Counted Yakuman".to_string(),
+                Lang::Ja => "数え役満".to_string(),
+            },
+            (ScoreRank::Yakuman, 1) => self.name(lang).to_string(),
+            (ScoreRank::Yakuman, multiplier) => match lang {
+                Lang::En => match multiplier {
+                    2 => "Double Yakuman".to_string(),
+                    3 => "Triple Yakuman".to_string(),
+                    _ => format!("{multiplier}x Yakuman"),
+                },
+                Lang::Ja => {
+                    // Six yakuman is the maximum possible combination, e.g.
+                    // Four Concealed Triplets (pair wait) + Big Four Winds
+                    // + Blessing of Heaven + All Honours
+                    // (四暗刻単騎待ち + 大四喜 + 天和 + 字一色).
+                    let numeral = match multiplier {
+                        2 => "二",
+                        3 => "三",
+                        4 => "四",
+                        5 => "五",
+                        6 => "六",
+                        _ => return format!("{multiplier}倍役満"),
+                    };
+                    format!("{numeral}倍役満")
+                }
+            },
+            _ => self.name(lang).to_string(),
+        }
+    }
 }
 
 /// Kind of dora, listed next to yaku on the result screen.
@@ -578,7 +616,10 @@ mod tests {
         status.is_self_drawn = false;
         status.seat_wind = Wind::South;
         status.round_wind = Wind::East;
-        let settings = Settings::new();
+        let settings = Settings {
+            double_yakuman: false,
+            ..Settings::new()
+        };
         let result = calculate_score(&analyzer, &hand, &status, &settings)
             .unwrap()
             .unwrap();
@@ -593,6 +634,26 @@ mod tests {
     }
 
     #[test]
+    fn test_double_yakuman_setting_changes_thirteen_wait_score() {
+        let hand = Hand::from("19m19p19s1234567z 1m");
+        let analyzer = HandAnalyzer::new(&hand).unwrap();
+        let status = Status::new();
+        let settings = Settings::new();
+
+        let result = calculate_score(&analyzer, &hand, &status, &settings)
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.han, 26);
+        assert_eq!(result.rank, ScoreRank::Yakuman);
+        assert_eq!(
+            result.yaku_list,
+            vec![(ScoreItem::Yaku(Kind::ThirteenOrphansThirteenWait), 26)]
+        );
+        assert_eq!(result.non_dealer_ron, 64_000);
+        assert_eq!(result.dealer_ron, 96_000);
+    }
+
+    #[test]
     fn test_calculate_score_stacks_independent_yakuman() {
         let hand = Hand::from("222333444z5z 111z 5z");
         let analyzer = HandAnalyzer::new(&hand).unwrap();
@@ -602,20 +663,20 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(result.han, 26);
+        assert_eq!(result.han, 39);
         assert_eq!(result.rank, ScoreRank::Yakuman);
         assert!(
             result
                 .yaku_list
-                .contains(&(ScoreItem::Yaku(Kind::BigWinds), 13))
+                .contains(&(ScoreItem::Yaku(Kind::BigWinds), 26))
         );
         assert!(
             result
                 .yaku_list
                 .contains(&(ScoreItem::Yaku(Kind::AllHonours), 13))
         );
-        assert_eq!(result.non_dealer_ron, 64_000);
-        assert_eq!(result.dealer_ron, 96_000);
+        assert_eq!(result.non_dealer_ron, 96_000);
+        assert_eq!(result.dealer_ron, 144_000);
     }
 
     #[test]
@@ -871,6 +932,23 @@ mod tests {
         assert_eq!(ScoreRank::Baiman.name(Lang::En), "Baiman");
         assert_eq!(ScoreRank::Sanbaiman.name(Lang::En), "Sanbaiman");
         assert_eq!(ScoreRank::Yakuman.name(Lang::En), "Yakuman");
+    }
+
+    #[test]
+    fn contextual_yakuman_rank_name() {
+        assert_eq!(ScoreRank::Yakuman.name_for_result(Lang::Ja, 0), "数え役満");
+        assert_eq!(
+            ScoreRank::Yakuman.name_for_result(Lang::En, 0),
+            "Counted Yakuman"
+        );
+        assert_eq!(ScoreRank::Yakuman.name_for_result(Lang::Ja, 1), "役満");
+        assert_eq!(ScoreRank::Yakuman.name_for_result(Lang::Ja, 2), "二倍役満");
+        assert_eq!(
+            ScoreRank::Yakuman.name_for_result(Lang::En, 2),
+            "Double Yakuman"
+        );
+        assert_eq!(ScoreRank::Yakuman.name_for_result(Lang::Ja, 3), "三倍役満");
+        assert_eq!(ScoreRank::Yakuman.name_for_result(Lang::Ja, 6), "六倍役満");
     }
 
     #[test]

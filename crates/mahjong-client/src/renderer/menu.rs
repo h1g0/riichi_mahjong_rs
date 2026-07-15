@@ -310,6 +310,11 @@ fn nuki_rect() -> Rect2 {
     menu_button(504.0, 40.0)
 }
 
+/// Double-yakuman toggle rectangle.
+fn double_yakuman_rect() -> Rect2 {
+    menu_button(550.0, 40.0)
+}
+
 /// Back-button rectangle.
 fn mode_back_rect() -> Rect2 {
     menu_button(596.0, 40.0)
@@ -324,11 +329,19 @@ pub enum ModeSelectAction {
     Back,
 }
 
-/// Current mode and pei dora values for the given origin.
-fn mode_and_nuki(state: &GameState, origin: MenuOrigin) -> (GameMode, bool) {
+/// Current mode and rule-toggle values for the given origin.
+fn mode_and_rules(state: &GameState, origin: MenuOrigin) -> (GameMode, bool, bool) {
     match origin {
-        MenuOrigin::Local => (state.setup_state.mode, state.setup_state.nuki_dora),
-        MenuOrigin::Online => (state.online_state.mode, state.online_state.nuki_dora),
+        MenuOrigin::Local => (
+            state.setup_state.mode,
+            state.setup_state.nuki_dora,
+            state.setup_state.double_yakuman,
+        ),
+        MenuOrigin::Online => (
+            state.online_state.mode,
+            state.online_state.nuki_dora,
+            state.online_state.double_yakuman,
+        ),
     }
 }
 
@@ -337,7 +350,7 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
     let tr = state.tr();
     draw_menu_panel(font, tr.get(Key::ModeSelectTitle), 26);
 
-    let (current_mode, nuki_dora) = mode_and_nuki(state, origin);
+    let (current_mode, nuki_dora, double_yakuman) = mode_and_rules(state, origin);
 
     for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
         draw_toggle(
@@ -356,6 +369,13 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
         tr.get(Key::SanmaOnlyNote)
     );
     draw_toggle(font, &nuki_rect(), &nuki_label, nuki_dora, 13);
+    draw_toggle(
+        font,
+        &double_yakuman_rect(),
+        tr.get(Key::DoubleYakumanToggle),
+        double_yakuman,
+        13,
+    );
 
     draw_menu_button(font, &mode_back_rect(), tr.get(Key::Back), false);
 }
@@ -387,6 +407,18 @@ pub fn handle_mode_select_input(
             }
             MenuOrigin::Online => {
                 state.online_state.nuki_dora = !state.online_state.nuki_dora;
+            }
+        }
+        return None;
+    }
+
+    if double_yakuman_rect().contains(mx, my) {
+        match origin {
+            MenuOrigin::Local => {
+                state.setup_state.double_yakuman = !state.setup_state.double_yakuman;
+            }
+            MenuOrigin::Online => {
+                state.online_state.double_yakuman = !state.online_state.double_yakuman;
             }
         }
         return None;

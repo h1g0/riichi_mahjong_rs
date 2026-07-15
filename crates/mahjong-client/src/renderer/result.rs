@@ -182,16 +182,18 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     y += 8.0;
     for (name, han) in &wr.yaku {
         draw_jp_text(font, name, content_l, y + 14.0, 14, theme::TEXT);
-        let han_text = tr.han(*han);
-        let hw = theme::measure_scaled(font, &han_text, 14).width;
-        draw_jp_text(
-            font,
-            &han_text,
-            content_r - hw,
-            y + 14.0,
-            14,
-            theme::GOLD_LT,
-        );
+        if wr.yakuman_multiplier == 0 {
+            let han_text = tr.han(*han);
+            let hw = theme::measure_scaled(font, &han_text, 14).width;
+            draw_jp_text(
+                font,
+                &han_text,
+                content_r - hw,
+                y + 14.0,
+                14,
+                theme::GOLD_LT,
+            );
+        }
         draw_rectangle(
             content_l,
             y + 22.0,
@@ -206,9 +208,11 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     }
     y += 8.0;
 
-    // Totals: small han/fu on the left, rank + big score on the right.
-    let hanfu = tr.han_fu(wr.han, wr.fu);
-    draw_jp_text(font, &hanfu, content_l, y + 24.0, 13, theme::TEXT_DIM);
+    // Totals: non-yakuman han/fu on the left, rank + big score on the right.
+    if wr.rank != ScoreRank::Yakuman {
+        let hanfu = tr.han_fu(wr.han, wr.fu);
+        draw_jp_text(font, &hanfu, content_l, y + 24.0, 13, theme::TEXT_DIM);
+    }
 
     // The hand score is shown separately from any riichi deposit collected
     // with the win, so a big number never silently includes the deposit.

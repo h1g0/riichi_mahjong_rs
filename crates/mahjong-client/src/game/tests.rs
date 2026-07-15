@@ -1,6 +1,8 @@
 //! Unit tests for the game state.
 
 use super::*;
+use mahjong_core::scoring::score::{DoraLabel, ScoreItem, ScoreRank};
+use mahjong_core::winning_hand::name::Kind;
 use mahjong_server::table::GameLength;
 
 #[test]
@@ -497,14 +499,17 @@ fn test_setup_state_build_game_settings() {
     let mut setup = SetupState::new();
     let settings = setup.build_game_settings();
     assert!(!settings.rules.three_player);
+    assert!(settings.rules.double_yakuman);
     assert_eq!(settings.length, GameLength::EastOnly, "既定は東風戦");
     assert_eq!(setup.cpu_count(), 3);
 
     setup.mode = GameMode::ThreeHanchan;
     setup.nuki_dora = false;
+    setup.double_yakuman = false;
     let settings = setup.build_game_settings();
     assert!(settings.rules.three_player);
     assert!(!settings.rules.nuki_dora);
+    assert!(!settings.rules.double_yakuman);
     assert_eq!(
         settings.length,
         GameLength::Hanchan,
@@ -512,6 +517,15 @@ fn test_setup_state_build_game_settings() {
     );
     assert_eq!(settings.initial_score, 35000);
     assert_eq!(setup.cpu_count(), 2);
+}
+
+#[test]
+fn test_online_ui_build_rules_includes_double_yakuman() {
+    let mut online = OnlineUiState::new();
+    assert!(online.build_rules().double_yakuman);
+
+    online.double_yakuman = false;
+    assert!(!online.build_rules().double_yakuman);
 }
 
 /// Round-trip between game mode and (three-player flag, length).
@@ -767,6 +781,90 @@ fn round_won_ron(winner: Wind, loser: Wind) -> ServerEvent {
         },
         _ => unreachable!(),
     }
+}
+
+fn round_won_with_score(yaku_list: Vec<(ScoreItem, u32)>, han: u32) -> ServerEvent {
+    ServerEvent::RoundWon {
+        winner: Wind::East,
+        loser: None,
+        winning_tile: Tile::new(Tile::P1),
+        scores: [25000; 4],
+        yaku_list,
+        han,
+        fu: 30,
+        score_points: 48000,
+        rank: ScoreRank::Yakuman,
+        has_opened: false,
+        uradora_indicators: vec![],
+        riichi_sticks: 0,
+        player_hands: vec![],
+    }
+}
+
+#[test]
+fn test_counted_yakuman_result_uses_counted_label() {
+    let mut state = GameState::new();
+    state.lang = Lang::Ja;
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.handle_event(round_won_with_score(
+        vec![
+            (ScoreItem::Yaku(Kind::Riichi), 1),
+            (ScoreItem::Dora(DoraLabel::Dora), 12),
+        ],
+        13,
+    ));
+
+    let result = state.current_win_result().expect("win result");
+    assert_eq!(result.rank_name, "数え役満");
+    assert_eq!(result.yakuman_multiplier, 0);
+    assert!(
+        result
+            .result_message
+            .contains("立直 1飜  ドラ 12飜\n数え役満 →")
+    );
+    assert!(!result.result_message.contains("30符"));
+}
+
+#[test]
+fn test_yakuman_yaku_result_keeps_yakuman_label() {
+    let mut state = GameState::new();
+    state.lang = Lang::Ja;
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.handle_event(round_won_with_score(
+        vec![(ScoreItem::Yaku(Kind::ThirteenOrphans), 13)],
+        13,
+    ));
+
+    let result = state.current_win_result().expect("win result");
+    assert_eq!(result.rank_name, "役満");
+    assert_eq!(result.yakuman_multiplier, 1);
+    assert!(result.result_message.contains("国士無双 役満 →"));
+    assert!(!result.result_message.contains('飜'));
+    assert!(!result.result_message.contains('符'));
+}
+
+#[test]
+fn test_multiple_yakuman_result_uses_multiplier_without_han_or_fu() {
+    let mut state = GameState::new();
+    state.lang = Lang::Ja;
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.handle_event(round_won_with_score(
+        vec![
+            (ScoreItem::Yaku(Kind::FourConcealedTriplets), 13),
+            (ScoreItem::Yaku(Kind::BigDragons), 13),
+        ],
+        26,
+    ));
+
+    let result = state.current_win_result().expect("win result");
+    assert_eq!(result.rank_name, "二倍役満");
+    assert_eq!(result.yakuman_multiplier, 2);
+    assert!(result.result_message.contains("四暗刻  大三元 二倍役満 →"));
+    assert!(!result.result_message.contains('飜'));
+    assert!(!result.result_message.contains('符'));
 }
 
 #[test]

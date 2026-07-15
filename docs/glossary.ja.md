@@ -127,6 +127,7 @@
 | 包 / 責任払い | pao / sekinin-barai | liability payment | — | 大三元・大四喜・四槓子で確定牌を放銃した者が全額払い。 |
 | 喰い替え | kuikae | swap-calling | `Settings::forbid_swap_calling` | 鳴いた牌と同/同等の牌を即捨てすること。デフォルトで禁止。 |
 | 喰いタン | kuitan | Open Tan'yao | `Settings::opened_all_inside` | 副露した手で断么九（All Inside）を認めるか否か。 |
+| 二倍役満 | — | double yakuman | `Settings::double_yakuman` | 4種の特殊役満を二倍役満とするか。デフォルトはあり。 |
 | 四槓散了 | sūkan sanra | four-quads abortive draw | `Settings::four_kans_draw` | オプション。 |
 | 四風連打 | sūfon renda | four-winds abortive draw | `Settings::four_winds_draw` | オプション。 |
 | 四家立直 | sūcha riichi | four-riichi abortive draw | `Settings::four_riichi_draw` | オプション。 |
@@ -229,16 +230,18 @@
 | 天和 | Tenhō | Blessing of Heaven | `BlessingOfHeaven` | 門前のみ。親が配牌時の自摸で和了。 |
 | 地和 | Chihō | Blessing of Earth | `BlessingOfEarth` | 門前のみ。子が第一自摸で和了。 |
 | 国士無双 | Kokushi Musō | Thirteen Orphans | `ThirteenOrphans` | 門前のみ。 |
+| 国士無双十三面待ち | Kokushi Musō jūsanmen machi | Thirteen Orphans (13-sided wait) | `ThirteenOrphansThirteenWait` | 設定有効時は二倍役満。 |
 | 九蓮宝燈 | Chūren Pōto | Nine Gates | `NineGates` | 門前のみ。 |
+| 純正九蓮宝燈 | Junsei Chūren Pōto | Pure Nine Gates | `PureNineGates` | 設定有効時は二倍役満。 |
 | 緑一色 | Ryūiisō | All Green | `AllGreen` | 發は必須ではない。 |
 | 四暗刻 | Sūankō | Four Concealed Triplets | `FourConcealedTriplets` | 門前のみ。 |
-| 四暗刻単騎 | Sūankō tanki | Four Concealed Triplets (pair wait) | `FourConcealedTripletsPairWait` | 四暗刻の単騎待ちバリアント。 |
+| 四暗刻単騎待ち | Sūankō tanki | Four Concealed Triplets (pair wait) | `FourConcealedTripletsPairWait` | 設定有効時は二倍役満。 |
 | 四槓子 | Sūkantsu | Four Quads | `FourQuads` | 責任払いの対象になりうる。 |
 | 清老頭 | Chinrōtō | Perfect Terminals | `PerfectTerminals` | |
 | 字一色 | Tsūiisō | All Honours | `AllHonours` | |
 | 大三元 | Daisangen | Big Dragons | `BigDragons` | 責任払いの対象になりうる。 |
 | 小四喜 | Shōsūshii | Little Winds | `LittleWinds` | |
-| 大四喜 | Daisūshii | Big Winds | `BigWinds` | 責任払いの対象になりうる。 |
+| 大四喜 | Daisūshii | Big Winds | `BigWinds` | 設定有効時は二倍役満。責任払いの対象になりうる。 |
 
 ### その他
 

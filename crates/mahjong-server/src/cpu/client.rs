@@ -156,6 +156,7 @@ impl CpuClient {
         state.three_player = rules.three_player;
         state.nuki_dora = rules.three_player && rules.nuki_dora;
         state.opened_all_inside = rules.opened_all_inside;
+        state.double_yakuman = rules.double_yakuman;
         CpuClient { config, state }
     }
 
