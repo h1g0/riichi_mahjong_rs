@@ -82,9 +82,10 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     };
     let tr = state.tr();
     let yaku_count = wr.yaku.len().max(1);
-    let kyoutaku_points = wr.riichi_sticks as i32 * crate::game::RIICHI_STICK_VALUE;
+    let kyoutaku_points = wr.riichi_points();
+    let has_bonus_line = kyoutaku_points > 0 || wr.honba_points > 0;
     let panel_w = 700.0;
-    let panel_h = 326.0 + yaku_count as f32 * 22.0 + if kyoutaku_points > 0 { 26.0 } else { 0.0 };
+    let panel_h = 326.0 + yaku_count as f32 * 22.0 + if has_bonus_line { 26.0 } else { 0.0 };
     let (panel_x, panel_y, panel_right) = draw_overlay_panel(panel_w, panel_h);
     let cx = panel_x + panel_w / 2.0;
     let content_l = panel_x + 40.0;
@@ -214,10 +215,9 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
         draw_jp_text(font, &hanfu, content_l, y + 24.0, 13, theme::TEXT_DIM);
     }
 
-    // The hand score is shown separately from any riichi deposit collected
-    // with the win, so a big number never silently includes the deposit.
-    let hand_points = wr.score_points - kyoutaku_points;
-    let pts = tr.points(&format_score(hand_points));
+    // Keep the hand score separate from table bonuses, whose breakdown is
+    // shown on the line below.
+    let pts = tr.points(&format_score(wr.hand_points()));
     let pw = theme::measure_scaled(font, &pts, 28).width;
     let pts_x = content_r - pw;
     draw_jp_text(font, &pts, pts_x, y + 28.0, 28, theme::GOLD_LT);
@@ -236,11 +236,18 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     }
     y += 44.0;
 
-    if kyoutaku_points > 0 {
+    if has_bonus_line {
         y += 6.0;
-        let deposit_text = tr.deposit_points(wr.riichi_sticks, &format_score(kyoutaku_points));
-        let dw = theme::measure_scaled(font, &deposit_text, 13).width;
-        draw_jp_text(font, &deposit_text, content_r - dw, y, 13, theme::TEXT_DIM);
+        let mut bonus_parts = Vec::with_capacity(2);
+        if kyoutaku_points > 0 {
+            bonus_parts.push(tr.deposit_points(wr.riichi_sticks, &format_score(kyoutaku_points)));
+        }
+        if wr.honba_points > 0 {
+            bonus_parts.push(tr.honba_points(wr.honba, &format_score(wr.honba_points)));
+        }
+        let bonus_text = bonus_parts.join(" ");
+        let bw = theme::measure_scaled(font, &bonus_text, 13).width;
+        draw_jp_text(font, &bonus_text, content_r - bw, y, 13, theme::TEXT_DIM);
         y += 20.0;
     }
 

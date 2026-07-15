@@ -257,6 +257,7 @@ impl Round {
         let rank = score_result.rank;
         let has_opened = score_result.has_opened;
         let player_hands = self.build_player_hands();
+        let honba_points = self.honba as i32 * 100 * (self.player_count as i32 - 1);
 
         for i in 0..self.player_count {
             self.events.push((
@@ -274,6 +275,8 @@ impl Round {
                     has_opened,
                     uradora_indicators: uradora_indicators.clone(),
                     riichi_sticks,
+                    honba: self.honba,
+                    honba_points,
                     player_hands: player_hands.clone(),
                 },
             ));

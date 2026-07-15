@@ -232,7 +232,8 @@ pub enum ServerEvent {
         han: u32,
         /// Fu (minipoints)
         fu: u32,
-        /// Points gained by the winner
+        /// Total points gained by the winner, including continuance bonuses
+        /// and riichi deposits
         score_points: i32,
         /// Score rank (mangan etc.; usually `ScoreRank::Normal`)
         rank: ScoreRank,
@@ -243,6 +244,11 @@ pub enum ServerEvent {
         uradora_indicators: Vec<Tile>,
         /// Riichi deposits on the table before the win
         riichi_sticks: usize,
+        /// Continuance counter awarded to this winner. Later winners in a
+        /// simultaneous ron receive zero.
+        honba: usize,
+        /// Points awarded for the continuance counter
+        honba_points: i32,
         /// Every player's revealed hand
         player_hands: Vec<PlayerHandInfo>,
     },

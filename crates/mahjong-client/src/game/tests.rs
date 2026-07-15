@@ -744,6 +744,8 @@ fn round_won_tsumo(winner: Wind) -> ServerEvent {
         has_opened: false,
         uradora_indicators: vec![],
         riichi_sticks: 0,
+        honba: 0,
+        honba_points: 0,
         player_hands: vec![],
     }
 }
@@ -762,6 +764,8 @@ fn round_won_ron(winner: Wind, loser: Wind) -> ServerEvent {
             has_opened,
             uradora_indicators,
             riichi_sticks,
+            honba,
+            honba_points,
             player_hands,
             ..
         } => ServerEvent::RoundWon {
@@ -777,6 +781,8 @@ fn round_won_ron(winner: Wind, loser: Wind) -> ServerEvent {
             has_opened,
             uradora_indicators,
             riichi_sticks,
+            honba,
+            honba_points,
             player_hands,
         },
         _ => unreachable!(),
@@ -797,6 +803,8 @@ fn round_won_with_score(yaku_list: Vec<(ScoreItem, u32)>, han: u32) -> ServerEve
         has_opened: false,
         uradora_indicators: vec![],
         riichi_sticks: 0,
+        honba: 0,
+        honba_points: 0,
         player_hands: vec![],
     }
 }
@@ -956,6 +964,36 @@ fn test_round_won_deferred_until_banner_hold_elapses() {
     // The result screen appears once the hold ends.
     state.process_events(100.0 + WIN_HOLD_SECS);
     assert_eq!(state.phase, GamePhase::RoundResult);
+}
+
+#[test]
+fn test_round_won_separates_honba_and_deposits_from_hand_points() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    let mut event = round_won_ron(Wind::South, Wind::East);
+    let ServerEvent::RoundWon {
+        score_points,
+        riichi_sticks,
+        honba,
+        honba_points,
+        ..
+    } = &mut event
+    else {
+        unreachable!("helper always returns RoundWon")
+    };
+    // 5,200 hand points + 1,000 deposit points + two honba (600).
+    *score_points = 6_800;
+    *riichi_sticks = 1;
+    *honba = 2;
+    *honba_points = 600;
+
+    state.handle_event(event);
+    let result = state.current_win_result().expect("win result");
+    assert_eq!(result.hand_points(), 5_200);
+    assert_eq!(result.riichi_points(), 1_000);
+    assert_eq!(result.honba, 2);
+    assert_eq!(result.honba_points, 600);
 }
 
 #[test]
