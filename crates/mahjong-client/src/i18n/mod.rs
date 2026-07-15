@@ -128,6 +128,16 @@ impl Translator {
         }
     }
 
+    /// Continuance-points caption shown under the score
+    /// (JA 「＋{n}本場　{s}点」 / EN "+{n} honba: {s} pts"); `s` is
+    /// pre-formatted.
+    pub fn honba_points(&self, n: usize, s: &str) -> String {
+        match self.lang {
+            Lang::Ja => format!("＋{n}本場　{s}点"),
+            Lang::En => format!("+{n} honba: {s} pts"),
+        }
+    }
+
     /// Lobby room-code heading.
     pub fn room_code(&self, code: &str) -> String {
         match self.lang {
@@ -748,6 +758,16 @@ mod tests {
         assert_eq!(en.personality_label(0), "Balanced");
         assert_eq!(ja.cpu_slot(1), "CPU 2");
         assert_eq!(en.cpu_slot(2), "CPU 3");
+    }
+
+    #[test]
+    fn bonus_point_labels() {
+        let ja = Translator::new(Lang::Ja);
+        let en = Translator::new(Lang::En);
+        assert_eq!(ja.deposit_points(1, "1,000"), "＋供託1本　1,000点");
+        assert_eq!(ja.honba_points(2, "600"), "＋2本場　600点");
+        assert_eq!(en.deposit_points(1, "1,000"), "+deposit 1: 1,000 pts");
+        assert_eq!(en.honba_points(2, "600"), "+2 honba: 600 pts");
     }
 
     /// The empty-seat row must localize its CPU config note (#245).

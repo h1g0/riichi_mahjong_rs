@@ -421,6 +421,8 @@ impl GameState {
                 has_opened,
                 uradora_indicators,
                 riichi_sticks,
+                honba,
+                honba_points,
                 player_hands,
             } => {
                 self.scores = scores;
@@ -529,6 +531,8 @@ impl GameState {
                     rank,
                     yakuman_multiplier,
                     riichi_sticks,
+                    honba,
+                    honba_points,
                 });
 
                 // The first RoundWon initializes the phase and display.

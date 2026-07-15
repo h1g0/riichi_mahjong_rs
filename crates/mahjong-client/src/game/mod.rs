@@ -62,8 +62,8 @@ struct Declaration {
 
 /// Value of one riichi deposit stick, in points. Mirrors the server's
 /// private `RIICHI_STICK_VALUE`; needed here because `WinResult::score_points`
-/// only carries the merged total plus a raw stick count, and the result
-/// screen displays the deposit portion separately.
+/// carries the merged total and the result screen displays the deposit
+/// portion separately.
 pub(crate) const RIICHI_STICK_VALUE: i32 = 1000;
 
 /// Heading used by the message-style hand result panel.
@@ -102,6 +102,22 @@ pub struct WinResult {
     pub yakuman_multiplier: u32,
     /// Riichi deposits collected with this win
     pub riichi_sticks: usize,
+    /// Continuance counter collected with this win
+    pub honba: usize,
+    /// Points collected for the continuance counter
+    pub honba_points: i32,
+}
+
+impl WinResult {
+    /// Riichi-deposit portion of the merged winner gain.
+    pub(crate) fn riichi_points(&self) -> i32 {
+        self.riichi_sticks as i32 * RIICHI_STICK_VALUE
+    }
+
+    /// Hand payment before table bonuses.
+    pub(crate) fn hand_points(&self) -> i32 {
+        self.score_points - self.riichi_points() - self.honba_points
+    }
 }
 
 /// Display info for one discard.

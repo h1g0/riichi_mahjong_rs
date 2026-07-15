@@ -1416,8 +1416,9 @@ fn test_double_ron_scores() {
 
 #[test]
 fn test_double_ron_events_generated() {
-    // A double ron emits one RoundWon per winner.
-    let mut round = Round::new(Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+    // A double ron emits one RoundWon per winner, and only the first event
+    // carries the honba breakdown.
+    let mut round = Round::new(Wind::East, 0, [25000; 4], 1, 0, 0, 4, Settings::new());
     setup_triple_ron(&mut round);
     round.drain_events();
 
@@ -1436,6 +1437,24 @@ fn test_double_ron_events_generated() {
         2,
         "ダブロンで2件のRoundWonイベントが生成されること"
     );
+    let ServerEvent::RoundWon {
+        honba: first_honba,
+        honba_points: first_honba_points,
+        ..
+    } = &won_events[0].1
+    else {
+        unreachable!("filtered to RoundWon")
+    };
+    let ServerEvent::RoundWon {
+        honba: second_honba,
+        honba_points: second_honba_points,
+        ..
+    } = &won_events[1].1
+    else {
+        unreachable!("filtered to RoundWon")
+    };
+    assert_eq!((*first_honba, *first_honba_points), (1, 300));
+    assert_eq!((*second_honba, *second_honba_points), (0, 0));
 }
 
 #[test]

@@ -949,6 +949,8 @@ mod tests {
             has_opened: false,
             uradora_indicators: Vec::new(),
             riichi_sticks: 0,
+            honba: 0,
+            honba_points: 0,
             player_hands: Vec::new(),
         });
         assert_eq!(state.scores, [35000, 15000, 25000, 25000]);

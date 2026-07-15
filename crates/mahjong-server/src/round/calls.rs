@@ -391,6 +391,8 @@ impl Round {
             deltas: [i32; 4],
             uradora_indicators: Vec<Tile>,
             score_points: i32,
+            honba: usize,
+            honba_points: i32,
         }
 
         let mut winner_data: Vec<WinnerData> = Vec::new();
@@ -461,6 +463,7 @@ impl Round {
                 0
             };
             let score_points = deltas[winner] + riichi_bonus;
+            let honba_points = honba_for_this as i32 * 300;
 
             winner_data.push(WinnerData {
                 winner,
@@ -468,6 +471,8 @@ impl Round {
                 deltas,
                 uradora_indicators,
                 score_points,
+                honba: honba_for_this,
+                honba_points,
             });
         }
 
@@ -520,6 +525,8 @@ impl Round {
                         has_opened,
                         uradora_indicators: wd.uradora_indicators.clone(),
                         riichi_sticks: event_riichi_sticks,
+                        honba: wd.honba,
+                        honba_points: wd.honba_points,
                         player_hands: player_hands.clone(),
                     },
                 ));

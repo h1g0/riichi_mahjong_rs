@@ -514,6 +514,8 @@ mod tests {
             has_opened: true,
             uradora_indicators: vec![Tile::new(Tile::P3)],
             riichi_sticks: 1,
+            honba: 2,
+            honba_points: 600,
             player_hands: Vec::new(),
         });
 
