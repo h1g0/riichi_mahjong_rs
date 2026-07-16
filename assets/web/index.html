@@ -28,7 +28,7 @@
     <canvas id="glcanvas" tabindex='1' width="1280" height="800"></canvas>
     <script>
         // Online server URL. When unset, ws://127.0.0.1:8080/ws (local
-        // development) is used; the deploy build script replaces this.
+        // development) is used; the web build script replaces this.
         // window.MAHJONG_SERVER_URL = "wss://example.com/ws";
     </script>
     <script>
@@ -54,12 +54,12 @@
         window.addEventListener("resize", fitMahjongCanvas);
         fitMahjongCanvas();
     </script>
-    <script src="public/mq_js_bundle.js"></script>
-    <script src="crates/mahjong-client/js/ws.js"></script>
-    <script src="crates/mahjong-client/js/storage.js"></script>
+    <script src="mq_js_bundle.js"></script>
+    <script src="ws.js"></script>
+    <script src="storage.js"></script>
     <script>
         if (typeof load === "function") {
-            load("target/wasm32-unknown-unknown/release/mahjong-client.wasm");
+            load("mahjong-client.wasm");
         } else {
             document.body.innerHTML = "<p style='color:white;text-align:center;margin-top:40vh'>エラー: mq_js_bundle.js が読み込めませんでした</p>";
         }

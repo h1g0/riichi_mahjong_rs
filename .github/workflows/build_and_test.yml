@@ -28,7 +28,5 @@ jobs:
       run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     - name: Run tests
       run: cargo test --workspace --all-targets --all-features --locked --verbose
-    - name: Check WASM client
-      run: cargo check -p mahjong-client --target wasm32-unknown-unknown --release --locked
-    - name: Check Macroquad JavaScript bundle
-      run: python3 scripts/copy_macroquad_bundle.py
+    - name: Build web client
+      run: bash scripts/vercel-build.sh

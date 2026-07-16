@@ -46,9 +46,9 @@
 
 - `crates/`: ワークスペースの各クレート
 - `assets/`: フォントなどの実行時アセット
-- `public/`: デプロイ用の Web アセット
+- `assets/web/`: ブラウザ版クライアントのソース HTML と favicon
+- `public/`: ローカル配信・デプロイ用に生成される Web アセット
 - `scripts/`: デプロイで使うビルドスクリプト
-- `index.html`: WASM クライアント用のローカル Web エントリポイント
 - `vercel.json`: Vercel のビルド設定
 
 ## 開発
@@ -75,6 +75,9 @@ cd riichi_mahjong_rs
 rustup target add wasm32-unknown-unknown
 ~~~
 
+ブラウザ向けビルドスクリプトの実行には、標準的な Unix
+ユーティリティを含む Bash 環境と Python 3 も必要です。
+
 ### コマンド
 
 テストの実行:
@@ -92,27 +95,26 @@ cargo run -p mahjong-client
 ブラウザ向けクライアントをローカルビルド:
 
 ~~~sh
-cargo build -p mahjong-client --target wasm32-unknown-unknown --release --locked
-python scripts/copy_macroquad_bundle.py
+bash scripts/vercel-build.sh
 ~~~
 
-2つ目のコマンドは、`Cargo.lock` で選択された Macroquad パッケージから
-`mq_js_bundle.js` を `public/` へコピーします。ビルド後は、お好みの方法で
-このリポジトリをローカルの静的ファイルサーバーで配信し、index.html を
-開くと生成した WASM クライアントをブラウザで確認できます。
+このスクリプトは WASM クライアントをビルドし、`Cargo.lock` で選択された
+Macroquad パッケージから `mq_js_bundle.js` をコピーして、生成済みの Web
+アプリケーションを `public/` 配下に配置します。ブラウザで確認する際は
+このディレクトリを静的ファイルサーバーで配信します。
 
 例：
 
 npxがインストールされている場合：
 
 ~~~sh
-npx serve . 
+npx serve public
 ~~~
 
 Pythonがインストールされている場合：
 
 ~~~sh
-python -m http.server 8080
+python -m http.server 8080 --directory public
 ~~~
 
 ## Vercel デプロイ
@@ -134,6 +136,7 @@ Vercel のビルドでは次の処理を行います。
 - `wasm32-unknown-unknown` ターゲットを追加
 - `mahjong-client` を release ビルド
 - Cargo で解決された Macroquad パッケージから JavaScript bundle をコピー
+- `assets/web/` からソース HTML と favicon をコピー
 - デプロイ用の Web アセットを `public/` 配下に配置
 
 同じ流れをローカルで再現する場合は、Bash、curl、Rust、および WASM ターゲットが利用できる環境で同等の手順を実行してください。

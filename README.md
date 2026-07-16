@@ -46,9 +46,9 @@ This repository is currently composed of the following crates.
 
 - `crates/`: workspace crates
 - `assets/`: runtime assets such as fonts
-- `public/`: web assets for deployment
+- `assets/web/`: source HTML and favicon for the browser client
+- `public/`: generated web assets for local serving and deployment
 - `scripts/`: build scripts used for deployment
-- `index.html`: local web entry point for the WASM client
 - `vercel.json`: Vercel build configuration
 
 ## Development
@@ -75,6 +75,9 @@ If you want to run the project locally with WASM, add the WASM target.
 rustup target add wasm32-unknown-unknown
 ~~~
 
+The browser build script also requires Bash with standard Unix utilities and
+Python 3.
+
 ### Commands
 
 Run tests:
@@ -92,27 +95,25 @@ cargo run -p mahjong-client
 Build the browser client locally:
 
 ~~~sh
-cargo build -p mahjong-client --target wasm32-unknown-unknown --release --locked
-python scripts/copy_macroquad_bundle.py
+bash scripts/vercel-build.sh
 ~~~
 
-The second command copies `mq_js_bundle.js` from the Macroquad package selected by
-`Cargo.lock` into `public/`. After building, serve this repository with any local
-static file server you prefer and open index.html to view the generated WASM
-client in a browser.
+The script builds the WASM client, copies `mq_js_bundle.js` from the Macroquad
+package selected by `Cargo.lock`, and assembles the generated web application
+under `public/`. Serve that directory to view the client in a browser.
 
 e.g.
 
 If `npx` is installed:
 
 ~~~sh
-npx serve .
+npx serve public
 ~~~
 
 If Python is installed:
 
 ~~~sh
-python -m http.server 8080
+python -m http.server 8080 --directory public
 ~~~
 
 ## Vercel deployment
@@ -134,6 +135,7 @@ The Vercel build performs the following steps.
 - adds the `wasm32-unknown-unknown` target
 - builds `mahjong-client` in release mode
 - copies the JavaScript bundle from the Cargo-resolved Macroquad package
+- copies the source HTML and favicon from `assets/web/`
 - places deployable web assets under `public/`
 
 To reproduce the same flow locally, run equivalent steps in an environment where Bash, curl, Rust, and the WASM target are available.
