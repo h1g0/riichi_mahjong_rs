@@ -251,10 +251,9 @@ impl GameState {
             return None;
         }
 
-        // Swap-calling-forbidden tiles cannot be discarded: keep the
-        // selected (raised) look and show the warning, but do not emit a
-        // discard. Outside our turn they are ordinary reference
-        // selections, so no discard warning is needed.
+        // Keep forbidden tiles selected so the raised tile and warning
+        // explain the rejected discard. Outside our turn no discard is
+        // attempted, so showing that warning would be misleading.
         if can_discard && self.forbidden_discards.contains(&tile.get()) {
             self.selected_tile = Some(idx);
             self.selected_drawn = false;
@@ -353,7 +352,6 @@ impl GameState {
 
         // Overlay clicks, as reported by draw_game.
         if let Some(click) = overlay_click {
-            // Every overlay control is outside the hand.
             self.clear_tile_selection();
 
             if self.nine_terminals_pending {
@@ -457,22 +455,19 @@ impl GameState {
             }
         }
 
-        // During our own riichi turn the drawn tile is handled only by
-        // tsumo/pei or automatic tsumogiri. Informational selection
-        // remains available during the other players' turns.
+        // Do not let inspection selection interfere with tsumo/pei or
+        // automatic tsumogiri during our own riichi turn.
         if self.is_my_turn && self.is_riichi {
             return None;
         }
 
-        // Hand selection is also available outside our turn. The click
-        // helpers below keep actual discards gated to our own turn.
         if !is_mouse_button_pressed(MouseButton::Left) {
             return None;
         }
 
-        // Nine terminals is an own-turn decision, so do not let a hand
-        // click accidentally become a discard. Call-response panels are
-        // outside our turn and still allow informational selection.
+        // Do not let a hand click become a discard while the own-turn
+        // nine terminals decision is unresolved. Call-response panels
+        // occur outside our turn, so inspection remains safe there.
         if self.nine_terminals_pending {
             self.clear_tile_selection();
             return None;

@@ -356,7 +356,6 @@ fn test_hand_selection_is_informational_outside_our_turn() {
     assert_eq!(state.selected_tile_type(), Some(Tile::M5));
     assert_eq!(state.hand.len(), 2);
 
-    // A second click remains a reference selection and must not discard.
     assert!(state.handle_hand_tile_click(1).is_none());
     assert_eq!(state.selected_tile, Some(1));
     assert_eq!(state.hand.len(), 2);
