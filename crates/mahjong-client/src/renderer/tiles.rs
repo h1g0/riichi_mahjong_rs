@@ -145,8 +145,9 @@ pub(super) fn draw_melds(state: &GameState, tile_textures: &TileTextures) {
 
     // Earliest meld on the right, later melds further left.
     let xs = self_meld_x_positions(&state.melds, tw, th, meld_gap, right_edge);
+    let selected_tile_type = state.selected_tile_type();
     for (meld, &x) in state.melds.iter().zip(&xs) {
-        draw_meld_group(meld, x, meld_y, tw, th, tile_textures);
+        draw_meld_group(meld, x, meld_y, tw, th, tile_textures, selected_tile_type);
     }
 }
 
@@ -178,8 +179,16 @@ pub(super) fn draw_meld_tile(
     w: f32,
     h: f32,
     tile_textures: &TileTextures,
+    selected_tile_type: Option<TileType>,
 ) {
-    draw_tile_sprite(tile_textures.for_tile(tile), x, y, w - 2.0, h - 2.0, WHITE);
+    draw_tile_sprite(
+        tile_textures.for_tile(tile),
+        x,
+        y,
+        w - 2.0,
+        h - 2.0,
+        public_tile_tint(tile, selected_tile_type),
+    );
 }
 
 /// Draws a sideways (90-degree) meld tile.
@@ -190,6 +199,7 @@ pub(super) fn draw_meld_tile_sideways(
     tw: f32,
     th: f32,
     tile_textures: &TileTextures,
+    selected_tile_type: Option<TileType>,
 ) {
     // A sideways tile's bounding box is th wide and tw tall.
     draw_tile_sprite_rotated(
@@ -198,7 +208,7 @@ pub(super) fn draw_meld_tile_sideways(
         y,
         tw - 2.0,
         th - 2.0,
-        WHITE,
+        public_tile_tint(tile, selected_tile_type),
         -std::f32::consts::FRAC_PI_2,
     );
 }
@@ -249,6 +259,7 @@ pub(super) fn draw_meld_group(
     tw: f32,
     th: f32,
     tile_textures: &TileTextures,
+    selected_tile_type: Option<TileType>,
 ) {
     match meld.category {
         MeldType::Kan if meld.from == MeldFrom::Myself => {
@@ -258,7 +269,15 @@ pub(super) fn draw_meld_group(
                 if i == 0 || i == 3 {
                     draw_meld_tile_back(x, base_y, tw, th, tile_textures);
                 } else {
-                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
+                    draw_meld_tile(
+                        x,
+                        base_y,
+                        &meld.tiles[i],
+                        tw,
+                        th,
+                        tile_textures,
+                        selected_tile_type,
+                    );
                 }
             }
         }
@@ -270,7 +289,15 @@ pub(super) fn draw_meld_group(
 
             let mut x = base_x;
             if let Some(ct) = called {
-                draw_meld_tile_sideways(x, base_y + (th - tw), &ct, tw, th, tile_textures);
+                draw_meld_tile_sideways(
+                    x,
+                    base_y + (th - tw),
+                    &ct,
+                    tw,
+                    th,
+                    tile_textures,
+                    selected_tile_type,
+                );
                 x += th;
                 let mut skipped = false;
                 for tile in &sorted_tiles {
@@ -278,12 +305,12 @@ pub(super) fn draw_meld_group(
                         skipped = true;
                         continue;
                     }
-                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures);
+                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures, selected_tile_type);
                     x += tw;
                 }
             } else {
                 for tile in &sorted_tiles {
-                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures);
+                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures, selected_tile_type);
                     x += tw;
                 }
             }
@@ -301,10 +328,19 @@ pub(super) fn draw_meld_group(
                         tw,
                         th,
                         tile_textures,
+                        selected_tile_type,
                     );
                     x += th;
                 } else {
-                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
+                    draw_meld_tile(
+                        x,
+                        base_y,
+                        &meld.tiles[i],
+                        tw,
+                        th,
+                        tile_textures,
+                        selected_tile_type,
+                    );
                     x += tw;
                 }
             }
@@ -322,10 +358,19 @@ pub(super) fn draw_meld_group(
                         tw,
                         th,
                         tile_textures,
+                        selected_tile_type,
                     );
                     x += th;
                 } else {
-                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
+                    draw_meld_tile(
+                        x,
+                        base_y,
+                        &meld.tiles[i],
+                        tw,
+                        th,
+                        tile_textures,
+                        selected_tile_type,
+                    );
                     x += tw;
                 }
             }
@@ -343,6 +388,7 @@ pub(super) fn draw_meld_group(
                         tw,
                         th,
                         tile_textures,
+                        selected_tile_type,
                     );
                     if meld.tiles.len() > 3 {
                         draw_meld_tile_sideways(
@@ -352,11 +398,20 @@ pub(super) fn draw_meld_group(
                             tw,
                             th,
                             tile_textures,
+                            selected_tile_type,
                         );
                     }
                     x += th;
                 } else {
-                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures);
+                    draw_meld_tile(
+                        x,
+                        base_y,
+                        &meld.tiles[i],
+                        tw,
+                        th,
+                        tile_textures,
+                        selected_tile_type,
+                    );
                     x += tw;
                 }
             }
@@ -512,6 +567,7 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
 
     let base_y = BOARD_CENTER_Y + hand_distance;
     let now = get_time();
+    let selected_tile_type = state.selected_tile_type();
 
     for other_idx in 0..(state.player_count - 1) {
         let relative_idx = other_idx + 1; // 1 right, 2 across, 3 left
@@ -555,7 +611,14 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
         let mut x = start_x;
         if other.revealed {
             for tile in &other.hand {
-                draw_tile_sprite(tile_textures.for_tile(tile), x, base_y, tw, th, WHITE);
+                draw_tile_sprite(
+                    tile_textures.for_tile(tile),
+                    x,
+                    base_y,
+                    tw,
+                    th,
+                    public_tile_tint(tile, selected_tile_type),
+                );
                 x += tile_step;
             }
         } else {
@@ -598,7 +661,7 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
         }
         let xs = other_meld_x_positions(&other.melds, tw, th, meld_gap, x + meld_offset);
         for (meld, &mx) in other.melds.iter().zip(&xs) {
-            draw_meld_group(meld, mx, base_y, tw, th, tile_textures);
+            draw_meld_group(meld, mx, base_y, tw, th, tile_textures, selected_tile_type);
         }
 
         set_design_camera();
