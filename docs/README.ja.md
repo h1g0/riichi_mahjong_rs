@@ -92,10 +92,14 @@ cargo run -p mahjong-client
 ブラウザ向けクライアントをローカルビルド:
 
 ~~~sh
-cargo build -p mahjong-client --target wasm32-unknown-unknown --release
+cargo build -p mahjong-client --target wasm32-unknown-unknown --release --locked
+python scripts/copy_macroquad_bundle.py
 ~~~
 
-ビルド後は、お好みの方法でこのリポジトリをローカルの静的ファイルサーバーで配信し、index.html を開くと生成した WASM クライアントをブラウザで確認できます。
+2つ目のコマンドは、`Cargo.lock` で選択された Macroquad パッケージから
+`mq_js_bundle.js` を `public/` へコピーします。ビルド後は、お好みの方法で
+このリポジトリをローカルの静的ファイルサーバーで配信し、index.html を
+開くと生成した WASM クライアントをブラウザで確認できます。
 
 例：
 
@@ -129,9 +133,13 @@ Vercel のビルドでは次の処理を行います。
 - 必要に応じて `rustup` を導入
 - `wasm32-unknown-unknown` ターゲットを追加
 - `mahjong-client` を release ビルド
+- Cargo で解決された Macroquad パッケージから JavaScript bundle をコピー
 - デプロイ用の Web アセットを `public/` 配下に配置
 
 同じ流れをローカルで再現する場合は、Bash、curl、Rust、および WASM ターゲットが利用できる環境で同等の手順を実行してください。
+
+`Cargo.lock` 内の Macroquad を更新すると、次回のブラウザ向けビルドから、
+そのパッケージ版に同梱された bundle が自動的に使用されます。
 
 デプロイした Web クライアントをオンラインサーバへ接続させるには、Vercel プロジェクトの環境変数 `MAHJONG_SERVER_URL` を設定します（例: `wss://your-app.fly.dev/ws`）。ビルド時に `window.MAHJONG_SERVER_URL` へ注入されます。未設定の場合は `ws://127.0.0.1:8080/ws`（ローカル開発用）にフォールバックします。
 

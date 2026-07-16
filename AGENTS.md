@@ -22,7 +22,8 @@ cargo test -p mahjong-server
 cargo run -p mahjong-client
 
 # Build WASM client
-cargo build -p mahjong-client --target wasm32-unknown-unknown --release
+cargo build -p mahjong-client --target wasm32-unknown-unknown --release --locked
+python scripts/copy_macroquad_bundle.py
 
 # Serve WASM locally (after building)
 python -m http.server 8080

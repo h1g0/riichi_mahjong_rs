@@ -14,8 +14,8 @@ fi
 rm -rf public
 mkdir -p public
 
-cargo build --release --target wasm32-unknown-unknown -p mahjong-client
-cp mq_js_bundle.js public/mq_js_bundle.js
+cargo build --locked --release --target wasm32-unknown-unknown -p mahjong-client
+python3 scripts/copy_macroquad_bundle.py
 cp target/wasm32-unknown-unknown/release/mahjong-client.wasm public/mahjong-client.wasm
 cp crates/mahjong-client/js/ws.js public/ws.js
 cp crates/mahjong-client/js/storage.js public/storage.js
@@ -35,7 +35,7 @@ mv public/ws.js "public/ws.${ws_hash}.js"
 mv public/storage.js "public/storage.${storage_hash}.js"
 
 sed -i "s|target/wasm32-unknown-unknown/release/mahjong-client.wasm|mahjong-client.${wasm_hash}.wasm|" public/index.html
-sed -i "s|mq_js_bundle.js|mq_js_bundle.${js_hash}.js|" public/index.html
+sed -i "s|public/mq_js_bundle.js|mq_js_bundle.${js_hash}.js|" public/index.html
 sed -i "s|crates/mahjong-client/js/ws.js|ws.${ws_hash}.js|" public/index.html
 sed -i "s|crates/mahjong-client/js/storage.js|storage.${storage_hash}.js|" public/index.html
 

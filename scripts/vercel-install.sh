@@ -9,6 +9,10 @@ if ! command -v curl >/dev/null 2>&1; then
   dnf install -y curl
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  dnf install -y python3
+fi
+
 if ! command -v rustup >/dev/null 2>&1; then
   curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
 fi
