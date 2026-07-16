@@ -147,7 +147,7 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     }
     for meld in &state.win_melds {
         x += meld_gap;
-        draw_meld_group(meld, x, hand_y, tw, th, tile_textures);
+        draw_meld_group(meld, x, hand_y, tw, th, tile_textures, None);
         x += calc_meld_width(meld, tw, th);
     }
     y = hand_y + th + 20.0;

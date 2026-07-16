@@ -80,16 +80,18 @@ pub(super) fn draw_dora_panel(
     );
 
     let revealed = state.dora_indicators.len();
+    let selected_tile_type = state.selected_tile_type();
     for i in 0..5 {
         let x = tiles_x + i as f32 * (dora_w + 1.0);
         if i < revealed {
+            let tile = &state.dora_indicators[i];
             draw_tile_sprite(
-                tile_textures.for_tile(&state.dora_indicators[i]),
+                tile_textures.for_tile(tile),
                 x,
                 tiles_y,
                 dora_w,
                 dora_h,
-                WHITE,
+                public_tile_tint(tile, selected_tile_type),
             );
         } else {
             draw_tile_sprite(&tile_textures.back, x, tiles_y, dora_w, dora_h, WHITE);
@@ -384,6 +386,7 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
 
     let my_wind_idx = state.my_wind_index();
     let my_initial_wind_idx = state.my_initial_wind_index();
+    let selected_tile_type = state.selected_tile_type();
 
     for rel in 0..state.player_count {
         let discards = &state.discards[rel];
@@ -407,7 +410,7 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
                     start_y,
                     kw,
                     kh,
-                    WHITE,
+                    public_tile_tint(&north, selected_tile_type),
                 );
             }
         }
@@ -440,6 +443,7 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
             if discard.is_called {
                 tint.a = 0.28;
             }
+            tint = public_tile_tint_with_base(&discard.tile, selected_tile_type, tint);
 
             if row != current_row {
                 col_offset = 0.0;

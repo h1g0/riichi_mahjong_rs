@@ -459,6 +459,20 @@ impl GameState {
         crate::i18n::Translator::new(self.lang)
     }
 
+    /// Tile kind currently selected in our hand.
+    ///
+    /// Red fives intentionally return the same kind as normal fives so
+    /// every publicly visible copy of that tile kind can be highlighted.
+    pub(crate) fn selected_tile_type(&self) -> Option<TileType> {
+        if self.selected_drawn {
+            self.drawn.map(|tile| tile.get())
+        } else {
+            self.selected_tile
+                .and_then(|idx| self.hand.get(idx))
+                .map(|tile| tile.get())
+        }
+    }
+
     /// Localized heading for a message-style hand result.
     pub fn message_result_heading(&self) -> &'static str {
         match self.message_result_kind {

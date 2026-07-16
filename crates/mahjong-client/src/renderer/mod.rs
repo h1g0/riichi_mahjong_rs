@@ -28,7 +28,7 @@ use tiles::*;
 use macroquad::prelude::*;
 use mahjong_core::scoring::score::{DoraLabel, ScoreRank};
 use mahjong_core::settings::Lang;
-use mahjong_core::tile::Tile;
+use mahjong_core::tile::{Tile, TileType};
 use mahjong_server::cpu::client::CpuConfig;
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
@@ -37,6 +37,33 @@ use crate::game::{GamePhase, GameState, SetupState};
 use crate::i18n::Key;
 
 const RIICHI_DISABLED_TINT: Color = Color::new(0.45, 0.45, 0.42, 1.0);
+const PUBLIC_TILE_HIGHLIGHT_TINT: Color = Color::new(0.48, 0.70, 1.0, 1.0);
+
+/// Light complementary-blue tint for a publicly visible tile matching
+/// the selected hand tile. Matching is by tile kind, so red and normal
+/// fives correspond.
+fn public_tile_tint(tile: &Tile, selected_tile_type: Option<TileType>) -> Color {
+    public_tile_tint_with_base(tile, selected_tile_type, WHITE)
+}
+
+/// Applies the public-tile highlight while preserving an existing
+/// transparency such as a called discard's dimmed appearance.
+fn public_tile_tint_with_base(
+    tile: &Tile,
+    selected_tile_type: Option<TileType>,
+    base: Color,
+) -> Color {
+    if selected_tile_type == Some(tile.get()) {
+        Color::new(
+            PUBLIC_TILE_HIGHLIGHT_TINT.r,
+            PUBLIC_TILE_HIGHLIGHT_TINT.g,
+            PUBLIC_TILE_HIGHLIGHT_TINT.b,
+            base.a,
+        )
+    } else {
+        base
+    }
+}
 
 const TILE_W: f32 = 48.0;
 const TILE_H: f32 = 68.0;

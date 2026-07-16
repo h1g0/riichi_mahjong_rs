@@ -1,7 +1,8 @@
 //! Unit tests for the rendering layout.
 
 use super::{
-    PLAYER_ROTATIONS, buffer_to_design, calc_meld_width, other_meld_x_positions, rotation_index,
+    PLAYER_ROTATIONS, PUBLIC_TILE_HIGHLIGHT_TINT, buffer_to_design, calc_meld_width,
+    other_meld_x_positions, public_tile_tint, public_tile_tint_with_base, rotation_index,
     seat_at_relative_position, self_meld_x_positions,
 };
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
@@ -22,6 +23,28 @@ fn buffer_to_design_scales_each_axis_independently() {
 #[test]
 fn buffer_to_design_handles_zero_sized_surface() {
     assert_eq!(buffer_to_design(10.0, 20.0, 0.0, 800.0), (0.0, 0.0));
+}
+
+#[test]
+fn public_tile_highlight_matches_red_and_normal_fives_by_kind() {
+    let red_five = Tile::new_red(Tile::M5);
+    assert_eq!(
+        public_tile_tint(&red_five, Some(Tile::M5)),
+        PUBLIC_TILE_HIGHLIGHT_TINT
+    );
+    assert_eq!(public_tile_tint(&red_five, Some(Tile::P5)), WHITE);
+}
+
+#[test]
+fn public_tile_highlight_preserves_called_discard_transparency() {
+    let tile = Tile::new(Tile::S3);
+    let base = Color::new(0.72, 0.72, 0.72, 0.28);
+    let tint = public_tile_tint_with_base(&tile, Some(Tile::S3), base);
+
+    assert_eq!(tint.a, 0.28);
+    assert_eq!(tint.r, PUBLIC_TILE_HIGHLIGHT_TINT.r);
+    assert_eq!(tint.g, PUBLIC_TILE_HIGHLIGHT_TINT.g);
+    assert_eq!(tint.b, PUBLIC_TILE_HIGHLIGHT_TINT.b);
 }
 
 /// Minimal pon meld for the ordering tests.

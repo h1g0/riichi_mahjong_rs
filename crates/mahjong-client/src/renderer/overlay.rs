@@ -10,7 +10,7 @@ use mahjong_server::protocol::{AvailableCall, ClientAction};
 
 use super::{
     AGARI_FONT, DESIGN_W, FONT_SIZE, SMALL_FONT, TileTextures, draw_jp_text, draw_tile_sprite,
-    theme,
+    public_tile_tint, theme,
 };
 use crate::game::GameState;
 use crate::i18n::Key;
@@ -392,7 +392,7 @@ fn draw_call_overlay(
             tile_y,
             tile_w - 8.0,
             tile_h - 8.0,
-            WHITE,
+            public_tile_tint(&target, state.selected_tile_type()),
         );
     }
 

@@ -41,8 +41,15 @@ impl GameState {
         self.riichi_selection_mode = false;
         self.riichi_selectable_tiles.clear();
         self.riichi_selectable_drawn = false;
+        self.clear_tile_selection();
+    }
+
+    /// Clears the currently selected hand tile and its related warnings.
+    pub(super) fn clear_tile_selection(&mut self) {
         self.selected_tile = None;
         self.selected_drawn = false;
+        self.selected_forbidden_swap = false;
+        self.selected_would_cause_furiten = false;
     }
 
     pub(super) fn can_discard_for_riichi(&self, tile: Option<Tile>) -> bool {
@@ -231,6 +238,78 @@ impl GameState {
         discarded_tile
     }
 
+    /// Handles a click on one of our concealed hand tiles.
+    ///
+    /// Selection is always available while playing. Only our turn, and
+    /// only before riichi, permits a second click to submit a discard.
+    pub(super) fn handle_hand_tile_click(&mut self, idx: usize) -> Option<ClientAction> {
+        let &tile = self.hand.get(idx)?;
+        let can_discard = self.is_my_turn && !self.is_riichi;
+
+        if can_discard && self.riichi_selection_mode && !self.riichi_selectable_tiles.contains(&idx)
+        {
+            return None;
+        }
+
+        // Keep forbidden tiles selected so the raised tile and warning
+        // explain the rejected discard. Outside our turn no discard is
+        // attempted, so showing that warning would be misleading.
+        if can_discard && self.forbidden_discards.contains(&tile.get()) {
+            self.selected_tile = Some(idx);
+            self.selected_drawn = false;
+            self.selected_would_cause_furiten = false;
+            self.selected_forbidden_swap = true;
+            return None;
+        }
+
+        if can_discard && self.selected_tile == Some(idx) {
+            let discarded_tile = self.apply_local_discard_from_hand(idx);
+            if self.riichi_selection_mode {
+                self.clear_riichi_selection();
+                return self.submit_turn_action(ClientAction::Riichi {
+                    tile: Some(discarded_tile),
+                });
+            }
+            return self.submit_turn_action(ClientAction::Discard {
+                tile: Some(discarded_tile),
+            });
+        }
+
+        self.selected_tile = Some(idx);
+        self.selected_drawn = false;
+        self.selected_forbidden_swap = false;
+        self.selected_would_cause_furiten =
+            can_discard && self.would_discard_cause_furiten(Some(tile));
+        None
+    }
+
+    /// Handles a click on our drawn tile, with the same informational
+    /// selection behavior outside our turn as concealed hand tiles.
+    pub(super) fn handle_drawn_tile_click(&mut self) -> Option<ClientAction> {
+        self.drawn?;
+        let can_discard = self.is_my_turn && !self.is_riichi;
+
+        if can_discard && self.riichi_selection_mode && !self.riichi_selectable_drawn {
+            return None;
+        }
+
+        if can_discard && self.selected_drawn {
+            self.selected_drawn = false;
+            self.drawn.take();
+            if self.riichi_selection_mode {
+                self.clear_riichi_selection();
+                return self.submit_turn_action(ClientAction::Riichi { tile: None });
+            }
+            return self.submit_turn_action(ClientAction::Discard { tile: None });
+        }
+
+        self.selected_drawn = true;
+        self.selected_tile = None;
+        self.selected_forbidden_swap = false;
+        self.selected_would_cause_furiten = can_discard && self.would_discard_cause_furiten(None);
+        None
+    }
+
     /// Input handling: turns overlay clicks and hand clicks into actions.
     pub fn handle_input(
         &mut self,
@@ -273,6 +352,8 @@ impl GameState {
 
         // Overlay clicks, as reported by draw_game.
         if let Some(click) = overlay_click {
+            self.clear_tile_selection();
+
             if self.nine_terminals_pending {
                 match click {
                     OverlayClick::NineTerminalsDeclare => {
@@ -374,21 +455,21 @@ impl GameState {
             }
         }
 
-        // Hand clicks cannot discard while in riichi.
-        if self.is_riichi {
+        // Do not let inspection selection interfere with tsumo/pei or
+        // automatic tsumogiri during our own riichi turn.
+        if self.is_my_turn && self.is_riichi {
             return None;
         }
 
-        if !self.is_my_turn || !is_mouse_button_pressed(MouseButton::Left) {
+        if !is_mouse_button_pressed(MouseButton::Left) {
             return None;
         }
 
-        // Ignore hand clicks while a decision panel is open.
-        if self.nine_terminals_pending
-            || self.chi_option_selecting
-            || self.pon_option_selecting
-            || !self.available_calls.is_empty()
-        {
+        // Do not let a hand click become a discard while the own-turn
+        // nine terminals decision is unresolved. Call-response panels
+        // occur outside our turn, so inspection remains safe there.
+        if self.nine_terminals_pending {
+            self.clear_tile_selection();
             return None;
         }
 
@@ -400,72 +481,33 @@ impl GameState {
         let hand_y = crate::renderer::HAND_Y;
         let tile_w = 48.0;
         let tile_h = 68.0;
+        let selected_raise = 14.0;
 
         for i in 0..hand_len {
             let x = hand_start_x + i as f32 * tile_w;
-            if mx >= x && mx <= x + tile_w && my >= hand_y && my <= hand_y + tile_h {
-                if self.riichi_selection_mode && !self.riichi_selectable_tiles.contains(&i) {
-                    return None;
-                }
-
-                // Swap-calling-forbidden tiles cannot be discarded: keep
-                // the selected (raised) look and show the warning, but
-                // do not emit a discard.
-                if self.forbidden_discards.contains(&self.hand[i].get()) {
-                    self.selected_tile = Some(i);
-                    self.selected_drawn = false;
-                    self.selected_would_cause_furiten = false;
-                    self.selected_forbidden_swap = true;
-                    return None;
-                }
-
-                if self.selected_tile == Some(i) {
-                    let discarded_tile = self.apply_local_discard_from_hand(i);
-                    if self.riichi_selection_mode {
-                        self.clear_riichi_selection();
-                        return self.submit_turn_action(ClientAction::Riichi {
-                            tile: Some(discarded_tile),
-                        });
-                    }
-                    return self.submit_turn_action(ClientAction::Discard {
-                        tile: Some(discarded_tile),
-                    });
-                }
-
-                self.selected_tile = Some(i);
-                self.selected_drawn = false;
-                self.selected_forbidden_swap = false;
-                self.selected_would_cause_furiten =
-                    self.would_discard_cause_furiten(Some(self.hand[i]));
-                return None;
+            let y = if self.selected_tile == Some(i) {
+                hand_y - selected_raise
+            } else {
+                hand_y
+            };
+            if mx >= x && mx <= x + tile_w && my >= y && my <= y + tile_h {
+                return self.handle_hand_tile_click(i);
             }
         }
 
         if self.drawn.is_some() {
             let drawn_x = hand_start_x + hand_len as f32 * tile_w + crate::renderer::DRAWN_GAP;
-            if mx >= drawn_x && mx <= drawn_x + tile_w && my >= hand_y && my <= hand_y + tile_h {
-                if self.riichi_selection_mode && !self.riichi_selectable_drawn {
-                    return None;
-                }
-
-                if self.selected_drawn {
-                    self.selected_drawn = false;
-                    self.drawn.take();
-                    if self.riichi_selection_mode {
-                        self.clear_riichi_selection();
-                        return self.submit_turn_action(ClientAction::Riichi { tile: None });
-                    }
-                    return self.submit_turn_action(ClientAction::Discard { tile: None });
-                }
-
-                self.selected_drawn = true;
-                self.selected_tile = None;
-                self.selected_forbidden_swap = false;
-                self.selected_would_cause_furiten = self.would_discard_cause_furiten(None);
-                return None;
+            let drawn_y = if self.selected_drawn {
+                hand_y - selected_raise
+            } else {
+                hand_y
+            };
+            if mx >= drawn_x && mx <= drawn_x + tile_w && my >= drawn_y && my <= drawn_y + tile_h {
+                return self.handle_drawn_tile_click();
             }
         }
 
+        self.clear_tile_selection();
         None
     }
 }

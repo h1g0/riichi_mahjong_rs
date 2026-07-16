@@ -345,6 +345,90 @@ fn test_self_turn_action_hides_stale_controls_until_server_event() {
 }
 
 #[test]
+fn test_hand_selection_is_informational_outside_our_turn() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.hand = vec![Tile::new(Tile::M1), Tile::new_red(Tile::M5)];
+    state.is_my_turn = false;
+
+    assert!(state.handle_hand_tile_click(1).is_none());
+    assert_eq!(state.selected_tile, Some(1));
+    assert_eq!(state.selected_tile_type(), Some(Tile::M5));
+    assert_eq!(state.hand.len(), 2);
+
+    assert!(state.handle_hand_tile_click(1).is_none());
+    assert_eq!(state.selected_tile, Some(1));
+    assert_eq!(state.hand.len(), 2);
+}
+
+#[test]
+fn test_hand_selection_still_discards_on_second_click_during_our_turn() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.hand = vec![Tile::new(Tile::M1), Tile::new(Tile::M2)];
+    state.drawn = Some(Tile::new(Tile::P9));
+    state.is_my_turn = true;
+
+    assert!(state.handle_hand_tile_click(1).is_none());
+    let action = state.handle_hand_tile_click(1);
+
+    assert!(matches!(
+        action,
+        Some(ClientAction::Discard {
+            tile: Some(tile)
+        }) if tile.get() == Tile::M2
+    ));
+    assert!(!state.is_my_turn);
+    assert_eq!(state.hand, vec![Tile::new(Tile::M1), Tile::new(Tile::P9)]);
+}
+
+#[test]
+fn test_selected_drawn_tile_type_is_available_outside_our_turn() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.drawn = Some(Tile::new_red(Tile::P5));
+    state.is_my_turn = false;
+
+    assert!(state.handle_drawn_tile_click().is_none());
+    assert!(state.selected_drawn);
+    assert_eq!(state.selected_tile_type(), Some(Tile::P5));
+    assert!(state.drawn.is_some());
+}
+
+#[test]
+fn test_clearing_tile_selection_also_clears_related_warnings() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.selected_tile = Some(0);
+    state.selected_drawn = true;
+    state.selected_forbidden_swap = true;
+    state.selected_would_cause_furiten = true;
+
+    state.clear_tile_selection();
+
+    assert_eq!(state.selected_tile, None);
+    assert!(!state.selected_drawn);
+    assert!(!state.selected_forbidden_swap);
+    assert!(!state.selected_would_cause_furiten);
+}
+
+#[test]
+fn test_overlay_click_clears_selected_tile() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.selected_tile = Some(0);
+    state.available_calls = vec![AvailableCall::Ron];
+
+    let action = state.handle_input(
+        Some(crate::renderer::OverlayClick::Action(ClientAction::Pass)),
+        100.0,
+    );
+
+    assert!(matches!(action, Some(ClientAction::Pass)));
+    assert_eq!(state.selected_tile, None);
+}
+
+#[test]
 fn test_sanma_relative_player_index_wraps_at_three() {
     let mut state = GameState::new();
     // With us as West, East sits to our right (relative 1).
