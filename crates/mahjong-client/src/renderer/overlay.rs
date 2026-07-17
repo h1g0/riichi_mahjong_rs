@@ -9,8 +9,8 @@ use mahjong_core::tile::Tile;
 use mahjong_server::protocol::{AvailableCall, ClientAction};
 
 use super::{
-    AGARI_FONT, DESIGN_W, FONT_SIZE, SMALL_FONT, TileTextures, draw_jp_text, draw_tile_sprite,
-    public_tile_tint, theme,
+    AGARI_FONT, DESIGN_W, DORA_TILE_TINT, DoraTileTypes, FONT_SIZE, SMALL_FONT, TileTextures,
+    dora_tile_tint, dora_tile_types, draw_jp_text, draw_tile_sprite, theme, visible_tile_tint,
 };
 use crate::game::GameState;
 use crate::i18n::Key;
@@ -344,6 +344,7 @@ fn draw_call_overlay(
     let tile_w = CALL_PANEL_TILE_W;
     let tile_h = CALL_PANEL_TILE_H;
     let tile_gap = 12.0_f32;
+    let dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
 
     let non_ron_call_count = state
         .available_calls
@@ -392,7 +393,7 @@ fn draw_call_overlay(
             tile_y,
             tile_w - 8.0,
             tile_h - 8.0,
-            public_tile_tint(&target, state.selected_tile_type()),
+            visible_tile_tint(&target, state.selected_tile_type(), &dora_tile_types),
         );
     }
 
@@ -509,7 +510,7 @@ fn draw_self_call_overlay(
 ) -> Option<OverlayClick> {
     let tr = state.tr();
 
-    let mut units: Vec<(Tile, &'static str, CallBtnKind, ClientAction)> = Vec::new();
+    let mut units: Vec<(Tile, &'static str, CallBtnKind, ClientAction, bool)> = Vec::new();
     for tile in &state.self_kan_options {
         units.push((
             *tile,
@@ -518,6 +519,7 @@ fn draw_self_call_overlay(
             ClientAction::Kan {
                 tile_index: tile.get() as usize,
             },
+            false,
         ));
     }
     if state.can_pei {
@@ -526,6 +528,7 @@ fn draw_self_call_overlay(
             tr.get(Key::Pei),
             CallBtnKind::Pei,
             ClientAction::Pei,
+            true,
         ));
     }
     if units.is_empty() {
@@ -537,6 +540,7 @@ fn draw_self_call_overlay(
     let tile_w = CALL_PANEL_TILE_W;
     let tile_h = CALL_PANEL_TILE_H;
     let pad = CALL_PANEL_PAD;
+    let dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
 
     // One unit = sprite + gap + button.
     let unit_w = tile_w + SELF_CALL_TILE_GAP + btn_w;
@@ -575,17 +579,22 @@ fn draw_self_call_overlay(
     );
 
     let mut result = None;
-    for (idx, (tile, label, kind, action)) in units.into_iter().enumerate() {
+    for (idx, (tile, label, kind, action, is_pei_dora)) in units.into_iter().enumerate() {
         let unit_x = base_x + idx as f32 * (unit_w + SELF_CALL_UNIT_SPACING);
         // Sprite vertically centered against the button.
         let tile_y = base_y + (btn_h - tile_h) / 2.0;
+        let tint = if is_pei_dora {
+            DORA_TILE_TINT
+        } else {
+            dora_tile_tint(&tile, &dora_tile_types)
+        };
         draw_tile_sprite(
             tile_textures.for_tile(&tile),
             unit_x,
             tile_y,
             tile_w - 8.0,
             tile_h - 8.0,
-            WHITE,
+            tint,
         );
         let btn_x = unit_x + tile_w + SELF_CALL_TILE_GAP;
         draw_call_button(font, btn_x, base_y, btn_w, btn_h, label, kind);
@@ -633,6 +642,7 @@ fn draw_chi_selection_overlay(
             cancel_label: tr.get(Key::Cancel),
             called_tile,
             options: &state.chi_pending_options,
+            dora_tile_types: dora_tile_types(&state.dora_indicators, state.is_three_player()),
             click: ClickState { clicked, mx, my },
         },
         |opt| ClientAction::Chi { tiles: opt },
@@ -657,6 +667,7 @@ fn draw_pon_selection_overlay(
             cancel_label: tr.get(Key::Cancel),
             called_tile,
             options: &state.pon_pending_options,
+            dora_tile_types: dora_tile_types(&state.dora_indicators, state.is_three_player()),
             click: ClickState { clicked, mx, my },
         },
         |opt| ClientAction::Pon { tiles: opt },
@@ -677,6 +688,7 @@ struct MeldSelectionOverlay<'a> {
     cancel_label: &'a str,
     called_tile: Tile,
     options: &'a [[Tile; 2]],
+    dora_tile_types: DoraTileTypes,
     click: ClickState,
 }
 
@@ -691,6 +703,7 @@ fn draw_meld_selection_overlay(
         cancel_label,
         called_tile,
         options,
+        dora_tile_types,
         click,
     } = overlay;
     let ClickState { clicked, mx, my } = click;
@@ -767,7 +780,7 @@ fn draw_meld_selection_overlay(
             let tint = if *tile == called_tile {
                 Color::new(1.0, 1.0, 0.6, 1.0)
             } else {
-                WHITE
+                dora_tile_tint(tile, &dora_tile_types)
             };
             draw_tile_sprite(
                 tile_textures.for_tile(tile),

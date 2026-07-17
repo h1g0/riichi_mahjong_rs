@@ -1,9 +1,10 @@
 //! Unit tests for the rendering layout.
 
 use super::{
-    PLAYER_ROTATIONS, PUBLIC_TILE_HIGHLIGHT_TINT, buffer_to_design, calc_meld_width,
+    DORA_TILE_TINT, PLAYER_ROTATIONS, PUBLIC_TILE_HIGHLIGHT_TINT, add_dora_tile_types,
+    buffer_to_design, calc_meld_width, dora_tile_tint, dora_tile_tint_with_base, dora_tile_types,
     other_meld_x_positions, public_tile_tint, public_tile_tint_with_base, rotation_index,
-    seat_at_relative_position, self_meld_x_positions,
+    seat_at_relative_position, self_meld_x_positions, visible_tile_tint,
 };
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType};
@@ -45,6 +46,55 @@ fn public_tile_highlight_preserves_called_discard_transparency() {
     assert_eq!(tint.r, PUBLIC_TILE_HIGHLIGHT_TINT.r);
     assert_eq!(tint.g, PUBLIC_TILE_HIGHLIGHT_TINT.g);
     assert_eq!(tint.b, PUBLIC_TILE_HIGHLIGHT_TINT.b);
+}
+
+#[test]
+fn dora_tiles_use_a_light_yellow_tint() {
+    let dora_types = dora_tile_types(&[Tile::new(Tile::M4)], false);
+
+    assert_eq!(
+        dora_tile_tint(&Tile::new(Tile::M5), &dora_types),
+        DORA_TILE_TINT
+    );
+    assert_eq!(
+        dora_tile_tint(&Tile::new_red(Tile::P5), &dora_types),
+        DORA_TILE_TINT
+    );
+    assert_eq!(dora_tile_tint(&Tile::new(Tile::P5), &dora_types), WHITE);
+}
+
+#[test]
+fn dora_tint_preserves_transparency() {
+    let tile = Tile::new(Tile::S3);
+    let dora_types = dora_tile_types(&[Tile::new(Tile::S2)], false);
+    let base = Color::new(0.72, 0.72, 0.72, 0.28);
+    let tint = dora_tile_tint_with_base(&tile, &dora_types, base);
+
+    assert_eq!(tint.a, 0.28);
+    assert_eq!(tint.r, DORA_TILE_TINT.r);
+    assert_eq!(tint.g, DORA_TILE_TINT.g);
+    assert_eq!(tint.b, DORA_TILE_TINT.b);
+}
+
+#[test]
+fn selected_public_tile_tint_takes_priority_over_dora_tint() {
+    let tile = Tile::new(Tile::Z1);
+    let dora_types = dora_tile_types(&[Tile::new(Tile::Z4)], false);
+
+    assert_eq!(
+        visible_tile_tint(&tile, Some(Tile::Z1), &dora_types),
+        PUBLIC_TILE_HIGHLIGHT_TINT
+    );
+}
+
+#[test]
+fn dora_types_include_three_player_and_uradora_indicators() {
+    let mut dora_types = dora_tile_types(&[Tile::new(Tile::M1)], true);
+    add_dora_tile_types(&mut dora_types, &[Tile::new(Tile::P4)], true);
+
+    assert!(dora_types[Tile::M9 as usize]);
+    assert!(!dora_types[Tile::M2 as usize]);
+    assert!(dora_types[Tile::P5 as usize]);
 }
 
 /// Minimal pon meld for the ordering tests.

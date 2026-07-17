@@ -80,6 +80,13 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
         Some(w) => w,
         None => return,
     };
+    let mut dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
+    add_dora_tile_types(
+        &mut dora_tile_types,
+        &state.uradora_indicators,
+        state.is_three_player(),
+    );
+    let tile_tint = TileTintContext::new(None, &dora_tile_types);
     let tr = state.tr();
     let yaku_count = wr.yaku.len().max(1);
     let kyoutaku_points = wr.riichi_points();
@@ -128,7 +135,14 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
     let mut x = cx - row_w / 2.0;
     let hand_y = y;
     for tile in &state.win_hand {
-        draw_tile_sprite(tile_textures.for_tile(tile), x, hand_y, tw, th, WHITE);
+        draw_tile_sprite(
+            tile_textures.for_tile(tile),
+            x,
+            hand_y,
+            tw,
+            th,
+            dora_tile_tint(tile, &dora_tile_types),
+        );
         x += tw;
     }
     if let Some(win_tile) = &state.win_tile {
@@ -142,12 +156,19 @@ pub(super) fn draw_win_panel(state: &GameState, font: Option<&Font>, tile_textur
             2.0,
             theme::GOLD_LT,
         );
-        draw_tile_sprite(tile_textures.for_tile(win_tile), x, hand_y, tw, th, WHITE);
+        draw_tile_sprite(
+            tile_textures.for_tile(win_tile),
+            x,
+            hand_y,
+            tw,
+            th,
+            dora_tile_tint(win_tile, &dora_tile_types),
+        );
         x += tw;
     }
     for meld in &state.win_melds {
         x += meld_gap;
-        draw_meld_group(meld, x, hand_y, tw, th, tile_textures, None);
+        draw_meld_group(meld, x, hand_y, tw, th, tile_textures, tile_tint);
         x += calc_meld_width(meld, tw, th);
     }
     y = hand_y + th + 20.0;
