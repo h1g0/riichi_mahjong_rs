@@ -6,6 +6,7 @@ pub(super) fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &
     let hand_start_x = player_hand_start_x(state.hand.len());
     let hand_y = HAND_Y;
     let tr = state.tr();
+    let dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
 
     // Hand first; badges draw later so tiles cannot cover them.
     for (i, tile) in state.hand.iter().enumerate() {
@@ -26,6 +27,7 @@ pub(super) fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &
             tile,
             riichi_disabled || swap_forbidden,
             tile_textures,
+            &dora_tile_types,
         );
     }
 
@@ -54,6 +56,7 @@ pub(super) fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &
             drawn,
             riichi_disabled,
             tile_textures,
+            &dora_tile_types,
         );
     }
 
@@ -146,8 +149,10 @@ pub(super) fn draw_melds(state: &GameState, tile_textures: &TileTextures) {
     // Earliest meld on the right, later melds further left.
     let xs = self_meld_x_positions(&state.melds, tw, th, meld_gap, right_edge);
     let selected_tile_type = state.selected_tile_type();
+    let dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
+    let tile_tint = TileTintContext::new(selected_tile_type, &dora_tile_types);
     for (meld, &x) in state.melds.iter().zip(&xs) {
-        draw_meld_group(meld, x, meld_y, tw, th, tile_textures, selected_tile_type);
+        draw_meld_group(meld, x, meld_y, tw, th, tile_textures, tile_tint);
     }
 }
 
@@ -179,7 +184,7 @@ pub(super) fn draw_meld_tile(
     w: f32,
     h: f32,
     tile_textures: &TileTextures,
-    selected_tile_type: Option<TileType>,
+    tile_tint: TileTintContext<'_>,
 ) {
     draw_tile_sprite(
         tile_textures.for_tile(tile),
@@ -187,7 +192,7 @@ pub(super) fn draw_meld_tile(
         y,
         w - 2.0,
         h - 2.0,
-        public_tile_tint(tile, selected_tile_type),
+        tile_tint.tint(tile),
     );
 }
 
@@ -199,7 +204,7 @@ pub(super) fn draw_meld_tile_sideways(
     tw: f32,
     th: f32,
     tile_textures: &TileTextures,
-    selected_tile_type: Option<TileType>,
+    tile_tint: TileTintContext<'_>,
 ) {
     // A sideways tile's bounding box is th wide and tw tall.
     draw_tile_sprite_rotated(
@@ -208,7 +213,7 @@ pub(super) fn draw_meld_tile_sideways(
         y,
         tw - 2.0,
         th - 2.0,
-        public_tile_tint(tile, selected_tile_type),
+        tile_tint.tint(tile),
         -std::f32::consts::FRAC_PI_2,
     );
 }
@@ -259,7 +264,7 @@ pub(super) fn draw_meld_group(
     tw: f32,
     th: f32,
     tile_textures: &TileTextures,
-    selected_tile_type: Option<TileType>,
+    tile_tint: TileTintContext<'_>,
 ) {
     match meld.category {
         MeldType::Kan if meld.from == MeldFrom::Myself => {
@@ -269,15 +274,7 @@ pub(super) fn draw_meld_group(
                 if i == 0 || i == 3 {
                     draw_meld_tile_back(x, base_y, tw, th, tile_textures);
                 } else {
-                    draw_meld_tile(
-                        x,
-                        base_y,
-                        &meld.tiles[i],
-                        tw,
-                        th,
-                        tile_textures,
-                        selected_tile_type,
-                    );
+                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures, tile_tint);
                 }
             }
         }
@@ -296,7 +293,7 @@ pub(super) fn draw_meld_group(
                     tw,
                     th,
                     tile_textures,
-                    selected_tile_type,
+                    tile_tint,
                 );
                 x += th;
                 let mut skipped = false;
@@ -305,12 +302,12 @@ pub(super) fn draw_meld_group(
                         skipped = true;
                         continue;
                     }
-                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures, selected_tile_type);
+                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures, tile_tint);
                     x += tw;
                 }
             } else {
                 for tile in &sorted_tiles {
-                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures, selected_tile_type);
+                    draw_meld_tile(x, base_y, tile, tw, th, tile_textures, tile_tint);
                     x += tw;
                 }
             }
@@ -328,19 +325,11 @@ pub(super) fn draw_meld_group(
                         tw,
                         th,
                         tile_textures,
-                        selected_tile_type,
+                        tile_tint,
                     );
                     x += th;
                 } else {
-                    draw_meld_tile(
-                        x,
-                        base_y,
-                        &meld.tiles[i],
-                        tw,
-                        th,
-                        tile_textures,
-                        selected_tile_type,
-                    );
+                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures, tile_tint);
                     x += tw;
                 }
             }
@@ -358,19 +347,11 @@ pub(super) fn draw_meld_group(
                         tw,
                         th,
                         tile_textures,
-                        selected_tile_type,
+                        tile_tint,
                     );
                     x += th;
                 } else {
-                    draw_meld_tile(
-                        x,
-                        base_y,
-                        &meld.tiles[i],
-                        tw,
-                        th,
-                        tile_textures,
-                        selected_tile_type,
-                    );
+                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures, tile_tint);
                     x += tw;
                 }
             }
@@ -388,7 +369,7 @@ pub(super) fn draw_meld_group(
                         tw,
                         th,
                         tile_textures,
-                        selected_tile_type,
+                        tile_tint,
                     );
                     if meld.tiles.len() > 3 {
                         draw_meld_tile_sideways(
@@ -398,20 +379,12 @@ pub(super) fn draw_meld_group(
                             tw,
                             th,
                             tile_textures,
-                            selected_tile_type,
+                            tile_tint,
                         );
                     }
                     x += th;
                 } else {
-                    draw_meld_tile(
-                        x,
-                        base_y,
-                        &meld.tiles[i],
-                        tw,
-                        th,
-                        tile_textures,
-                        selected_tile_type,
-                    );
+                    draw_meld_tile(x, base_y, &meld.tiles[i], tw, th, tile_textures, tile_tint);
                     x += tw;
                 }
             }
@@ -425,11 +398,12 @@ pub(super) fn draw_tile(
     tile: &mahjong_core::tile::Tile,
     riichi_disabled: bool,
     tile_textures: &TileTextures,
+    dora_tile_types: &DoraTileTypes,
 ) {
     let tint = if riichi_disabled {
         RIICHI_DISABLED_TINT
     } else {
-        WHITE
+        dora_tile_tint(tile, dora_tile_types)
     };
     draw_tile_sprite(
         tile_textures.for_tile(tile),
@@ -568,6 +542,8 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
     let base_y = BOARD_CENTER_Y + hand_distance;
     let now = get_time();
     let selected_tile_type = state.selected_tile_type();
+    let dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
+    let tile_tint = TileTintContext::new(selected_tile_type, &dora_tile_types);
 
     for other_idx in 0..(state.player_count - 1) {
         let relative_idx = other_idx + 1; // 1 right, 2 across, 3 left
@@ -617,7 +593,7 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
                     base_y,
                     tw,
                     th,
-                    public_tile_tint(tile, selected_tile_type),
+                    visible_tile_tint(tile, selected_tile_type, &dora_tile_types),
                 );
                 x += tile_step;
             }
@@ -661,7 +637,7 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
         }
         let xs = other_meld_x_positions(&other.melds, tw, th, meld_gap, x + meld_offset);
         for (meld, &mx) in other.melds.iter().zip(&xs) {
-            draw_meld_group(meld, mx, base_y, tw, th, tile_textures, selected_tile_type);
+            draw_meld_group(meld, mx, base_y, tw, th, tile_textures, tile_tint);
         }
 
         set_design_camera();

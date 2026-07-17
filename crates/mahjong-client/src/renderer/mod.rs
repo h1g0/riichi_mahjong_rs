@@ -28,7 +28,7 @@ use tiles::*;
 use macroquad::prelude::*;
 use mahjong_core::scoring::score::{DoraLabel, ScoreRank};
 use mahjong_core::settings::Lang;
-use mahjong_core::tile::{Tile, TileType};
+use mahjong_core::tile::{Tile, TileType, dora_indicator_to_dora_in};
 use mahjong_server::cpu::client::CpuConfig;
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
@@ -38,6 +38,38 @@ use crate::i18n::Key;
 
 const RIICHI_DISABLED_TINT: Color = Color::new(0.45, 0.45, 0.42, 1.0);
 const PUBLIC_TILE_HIGHLIGHT_TINT: Color = Color::new(0.48, 0.70, 1.0, 1.0);
+const DORA_TILE_TINT: Color = Color::new(1.0, 0.96, 0.72, 1.0);
+
+type DoraTileTypes = [bool; Tile::LEN];
+
+fn add_dora_tile_types(
+    dora_tile_types: &mut DoraTileTypes,
+    indicators: &[Tile],
+    three_player: bool,
+) {
+    for indicator in indicators {
+        let tile_type = dora_indicator_to_dora_in(indicator.get(), three_player);
+        dora_tile_types[tile_type as usize] = true;
+    }
+}
+
+fn dora_tile_types(indicators: &[Tile], three_player: bool) -> DoraTileTypes {
+    let mut result = [false; Tile::LEN];
+    add_dora_tile_types(&mut result, indicators, three_player);
+    result
+}
+
+fn dora_tile_tint(tile: &Tile, dora_tile_types: &DoraTileTypes) -> Color {
+    dora_tile_tint_with_base(tile, dora_tile_types, WHITE)
+}
+
+fn dora_tile_tint_with_base(tile: &Tile, dora_tile_types: &DoraTileTypes, base: Color) -> Color {
+    if tile.is_red_dora() || dora_tile_types[tile.get() as usize] {
+        Color::new(DORA_TILE_TINT.r, DORA_TILE_TINT.g, DORA_TILE_TINT.b, base.a)
+    } else {
+        base
+    }
+}
 
 /// Light complementary-blue tint for a publicly visible tile matching
 /// the selected hand tile. Matching is by tile kind, so red and normal
@@ -62,6 +94,46 @@ fn public_tile_tint_with_base(
         )
     } else {
         base
+    }
+}
+
+fn visible_tile_tint(
+    tile: &Tile,
+    selected_tile_type: Option<TileType>,
+    dora_tile_types: &DoraTileTypes,
+) -> Color {
+    visible_tile_tint_with_base(tile, selected_tile_type, dora_tile_types, WHITE)
+}
+
+fn visible_tile_tint_with_base(
+    tile: &Tile,
+    selected_tile_type: Option<TileType>,
+    dora_tile_types: &DoraTileTypes,
+    base: Color,
+) -> Color {
+    if selected_tile_type == Some(tile.get()) {
+        public_tile_tint_with_base(tile, selected_tile_type, base)
+    } else {
+        dora_tile_tint_with_base(tile, dora_tile_types, base)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TileTintContext<'a> {
+    selected_tile_type: Option<TileType>,
+    dora_tile_types: &'a DoraTileTypes,
+}
+
+impl<'a> TileTintContext<'a> {
+    fn new(selected_tile_type: Option<TileType>, dora_tile_types: &'a DoraTileTypes) -> Self {
+        Self {
+            selected_tile_type,
+            dora_tile_types,
+        }
+    }
+
+    fn tint(self, tile: &Tile) -> Color {
+        visible_tile_tint(tile, self.selected_tile_type, self.dora_tile_types)
     }
 }
 

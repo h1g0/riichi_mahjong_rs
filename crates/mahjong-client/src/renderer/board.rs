@@ -387,6 +387,7 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
     let my_wind_idx = state.my_wind_index();
     let my_initial_wind_idx = state.my_initial_wind_index();
     let selected_tile_type = state.selected_tile_type();
+    let dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
 
     for rel in 0..state.player_count {
         let discards = &state.discards[rel];
@@ -410,7 +411,7 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
                     start_y,
                     kw,
                     kh,
-                    public_tile_tint(&north, selected_tile_type),
+                    public_tile_tint_with_base(&north, selected_tile_type, DORA_TILE_TINT),
                 );
             }
         }
@@ -443,7 +444,12 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
             if discard.is_called {
                 tint.a = 0.28;
             }
-            tint = public_tile_tint_with_base(&discard.tile, selected_tile_type, tint);
+            tint = visible_tile_tint_with_base(
+                &discard.tile,
+                selected_tile_type,
+                &dora_tile_types,
+                tint,
+            );
 
             if row != current_row {
                 col_offset = 0.0;
