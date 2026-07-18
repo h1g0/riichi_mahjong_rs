@@ -139,6 +139,12 @@ impl<'a> TileTintContext<'a> {
 
 const TILE_W: f32 = 48.0;
 const TILE_H: f32 = 68.0;
+const SELF_MELD_TILE_W: f32 = 40.0;
+const SELF_MELD_TILE_H: f32 = 56.0;
+const SELF_MELD_GAP: f32 = 12.0;
+const SELF_MELD_RIGHT_EDGE: f32 = 1220.0;
+const SELF_HAND_MELD_GAP: f32 = 20.0;
+const SELF_HAND_LEFT_MARGIN: f32 = 40.0;
 const FONT_SIZE: u16 = 20;
 const SMALL_FONT: u16 = 16;
 const AGARI_FONT: u16 = 32;
@@ -170,18 +176,34 @@ pub const HAND_Y: f32 = 680.0;
 /// Gap between the hand and the drawn tile to its right.
 pub const DRAWN_GAP: f32 = 20.0;
 
-/// Left X that centers our stable concealed hand on screen.
+/// Left X that centers our stable concealed hand when space permits.
 ///
 /// The drawn tile is excluded from centering and hangs to the right, as
 /// is conventional. Shared by rendering ([`draw_hand`]) and hit testing
-/// (`GameState::handle_input`).
-pub fn player_hand_start_x(hand_len: usize) -> f32 {
+/// (`GameState::handle_input`). Space for the drawn tile is always
+/// reserved when checking the called-meld boundary, so drawing and
+/// discarding do not shift the whole hand.
+pub fn player_hand_start_x(hand_len: usize, melds: &[Meld]) -> f32 {
     // A pon/chii temporarily leaves one extra tile before the caller's
     // discard. Centering on the post-discard length prevents that discard
     // from shifting tiles that were left of the gap (#339).
     let layout_len = hand_len - usize::from(hand_len % 3 == 2);
     let hand_w = layout_len as f32 * TILE_W;
-    (DESIGN_W - hand_w) / 2.0
+    let centered_x = (DESIGN_W - hand_w) / 2.0;
+    if melds.is_empty() {
+        return centered_x;
+    }
+
+    let meld_widths: f32 = melds
+        .iter()
+        .map(|meld| calc_meld_width(meld, SELF_MELD_TILE_W, SELF_MELD_TILE_H))
+        .sum();
+    let meld_gaps = melds.len().saturating_sub(1) as f32 * SELF_MELD_GAP;
+    let meld_left_x = SELF_MELD_RIGHT_EDGE - meld_widths - meld_gaps;
+    let reserved_hand_width = hand_w + DRAWN_GAP + TILE_W;
+    let non_overlapping_x = meld_left_x - SELF_HAND_MELD_GAP - reserved_hand_width;
+
+    centered_x.min(non_overlapping_x).max(SELF_HAND_LEFT_MARGIN)
 }
 
 /// Current X of one tile in our final sorted hand.
@@ -189,7 +211,7 @@ pub fn player_hand_start_x(hand_len: usize) -> f32 {
 /// Rendering and hit testing share this function so animated tiles stay
 /// interactive at the position where they are visible.
 pub(crate) fn player_hand_tile_x(state: &GameState, index: usize, now: f64) -> f32 {
-    let final_x = player_hand_start_x(state.hand.len()) + index as f32 * TILE_W;
+    let final_x = player_hand_start_x(state.hand.len(), &state.melds) + index as f32 * TILE_W;
     let Some(anim) = &state.self_tedashi_anim else {
         return final_x;
     };
@@ -197,7 +219,7 @@ pub(crate) fn player_hand_tile_x(state: &GameState, index: usize, now: f64) -> f
         return final_x;
     };
 
-    let pre_start_x = player_hand_start_x(anim.pre_hand_len);
+    let pre_start_x = player_hand_start_x(anim.pre_hand_len, &state.melds);
     let from_x = match origin {
         SelfTileOrigin::Hand(pre_index) => pre_start_x + *pre_index as f32 * TILE_W,
         SelfTileOrigin::Drawn => pre_start_x + anim.pre_hand_len as f32 * TILE_W + DRAWN_GAP,

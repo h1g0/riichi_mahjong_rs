@@ -501,7 +501,7 @@ impl GameState {
 
         // Hand clicks use the same centering as the renderer.
         let hand_len = self.hand.len();
-        let hand_start_x = crate::renderer::player_hand_start_x(hand_len);
+        let hand_start_x = crate::renderer::player_hand_start_x(hand_len, &self.melds);
         let hand_y = crate::renderer::HAND_Y;
         let tile_w = 48.0;
         let tile_h = 68.0;
