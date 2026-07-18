@@ -1,11 +1,13 @@
 //! Unit tests for the rendering layout.
 
 use super::{
-    DORA_TILE_TINT, PLAYER_ROTATIONS, PUBLIC_TILE_HIGHLIGHT_TINT, add_dora_tile_types,
-    buffer_to_design, calc_meld_width, dora_tile_tint, dora_tile_tint_with_base, dora_tile_types,
-    other_meld_x_positions, public_tile_tint, public_tile_tint_with_base, rotation_index,
+    DORA_TILE_TINT, DRAWN_GAP, PLAYER_ROTATIONS, PUBLIC_TILE_HIGHLIGHT_TINT, TILE_W,
+    add_dora_tile_types, buffer_to_design, calc_meld_width, dora_tile_tint,
+    dora_tile_tint_with_base, dora_tile_types, other_meld_x_positions, player_hand_start_x,
+    player_hand_tile_x, public_tile_tint, public_tile_tint_with_base, rotation_index,
     seat_at_relative_position, self_meld_x_positions, visible_tile_tint,
 };
+use crate::game::{GameState, SelfTedashiAnim, SelfTileOrigin};
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType};
 
@@ -449,4 +451,53 @@ fn post_call_discard_keeps_hand_edges_and_melds_fixed() {
         after_count as f32 * step + after_slot,
         "打牌の前後で手牌領域の両端と後続する副露位置を固定する"
     );
+}
+
+#[test]
+fn own_post_call_discard_keeps_the_hand_left_edge_fixed() {
+    assert_eq!(
+        player_hand_start_x(11),
+        player_hand_start_x(10),
+        "鳴き直後の打牌で手牌の左端を動かさない"
+    );
+}
+
+#[test]
+fn own_tedashi_tiles_move_from_pre_discard_origins() {
+    let mut state = GameState::new();
+    state.hand = vec![
+        Tile::new(Tile::M1),
+        Tile::new(Tile::M3),
+        Tile::new(Tile::P9),
+    ];
+    state.self_tedashi_anim = Some(SelfTedashiAnim {
+        origins: vec![
+            SelfTileOrigin::Hand(0),
+            SelfTileOrigin::Hand(2),
+            SelfTileOrigin::Drawn,
+        ],
+        pre_hand_len: 3,
+        started_at: 100.0,
+    });
+    let start_x = player_hand_start_x(3);
+
+    assert_eq!(player_hand_tile_x(&state, 0, 100.0), start_x);
+    assert_eq!(
+        player_hand_tile_x(&state, 1, 100.0),
+        start_x + 2.0 * TILE_W,
+        "打牌位置の空きを保持する"
+    );
+    assert_eq!(
+        player_hand_tile_x(&state, 2, 100.0),
+        start_x + 3.0 * TILE_W + DRAWN_GAP,
+        "ツモ牌はツモ牌位置から移動を始める"
+    );
+
+    let finished_at = 100.0 + TEDASHI_GAP_HOLD_SECS + TEDASHI_SLIDE_SECS;
+    for i in 0..state.hand.len() {
+        assert_eq!(
+            player_hand_tile_x(&state, i, finished_at),
+            start_x + i as f32 * TILE_W
+        );
+    }
 }

@@ -5,12 +5,13 @@ use super::*;
 pub(super) fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
     let hand_start_x = player_hand_start_x(state.hand.len());
     let hand_y = HAND_Y;
+    let now = get_time();
     let tr = state.tr();
     let dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
 
     // Hand first; badges draw later so tiles cannot cover them.
     for (i, tile) in state.hand.iter().enumerate() {
-        let x = hand_start_x + i as f32 * TILE_W;
+        let x = player_hand_tile_x(state, i, now);
         let selected = state.selected_tile == Some(i);
         let riichi_selectable =
             state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);

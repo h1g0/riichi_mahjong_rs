@@ -33,7 +33,7 @@ use mahjong_server::cpu::client::CpuConfig;
 
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 
-use crate::game::{GamePhase, GameState, SetupState};
+use crate::game::{GamePhase, GameState, SelfTileOrigin, SetupState};
 use crate::i18n::Key;
 
 const RIICHI_DISABLED_TINT: Color = Color::new(0.45, 0.45, 0.42, 1.0);
@@ -170,14 +170,40 @@ pub const HAND_Y: f32 = 680.0;
 /// Gap between the hand and the drawn tile to its right.
 pub const DRAWN_GAP: f32 = 20.0;
 
-/// Left X that centers our `hand_len`-tile hand on screen.
+/// Left X that centers our stable concealed hand on screen.
 ///
 /// The drawn tile is excluded from centering and hangs to the right, as
 /// is conventional. Shared by rendering ([`draw_hand`]) and hit testing
 /// (`GameState::handle_input`).
 pub fn player_hand_start_x(hand_len: usize) -> f32 {
-    let hand_w = hand_len as f32 * TILE_W;
+    // A pon/chii temporarily leaves one extra tile before the caller's
+    // discard. Centering on the post-discard length prevents that discard
+    // from shifting tiles that were left of the gap (#339).
+    let layout_len = hand_len - usize::from(hand_len % 3 == 2);
+    let hand_w = layout_len as f32 * TILE_W;
     (DESIGN_W - hand_w) / 2.0
+}
+
+/// Current X of one tile in our final sorted hand.
+///
+/// Rendering and hit testing share this function so animated tiles stay
+/// interactive at the position where they are visible.
+pub(crate) fn player_hand_tile_x(state: &GameState, index: usize, now: f64) -> f32 {
+    let final_x = player_hand_start_x(state.hand.len()) + index as f32 * TILE_W;
+    let Some(anim) = &state.self_tedashi_anim else {
+        return final_x;
+    };
+    let Some(origin) = anim.origins.get(index) else {
+        return final_x;
+    };
+
+    let pre_start_x = player_hand_start_x(anim.pre_hand_len);
+    let from_x = match origin {
+        SelfTileOrigin::Hand(pre_index) => pre_start_x + *pre_index as f32 * TILE_W,
+        SelfTileOrigin::Drawn => pre_start_x + anim.pre_hand_len as f32 * TILE_W + DRAWN_GAP,
+    };
+    let progress = tedashi_progress(now - anim.started_at);
+    final_x + (from_x - final_x) * (1.0 - progress)
 }
 
 /// Camera2D rotations in degrees: self 0, right -90, across 180, left 90.

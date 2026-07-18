@@ -44,6 +44,7 @@ impl GameState {
                 self.hand = hand;
                 self.hand.sort();
                 self.drawn = None;
+                self.self_tedashi_anim = None;
                 self.scores = scores;
                 self.round_wind = Some(round_wind);
                 self.dora_indicators = dora_indicators;
@@ -96,6 +97,7 @@ impl GameState {
                 is_furiten,
             } => {
                 self.drawn = Some(tile);
+                self.self_tedashi_anim = None;
                 // Restart the auto-tsumogiri delay for the new draw.
                 self.riichi_auto_discard_at = None;
                 self.remaining_tiles = remaining_tiles;
@@ -405,6 +407,7 @@ impl GameState {
             ServerEvent::HandUpdated { hand } => {
                 self.hand = hand;
                 self.hand.sort();
+                self.self_tedashi_anim = None;
                 self.refresh_self_kan_options();
             }
 
