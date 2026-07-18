@@ -380,6 +380,84 @@ fn test_hand_selection_still_discards_on_second_click_during_our_turn() {
     ));
     assert!(!state.is_my_turn);
     assert_eq!(state.hand, vec![Tile::new(Tile::M1), Tile::new(Tile::P9)]);
+    assert_eq!(
+        state
+            .self_tedashi_anim
+            .as_ref()
+            .expect("手出しアニメーションが開始されていない")
+            .origins,
+        vec![SelfTileOrigin::Hand(0), SelfTileOrigin::Drawn]
+    );
+}
+
+#[test]
+fn test_local_hand_discard_tracks_origins_through_sorting() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.hand = vec![
+        Tile::new(Tile::M2),
+        Tile::new(Tile::M3),
+        Tile::new(Tile::M4),
+    ];
+    state.drawn = Some(Tile::new(Tile::M1));
+    state.process_events(100.0);
+
+    let discarded = state.apply_local_discard_from_hand(1);
+
+    assert_eq!(discarded, Tile::new(Tile::M3));
+    assert_eq!(
+        state.hand,
+        vec![
+            Tile::new(Tile::M1),
+            Tile::new(Tile::M2),
+            Tile::new(Tile::M4),
+        ]
+    );
+    let anim = state
+        .self_tedashi_anim
+        .as_ref()
+        .expect("手出しアニメーションが開始されていない");
+    assert_eq!(anim.pre_hand_len, 3);
+    assert_eq!(anim.started_at, 100.0);
+    assert_eq!(
+        anim.origins,
+        vec![
+            SelfTileOrigin::Drawn,
+            SelfTileOrigin::Hand(0),
+            SelfTileOrigin::Hand(2),
+        ]
+    );
+}
+
+#[test]
+fn test_local_tsumogiri_does_not_start_hand_animation() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.drawn = Some(Tile::new(Tile::P9));
+    state.is_my_turn = true;
+    state.selected_drawn = true;
+
+    let action = state.handle_drawn_tile_click();
+
+    assert!(matches!(action, Some(ClientAction::Discard { tile: None })));
+    assert!(state.drawn.is_none());
+    assert!(state.self_tedashi_anim.is_none());
+}
+
+#[test]
+fn test_authoritative_hand_update_clears_local_hand_animation() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.hand = vec![Tile::new(Tile::M1), Tile::new(Tile::M2)];
+    state.drawn = Some(Tile::new(Tile::P9));
+    state.apply_local_discard_from_hand(0);
+    assert!(state.self_tedashi_anim.is_some());
+
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: vec![Tile::new(Tile::S1), Tile::new(Tile::S2)],
+    });
+
+    assert!(state.self_tedashi_anim.is_none());
 }
 
 #[test]

@@ -226,15 +226,35 @@ impl GameState {
 
     pub(super) fn apply_local_discard_from_hand(&mut self, idx: usize) -> Tile {
         let discarded_tile = self.hand[idx];
+        let pre_hand_len = self.hand.len();
         self.selected_tile = None;
         self.selected_drawn = false;
+
+        // Sorting tiles together with their origins preserves the
+        // physical instance each final tile should animate from. Matching
+        // by tile value afterwards would be ambiguous for duplicates.
+        let mut tiles_with_origins: Vec<(Tile, SelfTileOrigin)> = self
+            .hand
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(hand_idx, _)| *hand_idx != idx)
+            .map(|(hand_idx, tile)| (tile, SelfTileOrigin::Hand(hand_idx)))
+            .collect();
         if let Some(drawn_tile) = self.drawn.take() {
-            self.hand.remove(idx);
-            self.hand.push(drawn_tile);
-            self.hand.sort();
-        } else {
-            self.hand.remove(idx);
+            tiles_with_origins.push((drawn_tile, SelfTileOrigin::Drawn));
         }
+        tiles_with_origins.sort_by_key(|(tile, _)| *tile);
+
+        self.hand = tiles_with_origins.iter().map(|(tile, _)| *tile).collect();
+        self.self_tedashi_anim = Some(SelfTedashiAnim {
+            origins: tiles_with_origins
+                .into_iter()
+                .map(|(_, origin)| origin)
+                .collect(),
+            pre_hand_len,
+            started_at: self.clock,
+        });
         discarded_tile
     }
 
@@ -296,6 +316,7 @@ impl GameState {
         if can_discard && self.selected_drawn {
             self.selected_drawn = false;
             self.drawn.take();
+            self.self_tedashi_anim = None;
             if self.riichi_selection_mode {
                 self.clear_riichi_selection();
                 return self.submit_turn_action(ClientAction::Riichi { tile: None });
@@ -321,6 +342,7 @@ impl GameState {
         if self.phase != GamePhase::Playing {
             return None;
         }
+        self.clock = now;
 
         // Refuse input while unapplied server events remain (e.g. a
         // pending declaration banner): the screen still shows stale state,
@@ -347,6 +369,7 @@ impl GameState {
             }
             self.riichi_auto_discard_at = None;
             self.drawn.take();
+            self.self_tedashi_anim = None;
             return self.submit_turn_action(ClientAction::Discard { tile: None });
         }
 
@@ -439,6 +462,7 @@ impl GameState {
                     if self.is_riichi && self.drawn.is_some() {
                         self.can_pei = false;
                         self.drawn.take();
+                        self.self_tedashi_anim = None;
                         return self.submit_turn_action(ClientAction::Discard { tile: None });
                     }
                     return None;
@@ -477,14 +501,14 @@ impl GameState {
 
         // Hand clicks use the same centering as the renderer.
         let hand_len = self.hand.len();
-        let hand_start_x = crate::renderer::player_hand_start_x(hand_len);
+        let hand_start_x = crate::renderer::player_hand_start_x(hand_len, &self.melds);
         let hand_y = crate::renderer::HAND_Y;
         let tile_w = 48.0;
         let tile_h = 68.0;
         let selected_raise = 14.0;
 
         for i in 0..hand_len {
-            let x = hand_start_x + i as f32 * tile_w;
+            let x = crate::renderer::player_hand_tile_x(self, i, now);
             let y = if self.selected_tile == Some(i) {
                 hand_y - selected_raise
             } else {
