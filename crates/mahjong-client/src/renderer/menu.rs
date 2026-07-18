@@ -1,16 +1,15 @@
-//! Title and mode-selection screens.
+//! Title, mode-selection, and rule-settings screens.
 //!
 //! The title screen is the entry point: local CPU play, online play,
-//! settings (not yet implemented), and language. The mode screen picks
-//! the game mode (four-player East-only through three-player hanchan)
-//! and pei dora, shared by CPU play and online room creation.
+//! settings (not yet implemented), and language. Pre-game screens choose
+//! the game mode and rules shared by CPU play and online room creation.
 
 use macroquad::prelude::*;
 
 use super::{DESIGN_W, draw_jp_text, mouse_position_design, theme};
-use crate::game::{GameMode, GameState, MenuOrigin};
+use crate::game::{GameMode, GameState, MenuOrigin, RuleOption};
 use crate::i18n::Key;
-use mahjong_core::settings::Lang;
+use mahjong_core::settings::{Lang, Settings};
 
 /// A button rectangle.
 struct Rect2 {
@@ -302,47 +301,210 @@ pub fn handle_top_menu_input(state: &mut GameState) -> Option<TopMenuAction> {
 
 /// Mode-button rectangles; idx follows GameMode::ALL order.
 fn mode_rect(idx: usize) -> Rect2 {
-    menu_button(220.0 + idx as f32 * 66.0, 52.0)
+    const W: f32 = 230.0;
+    const H: f32 = 42.0;
+    const GAP_X: f32 = 12.0;
+    const GAP_Y: f32 = 10.0;
+    let left = DESIGN_W / 2.0 - W - GAP_X / 2.0;
+    Rect2 {
+        x: left + (idx % 2) as f32 * (W + GAP_X),
+        y: 210.0 + (idx / 2) as f32 * (H + GAP_Y),
+        w: W,
+        h: H,
+    }
 }
 
-/// Pei dora toggle rectangle, under the mode buttons.
-fn nuki_rect() -> Rect2 {
-    menu_button(504.0, 40.0)
+fn mode_summary_rect() -> Rect2 {
+    Rect2 {
+        x: panel_x() + 32.0,
+        y: 318.0,
+        w: PANEL_W - 64.0,
+        h: 236.0,
+    }
 }
 
-/// Double-yakuman toggle rectangle.
-fn double_yakuman_rect() -> Rect2 {
-    menu_button(550.0, 40.0)
+fn mode_rule_settings_rect() -> Rect2 {
+    menu_button(563.0, 38.0)
 }
 
 /// Back-button rectangle.
 fn mode_back_rect() -> Rect2 {
-    menu_button(596.0, 40.0)
+    Rect2 {
+        x: DESIGN_W / 2.0 - 180.0,
+        y: 611.0,
+        w: 174.0,
+        h: 42.0,
+    }
+}
+
+fn mode_confirm_rect() -> Rect2 {
+    Rect2 {
+        x: DESIGN_W / 2.0 + 6.0,
+        y: 611.0,
+        w: 174.0,
+        h: 42.0,
+    }
 }
 
 /// Mode-screen actions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModeSelectAction {
-    /// Pick a mode and continue (CPU setup locally, room creation online)
+    /// Confirm the selected mode and continue
     ModeChosen(GameMode),
+    /// Open the rule-settings screen
+    OpenRuleSettings,
     /// Back to the previous screen
     Back,
 }
 
-/// Current mode and rule-toggle values for the given origin.
-fn mode_and_rules(state: &GameState, origin: MenuOrigin) -> (GameMode, bool, bool) {
+fn selected_mode(state: &GameState, origin: MenuOrigin) -> GameMode {
     match origin {
-        MenuOrigin::Local => (
-            state.setup_state.mode,
-            state.setup_state.nuki_dora,
-            state.setup_state.double_yakuman,
-        ),
-        MenuOrigin::Online => (
-            state.online_state.mode,
-            state.online_state.nuki_dora,
-            state.online_state.double_yakuman,
-        ),
+        MenuOrigin::Local => state.setup_state.mode,
+        MenuOrigin::Online => state.online_state.mode,
     }
+}
+
+fn set_selected_mode(state: &mut GameState, origin: MenuOrigin, mode: GameMode) {
+    match origin {
+        MenuOrigin::Local => state.setup_state.mode = mode,
+        MenuOrigin::Online => state.online_state.mode = mode,
+    }
+}
+
+fn selected_rules(state: &GameState, origin: MenuOrigin) -> &Settings {
+    match origin {
+        MenuOrigin::Local => &state.setup_state.rules,
+        MenuOrigin::Online => &state.online_state.rules,
+    }
+}
+
+fn selected_rules_mut(state: &mut GameState, origin: MenuOrigin) -> &mut Settings {
+    match origin {
+        MenuOrigin::Local => &mut state.setup_state.rules,
+        MenuOrigin::Online => &mut state.online_state.rules,
+    }
+}
+
+fn rule_label_key(rule: RuleOption) -> Key {
+    match rule {
+        RuleOption::OpenAllInside => Key::RuleOpenAllInside,
+        RuleOption::SwapCalling => Key::RuleSwapCalling,
+        RuleOption::DoubleYakuman => Key::RuleDoubleYakuman,
+        RuleOption::NukiDora => Key::RuleNukiDora,
+        RuleOption::FourKansDraw => Key::RuleFourKansDraw,
+        RuleOption::FourWindsDraw => Key::RuleFourWindsDraw,
+        RuleOption::FourRiichiDraw => Key::RuleFourRiichiDraw,
+        RuleOption::NineTerminalsDraw => Key::RuleNineTerminalsDraw,
+        RuleOption::TripleRonDraw => Key::RuleTripleRonDraw,
+        RuleOption::MultipleRon => Key::RuleMultipleRon,
+        RuleOption::YakumanPao => Key::RuleYakumanPao,
+    }
+}
+
+fn rule_description_key(rule: RuleOption) -> Key {
+    match rule {
+        RuleOption::OpenAllInside => Key::RuleOpenAllInsideDescription,
+        RuleOption::SwapCalling => Key::RuleSwapCallingDescription,
+        RuleOption::DoubleYakuman => Key::RuleDoubleYakumanDescription,
+        RuleOption::NukiDora => Key::RuleNukiDoraDescription,
+        RuleOption::FourKansDraw => Key::RuleFourKansDrawDescription,
+        RuleOption::FourWindsDraw => Key::RuleFourWindsDrawDescription,
+        RuleOption::FourRiichiDraw => Key::RuleFourRiichiDrawDescription,
+        RuleOption::NineTerminalsDraw => Key::RuleNineTerminalsDrawDescription,
+        RuleOption::TripleRonDraw => Key::RuleTripleRonDrawDescription,
+        RuleOption::MultipleRon => Key::RuleMultipleRonDescription,
+        RuleOption::YakumanPao => Key::RuleYakumanPaoDescription,
+    }
+}
+
+fn rule_value(state: &GameState, rule: RuleOption, enabled: bool) -> String {
+    let tr = state.tr();
+    let label = tr.get(rule_label_key(rule));
+    let value = tr.get(if enabled { Key::RuleOn } else { Key::RuleOff });
+    match state.lang {
+        Lang::Ja => format!("{label}{value}"),
+        Lang::En => format!("{label}: {value}"),
+    }
+}
+
+fn initial_score_label(lang: Lang, three_player: bool) -> &'static str {
+    match (lang, three_player) {
+        (Lang::Ja, false) => "25,000点始まり",
+        (Lang::Ja, true) => "35,000点始まり",
+        (Lang::En, false) => "25,000-point start",
+        (Lang::En, true) => "35,000-point start",
+    }
+}
+
+fn mode_summary_lines(state: &GameState, origin: MenuOrigin) -> Vec<String> {
+    let tr = state.tr();
+    let mode = selected_mode(state, origin);
+    let rules = selected_rules(state, origin);
+    let separator = match state.lang {
+        Lang::Ja => "、",
+        Lang::En => " / ",
+    };
+    let extension = match mode.length() {
+        mahjong_server::table::GameLength::EastOnly => tr.get(Key::NoSouthExtension),
+        mahjong_server::table::GameLength::Hanchan => tr.get(Key::NoWestExtension),
+    };
+    let join = |items: &[(RuleOption, bool)]| {
+        items
+            .iter()
+            .map(|(rule, enabled)| rule_value(state, *rule, *enabled))
+            .collect::<Vec<_>>()
+            .join(separator)
+    };
+    let mut lines = vec![format!(
+        "{}{}{}{}{}",
+        tr.get(mode.label_key()),
+        separator,
+        initial_score_label(state.lang, mode.three_player()),
+        separator,
+        extension
+    )];
+    lines.push(join(&[
+        (RuleOption::OpenAllInside, rules.opened_all_inside),
+        (RuleOption::SwapCalling, !rules.forbid_swap_calling),
+        (RuleOption::DoubleYakuman, rules.double_yakuman),
+    ]));
+    lines.push(join(&[
+        (RuleOption::FourKansDraw, rules.four_kans_draw),
+        (RuleOption::FourWindsDraw, rules.four_winds_draw),
+        (RuleOption::FourRiichiDraw, rules.four_riichi_draw),
+    ]));
+    lines.push(join(&[
+        (RuleOption::NineTerminalsDraw, rules.nine_terminals_draw),
+        (RuleOption::TripleRonDraw, rules.triple_ron_draw),
+        (RuleOption::MultipleRon, rules.multiple_ron),
+    ]));
+    let mut final_rules = vec![(RuleOption::YakumanPao, rules.yakuman_pao)];
+    if mode.three_player() {
+        final_rules.push((RuleOption::NukiDora, rules.nuki_dora));
+    }
+    lines.push(join(&final_rules));
+    lines.push(
+        [
+            tr.get(Key::FixedBankruptcy),
+            tr.get(Key::FixedAfterTheFactYaku),
+            tr.get(Key::FixedNagashiMangan),
+        ]
+        .join(separator),
+    );
+    lines.push(
+        [
+            tr.get(if mode.three_player() {
+                Key::FixedRedDoraThreePlayer
+            } else {
+                Key::FixedRedDoraFourPlayer
+            }),
+            tr.get(Key::FixedPinfuTsumo),
+        ]
+        .join(separator),
+    );
+    lines.push(tr.get(Key::FixedDealerContinuation).to_string());
+    lines.push(tr.get(Key::FixedKiriageMangan).to_string());
+    lines
 }
 
 /// Draws the mode-selection screen.
@@ -350,7 +512,7 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
     let tr = state.tr();
     draw_menu_panel(font, tr.get(Key::ModeSelectTitle), 26);
 
-    let (current_mode, nuki_dora, double_yakuman) = mode_and_rules(state, origin);
+    let current_mode = selected_mode(state, origin);
 
     for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
         draw_toggle(
@@ -362,22 +524,43 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
         );
     }
 
-    // Pei dora toggle; only takes effect for three-player modes.
-    let nuki_label = format!(
-        "{}{}",
-        tr.get(Key::NukiDoraToggle),
-        tr.get(Key::SanmaOnlyNote)
+    let summary = mode_summary_rect();
+    theme::draw_panel(
+        summary.x,
+        summary.y,
+        summary.w,
+        summary.h,
+        6.0,
+        theme::rgba(0xffffff, 0.025),
+        theme::rgba(0xc8a227, 0.16),
     );
-    draw_toggle(font, &nuki_rect(), &nuki_label, nuki_dora, 13);
-    draw_toggle(
+    theme::draw_text_centered(
         font,
-        &double_yakuman_rect(),
-        tr.get(Key::DoubleYakumanToggle),
-        double_yakuman,
+        tr.get(Key::CurrentRulesTitle),
+        summary.center_x(),
+        summary.y + 22.0,
         13,
+        theme::GOLD,
     );
+    for (idx, line) in mode_summary_lines(state, origin).iter().enumerate() {
+        theme::draw_text_centered(
+            font,
+            line,
+            summary.center_x(),
+            summary.y + 44.0 + idx as f32 * 20.0,
+            11,
+            theme::TEXT_DIM,
+        );
+    }
 
+    draw_menu_button(
+        font,
+        &mode_rule_settings_rect(),
+        tr.get(Key::RuleSettingsButton),
+        false,
+    );
     draw_menu_button(font, &mode_back_rect(), tr.get(Key::Back), false);
+    draw_menu_button(font, &mode_confirm_rect(), tr.get(Key::Confirm), true);
 }
 
 /// Handles mode-screen input, returning any pressed action.
@@ -392,36 +575,17 @@ pub fn handle_mode_select_input(
 
     for (idx, mode) in GameMode::ALL.into_iter().enumerate() {
         if mode_rect(idx).contains(mx, my) {
-            match origin {
-                MenuOrigin::Local => state.setup_state.mode = mode,
-                MenuOrigin::Online => state.online_state.mode = mode,
-            }
-            return Some(ModeSelectAction::ModeChosen(mode));
+            set_selected_mode(state, origin, mode);
+            return None;
         }
     }
 
-    if nuki_rect().contains(mx, my) {
-        match origin {
-            MenuOrigin::Local => {
-                state.setup_state.nuki_dora = !state.setup_state.nuki_dora;
-            }
-            MenuOrigin::Online => {
-                state.online_state.nuki_dora = !state.online_state.nuki_dora;
-            }
-        }
-        return None;
+    if mode_rule_settings_rect().contains(mx, my) {
+        return Some(ModeSelectAction::OpenRuleSettings);
     }
 
-    if double_yakuman_rect().contains(mx, my) {
-        match origin {
-            MenuOrigin::Local => {
-                state.setup_state.double_yakuman = !state.setup_state.double_yakuman;
-            }
-            MenuOrigin::Online => {
-                state.online_state.double_yakuman = !state.online_state.double_yakuman;
-            }
-        }
-        return None;
+    if mode_confirm_rect().contains(mx, my) {
+        return Some(ModeSelectAction::ModeChosen(selected_mode(state, origin)));
     }
 
     if mode_back_rect().contains(mx, my) {
@@ -429,4 +593,398 @@ pub fn handle_mode_select_input(
     }
 
     None
+}
+
+// ========== Rule-settings screen ==========
+
+fn rule_rect(idx: usize) -> Rect2 {
+    const W: f32 = 242.0;
+    const H: f32 = 35.0;
+    const GAP_X: f32 = 12.0;
+    const GAP_Y: f32 = 8.0;
+    let left = panel_x() + 32.0;
+    Rect2 {
+        x: left + (idx % 2) as f32 * (W + GAP_X),
+        y: 216.0 + (idx / 2) as f32 * (H + GAP_Y),
+        w: W,
+        h: H,
+    }
+}
+
+fn rule_description_rect() -> Rect2 {
+    Rect2 {
+        x: panel_x() + 32.0,
+        y: 480.0,
+        w: PANEL_W - 64.0,
+        h: 106.0,
+    }
+}
+
+fn rule_value_selector_rect() -> Rect2 {
+    Rect2 {
+        x: DESIGN_W / 2.0 - 100.0,
+        y: 511.0,
+        w: 200.0,
+        h: 30.0,
+    }
+}
+
+fn rule_value_previous_rect() -> Rect2 {
+    let selector = rule_value_selector_rect();
+    Rect2 {
+        x: selector.x,
+        y: selector.y,
+        w: 46.0,
+        h: selector.h,
+    }
+}
+
+fn rule_value_next_rect() -> Rect2 {
+    let selector = rule_value_selector_rect();
+    Rect2 {
+        x: selector.x + selector.w - 46.0,
+        y: selector.y,
+        w: 46.0,
+        h: selector.h,
+    }
+}
+
+fn rule_confirm_rect() -> Rect2 {
+    menu_button(600.0, 46.0)
+}
+
+fn draw_rule_button(
+    font: Option<&Font>,
+    rect: &Rect2,
+    label: &str,
+    value: &str,
+    selected: bool,
+    enabled: bool,
+) {
+    let fill = if selected {
+        theme::rgba(0xc8a227, 0.13)
+    } else {
+        theme::rgba(0xffffff, 0.04)
+    };
+    let border = if selected {
+        theme::rgba(0xc8a227, 0.6)
+    } else {
+        theme::rgba(0xffffff, 0.08)
+    };
+    theme::draw_rounded_rect(rect.x, rect.y, rect.w, rect.h, 4.0, fill);
+    theme::draw_rounded_rect_lines(rect.x, rect.y, rect.w, rect.h, 4.0, 1.0, border);
+    draw_jp_text(
+        font,
+        label,
+        rect.x + 12.0,
+        rect.center_y() + 5.0,
+        12,
+        if selected {
+            theme::GOLD_LT
+        } else {
+            theme::TEXT
+        },
+    );
+    theme::draw_text_centered(
+        font,
+        value,
+        rect.x + rect.w - 30.0,
+        rect.center_y() + 5.0,
+        11,
+        if enabled {
+            theme::GOLD_LT
+        } else {
+            theme::TEXT_DIM
+        },
+    );
+}
+
+fn draw_rule_value_selector(font: Option<&Font>, value: &str, enabled: bool) {
+    let selector = rule_value_selector_rect();
+    let previous = rule_value_previous_rect();
+    let next = rule_value_next_rect();
+    theme::draw_rounded_rect(
+        selector.x,
+        selector.y,
+        selector.w,
+        selector.h,
+        4.0,
+        theme::rgba(0xffffff, 0.04),
+    );
+    theme::draw_rounded_rect(
+        previous.x,
+        previous.y,
+        previous.w,
+        previous.h,
+        4.0,
+        theme::rgba(0xc8a227, 0.1),
+    );
+    theme::draw_rounded_rect(
+        next.x,
+        next.y,
+        next.w,
+        next.h,
+        4.0,
+        theme::rgba(0xc8a227, 0.1),
+    );
+    theme::draw_rounded_rect_lines(
+        selector.x,
+        selector.y,
+        selector.w,
+        selector.h,
+        4.0,
+        1.0,
+        theme::rgba(0xc8a227, 0.42),
+    );
+    draw_line(
+        previous.x + previous.w,
+        selector.y + 4.0,
+        previous.x + previous.w,
+        selector.y + selector.h - 4.0,
+        1.0,
+        theme::rgba(0xc8a227, 0.25),
+    );
+    draw_line(
+        next.x,
+        selector.y + 4.0,
+        next.x,
+        selector.y + selector.h - 4.0,
+        1.0,
+        theme::rgba(0xc8a227, 0.25),
+    );
+    theme::draw_text_centered(
+        font,
+        "←",
+        previous.center_x(),
+        previous.center_y() + 5.0,
+        12,
+        theme::GOLD_LT,
+    );
+    theme::draw_text_centered(
+        font,
+        value,
+        selector.center_x(),
+        selector.center_y() + 5.0,
+        12,
+        if enabled {
+            theme::GOLD_LT
+        } else {
+            theme::TEXT_DIM
+        },
+    );
+    theme::draw_text_centered(
+        font,
+        "→",
+        next.center_x(),
+        next.center_y() + 5.0,
+        12,
+        theme::GOLD_LT,
+    );
+}
+
+fn select_rule(state: &mut GameState, rule: RuleOption) {
+    state.selected_rule = rule;
+}
+
+fn toggle_selected_rule(state: &mut GameState, origin: MenuOrigin) {
+    state
+        .selected_rule
+        .toggle(selected_rules_mut(state, origin));
+}
+
+/// Action emitted by the rule-settings screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleSettingsAction {
+    /// Keep the changes and return to mode selection
+    Confirm,
+}
+
+/// Draws every configurable game rule and the selected rule's description.
+pub fn draw_rule_settings(state: &GameState, font: Option<&Font>, origin: MenuOrigin) {
+    let tr = state.tr();
+    let rules = selected_rules(state, origin);
+    draw_menu_panel(font, tr.get(Key::RuleSettingsTitle), 26);
+
+    for (idx, rule) in RuleOption::ALL.into_iter().enumerate() {
+        let enabled = rule.is_enabled(rules);
+        let value = tr.get(if enabled { Key::RuleOn } else { Key::RuleOff });
+        let mut label = tr.get(rule_label_key(rule)).to_string();
+        if rule == RuleOption::NukiDora {
+            label.push_str(tr.get(Key::SanmaOnlyNote));
+        }
+        draw_rule_button(
+            font,
+            &rule_rect(idx),
+            &label,
+            value,
+            rule == state.selected_rule,
+            enabled,
+        );
+    }
+
+    let description = rule_description_rect();
+    theme::draw_panel(
+        description.x,
+        description.y,
+        description.w,
+        description.h,
+        6.0,
+        theme::rgba(0xffffff, 0.025),
+        theme::rgba(0xc8a227, 0.16),
+    );
+    theme::draw_text_centered(
+        font,
+        tr.get(rule_label_key(state.selected_rule)),
+        description.center_x(),
+        description.y + 23.0,
+        14,
+        theme::GOLD,
+    );
+    let selected_enabled = state.selected_rule.is_enabled(rules);
+    draw_rule_value_selector(
+        font,
+        tr.get(if selected_enabled {
+            Key::RuleOn
+        } else {
+            Key::RuleOff
+        }),
+        selected_enabled,
+    );
+    let description_text = tr.get(rule_description_key(state.selected_rule));
+    let description_lines: Vec<_> = description_text.lines().collect();
+    let first_baseline = if description_lines.len() == 1 {
+        description.y + 82.0
+    } else {
+        description.y + 73.0
+    };
+    for (idx, line) in description_lines.into_iter().enumerate() {
+        theme::draw_text_centered(
+            font,
+            line,
+            description.center_x(),
+            first_baseline + idx as f32 * 18.0,
+            11,
+            theme::TEXT_DIM,
+        );
+    }
+
+    draw_menu_button(font, &rule_confirm_rect(), tr.get(Key::Confirm), true);
+}
+
+/// Handles rule selection, value arrows, and settings confirmation.
+pub fn handle_rule_settings_input(
+    state: &mut GameState,
+    origin: MenuOrigin,
+) -> Option<RuleSettingsAction> {
+    if !is_mouse_button_pressed(MouseButton::Left) {
+        return None;
+    }
+    let (mx, my) = mouse_position_design();
+
+    for (idx, rule) in RuleOption::ALL.into_iter().enumerate() {
+        if rule_rect(idx).contains(mx, my) {
+            select_rule(state, rule);
+            return None;
+        }
+    }
+
+    if rule_value_previous_rect().contains(mx, my) || rule_value_next_rect().contains(mx, my) {
+        toggle_selected_rule(state, origin);
+        return None;
+    }
+
+    if rule_confirm_rect().contains(mx, my) {
+        return Some(RuleSettingsAction::Confirm);
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode_summary_reports_mode_score_extension_and_rules() {
+        let mut state = GameState::new();
+        state.lang = Lang::Ja;
+        state.setup_state.rules.forbid_swap_calling = false;
+
+        let lines = mode_summary_lines(&state, MenuOrigin::Local);
+
+        assert_eq!(lines[0], "四人東風、25,000点始まり、南入なし");
+        assert!(lines.iter().any(|line| line.contains("喰いタンあり")));
+        assert!(lines.iter().any(|line| line.contains("喰い替えあり")));
+        assert!(lines.iter().any(|line| line.contains("二倍役満あり")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("飛びあり（0点は続行）"))
+        );
+        assert!(lines.iter().any(|line| line.contains("後付けあり")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("赤ドラ：5m・5p・5s各1枚"))
+        );
+        assert!(lines.iter().any(|line| line.contains("流し満貫あり")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("親の和了・聴牌、途中流局"))
+        );
+        assert!(lines.iter().any(|line| line.contains("平和ツモ複合あり")));
+        assert!(lines.iter().any(|line| line.contains("3翻60符・4翻30符")));
+        assert!(!lines.iter().any(|line| line.contains("北抜き")));
+    }
+
+    #[test]
+    fn mode_summary_includes_three_player_score_and_pei_dora() {
+        let mut state = GameState::new();
+        state.lang = Lang::Ja;
+        state.setup_state.mode = GameMode::ThreeHanchan;
+        state.setup_state.rules.nuki_dora = false;
+
+        let lines = mode_summary_lines(&state, MenuOrigin::Local);
+
+        assert_eq!(lines[0], "三人半荘、35,000点始まり、西入なし");
+        assert!(lines.iter().any(|line| line.contains("北抜きなし")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("赤ドラ：5p・5s各1枚"))
+        );
+        assert!(!lines.iter().any(|line| line.contains("赤ドラ：5m")));
+    }
+
+    #[test]
+    fn double_yakuman_description_lists_every_qualifying_hand() {
+        let description = Key::RuleDoubleYakumanDescription.text(Lang::Ja);
+
+        for name in [
+            "国士無双十三面待ち",
+            "四暗刻単騎待ち",
+            "大四喜",
+            "純正九蓮宝燈",
+        ] {
+            assert!(description.contains(name), "missing {name}");
+        }
+        assert_eq!(description.lines().count(), 2);
+    }
+
+    #[test]
+    fn selecting_a_rule_does_not_toggle_it_until_an_arrow_is_used() {
+        let mut state = GameState::new();
+        let rule = RuleOption::SwapCalling;
+        let before = rule.is_enabled(&state.setup_state.rules);
+
+        select_rule(&mut state, rule);
+
+        assert_eq!(state.selected_rule, rule);
+        assert_eq!(rule.is_enabled(&state.setup_state.rules), before);
+
+        toggle_selected_rule(&mut state, MenuOrigin::Local);
+
+        assert_ne!(rule.is_enabled(&state.setup_state.rules), before);
+    }
 }

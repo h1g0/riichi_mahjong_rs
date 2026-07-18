@@ -1,6 +1,7 @@
 //! State for the setup screen and the online UI.
 
 use super::*;
+use mahjong_core::settings::Settings;
 use mahjong_server::table::GameLength;
 
 /// Game mode: player count x game length, as picked by the mode toggle
@@ -60,6 +61,75 @@ impl GameMode {
     }
 }
 
+/// A rule exposed by the pre-game rule-settings screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleOption {
+    OpenAllInside,
+    SwapCalling,
+    DoubleYakuman,
+    NukiDora,
+    FourKansDraw,
+    FourWindsDraw,
+    FourRiichiDraw,
+    NineTerminalsDraw,
+    TripleRonDraw,
+    MultipleRon,
+    YakumanPao,
+}
+
+impl RuleOption {
+    /// Every configurable rule in display order.
+    pub const ALL: [RuleOption; 11] = [
+        RuleOption::OpenAllInside,
+        RuleOption::SwapCalling,
+        RuleOption::DoubleYakuman,
+        RuleOption::NukiDora,
+        RuleOption::FourKansDraw,
+        RuleOption::FourWindsDraw,
+        RuleOption::FourRiichiDraw,
+        RuleOption::NineTerminalsDraw,
+        RuleOption::TripleRonDraw,
+        RuleOption::MultipleRon,
+        RuleOption::YakumanPao,
+    ];
+
+    /// Returns the user-facing enabled state of this rule.
+    pub fn is_enabled(self, rules: &Settings) -> bool {
+        match self {
+            RuleOption::OpenAllInside => rules.opened_all_inside,
+            RuleOption::SwapCalling => !rules.forbid_swap_calling,
+            RuleOption::DoubleYakuman => rules.double_yakuman,
+            RuleOption::NukiDora => rules.nuki_dora,
+            RuleOption::FourKansDraw => rules.four_kans_draw,
+            RuleOption::FourWindsDraw => rules.four_winds_draw,
+            RuleOption::FourRiichiDraw => rules.four_riichi_draw,
+            RuleOption::NineTerminalsDraw => rules.nine_terminals_draw,
+            RuleOption::TripleRonDraw => rules.triple_ron_draw,
+            RuleOption::MultipleRon => rules.multiple_ron,
+            RuleOption::YakumanPao => rules.yakuman_pao,
+        }
+    }
+
+    /// Changes the rule to its opposite user-facing state.
+    pub fn toggle(self, rules: &mut Settings) {
+        match self {
+            RuleOption::OpenAllInside => rules.opened_all_inside = !rules.opened_all_inside,
+            RuleOption::SwapCalling => rules.forbid_swap_calling = !rules.forbid_swap_calling,
+            RuleOption::DoubleYakuman => rules.double_yakuman = !rules.double_yakuman,
+            RuleOption::NukiDora => rules.nuki_dora = !rules.nuki_dora,
+            RuleOption::FourKansDraw => rules.four_kans_draw = !rules.four_kans_draw,
+            RuleOption::FourWindsDraw => rules.four_winds_draw = !rules.four_winds_draw,
+            RuleOption::FourRiichiDraw => rules.four_riichi_draw = !rules.four_riichi_draw,
+            RuleOption::NineTerminalsDraw => {
+                rules.nine_terminals_draw = !rules.nine_terminals_draw;
+            }
+            RuleOption::TripleRonDraw => rules.triple_ron_draw = !rules.triple_ron_draw,
+            RuleOption::MultipleRon => rules.multiple_ron = !rules.multiple_ron,
+            RuleOption::YakumanPao => rules.yakuman_pao = !rules.yakuman_pao,
+        }
+    }
+}
+
 /// State of the online UI (menu and lobby).
 #[derive(Debug, Clone)]
 pub struct OnlineUiState {
@@ -79,10 +149,8 @@ pub struct OnlineUiState {
     pub turn_remaining: Option<u32>,
     /// Mode used when creating a room
     pub mode: GameMode,
-    /// Whether pei dora is on when creating a room (three-player only)
-    pub nuki_dora: bool,
-    /// Whether the four special variants are worth double yakuman
-    pub double_yakuman: bool,
+    /// Rules used when creating a room
+    pub rules: Settings,
 }
 
 impl OnlineUiState {
@@ -97,22 +165,16 @@ impl OnlineUiState {
             room: None,
             turn_remaining: None,
             mode: GameMode::FourEast,
-            nuki_dora: true,
-            double_yakuman: true,
+            rules: Settings::new(),
         }
     }
 
     /// Builds the rule settings sent when creating a room.
     ///
-    /// Rules without UI stay at their defaults; new rule pickers only
-    /// need to be reflected here to reach the server.
-    pub fn build_rules(&self) -> mahjong_core::settings::Settings {
-        mahjong_core::settings::Settings {
-            three_player: self.mode.three_player(),
-            nuki_dora: self.nuki_dora,
-            double_yakuman: self.double_yakuman,
-            ..mahjong_core::settings::Settings::new()
-        }
+    pub fn build_rules(&self) -> Settings {
+        let mut rules = self.rules.clone();
+        rules.three_player = self.mode.three_player();
+        rules
     }
 
     /// The game length sent when creating a room.
@@ -139,10 +201,8 @@ pub struct RoomViewUi {
 pub struct SetupState {
     /// Game mode
     pub mode: GameMode,
-    /// Whether pei dora is on (three-player only)
-    pub nuki_dora: bool,
-    /// Whether the four special variants are worth double yakuman
-    pub double_yakuman: bool,
+    /// Rules used for local play
+    pub rules: Settings,
     /// CPU levels (right, across, left)
     pub cpu_levels: [usize; 3],
     /// CPU personalities (right, across, left)
@@ -153,8 +213,7 @@ impl SetupState {
     pub fn new() -> Self {
         SetupState {
             mode: GameMode::FourEast,
-            nuki_dora: true,
-            double_yakuman: true,
+            rules: Settings::new(),
             cpu_levels: [1, 1, 1],        // all Normal
             cpu_personalities: [0, 1, 2], // Balanced, Speedy, HighValue
         }
@@ -167,15 +226,10 @@ impl SetupState {
 
     /// Builds the selected rule settings.
     ///
-    /// Rules without UI stay at their defaults; new rule pickers only
-    /// need to be reflected here to reach both local and online play.
-    pub fn build_rules(&self) -> mahjong_core::settings::Settings {
-        mahjong_core::settings::Settings {
-            three_player: self.mode.three_player(),
-            nuki_dora: self.nuki_dora,
-            double_yakuman: self.double_yakuman,
-            ..mahjong_core::settings::Settings::new()
-        }
+    pub fn build_rules(&self) -> Settings {
+        let mut rules = self.rules.clone();
+        rules.three_player = self.mode.three_player();
+        rules
     }
 
     /// Builds the game settings; the starting score follows the rules.

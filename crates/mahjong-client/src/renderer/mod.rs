@@ -13,7 +13,10 @@ mod tests;
 mod theme;
 mod tiles;
 
-pub use menu::{ModeSelectAction, TopMenuAction, handle_mode_select_input, handle_top_menu_input};
+pub use menu::{
+    ModeSelectAction, RuleSettingsAction, TopMenuAction, handle_mode_select_input,
+    handle_rule_settings_input, handle_top_menu_input,
+};
 pub use setup::{SetupAction, handle_setup_input};
 
 use board::*;
@@ -530,6 +533,10 @@ pub fn draw_game(
         }
         GamePhase::ModeSelect(origin) => {
             menu::draw_mode_select(state, font, origin);
+            None
+        }
+        GamePhase::RuleSettings(origin) => {
+            menu::draw_rule_settings(state, font, origin);
             None
         }
         GamePhase::CpuSetup(origin) => {

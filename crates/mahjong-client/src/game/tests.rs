@@ -284,7 +284,7 @@ fn test_game_started_uses_authoritative_mode_and_clears_turn_state() {
     state.handle_event(event);
 
     assert_eq!(state.setup_state.mode, GameMode::ThreeHanchan);
-    assert!(state.setup_state.nuki_dora);
+    assert!(state.setup_state.rules.nuki_dora);
     assert!(!state.is_my_turn);
     assert!(state.forbidden_discards.is_empty());
     assert!(!state.selected_forbidden_swap);
@@ -588,12 +588,14 @@ fn test_setup_state_build_game_settings() {
     assert_eq!(setup.cpu_count(), 3);
 
     setup.mode = GameMode::ThreeHanchan;
-    setup.nuki_dora = false;
-    setup.double_yakuman = false;
+    setup.rules.nuki_dora = false;
+    setup.rules.double_yakuman = false;
+    setup.rules.opened_all_inside = false;
     let settings = setup.build_game_settings();
     assert!(settings.rules.three_player);
     assert!(!settings.rules.nuki_dora);
     assert!(!settings.rules.double_yakuman);
+    assert!(!settings.rules.opened_all_inside);
     assert_eq!(
         settings.length,
         GameLength::Hanchan,
@@ -604,12 +606,27 @@ fn test_setup_state_build_game_settings() {
 }
 
 #[test]
-fn test_online_ui_build_rules_includes_double_yakuman() {
+fn test_online_ui_build_rules_includes_selected_rules() {
     let mut online = OnlineUiState::new();
     assert!(online.build_rules().double_yakuman);
 
-    online.double_yakuman = false;
-    assert!(!online.build_rules().double_yakuman);
+    online.rules.double_yakuman = false;
+    online.rules.triple_ron_draw = true;
+    let rules = online.build_rules();
+    assert!(!rules.double_yakuman);
+    assert!(rules.triple_ron_draw);
+}
+
+#[test]
+fn test_every_rule_option_toggles_its_user_facing_state() {
+    let mut rules = mahjong_core::settings::Settings::new();
+    for rule in RuleOption::ALL {
+        let before = rule.is_enabled(&rules);
+        rule.toggle(&mut rules);
+        assert_ne!(rule.is_enabled(&rules), before, "{rule:?}");
+        rule.toggle(&mut rules);
+        assert_eq!(rule.is_enabled(&rules), before, "{rule:?}");
+    }
 }
 
 /// Round-trip between game mode and (three-player flag, length).
