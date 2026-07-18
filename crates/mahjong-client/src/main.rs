@@ -23,7 +23,8 @@ use game::{GameMode, GamePhase, GameState, MenuOrigin, PlayerLabel, RoomViewUi};
 use mahjong_core::settings::Lang;
 use mahjong_server::protocol::net::SeatInfo;
 use renderer::{
-    ModeSelectAction, OnlineLobbyAction, OnlineMenuAction, SetupAction, TileTextures, TopMenuAction,
+    ModeSelectAction, OnlineLobbyAction, OnlineMenuAction, RuleSettingsAction, SetupAction,
+    TileTextures, TopMenuAction,
 };
 
 /// Window/taskbar icon: 16/32/64px RGBA decoded from embedded PNGs.
@@ -286,6 +287,9 @@ async fn main() {
                             // and the join wait.
                             game_state.phase = GamePhase::OnlineMenu;
                         }
+                        (ModeSelectAction::OpenRuleSettings, _) => {
+                            game_state.phase = GamePhase::RuleSettings(origin);
+                        }
                         (ModeSelectAction::Back, MenuOrigin::Local) => {
                             game_state.phase = GamePhase::TopMenu;
                         }
@@ -293,6 +297,14 @@ async fn main() {
                             game_state.phase = GamePhase::OnlineMenu;
                         }
                     }
+                }
+            }
+
+            GamePhase::RuleSettings(origin) => {
+                if let Some(RuleSettingsAction::Confirm) =
+                    renderer::handle_rule_settings_input(&mut game_state, origin)
+                {
+                    game_state.phase = GamePhase::ModeSelect(origin);
                 }
             }
 

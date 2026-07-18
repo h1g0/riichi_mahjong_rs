@@ -29,7 +29,7 @@ impl GameState {
                 // online joiners, whose local setup screen may still hold
                 // its default mode.
                 self.setup_state.mode = GameMode::from_parts(three_player, length);
-                self.setup_state.nuki_dora = nuki_dora;
+                self.setup_state.rules.nuki_dora = nuki_dora;
                 self.nuki_dora = nuki_dora;
                 self.pei_counts = [0; 4];
                 self.can_pei = false;

@@ -304,6 +304,80 @@ pub enum Key {
     LanguageLabel,
     /// Mode-selection screen title
     ModeSelectTitle,
+    /// Open the pre-game rule-settings screen
+    RuleSettingsButton,
+    /// Rule-settings screen title
+    RuleSettingsTitle,
+    /// Heading above the compact rule summary
+    CurrentRulesTitle,
+    /// Enabled value shown beside a rule
+    RuleOn,
+    /// Disabled value shown beside a rule
+    RuleOff,
+    /// East-only games do not extend into South
+    NoSouthExtension,
+    /// Hanchan games do not extend into West
+    NoWestExtension,
+    /// Bankruptcy ends the game below zero points
+    FixedBankruptcy,
+    /// Winning with a yaku completed only by the winning tile is allowed
+    FixedAfterTheFactYaku,
+    /// Red-fives included in four-player games
+    FixedRedDoraFourPlayer,
+    /// Red-fives included in three-player games
+    FixedRedDoraThreePlayer,
+    /// Nagashi Mangan is enabled
+    FixedNagashiMangan,
+    /// Dealer-continuation conditions
+    FixedDealerContinuation,
+    /// Pinfu and fully concealed self-draw may combine
+    FixedPinfuTsumo,
+    /// Mangan rounding up is enabled
+    FixedKiriageMangan,
+    /// Open All Inside rule label
+    RuleOpenAllInside,
+    /// Swap-calling rule label
+    RuleSwapCalling,
+    /// Double-yakuman rule label
+    RuleDoubleYakuman,
+    /// Pei dora rule label
+    RuleNukiDora,
+    /// Four-quads abortive-draw rule label
+    RuleFourKansDraw,
+    /// Four-winds abortive-draw rule label
+    RuleFourWindsDraw,
+    /// Four-riichi abortive-draw rule label
+    RuleFourRiichiDraw,
+    /// Nine-terminals abortive-draw rule label
+    RuleNineTerminalsDraw,
+    /// Triple-ron abortive-draw rule label
+    RuleTripleRonDraw,
+    /// Multiple-ron rule label
+    RuleMultipleRon,
+    /// Yakuman liability-payment rule label
+    RuleYakumanPao,
+    /// Open All Inside rule description
+    RuleOpenAllInsideDescription,
+    /// Swap-calling rule description
+    RuleSwapCallingDescription,
+    /// Double-yakuman rule description
+    RuleDoubleYakumanDescription,
+    /// Pei dora rule description
+    RuleNukiDoraDescription,
+    /// Four-quads abortive-draw rule description
+    RuleFourKansDrawDescription,
+    /// Four-winds abortive-draw rule description
+    RuleFourWindsDrawDescription,
+    /// Four-riichi abortive-draw rule description
+    RuleFourRiichiDrawDescription,
+    /// Nine-terminals abortive-draw rule description
+    RuleNineTerminalsDrawDescription,
+    /// Triple-ron abortive-draw rule description
+    RuleTripleRonDrawDescription,
+    /// Multiple-ron rule description
+    RuleMultipleRonDescription,
+    /// Yakuman liability-payment rule description
+    RuleYakumanPaoDescription,
     /// Note that pei dora applies to three-player games only
     SanmaOnlyNote,
     /// CPU-setup screen title / lobby CPU-setup button
@@ -318,10 +392,6 @@ pub enum Key {
     ModeThreeEast,
     /// Mode: three-player hanchan
     ModeThreeHanchan,
-    /// Pei dora toggle
-    NukiDoraToggle,
-    /// Double yakuman variants toggle
-    DoubleYakumanToggle,
     /// CPU level heading
     CpuStrengthLabel,
     /// CPU personality heading
@@ -464,6 +534,158 @@ impl Key {
                 Lang::Ja => "モード選択",
                 Lang::En => "Select Mode",
             },
+            Key::RuleSettingsButton => match lang {
+                Lang::Ja => "ルール設定",
+                Lang::En => "Rule Settings",
+            },
+            Key::RuleSettingsTitle => match lang {
+                Lang::Ja => "対戦ルール設定",
+                Lang::En => "Game Rules",
+            },
+            Key::CurrentRulesTitle => match lang {
+                Lang::Ja => "現在の対戦ルール",
+                Lang::En => "Current Rules",
+            },
+            Key::RuleOn => match lang {
+                Lang::Ja => "あり",
+                Lang::En => "On",
+            },
+            Key::RuleOff => match lang {
+                Lang::Ja => "なし",
+                Lang::En => "Off",
+            },
+            Key::NoSouthExtension => match lang {
+                Lang::Ja => "南入なし",
+                Lang::En => "No South extension",
+            },
+            Key::NoWestExtension => match lang {
+                Lang::Ja => "西入なし",
+                Lang::En => "No West extension",
+            },
+            Key::FixedBankruptcy => match lang {
+                Lang::Ja => "飛びあり（0点は続行）",
+                Lang::En => "Bankruptcy below zero: On",
+            },
+            Key::FixedAfterTheFactYaku => match lang {
+                Lang::Ja => "後付けあり",
+                Lang::En => "After-the-fact yaku: On",
+            },
+            Key::FixedRedDoraFourPlayer => match lang {
+                Lang::Ja => "赤ドラ：5m・5p・5s各1枚",
+                Lang::En => "Red fives: one each in 5m, 5p, and 5s",
+            },
+            Key::FixedRedDoraThreePlayer => match lang {
+                Lang::Ja => "赤ドラ：5p・5s各1枚",
+                Lang::En => "Red fives: one each in 5p and 5s",
+            },
+            Key::FixedNagashiMangan => match lang {
+                Lang::Ja => "流し満貫あり",
+                Lang::En => "Nagashi Mangan: On",
+            },
+            Key::FixedDealerContinuation => match lang {
+                Lang::Ja => "連荘：親の和了・聴牌、途中流局",
+                Lang::En => "Dealer continues after a win, tenpai, or abortive draw",
+            },
+            Key::FixedPinfuTsumo => match lang {
+                Lang::Ja => "平和ツモ複合あり",
+                Lang::En => "Pinfu + concealed self-draw: On",
+            },
+            Key::FixedKiriageMangan => match lang {
+                Lang::Ja => "切り上げ満貫あり（3翻60符・4翻30符）",
+                Lang::En => "Mangan rounding: 3 han 60 fu / 4 han 30 fu",
+            },
+            Key::RuleOpenAllInside => match lang {
+                Lang::Ja => "喰いタン",
+                Lang::En => "Open All Inside",
+            },
+            Key::RuleSwapCalling => match lang {
+                Lang::Ja => "喰い替え",
+                Lang::En => "Swap-calling",
+            },
+            Key::RuleDoubleYakuman => match lang {
+                Lang::Ja => "二倍役満",
+                Lang::En => "Double yakuman",
+            },
+            Key::RuleNukiDora => match lang {
+                Lang::Ja => "北抜き",
+                Lang::En => "Pei dora",
+            },
+            Key::RuleFourKansDraw => match lang {
+                Lang::Ja => "四槓散了",
+                Lang::En => "Four-quads draw",
+            },
+            Key::RuleFourWindsDraw => match lang {
+                Lang::Ja => "四風連打",
+                Lang::En => "Four-winds draw",
+            },
+            Key::RuleFourRiichiDraw => match lang {
+                Lang::Ja => "四家立直",
+                Lang::En => "Four-riichi draw",
+            },
+            Key::RuleNineTerminalsDraw => match lang {
+                Lang::Ja => "九種九牌",
+                Lang::En => "Nine Terminals",
+            },
+            Key::RuleTripleRonDraw => match lang {
+                Lang::Ja => "三家和",
+                Lang::En => "Triple-ron draw",
+            },
+            Key::RuleMultipleRon => match lang {
+                Lang::Ja => "複数ロン",
+                Lang::En => "Multiple ron",
+            },
+            Key::RuleYakumanPao => match lang {
+                Lang::Ja => "責任払い",
+                Lang::En => "Liability payment",
+            },
+            Key::RuleOpenAllInsideDescription => match lang {
+                Lang::Ja => "副露した断么九を1翻役として認めます。",
+                Lang::En => "Allows All Inside (Tan'yao) on an open hand.",
+            },
+            Key::RuleSwapCallingDescription => match lang {
+                Lang::Ja => "鳴いた直後に、鳴いた牌や同等牌を捨てることを認めます。",
+                Lang::En => "Allows an immediate discard of the called or an equivalent tile.",
+            },
+            Key::RuleDoubleYakumanDescription => match lang {
+                Lang::Ja => {
+                    "国士無双十三面待ち、四暗刻単騎待ち、大四喜、\n純正九蓮宝燈を二倍役満にします。"
+                }
+                Lang::En => {
+                    "Thirteen Orphans (13-sided wait), Four Concealed Triplets (pair wait),\nBig Winds, and Pure Nine Gates are worth two yakuman."
+                }
+            },
+            Key::RuleNukiDoraDescription => match lang {
+                Lang::Ja => "三人麻雀で北を抜き、1翻のドラとして扱います。",
+                Lang::En => "In three-player games, North may be extracted as one dora.",
+            },
+            Key::RuleFourKansDrawDescription => match lang {
+                Lang::Ja => "複数人による4回目のカン成立時に流局します。",
+                Lang::En => "Ends the hand when multiple players complete four quads in total.",
+            },
+            Key::RuleFourWindsDrawDescription => match lang {
+                Lang::Ja => "全員が最初の打牌で同じ風牌を捨てると流局します。",
+                Lang::En => "Ends the hand when every first discard is the same wind tile.",
+            },
+            Key::RuleFourRiichiDrawDescription => match lang {
+                Lang::Ja => "全員がリーチを宣言すると流局します。",
+                Lang::En => "Ends the hand when every player declares riichi.",
+            },
+            Key::RuleNineTerminalsDrawDescription => match lang {
+                Lang::Ja => "配牌で么九牌が9種以上なら流局を宣言できます。",
+                Lang::En => "Allows a draw declaration with nine kinds of terminals and honours.",
+            },
+            Key::RuleTripleRonDrawDescription => match lang {
+                Lang::Ja => "3人が同じ牌にロンした場合は流局します。",
+                Lang::En => "Ends the hand when three players ron the same discard.",
+            },
+            Key::RuleMultipleRonDescription => match lang {
+                Lang::Ja => "同じ捨て牌への複数人のロンをすべて認めます。",
+                Lang::En => "Allows every player who declares ron on the same discard to win.",
+            },
+            Key::RuleYakumanPaoDescription => match lang {
+                Lang::Ja => "大三元・大四喜・四槓子を確定させた打牌に責任払いを適用します。",
+                Lang::En => "Applies liability payment when a discard completes certain yakuman.",
+            },
             Key::SanmaOnlyNote => match lang {
                 Lang::Ja => "（三麻のみ）",
                 Lang::En => " (3-player only)",
@@ -491,14 +713,6 @@ impl Key {
             Key::ModeThreeHanchan => match lang {
                 Lang::Ja => "三人半荘",
                 Lang::En => "3P Hanchan",
-            },
-            Key::NukiDoraToggle => match lang {
-                Lang::Ja => "北抜きドラ",
-                Lang::En => "Pei dora",
-            },
-            Key::DoubleYakumanToggle => match lang {
-                Lang::Ja => "二倍役満",
-                Lang::En => "Double yakuman",
             },
             Key::CpuStrengthLabel => match lang {
                 Lang::Ja => "強さ",
