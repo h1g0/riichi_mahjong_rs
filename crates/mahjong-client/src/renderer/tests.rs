@@ -383,7 +383,8 @@ fn export_labeled_tiles_for_visual_check() {
 // --- Opponent hand-discard animation ---
 
 use super::tiles::{
-    TEDASHI_GAP_HOLD_SECS, TEDASHI_SLIDE_SECS, tedashi_progress, tedashi_tile_offset,
+    TEDASHI_GAP_HOLD_SECS, TEDASHI_SLIDE_SECS, opponent_drawn_slot_width, tedashi_progress,
+    tedashi_tile_offset,
 };
 
 #[test]
@@ -423,18 +424,29 @@ fn tedashi_offsets_show_gap_at_discarded_position() {
 }
 
 #[test]
-fn tedashi_offsets_without_drawn_include_recentering_shift() {
+fn tedashi_offsets_without_drawn_only_move_tiles_right_of_gap() {
     let (step, gap) = (28.0, 8.0);
-    // A post-call discard (no drawn tile) shrinks the hand by one, so
-    // centering shifts half a tile and tiles left of the gap slide too.
-    assert_eq!(
-        tedashi_tile_offset(0, 10, 2, false, step, gap, 0.0),
-        -step / 2.0
-    );
-    assert_eq!(
-        tedashi_tile_offset(5, 10, 2, false, step, gap, 0.0),
-        step / 2.0
-    );
+    // A post-call discard must leave tiles left of the discarded tile
+    // fixed while tiles to its right close the gap.
+    assert_eq!(tedashi_tile_offset(0, 10, 2, false, step, gap, 0.0), 0.0);
+    assert_eq!(tedashi_tile_offset(5, 10, 2, false, step, gap, 0.0), step);
     // No offsets at the final position.
     assert_eq!(tedashi_tile_offset(0, 10, 2, false, step, gap, 1.0), 0.0);
+}
+
+#[test]
+fn post_call_discard_keeps_hand_edges_and_melds_fixed() {
+    let (step, gap) = (28.0, 8.0);
+    let before_count = 11;
+    let after_count = 10;
+    let before_slot = opponent_drawn_slot_width(before_count, false, step, gap);
+    let after_slot = opponent_drawn_slot_width(after_count, false, step, gap);
+
+    assert_eq!(before_slot, gap, "鳴き直後は余分な手牌がツモ牌枠を占める");
+    assert_eq!(after_slot, step + gap, "打牌後は通常のツモ牌枠を戻す");
+    assert_eq!(
+        before_count as f32 * step + before_slot,
+        after_count as f32 * step + after_slot,
+        "打牌の前後で手牌領域の両端と後続する副露位置を固定する"
+    );
 }
