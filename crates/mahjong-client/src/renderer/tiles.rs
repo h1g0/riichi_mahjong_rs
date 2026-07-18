@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
-    let hand_start_x = player_hand_start_x(state.hand.len());
+    let hand_start_x = player_hand_start_x(state.hand.len(), &state.melds);
     let hand_y = HAND_Y;
     let now = get_time();
     let tr = state.tr();
@@ -141,11 +141,11 @@ pub(super) fn draw_melds(state: &GameState, tile_textures: &TileTextures) {
         return;
     }
 
-    let tw: f32 = 40.0;
-    let th: f32 = 56.0;
+    let tw = SELF_MELD_TILE_W;
+    let th = SELF_MELD_TILE_H;
     let meld_y: f32 = 692.0;
-    let meld_gap: f32 = 12.0;
-    let right_edge: f32 = 1220.0;
+    let meld_gap = SELF_MELD_GAP;
+    let right_edge = SELF_MELD_RIGHT_EDGE;
 
     // Earliest meld on the right, later melds further left.
     let xs = self_meld_x_positions(&state.melds, tw, th, meld_gap, right_edge);
