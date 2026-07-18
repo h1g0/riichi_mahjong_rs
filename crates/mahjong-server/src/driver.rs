@@ -1247,6 +1247,11 @@ mod tests {
         {
             let round = driver.table_mut().current_round_mut().unwrap();
 
+            // Seat 1 is not part of this scenario; leaving its dealt hand intact
+            // can add an unrelated call response and make the manual chain stall.
+            let seat1_wind = round.players[1].seat_wind;
+            round.players[1] = Player::new(seat1_wind, Vec::new(), 25000);
+
             // Seat 0: 13 tiles that can pon a 9s.
             let seat0_wind = round.players[0].seat_wind;
             let seat0_tiles = vec![
