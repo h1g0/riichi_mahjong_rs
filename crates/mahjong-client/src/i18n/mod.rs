@@ -667,8 +667,12 @@ impl Key {
                 Lang::En => "In three-player games, North may be extracted as one dora.",
             },
             Key::RuleTsumoLossDescription => match lang {
-                Lang::Ja => "ツモ和了時に、不在の北家分の点数を受け取りません。",
-                Lang::En => "On self-draw wins, the absent North player's share is not received.",
+                Lang::Ja => {
+                    "ありの場合は不在の北家分を受け取らず、\nなしの場合は支払う2人で折半します。"
+                }
+                Lang::En => {
+                    "When on, the absent North player's share is not received;\nwhen off, both payers split it."
+                }
             },
             Key::RuleFourKansDrawDescription => match lang {
                 Lang::Ja => "複数人による4回目のカン成立時に流局します。",

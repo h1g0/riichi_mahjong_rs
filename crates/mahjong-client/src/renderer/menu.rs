@@ -978,6 +978,17 @@ mod tests {
     }
 
     #[test]
+    fn tsumo_loss_description_explains_the_disabled_payment_split() {
+        let ja = Key::RuleTsumoLossDescription.text(Lang::Ja);
+        let en = Key::RuleTsumoLossDescription.text(Lang::En);
+
+        assert!(ja.contains("なしの場合は支払う2人で折半"));
+        assert!(en.contains("when off, both payers split it"));
+        assert_eq!(ja.lines().count(), 2);
+        assert_eq!(en.lines().count(), 2);
+    }
+
+    #[test]
     fn selecting_a_rule_does_not_toggle_it_until_an_arrow_is_used() {
         let mut state = GameState::new();
         let rule = RuleOption::SwapCalling;
