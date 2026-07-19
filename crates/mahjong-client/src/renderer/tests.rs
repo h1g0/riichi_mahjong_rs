@@ -3,8 +3,8 @@
 use super::{
     DORA_TILE_TINT, PLAYER_ROTATIONS, PUBLIC_TILE_HIGHLIGHT_TINT, add_dora_tile_types,
     buffer_to_design, calc_meld_width, dora_tile_tint, dora_tile_tint_with_base, dora_tile_types,
-    other_meld_x_positions, public_tile_tint, public_tile_tint_with_base, rotation_index,
-    seat_at_relative_position, self_meld_x_positions, visible_tile_tint,
+    other_meld_x_positions, pei_tile_x, public_tile_tint, public_tile_tint_with_base,
+    rotation_index, seat_at_relative_position, self_meld_x_positions, visible_tile_tint,
 };
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType};
@@ -200,6 +200,18 @@ fn sanma_rotation_leaves_north_position_empty() {
         for rel in 0..4 {
             assert_eq!(rotation_index(rel, 4, wind), rel);
         }
+    }
+}
+
+#[test]
+fn sanma_pei_tiles_do_not_overlap() {
+    let tile_width = 24.0;
+    let positions: Vec<_> = (0..4)
+        .map(|index| pei_tile_x(100.0, tile_width, index))
+        .collect();
+
+    for pair in positions.windows(2) {
+        assert!(pair[0] + tile_width < pair[1]);
     }
 }
 

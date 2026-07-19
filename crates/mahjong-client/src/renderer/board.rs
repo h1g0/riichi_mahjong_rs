@@ -365,6 +365,13 @@ fn draw_turn_indicator_edge(x: f32, y: f32, w: f32) {
     draw_rectangle(x, y - 1.5, w, 3.0, theme::rgba(0xffe066, 0.95 * pulse));
 }
 
+/// Returns the horizontal position of an extracted North tile, keeping
+/// adjacent tiles separated by a small visible gap.
+pub(super) fn pei_tile_x(start_x: f32, tile_width: f32, index: usize) -> f32 {
+    const GAP: f32 = 2.0;
+    start_x + index as f32 * (tile_width + GAP)
+}
+
 pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
     let dtw: f32 = 32.0; // natural tile width
     let dth: f32 = 44.0; // natural tile height
@@ -404,10 +411,11 @@ pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
             let north = mahjong_core::tile::Tile::new(mahjong_core::tile::Tile::Z4);
             let kw = dtw * 0.75;
             let kh = dth * 0.75;
+            let pei_start_x = BOARD_CENTER_X + half_width + 10.0;
             for k in 0..pei {
                 draw_tile_sprite(
                     tile_textures.for_tile(&north),
-                    BOARD_CENTER_X + half_width + 10.0 + k as f32 * (kw * 0.6),
+                    pei_tile_x(pei_start_x, kw, k),
                     start_y,
                     kw,
                     kh,
