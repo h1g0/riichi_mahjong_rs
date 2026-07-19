@@ -134,9 +134,9 @@ A Japanese-language edition of this document is maintained in parallel at
 | 四家立直 | sūcha riichi | four-riichi abortive draw | `Settings::four_riichi_draw` | Optional rule. |
 | 九種九牌 | kyūshu kyūhai | nine terminals abortive draw | `Settings::nine_terminals_draw` | Optional rule. |
 | 三家和 | sanchahō | triple-ron abortive draw | `Settings::triple_ron_draw` | Optional rule. |
-| 三人麻雀 / 三麻 | sanma | three-player mahjong | `Settings::three_player` | Characters 2–8 removed (108 tiles); no chii; tsumo loss payments. |
+| 三人麻雀 / 三麻 | sanma | three-player mahjong | `Settings::three_player` | Characters 2–8 removed (108 tiles); no chii; configurable tsumo loss payments. |
 | 北抜き | pei-nuki | pei (North extraction) | `Settings::nuki_dora` | Three-player only: set aside a North tile as a pei dora and draw a replacement tile. |
-| ツモ損 | tsumo-zon | tsumo loss | — | Three-player tsumo payment style: per-person amounts are unchanged and the missing player's share is simply not received. |
+| ツモ損 | tsumo-zon | tsumo loss | `Settings::tsumo_loss` | Three-player tsumo payment style: when enabled, per-person amounts are unchanged and the missing player's share is not received; when disabled, that share is split between both payers. |
 
 ---
 

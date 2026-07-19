@@ -133,9 +133,9 @@
 | 四家立直 | sūcha riichi | four-riichi abortive draw | `Settings::four_riichi_draw` | オプション。 |
 | 九種九牌 | kyūshu kyūhai | nine terminals abortive draw | `Settings::nine_terminals_draw` | オプション。 |
 | 三家和 | sanchahō | triple-ron abortive draw | `Settings::triple_ron_draw` | オプション。 |
-| 三人麻雀 / 三麻 | sanma | three-player mahjong | `Settings::three_player` | 萬子2〜8を除外した108枚・チーなし・ツモ損で3人で打つ。 |
+| 三人麻雀 / 三麻 | sanma | three-player mahjong | `Settings::three_player` | 萬子2〜8を除外した108枚・チーなし・設定可能なツモ損で3人で打つ。 |
 | 北抜き | pei-nuki | pei (North extraction) | `Settings::nuki_dora` | 三麻専用。北風牌を晒して抜きドラとし、牌山から1枚補充する。 |
-| ツモ損 | tsumo-zon | tsumo loss | — | 三麻のツモ支払い方式。1人あたりの支払額は四麻と同じで、いない北家の分は貰えない。 |
+| ツモ損 | tsumo-zon | tsumo loss | `Settings::tsumo_loss` | 三麻のツモ支払い方式。有効時は1人あたりの支払額を四麻と同じにして不在の北家分を受け取らず、無効時はその分を支払う2人で折半する。 |
 
 ---
 

@@ -61,8 +61,8 @@ pub enum ClientMessage {
         /// Game length (East-only or hanchan)
         #[serde(default)]
         length: GameLength,
-        /// Rule settings (all flags: three-player, pei dora, kuitan,
-        /// triple ron, ...)
+        /// Rule settings (all flags: three-player, tsumo loss, pei dora,
+        /// kuitan, triple ron, ...)
         ///
         /// Starting scores are derived server-side from the rules
         /// (25000 four-player, 35000 three-player). Missing fields fall
@@ -275,6 +275,7 @@ mod tests {
                 length: GameLength::EastOnly,
                 rules: Settings {
                     three_player: true,
+                    tsumo_loss: false,
                     nuki_dora: false,
                     triple_ron_draw: true,
                     double_yakuman: false,

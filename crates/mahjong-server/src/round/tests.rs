@@ -145,6 +145,22 @@ fn test_sanma_nagashi_mangan_uses_tsumo_loss() {
 }
 
 #[test]
+fn test_sanma_nagashi_mangan_without_tsumo_loss() {
+    let mut round = sanma_round(42, 0);
+    round.settings.tsumo_loss = false;
+    round.drain_events();
+    round.players[1].discards = vec![nagashi_discard(Tile::new(Tile::P1), false)];
+
+    round.do_exhaustive_draw();
+
+    assert_eq!(round.get_scores(), [30000, 43000, 32000, 0]);
+    assert!(matches!(
+        round.result,
+        Some(RoundResult::NagashiMangan { ref winners }) if winners == &[1]
+    ));
+}
+
+#[test]
 fn test_round_discard() {
     // Seeded wall guarantees the first draw is not a nine-terminals offer.
     let mut round =
