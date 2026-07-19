@@ -19,7 +19,7 @@ const BUBBLE_H: f32 = 46.0;
 /// Length of the bubble's tail triangle.
 const TAIL_LEN: f32 = 12.0;
 /// Width of the black outline outside the gold frame.
-const OUTLINE_W: f32 = 2.0;
+const OUTLINE_W: f32 = 1.0;
 
 /// Tail direction, pointing from the bubble towards the player's hand.
 #[derive(Clone, Copy)]
