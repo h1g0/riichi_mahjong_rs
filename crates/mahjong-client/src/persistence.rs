@@ -26,7 +26,10 @@ fn code_to_lang(code: i32) -> Option<Lang> {
     }
 }
 
-/// Loads the saved display language; `None` when unsaved or invalid.
+/// Loads the display language selected by the platform backend.
+///
+/// WASM uses a saved choice first and otherwise detects the browser preference;
+/// native returns `None` when the setting is unsaved or invalid.
 pub fn load_lang() -> Option<Lang> {
     code_to_lang(load_lang_code())
 }
