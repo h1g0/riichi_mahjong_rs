@@ -471,8 +471,6 @@ impl GameState {
             event_hold_until: 0.0,
             head_announced: false,
             clock: 0.0,
-            // Load the saved display language (Japanese when unsaved) so
-            // the choice survives new() being rebuilt on "play again".
             lang: crate::persistence::load_lang().unwrap_or(Lang::Ja),
         }
     }

@@ -14,7 +14,26 @@ const MAHJONG_STORAGE_VERSION = 1;
 // 1 = English
 const MAHJONG_LANG_KEY = "mahjong.lang";
 
-// Returns the saved display language; -1 when unset or invalid.
+function mahjong_storage_browser_lang() {
+    let languages = [];
+    if (typeof navigator !== "undefined") {
+        if (Array.isArray(navigator.languages) && navigator.languages.length > 0) {
+            languages = navigator.languages;
+        } else if (typeof navigator.language === "string") {
+            languages = [navigator.language];
+        }
+    }
+
+    const hasJapanese = languages.some((language) => {
+        if (typeof language !== "string") {
+            return false;
+        }
+        const normalized = language.toLowerCase();
+        return normalized === "ja" || normalized.startsWith("ja-");
+    });
+    return hasJapanese ? 0 : 1;
+}
+
 function mahjong_storage_get_lang() {
     try {
         const v = window.localStorage.getItem(MAHJONG_LANG_KEY);
@@ -24,12 +43,10 @@ function mahjong_storage_get_lang() {
         if (v === "en") {
             return 1;
         }
-        return -1;
     } catch (_err) {
-        // Environments without localStorage (private mode etc.)
-        // read as unset.
-        return -1;
+        // Browser detection keeps first launch usable when storage is blocked.
     }
+    return mahjong_storage_browser_lang();
 }
 
 // Saves the display language (0 = Japanese, 1 = English; others ignored).
