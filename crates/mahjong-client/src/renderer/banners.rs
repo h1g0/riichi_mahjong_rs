@@ -18,13 +18,45 @@ const FADE_SECS: f64 = 0.35;
 const BUBBLE_H: f32 = 46.0;
 /// Length of the bubble's tail triangle.
 const TAIL_LEN: f32 = 12.0;
+/// Width of the black outline outside the gold frame.
+const OUTLINE_W: f32 = 1.0;
 
 /// Tail direction, pointing from the bubble towards the player's hand.
+#[derive(Clone, Copy)]
 enum TailDir {
     Down,
     Right,
     Up,
     Left,
+}
+
+fn tail_triangle(x: f32, y: f32, w: f32, h: f32, tail: TailDir, outset: f32) -> [Vec2; 3] {
+    let cx = x + w / 2.0;
+    let cy = y + h / 2.0;
+    let half_base = 9.0 + outset;
+
+    match tail {
+        TailDir::Down => [
+            vec2(cx - half_base, y + h - 1.0),
+            vec2(cx + half_base, y + h - 1.0),
+            vec2(cx, y + h + TAIL_LEN + outset),
+        ],
+        TailDir::Up => [
+            vec2(cx - half_base, y + 1.0),
+            vec2(cx + half_base, y + 1.0),
+            vec2(cx, y - TAIL_LEN - outset),
+        ],
+        TailDir::Right => [
+            vec2(x + w - 1.0, cy - half_base),
+            vec2(x + w - 1.0, cy + half_base),
+            vec2(x + w + TAIL_LEN + outset, cy),
+        ],
+        TailDir::Left => [
+            vec2(x + 1.0, cy - half_base),
+            vec2(x + 1.0, cy + half_base),
+            vec2(x - TAIL_LEN - outset, cy),
+        ],
+    }
 }
 
 /// Bubble center and tail direction per draw slot, in
@@ -73,30 +105,20 @@ fn draw_banner_bubble(font: Option<&Font>, slot: usize, text: &str, alpha: f32) 
 
     let fill = theme::rgba(0x050e08, 0.94 * alpha);
     let border = theme::rgba(0xc9a227, 0.95 * alpha);
+    let outline = theme::rgba(0x000000, 0.95 * alpha);
 
-    // The tail bites slightly into the body to avoid a seam.
-    let (t1, t2, t3) = match tail {
-        TailDir::Down => (
-            vec2(cx - 9.0, y + h - 1.0),
-            vec2(cx + 9.0, y + h - 1.0),
-            vec2(cx, y + h + TAIL_LEN),
-        ),
-        TailDir::Up => (
-            vec2(cx - 9.0, y + 1.0),
-            vec2(cx + 9.0, y + 1.0),
-            vec2(cx, y - TAIL_LEN),
-        ),
-        TailDir::Right => (
-            vec2(x + w - 1.0, cy - 9.0),
-            vec2(x + w - 1.0, cy + 9.0),
-            vec2(x + w + TAIL_LEN, cy),
-        ),
-        TailDir::Left => (
-            vec2(x + 1.0, cy - 9.0),
-            vec2(x + 1.0, cy + 9.0),
-            vec2(x - TAIL_LEN, cy),
-        ),
-    };
+    let [ot1, ot2, ot3] = tail_triangle(x, y, w, h, tail, OUTLINE_W);
+    draw_triangle(ot1, ot2, ot3, outline);
+    theme::draw_rounded_rect(
+        x - OUTLINE_W,
+        y - OUTLINE_W,
+        w + OUTLINE_W * 2.0,
+        h + OUTLINE_W * 2.0,
+        10.0 + OUTLINE_W,
+        outline,
+    );
+
+    let [t1, t2, t3] = tail_triangle(x, y, w, h, tail, 0.0);
     draw_triangle(t1, t2, t3, border);
 
     theme::draw_rounded_rect(x, y, w, h, 10.0, fill);
@@ -104,4 +126,48 @@ fn draw_banner_bubble(font: Option<&Font>, slot: usize, text: &str, alpha: f32) 
 
     let text_color = Color::new(theme::TEXT_BR.r, theme::TEXT_BR.g, theme::TEXT_BR.b, alpha);
     theme::draw_text_centered(font, text, cx, cy + 9.0, BANNER_FONT, text_color);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tail_outline_surrounds_every_direction() {
+        let x = 100.0;
+        let y = 200.0;
+        let w = 80.0;
+        let h = BUBBLE_H;
+
+        for tail in [TailDir::Down, TailDir::Right, TailDir::Up, TailDir::Left] {
+            let inner = tail_triangle(x, y, w, h, tail, 0.0);
+            let outer = tail_triangle(x, y, w, h, tail, OUTLINE_W);
+            let bounds = |points: [Vec2; 3]| {
+                points.into_iter().fold(
+                    (f32::MAX, f32::MAX, f32::MIN, f32::MIN),
+                    |(min_x, min_y, max_x, max_y), point| {
+                        (
+                            min_x.min(point.x),
+                            min_y.min(point.y),
+                            max_x.max(point.x),
+                            max_y.max(point.y),
+                        )
+                    },
+                )
+            };
+            let (inner_min_x, inner_min_y, inner_max_x, inner_max_y) = bounds(inner);
+            let (outer_min_x, outer_min_y, outer_max_x, outer_max_y) = bounds(outer);
+
+            assert!(outer_min_x <= inner_min_x);
+            assert!(outer_min_y <= inner_min_y);
+            assert!(outer_max_x >= inner_max_x);
+            assert!(outer_max_y >= inner_max_y);
+            assert!(
+                outer_min_x < inner_min_x
+                    || outer_min_y < inner_min_y
+                    || outer_max_x > inner_max_x
+                    || outer_max_y > inner_max_y
+            );
+        }
+    }
 }
