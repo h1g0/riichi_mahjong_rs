@@ -342,6 +342,8 @@ pub enum Key {
     RuleDoubleYakuman,
     /// Pei dora rule label
     RuleNukiDora,
+    /// Tsumo-loss rule label
+    RuleTsumoLoss,
     /// Four-quads abortive-draw rule label
     RuleFourKansDraw,
     /// Four-winds abortive-draw rule label
@@ -364,6 +366,8 @@ pub enum Key {
     RuleDoubleYakumanDescription,
     /// Pei dora rule description
     RuleNukiDoraDescription,
+    /// Tsumo-loss rule description
+    RuleTsumoLossDescription,
     /// Four-quads abortive-draw rule description
     RuleFourKansDrawDescription,
     /// Four-winds abortive-draw rule description
@@ -610,6 +614,10 @@ impl Key {
                 Lang::Ja => "北抜き",
                 Lang::En => "Pei dora",
             },
+            Key::RuleTsumoLoss => match lang {
+                Lang::Ja => "ツモ損",
+                Lang::En => "Tsumo loss",
+            },
             Key::RuleFourKansDraw => match lang {
                 Lang::Ja => "四槓散了",
                 Lang::En => "Four-quads draw",
@@ -657,6 +665,14 @@ impl Key {
             Key::RuleNukiDoraDescription => match lang {
                 Lang::Ja => "三人麻雀で北を抜き、1翻のドラとして扱います。",
                 Lang::En => "In three-player games, North may be extracted as one dora.",
+            },
+            Key::RuleTsumoLossDescription => match lang {
+                Lang::Ja => {
+                    "ありの場合は不在の北家分を受け取らず、\nなしの場合は支払う2人で折半します。"
+                }
+                Lang::En => {
+                    "When on, the absent North player's share is not received;\nwhen off, both payers split it."
+                }
             },
             Key::RuleFourKansDrawDescription => match lang {
                 Lang::Ja => "複数人による4回目のカン成立時に流局します。",

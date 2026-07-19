@@ -391,6 +391,7 @@ fn rule_label_key(rule: RuleOption) -> Key {
         RuleOption::SwapCalling => Key::RuleSwapCalling,
         RuleOption::DoubleYakuman => Key::RuleDoubleYakuman,
         RuleOption::NukiDora => Key::RuleNukiDora,
+        RuleOption::TsumoLoss => Key::RuleTsumoLoss,
         RuleOption::FourKansDraw => Key::RuleFourKansDraw,
         RuleOption::FourWindsDraw => Key::RuleFourWindsDraw,
         RuleOption::FourRiichiDraw => Key::RuleFourRiichiDraw,
@@ -407,6 +408,7 @@ fn rule_description_key(rule: RuleOption) -> Key {
         RuleOption::SwapCalling => Key::RuleSwapCallingDescription,
         RuleOption::DoubleYakuman => Key::RuleDoubleYakumanDescription,
         RuleOption::NukiDora => Key::RuleNukiDoraDescription,
+        RuleOption::TsumoLoss => Key::RuleTsumoLossDescription,
         RuleOption::FourKansDraw => Key::RuleFourKansDrawDescription,
         RuleOption::FourWindsDraw => Key::RuleFourWindsDrawDescription,
         RuleOption::FourRiichiDraw => Key::RuleFourRiichiDrawDescription,
@@ -481,6 +483,7 @@ fn mode_summary_lines(state: &GameState, origin: MenuOrigin) -> Vec<String> {
     let mut final_rules = vec![(RuleOption::YakumanPao, rules.yakuman_pao)];
     if mode.three_player() {
         final_rules.push((RuleOption::NukiDora, rules.nuki_dora));
+        final_rules.push((RuleOption::TsumoLoss, rules.tsumo_loss));
     }
     lines.push(join(&final_rules));
     lines.push(
@@ -809,7 +812,7 @@ pub fn draw_rule_settings(state: &GameState, font: Option<&Font>, origin: MenuOr
         let enabled = rule.is_enabled(rules);
         let value = tr.get(if enabled { Key::RuleOn } else { Key::RuleOff });
         let mut label = tr.get(rule_label_key(rule)).to_string();
-        if rule == RuleOption::NukiDora {
+        if matches!(rule, RuleOption::NukiDora | RuleOption::TsumoLoss) {
             label.push_str(tr.get(Key::SanmaOnlyNote));
         }
         draw_rule_button(
@@ -944,11 +947,13 @@ mod tests {
         state.lang = Lang::Ja;
         state.setup_state.mode = GameMode::ThreeHanchan;
         state.setup_state.rules.nuki_dora = false;
+        state.setup_state.rules.tsumo_loss = false;
 
         let lines = mode_summary_lines(&state, MenuOrigin::Local);
 
         assert_eq!(lines[0], "三人半荘、35,000点始まり、西入なし");
         assert!(lines.iter().any(|line| line.contains("北抜きなし")));
+        assert!(lines.iter().any(|line| line.contains("ツモ損なし")));
         assert!(
             lines
                 .iter()
@@ -970,6 +975,17 @@ mod tests {
             assert!(description.contains(name), "missing {name}");
         }
         assert_eq!(description.lines().count(), 2);
+    }
+
+    #[test]
+    fn tsumo_loss_description_explains_the_disabled_payment_split() {
+        let ja = Key::RuleTsumoLossDescription.text(Lang::Ja);
+        let en = Key::RuleTsumoLossDescription.text(Lang::En);
+
+        assert!(ja.contains("なしの場合は支払う2人で折半"));
+        assert!(en.contains("when off, both payers split it"));
+        assert_eq!(ja.lines().count(), 2);
+        assert_eq!(en.lines().count(), 2);
     }
 
     #[test]

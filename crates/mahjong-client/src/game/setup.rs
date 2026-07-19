@@ -68,6 +68,7 @@ pub enum RuleOption {
     SwapCalling,
     DoubleYakuman,
     NukiDora,
+    TsumoLoss,
     FourKansDraw,
     FourWindsDraw,
     FourRiichiDraw,
@@ -79,11 +80,12 @@ pub enum RuleOption {
 
 impl RuleOption {
     /// Every configurable rule in display order.
-    pub const ALL: [RuleOption; 11] = [
+    pub const ALL: [RuleOption; 12] = [
         RuleOption::OpenAllInside,
         RuleOption::SwapCalling,
         RuleOption::DoubleYakuman,
         RuleOption::NukiDora,
+        RuleOption::TsumoLoss,
         RuleOption::FourKansDraw,
         RuleOption::FourWindsDraw,
         RuleOption::FourRiichiDraw,
@@ -100,6 +102,7 @@ impl RuleOption {
             RuleOption::SwapCalling => !rules.forbid_swap_calling,
             RuleOption::DoubleYakuman => rules.double_yakuman,
             RuleOption::NukiDora => rules.nuki_dora,
+            RuleOption::TsumoLoss => rules.tsumo_loss,
             RuleOption::FourKansDraw => rules.four_kans_draw,
             RuleOption::FourWindsDraw => rules.four_winds_draw,
             RuleOption::FourRiichiDraw => rules.four_riichi_draw,
@@ -117,6 +120,7 @@ impl RuleOption {
             RuleOption::SwapCalling => rules.forbid_swap_calling = !rules.forbid_swap_calling,
             RuleOption::DoubleYakuman => rules.double_yakuman = !rules.double_yakuman,
             RuleOption::NukiDora => rules.nuki_dora = !rules.nuki_dora,
+            RuleOption::TsumoLoss => rules.tsumo_loss = !rules.tsumo_loss,
             RuleOption::FourKansDraw => rules.four_kans_draw = !rules.four_kans_draw,
             RuleOption::FourWindsDraw => rules.four_winds_draw = !rules.four_winds_draw,
             RuleOption::FourRiichiDraw => rules.four_riichi_draw = !rules.four_riichi_draw,

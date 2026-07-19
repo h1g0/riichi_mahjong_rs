@@ -51,10 +51,12 @@ pub struct Settings {
     /// chii sequence.
     pub forbid_swap_calling: bool,
     /// Three-player mahjong (sanma / 三麻; default: false = four-player).
-    /// On: 108 tiles with characters 2m-8m removed, no chii, and tsumo loss
-    /// (per-person payments are unchanged; the absent player's share is
-    /// simply not received).
+    /// On: 108 tiles with characters 2m-8m removed and no chii.
     pub three_player: bool,
+    /// Tsumo loss (tsumo-zon / ツモ損; three-player only, default: on).
+    /// On: per-person payments are unchanged and the absent North player's
+    /// share is not received. Off: that share is split between both payers.
+    pub tsumo_loss: bool,
     /// Pei dora (North extraction / 北抜き; three-player only, default: on).
     /// On: a player may set aside a North tile as one dora each and draw a
     /// replacement tile from the wall.
@@ -89,6 +91,7 @@ impl Settings {
             multiple_ron: true,
             forbid_swap_calling: true,
             three_player: false,
+            tsumo_loss: true,
             nuki_dora: true,
             yakuman_pao: true,
             double_yakuman: true,
@@ -109,6 +112,7 @@ mod tests {
     fn default_is_four_player() {
         let settings = Settings::new();
         assert!(!settings.three_player);
+        assert!(settings.tsumo_loss);
         assert!(settings.nuki_dora);
         assert!(settings.double_yakuman);
         assert_eq!(settings.player_count(), 4);
@@ -130,10 +134,12 @@ mod tests {
         // Simulate an old format by removing fields added after the initial rules.
         let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
         value.as_object_mut().unwrap().remove("three_player");
+        value.as_object_mut().unwrap().remove("tsumo_loss");
         value.as_object_mut().unwrap().remove("nuki_dora");
         value.as_object_mut().unwrap().remove("double_yakuman");
         let settings: Settings = serde_json::from_value(value).unwrap();
         assert!(!settings.three_player);
+        assert!(settings.tsumo_loss);
         assert!(settings.nuki_dora);
         assert!(settings.double_yakuman);
     }

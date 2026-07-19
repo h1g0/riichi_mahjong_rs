@@ -228,8 +228,6 @@ impl Round {
             self.settings.three_player,
         );
 
-        // Three-player games use tsumo loss: the absent player's share
-        // is simply not received.
         let pao_players = self.pao_players_for_win(winner, &score_result.yaku_list);
         let deltas = scoring::calculate_tsumo_score_deltas_with_pao(
             winner,
@@ -238,6 +236,7 @@ impl Round {
             self.dealer,
             self.honba,
             self.player_count,
+            self.settings.tsumo_loss,
             &pao_players,
         );
         let riichi_sticks = self.riichi_sticks;

@@ -125,6 +125,7 @@ impl Round {
                 self.dealer,
                 honba,
                 self.player_count,
+                self.settings.tsumo_loss,
             );
             let riichi_bonus = if is_first_winner {
                 riichi_sticks as i32 * RIICHI_STICK_VALUE

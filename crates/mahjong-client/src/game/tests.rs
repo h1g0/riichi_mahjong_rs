@@ -667,11 +667,13 @@ fn test_setup_state_build_game_settings() {
 
     setup.mode = GameMode::ThreeHanchan;
     setup.rules.nuki_dora = false;
+    setup.rules.tsumo_loss = false;
     setup.rules.double_yakuman = false;
     setup.rules.opened_all_inside = false;
     let settings = setup.build_game_settings();
     assert!(settings.rules.three_player);
     assert!(!settings.rules.nuki_dora);
+    assert!(!settings.rules.tsumo_loss);
     assert!(!settings.rules.double_yakuman);
     assert!(!settings.rules.opened_all_inside);
     assert_eq!(
@@ -690,9 +692,11 @@ fn test_online_ui_build_rules_includes_selected_rules() {
 
     online.rules.double_yakuman = false;
     online.rules.triple_ron_draw = true;
+    online.rules.tsumo_loss = false;
     let rules = online.build_rules();
     assert!(!rules.double_yakuman);
     assert!(rules.triple_ron_draw);
+    assert!(!rules.tsumo_loss);
 }
 
 #[test]

@@ -253,8 +253,9 @@ pub fn check_nagashi_mangan(
 
 /// Computes the point transfers for a tsumo win.
 ///
-/// Three-player games use tsumo loss: per-person payments are unchanged
-/// and the absent player's share is simply not received.
+/// In three-player games, `tsumo_loss` keeps per-person hand payments
+/// unchanged. When it is off, the absent North player's hand-payment share
+/// is split between the two payers and each result is rounded up to 100.
 ///
 /// Returns each player's score delta (positive = gain); deltas always
 /// sum to zero.
@@ -265,6 +266,7 @@ pub fn calculate_tsumo_score_deltas(
     dealer_idx: usize,
     honba: usize,
     player_count: usize,
+    tsumo_loss: bool,
 ) -> [i32; 4] {
     calculate_tsumo_deltas_from_payments(
         winner,
@@ -275,7 +277,12 @@ pub fn calculate_tsumo_score_deltas(
         dealer_idx,
         honba,
         player_count,
+        tsumo_loss,
     )
+}
+
+fn add_half_missing_share(payment: i32, missing_payment: i32) -> i32 {
+    round_up_to_100((payment + missing_payment / 2) as u32) as i32
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -288,13 +295,20 @@ fn calculate_tsumo_deltas_from_payments(
     dealer_idx: usize,
     honba: usize,
     player_count: usize,
+    tsumo_loss: bool,
 ) -> [i32; 4] {
     let mut deltas = [0i32; 4];
     let honba_bonus = honba as i32 * 100;
+    let cover_missing_share = player_count == 3 && !tsumo_loss;
 
     if winner_is_dealer {
         // Dealer tsumo: every non-dealer pays the same amount.
-        let each_pay = dealer_tsumo_all + honba_bonus;
+        let hand_payment = if cover_missing_share {
+            add_half_missing_share(dealer_tsumo_all, dealer_tsumo_all)
+        } else {
+            dealer_tsumo_all
+        };
+        let each_pay = hand_payment + honba_bonus;
         for (i, delta) in deltas.iter_mut().enumerate().take(player_count) {
             if i == winner {
                 *delta = each_pay * (player_count as i32 - 1);
@@ -304,8 +318,16 @@ fn calculate_tsumo_deltas_from_payments(
         }
     } else {
         // Non-dealer tsumo: the dealer pays the larger share.
-        let dealer_pay = non_dealer_tsumo_dealer + honba_bonus;
-        let non_dealer_pay = non_dealer_tsumo_non_dealer + honba_bonus;
+        let (dealer_hand_payment, non_dealer_hand_payment) = if cover_missing_share {
+            (
+                add_half_missing_share(non_dealer_tsumo_dealer, non_dealer_tsumo_non_dealer),
+                add_half_missing_share(non_dealer_tsumo_non_dealer, non_dealer_tsumo_non_dealer),
+            )
+        } else {
+            (non_dealer_tsumo_dealer, non_dealer_tsumo_non_dealer)
+        };
+        let dealer_pay = dealer_hand_payment + honba_bonus;
+        let non_dealer_pay = non_dealer_hand_payment + honba_bonus;
         let mut total_gain = 0i32;
         for (i, delta) in deltas.iter_mut().enumerate().take(player_count) {
             if i == winner {
@@ -340,6 +362,7 @@ pub fn calculate_tsumo_score_deltas_with_pao(
     dealer_idx: usize,
     honba: usize,
     player_count: usize,
+    tsumo_loss: bool,
     pao_players: &[usize],
 ) -> [i32; 4] {
     if pao_players.is_empty() {
@@ -350,6 +373,7 @@ pub fn calculate_tsumo_score_deltas_with_pao(
             dealer_idx,
             honba,
             player_count,
+            tsumo_loss,
         );
     }
 
@@ -367,6 +391,7 @@ pub fn calculate_tsumo_score_deltas_with_pao(
             dealer_idx,
             honba,
             player_count,
+            tsumo_loss,
         );
         apply_pao_to_tsumo_deltas(&mut deltas, winner, pao_players[0]);
         return deltas;
@@ -389,6 +414,7 @@ pub fn calculate_tsumo_score_deltas_with_pao(
         dealer_idx,
         0,
         player_count,
+        tsumo_loss,
     );
 
     for &pao_player in liable_players {
@@ -401,6 +427,7 @@ pub fn calculate_tsumo_score_deltas_with_pao(
             dealer_idx,
             0,
             player_count,
+            tsumo_loss,
         );
         apply_pao_to_tsumo_deltas(&mut unit_deltas, winner, pao_player);
         for (delta, unit_delta) in deltas.iter_mut().zip(unit_deltas) {
@@ -707,7 +734,7 @@ mod tests {
     #[test]
     fn test_tsumo_dealer_mangan() {
         let score = make_mangan_score();
-        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0, 4);
+        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0, 4, true);
         assert_eq!(deltas[0], 12000); // 4000 * 3
         assert_eq!(deltas[1], -4000);
         assert_eq!(deltas[2], -4000);
@@ -718,7 +745,7 @@ mod tests {
     #[test]
     fn test_tsumo_non_dealer_mangan() {
         let score = make_mangan_score();
-        let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 4);
+        let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 4, true);
         assert_eq!(deltas[0], -4000); // dealer
         assert_eq!(deltas[1], 8000); // winner: 4000+2000+2000
         assert_eq!(deltas[2], -2000);
@@ -730,7 +757,7 @@ mod tests {
     fn test_tsumo_with_honba() {
         let score = make_mangan_score();
         // Two honba add 100 x 2 = 200 to each payment.
-        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 2, 4);
+        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 2, 4, true);
         assert_eq!(deltas[1], -4200); // 4000+200
         assert_eq!(deltas[2], -4200);
         assert_eq!(deltas[3], -4200);
@@ -741,7 +768,7 @@ mod tests {
     #[test]
     fn test_sanma_tsumo_dealer_mangan_tsumo_loss() {
         let score = make_mangan_score();
-        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0, 3);
+        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0, 3, true);
         // Tsumo loss: payments stay 4000 each; the absent player's
         // share is simply not received.
         assert_eq!(deltas[0], 8000); // 4000 * 2
@@ -754,12 +781,48 @@ mod tests {
     #[test]
     fn test_sanma_tsumo_non_dealer_mangan_tsumo_loss() {
         let score = make_mangan_score();
-        let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3);
+        let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3, true);
         assert_eq!(deltas[0], -4000); // dealer
         assert_eq!(deltas[1], 6000); // 4000 + 2000 (tsumo loss)
         assert_eq!(deltas[2], -2000);
         assert_eq!(deltas[3], 0); // The dummy seat never pays.
         assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn test_sanma_tsumo_dealer_mangan_without_tsumo_loss() {
+        let score = make_mangan_score();
+        let deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0, 3, false);
+        assert_eq!(deltas[0], 12000);
+        assert_eq!(deltas[1], -6000);
+        assert_eq!(deltas[2], -6000);
+        assert_eq!(deltas[3], 0);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn test_sanma_tsumo_non_dealer_mangan_without_tsumo_loss() {
+        let score = make_mangan_score();
+        let deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3, false);
+        assert_eq!(deltas[0], -5000);
+        assert_eq!(deltas[1], 8000);
+        assert_eq!(deltas[2], -3000);
+        assert_eq!(deltas[3], 0);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn test_sanma_without_tsumo_loss_rounds_each_split_payment() {
+        let mut score = make_mangan_score();
+        score.dealer_tsumo_all = 500;
+        score.non_dealer_tsumo_dealer = 500;
+        score.non_dealer_tsumo_non_dealer = 300;
+
+        let dealer_deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 0, 3, false);
+        assert_eq!(dealer_deltas, [1600, -800, -800, 0]);
+
+        let non_dealer_deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3, false);
+        assert_eq!(non_dealer_deltas, [-700, 1200, -500, 0]);
     }
 
     #[test]
@@ -929,7 +992,7 @@ mod tests {
     #[test]
     fn test_pao_tsumo_non_dealer_yakuman() {
         let score = make_yakuman_score();
-        let mut deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 4);
+        let mut deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 4, true);
         apply_pao_to_tsumo_deltas(&mut deltas, 1, 2);
         assert_eq!(deltas[0], 0);
         assert_eq!(deltas[1], 32000); // 16000 + 8000 + 8000
@@ -941,7 +1004,7 @@ mod tests {
     #[test]
     fn test_pao_tsumo_only_shifts_the_liable_yakuman_portion() {
         let score = make_double_yakuman_score();
-        let deltas = calculate_tsumo_score_deltas_with_pao(1, &score, false, 0, 0, 4, &[2]);
+        let deltas = calculate_tsumo_score_deltas_with_pao(1, &score, false, 0, 0, 4, true, &[2]);
 
         // Big Dragons is paid entirely by seat 2; All Honours keeps its
         // ordinary tsumo split.
@@ -952,7 +1015,8 @@ mod tests {
     #[test]
     fn test_pao_tsumo_covers_both_units_of_double_big_winds() {
         let score = make_single_double_yakuman_score();
-        let deltas = calculate_tsumo_score_deltas_with_pao(1, &score, false, 0, 0, 4, &[2, 2]);
+        let deltas =
+            calculate_tsumo_score_deltas_with_pao(1, &score, false, 0, 0, 4, true, &[2, 2]);
 
         assert_eq!(deltas, [0, 64_000, -64_000, 0]);
         assert_eq!(deltas.iter().sum::<i32>(), 0);
@@ -963,7 +1027,7 @@ mod tests {
     #[test]
     fn test_pao_tsumo_dealer_yakuman_with_honba() {
         let score = make_yakuman_score();
-        let mut deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 2, 4);
+        let mut deltas = calculate_tsumo_score_deltas(0, &score, true, 0, 2, 4, true);
         apply_pao_to_tsumo_deltas(&mut deltas, 0, 3);
         assert_eq!(deltas[0], 48600); // (16000+200) * 3
         assert_eq!(deltas[1], 0);
@@ -977,11 +1041,22 @@ mod tests {
     #[test]
     fn test_pao_tsumo_sanma_tsumo_loss() {
         let score = make_yakuman_score();
-        let mut deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3);
+        let mut deltas = calculate_tsumo_score_deltas(1, &score, false, 0, 0, 3, true);
         apply_pao_to_tsumo_deltas(&mut deltas, 1, 2);
         assert_eq!(deltas[0], 0);
         assert_eq!(deltas[1], 24000); // 16000 + 8000 (tsumo loss)
         assert_eq!(deltas[2], -24000);
+        assert_eq!(deltas[3], 0);
+        assert_eq!(deltas.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn test_pao_tsumo_sanma_without_tsumo_loss() {
+        let score = make_yakuman_score();
+        let deltas = calculate_tsumo_score_deltas_with_pao(1, &score, false, 0, 0, 3, false, &[2]);
+        assert_eq!(deltas[0], 0);
+        assert_eq!(deltas[1], 32000);
+        assert_eq!(deltas[2], -32000);
         assert_eq!(deltas[3], 0);
         assert_eq!(deltas.iter().sum::<i32>(), 0);
     }
