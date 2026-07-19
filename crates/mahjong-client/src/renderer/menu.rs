@@ -619,7 +619,7 @@ fn rule_description_rect() -> Rect2 {
         x: panel_x() + 32.0,
         y: 480.0,
         w: PANEL_W - 64.0,
-        h: 106.0,
+        h: 112.0,
     }
 }
 
@@ -986,6 +986,27 @@ mod tests {
         assert!(en.contains("when off, both payers split it"));
         assert_eq!(ja.lines().count(), 2);
         assert_eq!(en.lines().count(), 2);
+    }
+
+    #[test]
+    fn multiple_ron_description_explains_head_bump_priority_and_fits_panel() {
+        let ja = Key::RuleMultipleRonDescription.text(Lang::Ja);
+        let en = Key::RuleMultipleRonDescription.text(Lang::En);
+
+        for phrase in ["ダブロン・トリロン", "オフの時は頭ハネ", "供託棒は頭ハネ"]
+        {
+            assert!(ja.contains(phrase), "missing {phrase}");
+        }
+        assert!(en.contains("double and triple ron"));
+        assert!(en.contains("Off uses head bump"));
+        assert!(en.contains("Riichi deposits use head-bump priority"));
+        assert_eq!(ja.lines().count(), 3);
+        assert_eq!(en.lines().count(), 3);
+
+        let description = rule_description_rect();
+        let last_baseline = description.y + 73.0 + 2.0 * 18.0;
+        assert!(last_baseline <= description.y + description.h);
+        assert!(description.y + description.h < rule_confirm_rect().y);
     }
 
     #[test]
