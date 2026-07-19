@@ -679,8 +679,12 @@ impl Key {
                 Lang::En => "Ends the hand when three players ron the same discard.",
             },
             Key::RuleMultipleRonDescription => match lang {
-                Lang::Ja => "同じ捨て牌への複数人のロンをすべて認めます。",
-                Lang::En => "Allows every player who declares ron on the same discard to win.",
+                Lang::Ja => {
+                    "同じ捨て牌への複数人のロン（ダブロン・トリロン）をすべて認めます。\nオフの時は頭ハネ（放銃者からツモ順が最も早い和了者のみ）となります。\nオン・オフともに供託棒は頭ハネになります。"
+                }
+                Lang::En => {
+                    "Allows double and triple ron on the same discard.\nOff uses head bump: only the earliest winner after the discarder wins.\nRiichi deposits use head-bump priority in both modes."
+                }
             },
             Key::RuleYakumanPaoDescription => match lang {
                 Lang::Ja => "大三元・大四喜・四槓子を確定させた打牌に責任払いを適用します。",
