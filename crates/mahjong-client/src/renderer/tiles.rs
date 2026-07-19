@@ -3,14 +3,15 @@
 use super::*;
 
 pub(super) fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
-    let hand_start_x = player_hand_start_x(state.hand.len());
+    let hand_start_x = player_hand_start_x(state.hand.len(), &state.melds);
     let hand_y = HAND_Y;
+    let now = get_time();
     let tr = state.tr();
     let dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
 
     // Hand first; badges draw later so tiles cannot cover them.
     for (i, tile) in state.hand.iter().enumerate() {
-        let x = hand_start_x + i as f32 * TILE_W;
+        let x = player_hand_tile_x(state, i, now);
         let selected = state.selected_tile == Some(i);
         let riichi_selectable =
             state.riichi_selection_mode && state.riichi_selectable_tiles.contains(&i);
@@ -140,11 +141,11 @@ pub(super) fn draw_melds(state: &GameState, tile_textures: &TileTextures) {
         return;
     }
 
-    let tw: f32 = 40.0;
-    let th: f32 = 56.0;
+    let tw = SELF_MELD_TILE_W;
+    let th = SELF_MELD_TILE_H;
     let meld_y: f32 = 692.0;
-    let meld_gap: f32 = 12.0;
-    let right_edge: f32 = 1220.0;
+    let meld_gap = SELF_MELD_GAP;
+    let right_edge = SELF_MELD_RIGHT_EDGE;
 
     // Earliest meld on the right, later melds further left.
     let xs = self_meld_x_positions(&state.melds, tw, th, meld_gap, right_edge);
@@ -486,20 +487,10 @@ pub(super) fn tedashi_progress(elapsed: f64) -> f32 {
     1.0 - (1.0 - t) * (1.0 - t)
 }
 
-/// How far the centering anchor (hand left edge) moved across a hand
-/// discard (pre-discard X minus post-discard X).
-///
-/// With a drawn tile the count is unchanged and there is no shift;
-/// without one (a post-call discard) the hand shrinks by one and the
-/// centering shifts half a tile.
-fn tedashi_start_shift(had_drawn: bool, tile_step: f32) -> f32 {
-    if had_drawn { 0.0 } else { -tile_step / 2.0 }
-}
-
 /// Per-tile X offsets (added to post-discard positions) during the
 /// hand-discard animation.
 ///
-/// - Tiles left of the gap stay put (centering shift only).
+/// - Tiles left of the gap stay put.
 /// - Tiles right of the gap start one tile right (their pre-discard
 ///   spot) and slide left.
 /// - A drawn tile that was hanging out slides from its slot into the
@@ -513,15 +504,33 @@ pub(super) fn tedashi_tile_offset(
     drawn_gap: f32,
     progress: f32,
 ) -> f32 {
-    let shift = tedashi_start_shift(had_drawn, tile_step);
     let from = if final_index < gap_index {
-        shift
+        0.0
     } else if had_drawn && final_index + 1 == hand_count {
-        shift + tile_step + drawn_gap
+        tile_step + drawn_gap
     } else {
-        shift + tile_step
+        tile_step
     };
     from * (1.0 - progress)
+}
+
+/// Width reserved after an opponent's concealed hand for the drawn tile.
+///
+/// A pon/chii temporarily leaves one extra concealed tile until the
+/// caller discards. That tile occupies the drawn-tile slot itself, while
+/// the usual gap remains reserved. Restoring the full slot after the
+/// discard keeps both layout edges fixed while the hand closes its gap.
+pub(super) fn opponent_drawn_slot_width(
+    hand_count: usize,
+    has_drawn: bool,
+    tile_step: f32,
+    drawn_gap: f32,
+) -> f32 {
+    if !has_drawn && hand_count % 3 == 2 {
+        drawn_gap
+    } else {
+        drawn_gap + tile_step
+    }
 }
 
 /// Draws the other players' hands.
@@ -559,7 +568,7 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
         let drawn_slot = if other.revealed {
             0.0
         } else {
-            OTHER_DRAWN_GAP + tile_step
+            opponent_drawn_slot_width(hand_count, other.has_drawn, tile_step, OTHER_DRAWN_GAP)
         };
         let meld_widths: f32 = other.melds.iter().map(|m| calc_meld_width(m, tw, th)).sum();
         let meld_gaps = if other.melds.is_empty() {
@@ -627,15 +636,12 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
             x += drawn_slot;
         }
 
-        // Melds continue past the drawn-tile slot; on a post-call discard
-        // they slide together with the hand by the centering shift.
-        let meld_offset = anim.map_or(0.0, |(a, p)| {
-            tedashi_start_shift(a.had_drawn, tile_step) * (1.0 - p)
-        });
+        // Melds continue past the drawn-tile slot. The slot absorbs the
+        // width lost by a post-call discard, so melds remain stationary.
         if !other.melds.is_empty() {
             x += meld_gap;
         }
-        let xs = other_meld_x_positions(&other.melds, tw, th, meld_gap, x + meld_offset);
+        let xs = other_meld_x_positions(&other.melds, tw, th, meld_gap, x);
         for (meld, &mx) in other.melds.iter().zip(&xs) {
             draw_meld_group(meld, mx, base_y, tw, th, tile_textures, tile_tint);
         }

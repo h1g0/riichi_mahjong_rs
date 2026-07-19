@@ -26,7 +26,7 @@ mod setup;
 mod tests;
 
 pub use labels::PlayerLabel;
-pub use setup::{GameMode, OnlineUiState, RoomViewUi, SetupState};
+pub use setup::{GameMode, OnlineUiState, RoomViewUi, RuleOption, SetupState};
 
 use labels::*;
 
@@ -146,6 +146,26 @@ pub struct TedashiAnim {
     pub started_at: f64,
 }
 
+/// A tile's visible position before our hand discard is applied locally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfTileOrigin {
+    /// The tile was at this index in the concealed hand.
+    Hand(usize),
+    /// The tile was hanging to the right as the drawn tile.
+    Drawn,
+}
+
+/// Gap-closing animation state for our own hand discard.
+#[derive(Debug, Clone)]
+pub struct SelfTedashiAnim {
+    /// Pre-discard origins, aligned with the final sorted hand.
+    pub origins: Vec<SelfTileOrigin>,
+    /// Concealed-hand length before the discard.
+    pub pre_hand_len: usize,
+    /// Animation start time, on the input/process-events clock.
+    pub started_at: f64,
+}
+
 /// Display info for an opponent's hand, indexed relative to us.
 #[derive(Debug, Clone)]
 pub struct OtherPlayerHand {
@@ -195,6 +215,8 @@ pub struct GameState {
     pub hand: Vec<Tile>,
     /// The drawn tile
     pub drawn: Option<Tile>,
+    /// Gap-closing animation of our latest hand discard
+    pub self_tedashi_anim: Option<SelfTedashiAnim>,
     /// Discards per player (0 = self, 1 = right, 2 = across, 3 = left)
     pub discards: [Vec<DiscardInfo>; 4],
     /// Scores
@@ -292,6 +314,8 @@ pub struct GameState {
     pub nine_terminals_pending: bool,
     /// Pre-game setup state
     pub setup_state: SetupState,
+    /// Rule whose description is shown on the rule-settings screen
+    pub selected_rule: RuleOption,
     /// Online UI state
     pub online_state: OnlineUiState,
     /// Player types per seat, in the same order as `scores`
@@ -319,8 +343,8 @@ pub struct GameState {
     event_hold_until: f64,
     /// Whether the front event's banner has been shown (pre-apply hold)
     head_announced: bool,
-    /// The time last passed to [`process_events`](Self::process_events);
-    /// used as the animation start time when applying events.
+    /// The time last passed to [`process_events`](Self::process_events)
+    /// or `handle_input`; used as the animation start time.
     clock: f64,
     /// Display language
     pub lang: Lang,
@@ -343,6 +367,8 @@ pub enum GamePhase {
     TopMenu,
     /// Game-mode selection
     ModeSelect(MenuOrigin),
+    /// Rule settings opened from game-mode selection
+    RuleSettings(MenuOrigin),
     /// CPU setup (level/personality; starts locally, confirms online)
     CpuSetup(MenuOrigin),
     /// Online menu (name and room-code entry)
@@ -365,6 +391,7 @@ impl GameState {
             seat_wind: None,
             hand: Vec::new(),
             drawn: None,
+            self_tedashi_anim: None,
             discards: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             scores: [25000; 4],
             round_wind: None,
@@ -415,6 +442,7 @@ impl GameState {
             pon_pending_options: Vec::new(),
             nine_terminals_pending: false,
             setup_state: SetupState::new(),
+            selected_rule: RuleOption::OpenAllInside,
             online_state: OnlineUiState::new(),
             player_labels: [
                 PlayerLabel::Me,
