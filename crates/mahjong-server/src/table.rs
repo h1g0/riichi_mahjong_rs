@@ -677,7 +677,9 @@ mod tests {
     #[test]
     fn test_table_handle_discard() {
         let mut table = Table::new(GameSettings::default());
-        table.start_round();
+        // This test targets discard handling, so a fixed wall avoids
+        // randomly entering the nine-terminals choice before the discard.
+        table.start_round_with_seed(42);
         table.drain_events();
 
         {
