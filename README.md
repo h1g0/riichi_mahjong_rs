@@ -16,6 +16,7 @@ Implementation for Japanese Riichi Mahjong in Rust.
 - [Yaku](https://en.wikipedia.org/wiki/Japanese_Mahjong_yaku) evaluation is implemented.
 - Fu calculation and score calculation are implemented.
 - A playable client that runs in both native and WASM builds is included.
+- The native client saves a PNG screenshot to `screenshots/` when `F12` is pressed.
 - The client UI is multilingual (currently Japanese and English).
   - In English mode, each tile shows a small index label in its top-right corner so tiles can be identified without reading kanji: suit-colored digits for number tiles (man = red, pin = blue, sou = green), E/S/W/N for winds, and P/F/C for dragons.
 - CPU opponents are implemented.

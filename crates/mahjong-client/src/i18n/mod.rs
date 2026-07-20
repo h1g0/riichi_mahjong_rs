@@ -285,6 +285,15 @@ impl Translator {
             },
         }
     }
+
+    /// Screenshot-save confirmation with its relative path.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn screenshot_saved(&self, path: &str) -> String {
+        match self.lang {
+            Lang::Ja => format!("スクリーンショットを保存しました: {path}"),
+            Lang::En => format!("Screenshot saved: {path}"),
+        }
+    }
 }
 
 /// Keys for fixed, parameterless UI strings.
@@ -530,6 +539,12 @@ pub enum Key {
     PeerDisconnected,
     /// Generic transport-error caption (details go to the log)
     NetworkError,
+    /// Native screenshot keyboard shortcut
+    #[cfg(not(target_arch = "wasm32"))]
+    ScreenshotHint,
+    /// Generic screenshot-save error (details go to the log)
+    #[cfg(not(target_arch = "wasm32"))]
+    ScreenshotFailed,
 }
 
 impl Key {
@@ -1050,6 +1065,16 @@ impl Key {
                 Lang::Ja => "通信エラーが発生しました",
                 Lang::En => "A network error occurred",
             },
+            #[cfg(not(target_arch = "wasm32"))]
+            Key::ScreenshotHint => match lang {
+                Lang::Ja => "F12：スクリーンショットを保存",
+                Lang::En => "F12: Save screenshot",
+            },
+            #[cfg(not(target_arch = "wasm32"))]
+            Key::ScreenshotFailed => match lang {
+                Lang::Ja => "スクリーンショットを保存できませんでした",
+                Lang::En => "Could not save screenshot",
+            },
         }
     }
 }
@@ -1088,6 +1113,21 @@ mod tests {
         assert_eq!(en.personality_label(0), "Balanced");
         assert_eq!(ja.cpu_slot(1), "CPU 2");
         assert_eq!(en.cpu_slot(2), "CPU 3");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn screenshot_confirmation_contains_path() {
+        let ja = Translator::new(Lang::Ja);
+        let en = Translator::new(Lang::En);
+        assert_eq!(
+            ja.screenshot_saved("screenshots/test.png"),
+            "スクリーンショットを保存しました: screenshots/test.png"
+        );
+        assert_eq!(
+            en.screenshot_saved("screenshots/test.png"),
+            "Screenshot saved: screenshots/test.png"
+        );
     }
 
     #[test]

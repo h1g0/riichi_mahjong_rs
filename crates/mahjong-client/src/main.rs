@@ -12,6 +12,8 @@ mod game;
 mod i18n;
 mod persistence;
 mod renderer;
+#[cfg(not(target_arch = "wasm32"))]
+mod screenshot;
 mod transport;
 
 // Custom WASM randomness backend (no wasm-bindgen).
@@ -26,6 +28,24 @@ use renderer::{
     ModeSelectAction, OnlineLobbyAction, OnlineMenuAction, RuleSettingsAction, SetupAction,
     TileTextures, TopMenuAction,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ScreenshotNotice {
+    message: String,
+    is_error: bool,
+    expires_at: f64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ScreenshotNotice {
+    fn new(message: String, is_error: bool, now: f64) -> Self {
+        Self {
+            message,
+            is_error,
+            expires_at: now + 3.0,
+        }
+    }
+}
 
 /// Window/taskbar icon: 16/32/64px RGBA decoded from embedded PNGs.
 fn app_icon() -> Icon {
@@ -204,8 +224,13 @@ async fn main() {
     // game start.
     let mut online: Option<RemoteAdapter> = None;
     let mut game_state = GameState::new();
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut screenshot_notice: Option<ScreenshotNotice> = None;
 
     loop {
+        #[cfg(not(target_arch = "wasm32"))]
+        let screenshot_requested = is_key_pressed(KeyCode::F12);
+
         clear_background(Color::from_rgba(6, 14, 9, 255));
 
         // Scale the design coordinate system (DESIGN_W x DESIGN_H) to
@@ -216,7 +241,25 @@ async fn main() {
         // drawing.
         renderer::cache_dynamic_text(font.as_ref(), &game_state);
 
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if screenshot_notice
+                .as_ref()
+                .is_some_and(|notice| notice.expires_at <= get_time())
+            {
+                screenshot_notice = None;
+            }
+            if let Some(notice) = &screenshot_notice {
+                renderer::cache_notification_text(font.as_ref(), &notice.message);
+            }
+        }
+
         let overlay_click = renderer::draw_game(&game_state, font.as_ref(), &tile_textures);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if !screenshot_requested && let Some(notice) = &screenshot_notice {
+            renderer::draw_notification(font.as_ref(), &notice.message, notice.is_error);
+        }
 
         if let Some(remote) = &mut online {
             remote.tick();
@@ -455,6 +498,26 @@ async fn main() {
             }
 
             GamePhase::WaitingForStart => {}
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if screenshot_requested {
+            let now = get_time();
+            screenshot_notice = Some(match screenshot::capture() {
+                Ok(path) => {
+                    let path = path.to_string_lossy();
+                    macroquad::logging::info!("screenshot saved: {}", path);
+                    ScreenshotNotice::new(game_state.tr().screenshot_saved(&path), false, now)
+                }
+                Err(error) => {
+                    macroquad::logging::warn!("failed to save screenshot: {}", error);
+                    ScreenshotNotice::new(
+                        game_state.tr().get(i18n::Key::ScreenshotFailed).to_string(),
+                        true,
+                        now,
+                    )
+                }
+            });
         }
 
         next_frame().await;

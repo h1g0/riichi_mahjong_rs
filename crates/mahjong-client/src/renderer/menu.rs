@@ -270,6 +270,16 @@ pub fn draw_top_menu(state: &GameState, font: Option<&Font>, tile_textures: &sup
     for (idx, &label) in LANG_LABELS.iter().enumerate() {
         draw_toggle(font, &top_lang_rect(idx), label, idx == active_lang, 14);
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    theme::draw_text_centered(
+        font,
+        tr.get(Key::ScreenshotHint),
+        DESIGN_W / 2.0,
+        664.0,
+        11,
+        theme::TEXT_DIM,
+    );
 }
 
 /// Handles title-screen input, returning any pressed action.
