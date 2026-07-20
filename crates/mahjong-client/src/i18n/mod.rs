@@ -597,7 +597,7 @@ impl Key {
                 Lang::En => "Round extension",
             },
             Key::RuleAllLast => match lang {
-                Lang::Ja => "オーラス親の終了",
+                Lang::Ja => "和了止め・聴牌止め",
                 Lang::En => "Final dealer stop",
             },
             Key::RuleBankruptcy => match lang {
@@ -690,10 +690,10 @@ impl Key {
             },
             Key::RuleAllLastDescription => match lang {
                 Lang::Ja => {
-                    "オーラスの親が首位のとき、和了または聴牌を条件に\n対局を終了できるか設定します。"
+                    "オーラスの親が首位のとき、親の和了または聴牌流局後に、\n連荘せず対局を自動終了する条件を設定します。"
                 }
                 Lang::En => {
-                    "Controls whether the leading final dealer may end the game\nafter winning, or after winning/declaring tenpai."
+                    "Automatically ends without dealer continuation when the leading\nfinal dealer wins, or is tenpai after an exhaustive draw."
                 }
             },
             Key::RuleBankruptcyDescription => match lang {
@@ -1062,6 +1062,20 @@ mod tests {
     fn key_resolves_both_languages() {
         assert_eq!(Key::StartGame.text(Lang::Ja), "対局開始");
         assert_eq!(Key::StartGame.text(Lang::En), "Start Game");
+    }
+
+    #[test]
+    fn all_last_rule_text_explains_the_automatic_stop() {
+        assert_eq!(Key::RuleAllLast.text(Lang::Ja), "和了止め・聴牌止め");
+        assert_eq!(
+            Key::RuleAllLastDescription.text(Lang::Ja),
+            "オーラスの親が首位のとき、親の和了または聴牌流局後に、\n連荘せず対局を自動終了する条件を設定します。"
+        );
+        assert!(
+            Key::RuleAllLastDescription
+                .text(Lang::En)
+                .starts_with("Automatically ends")
+        );
     }
 
     #[test]
