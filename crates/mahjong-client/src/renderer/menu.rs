@@ -529,28 +529,6 @@ fn rule_summary_value(state: &GameState, rule: RuleOption, rules: &Settings) -> 
     let label = state.tr().get(rule_label_key(rule));
     let value = rule_value_text(state, rule, rules);
     match state.lang {
-        Lang::Ja
-            if matches!(
-                rule,
-                RuleOption::RedFives
-                    | RuleOption::RoundExtension
-                    | RuleOption::ColdEnd
-                    | RuleOption::OpenAllInside
-                    | RuleOption::SwapCalling
-                    | RuleOption::NagashiMangan
-                    | RuleOption::KiriageMangan
-                    | RuleOption::CountedYakuman
-                    | RuleOption::DoubleYakuman
-                    | RuleOption::NukiDora
-                    | RuleOption::TsumoLoss
-                    | RuleOption::FourKansDraw
-                    | RuleOption::FourWindsDraw
-                    | RuleOption::FourRiichiDraw
-                    | RuleOption::NineTerminalsDraw
-            ) =>
-        {
-            format!("{label}{value}")
-        }
         Lang::Ja => format!("{label}：{value}"),
         Lang::En => format!("{label}: {value}"),
     }
@@ -1185,7 +1163,7 @@ mod tests {
 
         assert_eq!(lines[0], "四人東風、25,000点始まり、南入なし");
         assert_eq!(lines.len(), 4);
-        assert!(lines.iter().any(|line| line.contains("赤ドラあり")));
+        assert!(lines.iter().any(|line| line.contains("赤ドラ：あり")));
         assert!(lines.iter().any(|line| line.contains("連荘：和了・聴牌")));
         assert!(
             lines
@@ -1193,9 +1171,12 @@ mod tests {
                 .any(|line| line.contains("同時ロン：ダブロン・トリロン"))
         );
         assert!(lines.iter().any(|line| line.contains("飛び終了：マイナス")));
-        assert!(lines.iter().any(|line| line.contains("流し満貫あり")));
-        assert!(lines.iter().any(|line| line.contains("切り上げ満貫あり")));
-        assert!(lines.iter().any(|line| line.contains("数え役満あり")));
+        assert!(lines.iter().any(|line| line.contains("流し満貫：あり")));
+        assert!(lines.iter().any(|line| line.contains("切り上げ満貫：あり")));
+        assert!(lines.iter().any(|line| line.contains("数え役満：あり")));
+        for item in lines[1..].iter().flat_map(|line| line.split('、')) {
+            assert!(item.contains('：'), "missing separator in {item}");
+        }
         assert!(!lines.iter().any(|line| line.contains("喰い替え")));
         assert!(!lines.iter().any(|line| line.contains("北抜き")));
     }
@@ -1211,9 +1192,9 @@ mod tests {
         let lines = mode_summary_lines(&state, MenuOrigin::Local);
 
         assert_eq!(lines[0], "三人半荘、35,000点始まり、西入なし");
-        assert!(lines.iter().any(|line| line.contains("北抜きなし")));
-        assert!(lines.iter().any(|line| line.contains("ツモ損なし")));
-        assert!(lines.iter().any(|line| line.contains("赤ドラあり")));
+        assert!(lines.iter().any(|line| line.contains("北抜き：なし")));
+        assert!(lines.iter().any(|line| line.contains("ツモ損：なし")));
+        assert!(lines.iter().any(|line| line.contains("赤ドラ：あり")));
         assert!(!lines.iter().any(|line| line.contains("コールド終了")));
     }
 
