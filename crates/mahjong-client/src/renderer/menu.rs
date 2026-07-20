@@ -767,31 +767,72 @@ fn rule_description_rect() -> Rect2 {
     }
 }
 
-fn rule_value_selector_rect() -> Rect2 {
+const RULE_VALUE_ARROW_WIDTH: f32 = 46.0;
+const RULE_VALUE_SELECTOR_MIN_WIDTH: f32 = 200.0;
+const RULE_VALUE_TEXT_PADDING: f32 = 24.0;
+
+fn rule_value_choices(lang: Lang, rule: RuleOption) -> &'static [&'static str] {
+    match (lang, rule) {
+        (Lang::Ja, RuleOption::DealerContinuation) => &["和了のみ", "和了・聴牌"],
+        (Lang::En, RuleOption::DealerContinuation) => &["Win only", "Win or tenpai"],
+        (Lang::Ja, RuleOption::AllLast) => &["なし", "和了", "和了・聴牌"],
+        (Lang::En, RuleOption::AllLast) => &["Off", "Win", "Win or tenpai"],
+        (Lang::Ja, RuleOption::Bankruptcy) => &["なし", "マイナス", "0点以下"],
+        (Lang::En, RuleOption::Bankruptcy) => &["Off", "Below zero", "Zero or less"],
+        (Lang::Ja, RuleOption::RonMode) => &["頭ハネ", "ダブロン・トリロン", "三家和流局"],
+        (Lang::En, RuleOption::RonMode) => &["Head bump", "Multiple ron", "Triple-ron draw"],
+        (Lang::Ja, RuleOption::AbortiveDrawMode) => {
+            &["なし", "四槓・四風・九種", "4種すべて", "個別設定"]
+        }
+        (Lang::En, RuleOption::AbortiveDrawMode) => {
+            &["Off", "Except four riichi", "All four", "Custom"]
+        }
+        (Lang::Ja, RuleOption::YakumanPao) => &["なし", "大三元・大四喜", "大三元・大四喜・四槓子"],
+        (Lang::En, RuleOption::YakumanPao) => {
+            &["Off", "Dragons / Winds", "Dragons / Winds / Four Quads"]
+        }
+        (Lang::Ja, _) => &["なし", "あり"],
+        (Lang::En, _) => &["Off", "On"],
+    }
+}
+
+fn rule_value_selector_width(lang: Lang, rule: RuleOption) -> f32 {
+    let max_chars = rule_value_choices(lang, rule)
+        .iter()
+        .map(|value| value.chars().count())
+        .max()
+        .unwrap_or(0) as f32;
+    let estimated_char_width = if lang == Lang::Ja { 12.0 } else { 7.0 };
+    let value_width = max_chars * estimated_char_width + RULE_VALUE_TEXT_PADDING;
+    (RULE_VALUE_ARROW_WIDTH * 2.0 + value_width).max(RULE_VALUE_SELECTOR_MIN_WIDTH)
+}
+
+fn rule_value_selector_rect(state: &GameState, rule: RuleOption) -> Rect2 {
+    let width = rule_value_selector_width(state.lang, rule);
     Rect2 {
-        x: DESIGN_W / 2.0 - 100.0,
+        x: DESIGN_W / 2.0 - width / 2.0,
         y: 511.0,
-        w: 200.0,
+        w: width,
         h: 30.0,
     }
 }
 
-fn rule_value_previous_rect() -> Rect2 {
-    let selector = rule_value_selector_rect();
+fn rule_value_previous_rect(state: &GameState, rule: RuleOption) -> Rect2 {
+    let selector = rule_value_selector_rect(state, rule);
     Rect2 {
         x: selector.x,
         y: selector.y,
-        w: 46.0,
+        w: RULE_VALUE_ARROW_WIDTH,
         h: selector.h,
     }
 }
 
-fn rule_value_next_rect() -> Rect2 {
-    let selector = rule_value_selector_rect();
+fn rule_value_next_rect(state: &GameState, rule: RuleOption) -> Rect2 {
+    let selector = rule_value_selector_rect(state, rule);
     Rect2 {
-        x: selector.x + selector.w - 46.0,
+        x: selector.x + selector.w - RULE_VALUE_ARROW_WIDTH,
         y: selector.y,
-        w: 46.0,
+        w: RULE_VALUE_ARROW_WIDTH,
         h: selector.h,
     }
 }
@@ -846,10 +887,16 @@ fn draw_rule_button(
     );
 }
 
-fn draw_rule_value_selector(font: Option<&Font>, value: &str, enabled: bool) {
-    let selector = rule_value_selector_rect();
-    let previous = rule_value_previous_rect();
-    let next = rule_value_next_rect();
+fn draw_rule_value_selector(
+    state: &GameState,
+    font: Option<&Font>,
+    rule: RuleOption,
+    value: &str,
+    enabled: bool,
+) {
+    let selector = rule_value_selector_rect(state, rule);
+    let previous = rule_value_previous_rect(state, rule);
+    let next = rule_value_next_rect(state, rule);
     theme::draw_rounded_rect(
         selector.x,
         selector.y,
@@ -1037,7 +1084,13 @@ pub fn draw_rule_settings(state: &GameState, font: Option<&Font>, origin: MenuOr
     );
     let selected_enabled = state.selected_rule.is_enabled(rules);
     let selected_value = rule_value_text(state, state.selected_rule, rules);
-    draw_rule_value_selector(font, &selected_value, selected_enabled);
+    draw_rule_value_selector(
+        state,
+        font,
+        state.selected_rule,
+        &selected_value,
+        selected_enabled,
+    );
     let description_text = tr.get(rule_description_key(state.selected_rule));
     let description_lines: Vec<_> = description_text.lines().collect();
     let first_baseline = if description_lines.len() == 1 {
@@ -1084,12 +1137,12 @@ pub fn handle_rule_settings_input(
         }
     }
 
-    if rule_value_previous_rect().contains(mx, my) {
+    if rule_value_previous_rect(state, state.selected_rule).contains(mx, my) {
         cycle_selected_rule(state, origin, false);
         return None;
     }
 
-    if rule_value_next_rect().contains(mx, my) {
+    if rule_value_next_rect(state, state.selected_rule).contains(mx, my) {
         cycle_selected_rule(state, origin, true);
         return None;
     }
@@ -1213,5 +1266,30 @@ mod tests {
         let basic_tab = rule_page_rect(RulePage::Basic);
 
         assert!(RULE_SETTINGS_TITLE_Y + 8.0 < basic_tab.y);
+    }
+
+    #[test]
+    fn rule_value_selector_expands_for_the_longest_choice() {
+        let mut state = GameState::new();
+        state.lang = Lang::Ja;
+
+        let boolean_width = rule_value_selector_width(state.lang, RuleOption::RedFives);
+        let ron_width = rule_value_selector_width(state.lang, RuleOption::RonMode);
+        let pao_width = rule_value_selector_width(state.lang, RuleOption::YakumanPao);
+
+        assert_eq!(boolean_width, RULE_VALUE_SELECTOR_MIN_WIDTH);
+        assert!(ron_width > boolean_width);
+        assert!(pao_width > ron_width);
+
+        let pao_rect = rule_value_selector_rect(&state, RuleOption::YakumanPao);
+        assert_eq!(pao_rect.center_x(), DESIGN_W / 2.0);
+        assert_eq!(
+            rule_value_previous_rect(&state, RuleOption::YakumanPao).w,
+            RULE_VALUE_ARROW_WIDTH
+        );
+        assert_eq!(
+            rule_value_next_rect(&state, RuleOption::YakumanPao).w,
+            RULE_VALUE_ARROW_WIDTH
+        );
     }
 }
