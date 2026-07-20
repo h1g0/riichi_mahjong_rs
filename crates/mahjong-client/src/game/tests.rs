@@ -2,6 +2,7 @@
 
 use super::*;
 use mahjong_core::scoring::score::{DoraLabel, ScoreItem, ScoreRank};
+use mahjong_core::settings::{AllLastRule, BankruptcyRule, Settings};
 use mahjong_core::winning_hand::name::Kind;
 use mahjong_server::table::GameLength;
 
@@ -700,15 +701,57 @@ fn test_online_ui_build_rules_includes_selected_rules() {
 }
 
 #[test]
-fn test_every_rule_option_toggles_its_user_facing_state() {
-    let mut rules = mahjong_core::settings::Settings::new();
-    for rule in RuleOption::ALL {
-        let before = rule.is_enabled(&rules);
-        rule.toggle(&mut rules);
-        assert_ne!(rule.is_enabled(&rules), before, "{rule:?}");
-        rule.toggle(&mut rules);
-        assert_eq!(rule.is_enabled(&rules), before, "{rule:?}");
+fn test_every_rule_option_cycles_forward_and_backward() {
+    let mut options = RuleOption::options(RulePage::Basic, false);
+    options.extend(RuleOption::options(RulePage::Basic, true));
+    options.extend(RuleOption::options(RulePage::Advanced, false));
+    options.dedup();
+
+    for rule in options {
+        let mut rules = mahjong_core::settings::Settings::new();
+        let before = rules.clone();
+        rule.cycle(&mut rules, true);
+        assert_ne!(rules, before, "{rule:?}");
+        rule.cycle(&mut rules, false);
+        assert_eq!(rules, before, "{rule:?}");
     }
+}
+
+#[test]
+fn test_multi_value_rules_wrap_backwards_from_the_first_value() {
+    let mut rules = Settings {
+        all_last_rule: AllLastRule::Continue,
+        bankruptcy_rule: BankruptcyRule::None,
+        multiple_ron: false,
+        triple_ron_draw: false,
+        four_kans_draw: false,
+        four_winds_draw: false,
+        four_riichi_draw: false,
+        nine_terminals_draw: false,
+        yakuman_pao: false,
+        four_quads_pao: false,
+        ..Settings::new()
+    };
+
+    RuleOption::AllLast.cycle(&mut rules, false);
+    assert_eq!(rules.all_last_rule, AllLastRule::WinOrTenpai);
+
+    RuleOption::Bankruptcy.cycle(&mut rules, false);
+    assert_eq!(rules.bankruptcy_rule, BankruptcyRule::ZeroOrLess);
+
+    RuleOption::RonMode.cycle(&mut rules, false);
+    assert!(rules.multiple_ron);
+    assert!(rules.triple_ron_draw);
+
+    RuleOption::AbortiveDrawMode.cycle(&mut rules, false);
+    assert!(rules.four_kans_draw);
+    assert!(rules.four_winds_draw);
+    assert!(rules.four_riichi_draw);
+    assert!(rules.nine_terminals_draw);
+
+    RuleOption::YakumanPao.cycle(&mut rules, false);
+    assert!(rules.yakuman_pao);
+    assert!(rules.four_quads_pao);
 }
 
 /// Round-trip between game mode and (three-player flag, length).

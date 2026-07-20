@@ -225,7 +225,7 @@ impl Round {
             &dora_indicators,
             &uradora_indicators,
             &self.players[winner].pei_tiles,
-            self.settings.three_player,
+            &self.settings,
         );
 
         let pao_players = self.pao_players_for_win(winner, &score_result.yaku_list);

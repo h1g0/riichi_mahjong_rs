@@ -7,6 +7,30 @@ pub enum Lang {
     Ja,
 }
 
+/// Score threshold that ends a game early.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum BankruptcyRule {
+    /// Continue even when a player has no points left.
+    None,
+    /// End when a player's score becomes negative; exactly zero continues.
+    #[default]
+    Negative,
+    /// End when a player's score becomes zero or negative.
+    ZeroOrLess,
+}
+
+/// Whether the final dealer may stop the game while leading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AllLastRule {
+    /// The dealer must rotate before the game can end.
+    #[default]
+    Continue,
+    /// End after the final dealer wins while in first place.
+    Win,
+    /// End after the final dealer wins or declares tenpai while in first place.
+    WinOrTenpai,
+}
+
 /// Rule settings.
 ///
 /// Sent over the network (`CreateRoom` / `RoomState`), so the struct-level
@@ -20,6 +44,24 @@ pub struct Settings {
     /// Whether All Inside (Tan'yao) is allowed on an open hand
     /// (kuitan / 喰いタン; default: allowed)
     pub opened_all_inside: bool,
+    /// Red fives (aka dora / 赤ドラ; default: on).
+    /// Four-player games use one red five per suit; three-player games use
+    /// one red 5p and 5s.
+    pub red_fives: bool,
+    /// Whether a tenpai dealer continues after an exhaustive draw
+    /// (default: on). A dealer win always continues.
+    pub tenpai_renchan: bool,
+    /// Extend an East-only game into South, or a hanchan into West, when no
+    /// player has reached the target score (default: off). At most one extra
+    /// round wind is played.
+    pub round_extension: bool,
+    /// Final-dealer stopping rule (default: continue).
+    pub all_last_rule: AllLastRule,
+    /// Bankruptcy threshold (default: negative score).
+    pub bankruptcy_rule: BankruptcyRule,
+    /// End a four-player game when any player reaches 55,000 points
+    /// (default: off).
+    pub cold_end: bool,
     /// Four-quads abortive draw (sūkan sanra / 四槓散了; default: on).
     /// On: the hand is drawn when two or more players declare four quads in total.
     /// Off: no abortive draw, but no further quads are allowed after the fourth.
@@ -70,6 +112,16 @@ pub struct Settings {
     /// On: Four Concealed Triplets on a pair wait, Big Winds, Thirteen Orphans
     /// on a 13-sided wait, and Pure Nine Gates are worth two yakuman.
     pub double_yakuman: bool,
+    /// Nagashi Mangan (流し満貫; default: on).
+    pub nagashi_mangan: bool,
+    /// Mangan rounding for 3 han 60 fu and 4 han 30 fu (default: on).
+    pub kiriage_mangan: bool,
+    /// Whether a non-yakuman hand with 13+ han is scored as counted yakuman
+    /// instead of sanbaiman (default: on).
+    pub counted_yakuman: bool,
+    /// Whether Four Quads is included when yakuman liability payment is on
+    /// (default: on). Big Dragons and Big Winds follow `yakuman_pao`.
+    pub four_quads_pao: bool,
 }
 
 impl Default for Settings {
@@ -83,6 +135,12 @@ impl Settings {
         Settings {
             display_lang: Lang::Ja,
             opened_all_inside: true,
+            red_fives: true,
+            tenpai_renchan: true,
+            round_extension: false,
+            all_last_rule: AllLastRule::Continue,
+            bankruptcy_rule: BankruptcyRule::Negative,
+            cold_end: false,
             four_kans_draw: true,
             four_winds_draw: true,
             four_riichi_draw: false,
@@ -95,6 +153,10 @@ impl Settings {
             nuki_dora: true,
             yakuman_pao: true,
             double_yakuman: true,
+            nagashi_mangan: true,
+            kiriage_mangan: true,
+            counted_yakuman: true,
+            four_quads_pao: true,
         }
     }
 
@@ -115,6 +177,16 @@ mod tests {
         assert!(settings.tsumo_loss);
         assert!(settings.nuki_dora);
         assert!(settings.double_yakuman);
+        assert!(settings.red_fives);
+        assert!(settings.tenpai_renchan);
+        assert!(!settings.round_extension);
+        assert_eq!(settings.all_last_rule, AllLastRule::Continue);
+        assert_eq!(settings.bankruptcy_rule, BankruptcyRule::Negative);
+        assert!(!settings.cold_end);
+        assert!(settings.nagashi_mangan);
+        assert!(settings.kiriage_mangan);
+        assert!(settings.counted_yakuman);
+        assert!(settings.four_quads_pao);
         assert_eq!(settings.player_count(), 4);
     }
 
@@ -137,11 +209,31 @@ mod tests {
         value.as_object_mut().unwrap().remove("tsumo_loss");
         value.as_object_mut().unwrap().remove("nuki_dora");
         value.as_object_mut().unwrap().remove("double_yakuman");
+        value.as_object_mut().unwrap().remove("red_fives");
+        value.as_object_mut().unwrap().remove("tenpai_renchan");
+        value.as_object_mut().unwrap().remove("round_extension");
+        value.as_object_mut().unwrap().remove("all_last_rule");
+        value.as_object_mut().unwrap().remove("bankruptcy_rule");
+        value.as_object_mut().unwrap().remove("cold_end");
+        value.as_object_mut().unwrap().remove("nagashi_mangan");
+        value.as_object_mut().unwrap().remove("kiriage_mangan");
+        value.as_object_mut().unwrap().remove("counted_yakuman");
+        value.as_object_mut().unwrap().remove("four_quads_pao");
         let settings: Settings = serde_json::from_value(value).unwrap();
         assert!(!settings.three_player);
         assert!(settings.tsumo_loss);
         assert!(settings.nuki_dora);
         assert!(settings.double_yakuman);
+        assert!(settings.red_fives);
+        assert!(settings.tenpai_renchan);
+        assert!(!settings.round_extension);
+        assert_eq!(settings.all_last_rule, AllLastRule::Continue);
+        assert_eq!(settings.bankruptcy_rule, BankruptcyRule::Negative);
+        assert!(!settings.cold_end);
+        assert!(settings.nagashi_mangan);
+        assert!(settings.kiriage_mangan);
+        assert!(settings.counted_yakuman);
+        assert!(settings.four_quads_pao);
     }
 
     /// The struct-level serde default must restore every field from empty JSON,
