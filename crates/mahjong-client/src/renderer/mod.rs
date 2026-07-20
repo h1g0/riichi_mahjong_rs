@@ -566,6 +566,34 @@ pub fn cache_dynamic_text(font: Option<&Font>, state: &GameState) {
     }
 }
 
+/// Precaches a transient native-client notification before other text draws.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn cache_notification_text(font: Option<&Font>, text: &str) {
+    let _ = theme::measure_scaled(font, text, 13);
+}
+
+/// Draws a transient native-client notification over the current screen.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn draw_notification(font: Option<&Font>, text: &str, is_error: bool) {
+    set_design_camera();
+    let dimensions = theme::measure_scaled(font, text, 13);
+    let width = (dimensions.width + 48.0).min(DESIGN_W - 40.0);
+    let x = (DESIGN_W - width) / 2.0;
+    let border = if is_error {
+        theme::rgba(0xe84444, 0.75)
+    } else {
+        theme::rgba(0xc9a227, 0.75)
+    };
+    let color = if is_error {
+        theme::RED_LT
+    } else {
+        theme::TEXT_BR
+    };
+
+    theme::draw_panel(x, 18.0, width, 42.0, 7.0, theme::PANEL_BG, border);
+    theme::draw_text_centered(font, text, DESIGN_W / 2.0, 45.0, 13, color);
+}
+
 pub fn draw_game(
     state: &GameState,
     font: Option<&Font>,
