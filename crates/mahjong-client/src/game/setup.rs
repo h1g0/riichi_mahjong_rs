@@ -171,27 +171,27 @@ impl RuleOption {
             RuleOption::DealerContinuation => rules.tenpai_renchan = !rules.tenpai_renchan,
             RuleOption::RoundExtension => rules.round_extension = !rules.round_extension,
             RuleOption::AllLast => {
-                rules.all_last_rule = match (rules.all_last_rule, forward) {
-                    (AllLastRule::Continue, true) | (AllLastRule::WinOrTenpai, false) => {
-                        AllLastRule::Win
-                    }
-                    (AllLastRule::Win, true) => AllLastRule::WinOrTenpai,
-                    (AllLastRule::Win, false) => AllLastRule::Continue,
-                    (AllLastRule::WinOrTenpai, true) | (AllLastRule::Continue, false) => {
-                        AllLastRule::Continue
-                    }
+                let value = match rules.all_last_rule {
+                    AllLastRule::Continue => 0,
+                    AllLastRule::Win => 1,
+                    AllLastRule::WinOrTenpai => 2,
+                };
+                rules.all_last_rule = match cycle_three_values(value, forward) {
+                    0 => AllLastRule::Continue,
+                    1 => AllLastRule::Win,
+                    _ => AllLastRule::WinOrTenpai,
                 };
             }
             RuleOption::Bankruptcy => {
-                rules.bankruptcy_rule = match (rules.bankruptcy_rule, forward) {
-                    (BankruptcyRule::None, true) | (BankruptcyRule::ZeroOrLess, false) => {
-                        BankruptcyRule::Negative
-                    }
-                    (BankruptcyRule::Negative, true) => BankruptcyRule::ZeroOrLess,
-                    (BankruptcyRule::Negative, false) => BankruptcyRule::None,
-                    (BankruptcyRule::ZeroOrLess, true) | (BankruptcyRule::None, false) => {
-                        BankruptcyRule::None
-                    }
+                let value = match rules.bankruptcy_rule {
+                    BankruptcyRule::None => 0,
+                    BankruptcyRule::Negative => 1,
+                    BankruptcyRule::ZeroOrLess => 2,
+                };
+                rules.bankruptcy_rule = match cycle_three_values(value, forward) {
+                    0 => BankruptcyRule::None,
+                    1 => BankruptcyRule::Negative,
+                    _ => BankruptcyRule::ZeroOrLess,
                 };
             }
             RuleOption::ColdEnd => rules.cold_end = !rules.cold_end,
@@ -216,17 +216,17 @@ impl RuleOption {
     }
 }
 
+fn cycle_three_values(value: usize, forward: bool) -> usize {
+    (value + if forward { 1 } else { 2 }) % 3
+}
+
 fn cycle_ron_mode(rules: &mut Settings, forward: bool) {
     let value = match (rules.multiple_ron, rules.triple_ron_draw) {
         (false, _) => 0,
         (true, false) => 1,
         (true, true) => 2,
     };
-    let next = if forward {
-        (value + 1) % 3
-    } else {
-        (value + 2) % 3
-    };
+    let next = cycle_three_values(value, forward);
     (rules.multiple_ron, rules.triple_ron_draw) = match next {
         0 => (false, false),
         1 => (true, false),
@@ -260,7 +260,8 @@ fn cycle_abortive_draw_mode(rules: &mut Settings, forward: bool) {
         (0, true) | (2, false) | (3, _) => 1,
         (1, true) => 2,
         (1, false) => 0,
-        (2, true) | (0, false) => 0,
+        (2, true) => 0,
+        (0, false) => 2,
         _ => unreachable!(),
     };
     let values = match next {
@@ -284,11 +285,7 @@ fn cycle_yakuman_pao(rules: &mut Settings, forward: bool) {
     } else {
         2
     };
-    let next = if forward {
-        (value + 1) % 3
-    } else {
-        (value + 2) % 3
-    };
+    let next = cycle_three_values(value, forward);
     (rules.yakuman_pao, rules.four_quads_pao) = match next {
         0 => (false, false),
         1 => (true, false),
