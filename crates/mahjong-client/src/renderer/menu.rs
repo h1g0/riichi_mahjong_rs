@@ -565,6 +565,15 @@ fn initial_score_label(lang: Lang, three_player: bool) -> &'static str {
     }
 }
 
+fn return_score_label(lang: Lang, three_player: bool) -> &'static str {
+    match (lang, three_player) {
+        (Lang::Ja, false) => "30,000点返し",
+        (Lang::Ja, true) => "40,000点返し",
+        (Lang::En, false) => "30,000-point return",
+        (Lang::En, true) => "40,000-point return",
+    }
+}
+
 fn mode_summary_lines(state: &GameState, origin: MenuOrigin) -> Vec<String> {
     let tr = state.tr();
     let mode = selected_mode(state, origin);
@@ -582,6 +591,15 @@ fn mode_summary_lines(state: &GameState, origin: MenuOrigin) -> Vec<String> {
         (Lang::En, mahjong_server::table::GameLength::EastOnly, false) => "South extension: Off",
         (Lang::En, mahjong_server::table::GameLength::Hanchan, true) => "West extension: On",
         (Lang::En, mahjong_server::table::GameLength::Hanchan, false) => "West extension: Off",
+    };
+    let extension = if rules.round_extension {
+        let return_score = return_score_label(state.lang, mode.three_player());
+        match state.lang {
+            Lang::Ja => format!("{extension}（{return_score}）"),
+            Lang::En => format!("{extension} ({return_score})"),
+        }
+    } else {
+        extension.into()
     };
     let join = |items: &[RuleOption]| {
         items
@@ -1197,6 +1215,26 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("ツモ損なし")));
         assert!(lines.iter().any(|line| line.contains("赤ドラあり")));
         assert!(!lines.iter().any(|line| line.contains("コールド終了")));
+    }
+
+    #[test]
+    fn mode_summary_reports_return_score_only_with_round_extension() {
+        let mut state = GameState::new();
+        state.lang = Lang::Ja;
+        state.setup_state.rules.round_extension = true;
+
+        let four_player_lines = mode_summary_lines(&state, MenuOrigin::Local);
+        assert_eq!(
+            four_player_lines[0],
+            "四人東風、25,000点始まり、南入あり（30,000点返し）"
+        );
+
+        state.setup_state.mode = GameMode::ThreeHanchan;
+        let three_player_lines = mode_summary_lines(&state, MenuOrigin::Local);
+        assert_eq!(
+            three_player_lines[0],
+            "三人半荘、35,000点始まり、西入あり（40,000点返し）"
+        );
     }
 
     #[test]
