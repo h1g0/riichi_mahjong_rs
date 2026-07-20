@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use mahjong_core::settings::Settings;
+use mahjong_core::settings::{AllLastRule, BankruptcyRule, Settings};
 use mahjong_core::tile::{Tile, Wind};
 
 use crate::protocol::{ClientAction, ServerEvent};
@@ -135,6 +135,11 @@ impl Table {
         self.settings.length.wind_count() * self.player_count()
     }
 
+    /// Maximum number of hands after the optional single-wind extension.
+    fn maximum_rounds(&self) -> usize {
+        self.total_rounds() + usize::from(self.settings.rules.round_extension) * self.player_count()
+    }
+
     fn player_count(&self) -> usize {
         self.settings.rules.player_count()
     }
@@ -148,7 +153,7 @@ impl Table {
             self.honba,
             self.riichi_sticks,
             self.round_number,
-            self.total_rounds(),
+            self.maximum_rounds(),
             self.settings.rules.clone(),
         );
         self.round = Some(round);
@@ -165,7 +170,7 @@ impl Table {
             self.honba,
             self.riichi_sticks,
             self.round_number,
-            self.total_rounds(),
+            self.maximum_rounds(),
             self.settings.rules.clone(),
         );
         self.round = Some(round);
@@ -292,8 +297,19 @@ impl Table {
         self.scores = scores;
         self.riichi_sticks = riichi_sticks;
 
-        // A negative score ends the game immediately; exactly zero is fine.
-        if self.scores.iter().any(|&score| score < 0) {
+        if self.bankruptcy_reached() || self.cold_end_reached() {
+            self.is_game_over = true;
+            self.round = None;
+            return;
+        }
+
+        if self.round_number >= self.total_rounds() && self.has_target_score() {
+            self.is_game_over = true;
+            self.round = None;
+            return;
+        }
+
+        if self.should_end_on_final_dealer(result.as_ref()) {
             self.is_game_over = true;
             self.round = None;
             return;
@@ -304,7 +320,7 @@ impl Table {
                 self.honba += 1;
                 // A tenpai dealer keeps the deal; otherwise the deal
                 // rotates and the hand counter advances.
-                if !dealer_tenpai {
+                if !dealer_tenpai || !self.settings.rules.tenpai_renchan {
                     self.dealer = (self.dealer + 1) % self.player_count();
                     self.advance_round_number();
                 }
@@ -353,12 +369,81 @@ impl Table {
 
     fn advance_round_number(&mut self) {
         self.round_number += 1;
-        if self.round_number >= self.total_rounds() {
+        let scheduled_rounds = self.total_rounds();
+        if self.round_number >= scheduled_rounds
+            && (!self.settings.rules.round_extension
+                || self.has_target_score()
+                || self.round_number >= self.maximum_rounds())
+        {
             self.is_game_over = true;
         }
 
         // The round wind advances every player_count hands.
         self.round_wind = Wind::from_index(self.round_number / self.player_count());
+    }
+
+    fn active_scores(&self) -> &[i32] {
+        &self.scores[..self.player_count()]
+    }
+
+    fn target_score(&self) -> i32 {
+        if self.settings.rules.three_player {
+            40000
+        } else {
+            30000
+        }
+    }
+
+    fn has_target_score(&self) -> bool {
+        self.active_scores()
+            .iter()
+            .any(|&score| score >= self.target_score())
+    }
+
+    fn bankruptcy_reached(&self) -> bool {
+        match self.settings.rules.bankruptcy_rule {
+            BankruptcyRule::None => false,
+            BankruptcyRule::Negative => self.active_scores().iter().any(|&score| score < 0),
+            BankruptcyRule::ZeroOrLess => self.active_scores().iter().any(|&score| score <= 0),
+        }
+    }
+
+    fn cold_end_reached(&self) -> bool {
+        !self.settings.rules.three_player
+            && self.settings.rules.cold_end
+            && self.active_scores().iter().any(|&score| score >= 55000)
+    }
+
+    fn dealer_is_leading(&self) -> bool {
+        let dealer_score = self.scores[self.dealer];
+        self.active_scores()
+            .iter()
+            .all(|&score| score <= dealer_score)
+    }
+
+    fn should_end_on_final_dealer(&self, result: Option<&RoundResult>) -> bool {
+        if self.round_number + 1 != self.total_rounds() || !self.dealer_is_leading() {
+            return false;
+        }
+
+        let dealer_won = match result {
+            Some(RoundResult::Tsumo { winner, .. }) => *winner == self.dealer,
+            Some(RoundResult::Ron { winners, .. })
+            | Some(RoundResult::NagashiMangan { winners }) => winners.contains(&self.dealer),
+            _ => false,
+        };
+        let dealer_tenpai = matches!(
+            result,
+            Some(RoundResult::ExhaustiveDraw {
+                dealer_tenpai: true
+            })
+        );
+
+        match self.settings.rules.all_last_rule {
+            AllLastRule::Continue => false,
+            AllLastRule::Win => dealer_won,
+            AllLastRule::WinOrTenpai => dealer_won || dealer_tenpai,
+        }
     }
 }
 
@@ -1022,6 +1107,172 @@ mod tests {
         assert_eq!(table.round_number, 4);
         assert_eq!(table.round_wind, Wind::South);
         assert_eq!(table.dealer, 0);
+    }
+
+    #[test]
+    fn test_east_game_extension_enters_south_and_stops_at_target() {
+        let mut table = Table::new(GameSettings::with_rules(
+            GameLength::EastOnly,
+            Settings {
+                round_extension: true,
+                ..Settings::new()
+            },
+        ));
+
+        for _ in 0..4 {
+            table.start_round();
+            let round = table.current_round_mut().unwrap();
+            round.phase = TurnPhase::RoundOver;
+            round.result = Some(RoundResult::ExhaustiveDraw {
+                dealer_tenpai: false,
+            });
+            table.finish_round();
+        }
+
+        assert!(!table.is_game_over);
+        assert_eq!(table.round_number, 4);
+        assert_eq!(table.round_wind, Wind::South);
+
+        table.start_round();
+        let round = table.current_round_mut().unwrap();
+        round.players[0].score = 30000;
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::Tsumo {
+            winner: 0,
+            winning_tile: Tile::new(Tile::M1),
+        });
+        table.finish_round();
+
+        assert!(table.is_game_over);
+    }
+
+    #[test]
+    fn test_hanchan_extension_enters_west_and_is_capped_at_one_wind() {
+        let settings = GameSettings::with_rules(
+            GameLength::Hanchan,
+            Settings {
+                round_extension: true,
+                ..Settings::new()
+            },
+        );
+        assert_eq!(count_rounds_until_game_over(settings, 12), 12);
+    }
+
+    #[test]
+    fn test_tenpai_renchan_can_be_disabled() {
+        let mut table = Table::new(GameSettings::with_rules(
+            GameLength::EastOnly,
+            Settings {
+                tenpai_renchan: false,
+                ..Settings::new()
+            },
+        ));
+        table.start_round();
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::ExhaustiveDraw {
+            dealer_tenpai: true,
+        });
+
+        table.finish_round();
+
+        assert_eq!(table.dealer, 1);
+        assert_eq!(table.round_number, 1);
+        assert_eq!(table.honba, 1);
+    }
+
+    #[test]
+    fn test_bankruptcy_thresholds_and_sanma_dummy_seat() {
+        let mut no_bankruptcy = Table::new(GameSettings::with_rules(
+            GameLength::EastOnly,
+            Settings {
+                bankruptcy_rule: BankruptcyRule::None,
+                ..Settings::new()
+            },
+        ));
+        no_bankruptcy.start_round();
+        let round = no_bankruptcy.current_round_mut().unwrap();
+        round.players[0].score = -100;
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::SpecialDraw);
+        no_bankruptcy.finish_round();
+        assert!(!no_bankruptcy.is_game_over);
+
+        let mut zero_or_less = Table::new(GameSettings::with_rules(
+            GameLength::EastOnly,
+            Settings {
+                bankruptcy_rule: BankruptcyRule::ZeroOrLess,
+                ..Settings::new()
+            },
+        ));
+        zero_or_less.start_round();
+        let round = zero_or_less.current_round_mut().unwrap();
+        round.players[0].score = 0;
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::SpecialDraw);
+        zero_or_less.finish_round();
+        assert!(zero_or_less.is_game_over);
+
+        let mut sanma = Table::new(GameSettings::with_rules(
+            GameLength::EastOnly,
+            Settings {
+                three_player: true,
+                bankruptcy_rule: BankruptcyRule::ZeroOrLess,
+                ..Settings::new()
+            },
+        ));
+        sanma.start_round();
+        let round = sanma.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::SpecialDraw);
+        sanma.finish_round();
+        assert!(!sanma.is_game_over);
+    }
+
+    #[test]
+    fn test_final_dealer_can_stop_after_winning_while_leading() {
+        let mut table = Table::new(GameSettings::with_rules(
+            GameLength::EastOnly,
+            Settings {
+                all_last_rule: AllLastRule::Win,
+                ..Settings::new()
+            },
+        ));
+        table.round_number = 3;
+        table.dealer = 3;
+        table.scores = [24000, 25000, 25000, 26000];
+        table.start_round();
+        let round = table.current_round_mut().unwrap();
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::Tsumo {
+            winner: 3,
+            winning_tile: Tile::new(Tile::M1),
+        });
+
+        table.finish_round();
+
+        assert!(table.is_game_over);
+        assert_eq!(table.round_number, 3);
+    }
+
+    #[test]
+    fn test_cold_end_at_fifty_five_thousand() {
+        let mut table = Table::new(GameSettings::with_rules(
+            GameLength::Hanchan,
+            Settings {
+                cold_end: true,
+                ..Settings::new()
+            },
+        ));
+        table.start_round();
+        let round = table.current_round_mut().unwrap();
+        round.players[0].score = 55000;
+        round.phase = TurnPhase::RoundOver;
+        round.result = Some(RoundResult::SpecialDraw);
+
+        table.finish_round();
+
+        assert!(table.is_game_over);
     }
 
     #[test]

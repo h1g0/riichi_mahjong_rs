@@ -7,9 +7,9 @@
 use macroquad::prelude::*;
 
 use super::{DESIGN_W, draw_jp_text, mouse_position_design, theme};
-use crate::game::{GameMode, GameState, MenuOrigin, RuleOption};
+use crate::game::{GameMode, GameState, MenuOrigin, RuleOption, RulePage};
 use crate::i18n::Key;
-use mahjong_core::settings::{Lang, Settings};
+use mahjong_core::settings::{AllLastRule, BankruptcyRule, Lang, Settings};
 
 /// A button rectangle.
 struct Rect2 {
@@ -387,8 +387,19 @@ fn selected_rules_mut(state: &mut GameState, origin: MenuOrigin) -> &mut Setting
 
 fn rule_label_key(rule: RuleOption) -> Key {
     match rule {
+        RuleOption::RedFives => Key::RuleRedFives,
+        RuleOption::DealerContinuation => Key::RuleDealerContinuation,
+        RuleOption::RoundExtension => Key::RuleRoundExtension,
+        RuleOption::AllLast => Key::RuleAllLast,
+        RuleOption::Bankruptcy => Key::RuleBankruptcy,
+        RuleOption::ColdEnd => Key::RuleColdEnd,
+        RuleOption::RonMode => Key::RuleRonMode,
+        RuleOption::AbortiveDrawMode => Key::RuleAbortiveDrawMode,
         RuleOption::OpenAllInside => Key::RuleOpenAllInside,
         RuleOption::SwapCalling => Key::RuleSwapCalling,
+        RuleOption::NagashiMangan => Key::RuleNagashiMangan,
+        RuleOption::KiriageMangan => Key::RuleKiriageMangan,
+        RuleOption::CountedYakuman => Key::RuleCountedYakuman,
         RuleOption::DoubleYakuman => Key::RuleDoubleYakuman,
         RuleOption::NukiDora => Key::RuleNukiDora,
         RuleOption::TsumoLoss => Key::RuleTsumoLoss,
@@ -396,16 +407,25 @@ fn rule_label_key(rule: RuleOption) -> Key {
         RuleOption::FourWindsDraw => Key::RuleFourWindsDraw,
         RuleOption::FourRiichiDraw => Key::RuleFourRiichiDraw,
         RuleOption::NineTerminalsDraw => Key::RuleNineTerminalsDraw,
-        RuleOption::TripleRonDraw => Key::RuleTripleRonDraw,
-        RuleOption::MultipleRon => Key::RuleMultipleRon,
         RuleOption::YakumanPao => Key::RuleYakumanPao,
     }
 }
 
 fn rule_description_key(rule: RuleOption) -> Key {
     match rule {
+        RuleOption::RedFives => Key::RuleRedFivesDescription,
+        RuleOption::DealerContinuation => Key::RuleDealerContinuationDescription,
+        RuleOption::RoundExtension => Key::RuleRoundExtensionDescription,
+        RuleOption::AllLast => Key::RuleAllLastDescription,
+        RuleOption::Bankruptcy => Key::RuleBankruptcyDescription,
+        RuleOption::ColdEnd => Key::RuleColdEndDescription,
+        RuleOption::RonMode => Key::RuleRonModeDescription,
+        RuleOption::AbortiveDrawMode => Key::RuleAbortiveDrawModeDescription,
         RuleOption::OpenAllInside => Key::RuleOpenAllInsideDescription,
         RuleOption::SwapCalling => Key::RuleSwapCallingDescription,
+        RuleOption::NagashiMangan => Key::RuleNagashiManganDescription,
+        RuleOption::KiriageMangan => Key::RuleKiriageManganDescription,
+        RuleOption::CountedYakuman => Key::RuleCountedYakumanDescription,
         RuleOption::DoubleYakuman => Key::RuleDoubleYakumanDescription,
         RuleOption::NukiDora => Key::RuleNukiDoraDescription,
         RuleOption::TsumoLoss => Key::RuleTsumoLossDescription,
@@ -413,18 +433,125 @@ fn rule_description_key(rule: RuleOption) -> Key {
         RuleOption::FourWindsDraw => Key::RuleFourWindsDrawDescription,
         RuleOption::FourRiichiDraw => Key::RuleFourRiichiDrawDescription,
         RuleOption::NineTerminalsDraw => Key::RuleNineTerminalsDrawDescription,
-        RuleOption::TripleRonDraw => Key::RuleTripleRonDrawDescription,
-        RuleOption::MultipleRon => Key::RuleMultipleRonDescription,
         RuleOption::YakumanPao => Key::RuleYakumanPaoDescription,
     }
 }
 
-fn rule_value(state: &GameState, rule: RuleOption, enabled: bool) -> String {
-    let tr = state.tr();
-    let label = tr.get(rule_label_key(rule));
-    let value = tr.get(if enabled { Key::RuleOn } else { Key::RuleOff });
+fn rule_value_text(state: &GameState, rule: RuleOption, rules: &Settings) -> String {
+    let boolean = |enabled| {
+        state
+            .tr()
+            .get(if enabled { Key::RuleOn } else { Key::RuleOff })
+            .to_string()
+    };
+    match rule {
+        RuleOption::RedFives => boolean(rules.red_fives),
+        RuleOption::DealerContinuation => match (state.lang, rules.tenpai_renchan) {
+            (Lang::Ja, true) => "和了・聴牌".into(),
+            (Lang::Ja, false) => "和了のみ".into(),
+            (Lang::En, true) => "Win or tenpai".into(),
+            (Lang::En, false) => "Win only".into(),
+        },
+        RuleOption::RoundExtension => boolean(rules.round_extension),
+        RuleOption::AllLast => match (state.lang, rules.all_last_rule) {
+            (Lang::Ja, AllLastRule::Continue) => "なし".into(),
+            (Lang::Ja, AllLastRule::Win) => "和了".into(),
+            (Lang::Ja, AllLastRule::WinOrTenpai) => "和了・聴牌".into(),
+            (Lang::En, AllLastRule::Continue) => "Off".into(),
+            (Lang::En, AllLastRule::Win) => "Win".into(),
+            (Lang::En, AllLastRule::WinOrTenpai) => "Win or tenpai".into(),
+        },
+        RuleOption::Bankruptcy => match (state.lang, rules.bankruptcy_rule) {
+            (Lang::Ja, BankruptcyRule::None) => "なし".into(),
+            (Lang::Ja, BankruptcyRule::Negative) => "マイナス".into(),
+            (Lang::Ja, BankruptcyRule::ZeroOrLess) => "0点以下".into(),
+            (Lang::En, BankruptcyRule::None) => "Off".into(),
+            (Lang::En, BankruptcyRule::Negative) => "Below zero".into(),
+            (Lang::En, BankruptcyRule::ZeroOrLess) => "Zero or less".into(),
+        },
+        RuleOption::ColdEnd => boolean(rules.cold_end),
+        RuleOption::RonMode => match (state.lang, rules.multiple_ron, rules.triple_ron_draw) {
+            (Lang::Ja, false, _) => "頭ハネ".into(),
+            (Lang::Ja, true, false) => "複数ロン".into(),
+            (Lang::Ja, true, true) => "三家和流局".into(),
+            (Lang::En, false, _) => "Head bump".into(),
+            (Lang::En, true, false) => "Multiple ron".into(),
+            (Lang::En, true, true) => "Triple-ron draw".into(),
+        },
+        RuleOption::AbortiveDrawMode => {
+            let standard = rules.four_kans_draw
+                && rules.four_winds_draw
+                && !rules.four_riichi_draw
+                && rules.nine_terminals_draw;
+            let all = rules.four_kans_draw
+                && rules.four_winds_draw
+                && rules.four_riichi_draw
+                && rules.nine_terminals_draw;
+            let none = !rules.four_kans_draw
+                && !rules.four_winds_draw
+                && !rules.four_riichi_draw
+                && !rules.nine_terminals_draw;
+            match (state.lang, none, standard, all) {
+                (Lang::Ja, true, _, _) => "なし".into(),
+                (Lang::Ja, _, true, _) => "四槓・四風・九種".into(),
+                (Lang::Ja, _, _, true) => "4種すべて".into(),
+                (Lang::Ja, _, _, _) => "個別設定".into(),
+                (Lang::En, true, _, _) => "Off".into(),
+                (Lang::En, _, true, _) => "Except four riichi".into(),
+                (Lang::En, _, _, true) => "All four".into(),
+                (Lang::En, _, _, _) => "Custom".into(),
+            }
+        }
+        RuleOption::OpenAllInside => boolean(rules.opened_all_inside),
+        RuleOption::SwapCalling => boolean(!rules.forbid_swap_calling),
+        RuleOption::NagashiMangan => boolean(rules.nagashi_mangan),
+        RuleOption::KiriageMangan => boolean(rules.kiriage_mangan),
+        RuleOption::CountedYakuman => boolean(rules.counted_yakuman),
+        RuleOption::DoubleYakuman => boolean(rules.double_yakuman),
+        RuleOption::NukiDora => boolean(rules.nuki_dora),
+        RuleOption::TsumoLoss => boolean(rules.tsumo_loss),
+        RuleOption::FourKansDraw => boolean(rules.four_kans_draw),
+        RuleOption::FourWindsDraw => boolean(rules.four_winds_draw),
+        RuleOption::FourRiichiDraw => boolean(rules.four_riichi_draw),
+        RuleOption::NineTerminalsDraw => boolean(rules.nine_terminals_draw),
+        RuleOption::YakumanPao => match (state.lang, rules.yakuman_pao, rules.four_quads_pao) {
+            (Lang::Ja, false, _) => "なし".into(),
+            (Lang::Ja, true, false) => "大三元・大四喜".into(),
+            (Lang::Ja, true, true) => "大三元・大四喜・四槓子".into(),
+            (Lang::En, false, _) => "Off".into(),
+            (Lang::En, true, false) => "Dragons / Winds".into(),
+            (Lang::En, true, true) => "Dragons / Winds / Four Quads".into(),
+        },
+    }
+}
+
+fn rule_summary_value(state: &GameState, rule: RuleOption, rules: &Settings) -> String {
+    let label = state.tr().get(rule_label_key(rule));
+    let value = rule_value_text(state, rule, rules);
     match state.lang {
-        Lang::Ja => format!("{label}{value}"),
+        Lang::Ja
+            if matches!(
+                rule,
+                RuleOption::RedFives
+                    | RuleOption::RoundExtension
+                    | RuleOption::ColdEnd
+                    | RuleOption::OpenAllInside
+                    | RuleOption::SwapCalling
+                    | RuleOption::NagashiMangan
+                    | RuleOption::KiriageMangan
+                    | RuleOption::CountedYakuman
+                    | RuleOption::DoubleYakuman
+                    | RuleOption::NukiDora
+                    | RuleOption::TsumoLoss
+                    | RuleOption::FourKansDraw
+                    | RuleOption::FourWindsDraw
+                    | RuleOption::FourRiichiDraw
+                    | RuleOption::NineTerminalsDraw
+            ) =>
+        {
+            format!("{label}{value}")
+        }
+        Lang::Ja => format!("{label}：{value}"),
         Lang::En => format!("{label}: {value}"),
     }
 }
@@ -446,14 +573,20 @@ fn mode_summary_lines(state: &GameState, origin: MenuOrigin) -> Vec<String> {
         Lang::Ja => "、",
         Lang::En => " / ",
     };
-    let extension = match mode.length() {
-        mahjong_server::table::GameLength::EastOnly => tr.get(Key::NoSouthExtension),
-        mahjong_server::table::GameLength::Hanchan => tr.get(Key::NoWestExtension),
+    let extension = match (state.lang, mode.length(), rules.round_extension) {
+        (Lang::Ja, mahjong_server::table::GameLength::EastOnly, true) => "南入あり",
+        (Lang::Ja, mahjong_server::table::GameLength::EastOnly, false) => "南入なし",
+        (Lang::Ja, mahjong_server::table::GameLength::Hanchan, true) => "西入あり",
+        (Lang::Ja, mahjong_server::table::GameLength::Hanchan, false) => "西入なし",
+        (Lang::En, mahjong_server::table::GameLength::EastOnly, true) => "South extension: On",
+        (Lang::En, mahjong_server::table::GameLength::EastOnly, false) => "South extension: Off",
+        (Lang::En, mahjong_server::table::GameLength::Hanchan, true) => "West extension: On",
+        (Lang::En, mahjong_server::table::GameLength::Hanchan, false) => "West extension: Off",
     };
-    let join = |items: &[(RuleOption, bool)]| {
+    let join = |items: &[RuleOption]| {
         items
             .iter()
-            .map(|(rule, enabled)| rule_value(state, *rule, *enabled))
+            .map(|rule| rule_summary_value(state, *rule, rules))
             .collect::<Vec<_>>()
             .join(separator)
     };
@@ -466,47 +599,23 @@ fn mode_summary_lines(state: &GameState, origin: MenuOrigin) -> Vec<String> {
         extension
     )];
     lines.push(join(&[
-        (RuleOption::OpenAllInside, rules.opened_all_inside),
-        (RuleOption::SwapCalling, !rules.forbid_swap_calling),
-        (RuleOption::DoubleYakuman, rules.double_yakuman),
+        RuleOption::RedFives,
+        RuleOption::DealerContinuation,
+        RuleOption::RonMode,
     ]));
     lines.push(join(&[
-        (RuleOption::FourKansDraw, rules.four_kans_draw),
-        (RuleOption::FourWindsDraw, rules.four_winds_draw),
-        (RuleOption::FourRiichiDraw, rules.four_riichi_draw),
+        RuleOption::Bankruptcy,
+        RuleOption::AllLast,
+        RuleOption::NagashiMangan,
     ]));
-    lines.push(join(&[
-        (RuleOption::NineTerminalsDraw, rules.nine_terminals_draw),
-        (RuleOption::TripleRonDraw, rules.triple_ron_draw),
-        (RuleOption::MultipleRon, rules.multiple_ron),
-    ]));
-    let mut final_rules = vec![(RuleOption::YakumanPao, rules.yakuman_pao)];
+    let mut final_rules = vec![RuleOption::KiriageMangan, RuleOption::CountedYakuman];
     if mode.three_player() {
-        final_rules.push((RuleOption::NukiDora, rules.nuki_dora));
-        final_rules.push((RuleOption::TsumoLoss, rules.tsumo_loss));
+        final_rules.push(RuleOption::NukiDora);
+        final_rules.push(RuleOption::TsumoLoss);
+    } else {
+        final_rules.push(RuleOption::ColdEnd);
     }
     lines.push(join(&final_rules));
-    lines.push(
-        [
-            tr.get(Key::FixedBankruptcy),
-            tr.get(Key::FixedAfterTheFactYaku),
-            tr.get(Key::FixedNagashiMangan),
-        ]
-        .join(separator),
-    );
-    lines.push(
-        [
-            tr.get(if mode.three_player() {
-                Key::FixedRedDoraThreePlayer
-            } else {
-                Key::FixedRedDoraFourPlayer
-            }),
-            tr.get(Key::FixedPinfuTsumo),
-        ]
-        .join(separator),
-    );
-    lines.push(tr.get(Key::FixedDealerContinuation).to_string());
-    lines.push(tr.get(Key::FixedKiriageMangan).to_string());
     lines
 }
 
@@ -584,6 +693,11 @@ pub fn handle_mode_select_input(
     }
 
     if mode_rule_settings_rect().contains(mx, my) {
+        let three_player = selected_mode(state, origin).three_player();
+        let options = RuleOption::options(state.rule_page, three_player);
+        if !options.contains(&state.selected_rule) {
+            state.selected_rule = options[0];
+        }
         return Some(ModeSelectAction::OpenRuleSettings);
     }
 
@@ -599,6 +713,22 @@ pub fn handle_mode_select_input(
 }
 
 // ========== Rule-settings screen ==========
+
+fn rule_page_rect(page: RulePage) -> Rect2 {
+    let width = (PANEL_W - 76.0) / 2.0;
+    Rect2 {
+        x: panel_x()
+            + 32.0
+            + if page == RulePage::Advanced {
+                width + 12.0
+            } else {
+                0.0
+            },
+        y: 170.0,
+        w: width,
+        h: 34.0,
+    }
+}
 
 fn rule_rect(idx: usize) -> Rect2 {
     const W: f32 = 242.0;
@@ -691,9 +821,9 @@ fn draw_rule_button(
     theme::draw_text_centered(
         font,
         value,
-        rect.x + rect.w - 30.0,
+        rect.x + rect.w - 64.0,
         rect.center_y() + 5.0,
-        11,
+        9,
         if enabled {
             theme::GOLD_LT
         } else {
@@ -789,10 +919,15 @@ fn select_rule(state: &mut GameState, rule: RuleOption) {
     state.selected_rule = rule;
 }
 
-fn toggle_selected_rule(state: &mut GameState, origin: MenuOrigin) {
-    state
-        .selected_rule
-        .toggle(selected_rules_mut(state, origin));
+fn cycle_selected_rule(state: &mut GameState, origin: MenuOrigin, forward: bool) {
+    let rule = state.selected_rule;
+    rule.cycle(selected_rules_mut(state, origin), forward);
+}
+
+fn select_rule_page(state: &mut GameState, page: RulePage, origin: MenuOrigin) {
+    state.rule_page = page;
+    let three_player = selected_mode(state, origin).three_player();
+    state.selected_rule = RuleOption::options(page, three_player)[0];
 }
 
 /// Action emitted by the rule-settings screen.
@@ -808,18 +943,61 @@ pub fn draw_rule_settings(state: &GameState, font: Option<&Font>, origin: MenuOr
     let rules = selected_rules(state, origin);
     draw_menu_panel(font, tr.get(Key::RuleSettingsTitle), 26);
 
-    for (idx, rule) in RuleOption::ALL.into_iter().enumerate() {
+    for (page, key) in [
+        (RulePage::Basic, Key::RuleBasicPage),
+        (RulePage::Advanced, Key::RuleAdvancedPage),
+    ] {
+        let rect = rule_page_rect(page);
+        let selected = state.rule_page == page;
+        theme::draw_rounded_rect(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            4.0,
+            if selected {
+                theme::rgba(0xc8a227, 0.16)
+            } else {
+                theme::rgba(0xffffff, 0.035)
+            },
+        );
+        theme::draw_rounded_rect_lines(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            4.0,
+            1.0,
+            if selected {
+                theme::rgba(0xc8a227, 0.55)
+            } else {
+                theme::rgba(0xffffff, 0.08)
+            },
+        );
+        theme::draw_text_centered(
+            font,
+            tr.get(key),
+            rect.center_x(),
+            rect.center_y() + 5.0,
+            12,
+            if selected {
+                theme::GOLD_LT
+            } else {
+                theme::TEXT_DIM
+            },
+        );
+    }
+
+    let options = RuleOption::options(state.rule_page, selected_mode(state, origin).three_player());
+    for (idx, rule) in options.into_iter().enumerate() {
         let enabled = rule.is_enabled(rules);
-        let value = tr.get(if enabled { Key::RuleOn } else { Key::RuleOff });
-        let mut label = tr.get(rule_label_key(rule)).to_string();
-        if matches!(rule, RuleOption::NukiDora | RuleOption::TsumoLoss) {
-            label.push_str(tr.get(Key::SanmaOnlyNote));
-        }
+        let value = rule_value_text(state, rule, rules);
+        let label = tr.get(rule_label_key(rule));
         draw_rule_button(
             font,
             &rule_rect(idx),
-            &label,
-            value,
+            label,
+            &value,
             rule == state.selected_rule,
             enabled,
         );
@@ -844,15 +1022,8 @@ pub fn draw_rule_settings(state: &GameState, font: Option<&Font>, origin: MenuOr
         theme::GOLD,
     );
     let selected_enabled = state.selected_rule.is_enabled(rules);
-    draw_rule_value_selector(
-        font,
-        tr.get(if selected_enabled {
-            Key::RuleOn
-        } else {
-            Key::RuleOff
-        }),
-        selected_enabled,
-    );
+    let selected_value = rule_value_text(state, state.selected_rule, rules);
+    draw_rule_value_selector(font, &selected_value, selected_enabled);
     let description_text = tr.get(rule_description_key(state.selected_rule));
     let description_lines: Vec<_> = description_text.lines().collect();
     let first_baseline = if description_lines.len() == 1 {
@@ -884,15 +1055,28 @@ pub fn handle_rule_settings_input(
     }
     let (mx, my) = mouse_position_design();
 
-    for (idx, rule) in RuleOption::ALL.into_iter().enumerate() {
+    for page in [RulePage::Basic, RulePage::Advanced] {
+        if rule_page_rect(page).contains(mx, my) {
+            select_rule_page(state, page, origin);
+            return None;
+        }
+    }
+
+    let options = RuleOption::options(state.rule_page, selected_mode(state, origin).three_player());
+    for (idx, rule) in options.into_iter().enumerate() {
         if rule_rect(idx).contains(mx, my) {
             select_rule(state, rule);
             return None;
         }
     }
 
-    if rule_value_previous_rect().contains(mx, my) || rule_value_next_rect().contains(mx, my) {
-        toggle_selected_rule(state, origin);
+    if rule_value_previous_rect().contains(mx, my) {
+        cycle_selected_rule(state, origin, false);
+        return None;
+    }
+
+    if rule_value_next_rect().contains(mx, my) {
+        cycle_selected_rule(state, origin, true);
         return None;
     }
 
@@ -911,33 +1095,19 @@ mod tests {
     fn mode_summary_reports_mode_score_extension_and_rules() {
         let mut state = GameState::new();
         state.lang = Lang::Ja;
-        state.setup_state.rules.forbid_swap_calling = false;
 
         let lines = mode_summary_lines(&state, MenuOrigin::Local);
 
         assert_eq!(lines[0], "四人東風、25,000点始まり、南入なし");
-        assert!(lines.iter().any(|line| line.contains("喰いタンあり")));
-        assert!(lines.iter().any(|line| line.contains("喰い替えあり")));
-        assert!(lines.iter().any(|line| line.contains("二倍役満あり")));
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains("飛びあり（0点は続行）"))
-        );
-        assert!(lines.iter().any(|line| line.contains("後付けあり")));
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains("赤ドラ：5m・5p・5s各1枚"))
-        );
+        assert_eq!(lines.len(), 4);
+        assert!(lines.iter().any(|line| line.contains("赤ドラあり")));
+        assert!(lines.iter().any(|line| line.contains("連荘：和了・聴牌")));
+        assert!(lines.iter().any(|line| line.contains("同時ロン：複数ロン")));
+        assert!(lines.iter().any(|line| line.contains("飛び終了：マイナス")));
         assert!(lines.iter().any(|line| line.contains("流し満貫あり")));
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains("親の和了・聴牌、途中流局"))
-        );
-        assert!(lines.iter().any(|line| line.contains("平和ツモ複合あり")));
-        assert!(lines.iter().any(|line| line.contains("3翻60符・4翻30符")));
+        assert!(lines.iter().any(|line| line.contains("切り上げ満貫あり")));
+        assert!(lines.iter().any(|line| line.contains("数え役満あり")));
+        assert!(!lines.iter().any(|line| line.contains("喰い替え")));
         assert!(!lines.iter().any(|line| line.contains("北抜き")));
     }
 
@@ -954,12 +1124,8 @@ mod tests {
         assert_eq!(lines[0], "三人半荘、35,000点始まり、西入なし");
         assert!(lines.iter().any(|line| line.contains("北抜きなし")));
         assert!(lines.iter().any(|line| line.contains("ツモ損なし")));
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains("赤ドラ：5p・5s各1枚"))
-        );
-        assert!(!lines.iter().any(|line| line.contains("赤ドラ：5m")));
+        assert!(lines.iter().any(|line| line.contains("赤ドラあり")));
+        assert!(!lines.iter().any(|line| line.contains("コールド終了")));
     }
 
     #[test]
@@ -989,22 +1155,21 @@ mod tests {
     }
 
     #[test]
-    fn multiple_ron_description_explains_head_bump_priority_and_fits_panel() {
-        let ja = Key::RuleMultipleRonDescription.text(Lang::Ja);
-        let en = Key::RuleMultipleRonDescription.text(Lang::En);
+    fn ron_mode_description_explains_all_three_choices_and_fits_panel() {
+        let ja = Key::RuleRonModeDescription.text(Lang::Ja);
+        let en = Key::RuleRonModeDescription.text(Lang::En);
 
-        for phrase in ["ダブロン・トリロン", "オフの時は頭ハネ", "供託棒は頭ハネ"]
-        {
+        for phrase in ["頭ハネ", "ダブロン・トリロン", "三家和"] {
             assert!(ja.contains(phrase), "missing {phrase}");
         }
-        assert!(en.contains("double and triple ron"));
-        assert!(en.contains("Off uses head bump"));
-        assert!(en.contains("Riichi deposits use head-bump priority"));
-        assert_eq!(ja.lines().count(), 3);
-        assert_eq!(en.lines().count(), 3);
+        assert!(en.contains("head bump"));
+        assert!(en.contains("double/triple ron"));
+        assert!(en.contains("abortive draw"));
+        assert_eq!(ja.lines().count(), 2);
+        assert_eq!(en.lines().count(), 2);
 
         let description = rule_description_rect();
-        let last_baseline = description.y + 73.0 + 2.0 * 18.0;
+        let last_baseline = description.y + 73.0 + 18.0;
         assert!(last_baseline <= description.y + description.h);
         assert!(description.y + description.h < rule_confirm_rect().y);
     }
@@ -1020,7 +1185,7 @@ mod tests {
         assert_eq!(state.selected_rule, rule);
         assert_eq!(rule.is_enabled(&state.setup_state.rules), before);
 
-        toggle_selected_rule(&mut state, MenuOrigin::Local);
+        cycle_selected_rule(&mut state, MenuOrigin::Local, true);
 
         assert_ne!(rule.is_enabled(&state.setup_state.rules), before);
     }

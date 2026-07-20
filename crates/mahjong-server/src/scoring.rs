@@ -6,8 +6,8 @@ use mahjong_core::hand::Hand;
 use mahjong_core::hand_info::hand_analyzer::{self, HandAnalyzer};
 use mahjong_core::hand_info::status::Status;
 use mahjong_core::scoring::score::{
-    DoraLabel, ScoreItem, ScoreResult, calculate_base_points, calculate_score, determine_rank,
-    round_up_to_100,
+    DoraLabel, ScoreItem, ScoreResult, calculate_base_points, calculate_score,
+    determine_rank_with_rules, round_up_to_100,
 };
 use mahjong_core::settings::Settings;
 use mahjong_core::tile::{Tile, TileType, Wind, dora_indicator_to_dora_in};
@@ -569,7 +569,7 @@ fn calculate_ron_deltas_with_pao_points(
 /// * `pei_tiles` - extracted North tiles (three-player only); each is
 ///   worth one han, and also counts again as indicator dora when an
 ///   indicator points at North
-/// * `three_player` - wraps the characters dora chain 1m<->9m
+/// * `settings` - controls sanma dora wrapping and configurable limit rules
 pub fn add_dora_to_score(
     score_result: &mut ScoreResult,
     hand: &Hand,
@@ -577,7 +577,7 @@ pub fn add_dora_to_score(
     dora_indicators: &[Tile],
     uradora_indicators: &[Tile],
     pei_tiles: &[Tile],
-    three_player: bool,
+    settings: &Settings,
 ) {
     // Yakuman hands score a fixed amount; dora never applies.
     if score_result.yaku_list.iter().any(|(_, h)| *h >= 13) {
@@ -600,13 +600,13 @@ pub fn add_dora_to_score(
 
     let mut dora_count: u32 = 0;
     for indicator in dora_indicators {
-        let dora_type = dora_indicator_to_dora_in(indicator.get(), three_player);
+        let dora_type = dora_indicator_to_dora_in(indicator.get(), settings.three_player);
         dora_count += all_tiles.iter().filter(|t| t.get() == dora_type).count() as u32;
     }
 
     let mut uradora_count: u32 = 0;
     for indicator in uradora_indicators {
-        let dora_type = dora_indicator_to_dora_in(indicator.get(), three_player);
+        let dora_type = dora_indicator_to_dora_in(indicator.get(), settings.three_player);
         uradora_count += all_tiles.iter().filter(|t| t.get() == dora_type).count() as u32;
     }
 
@@ -622,7 +622,13 @@ pub fn add_dora_to_score(
     let new_han = score_result.han + extra_han;
     score_result.han = new_han;
 
-    score_result.rank = determine_rank(new_han, score_result.fu, false);
+    score_result.rank = determine_rank_with_rules(
+        new_han,
+        score_result.fu,
+        false,
+        settings.counted_yakuman,
+        settings.kiriage_mangan,
+    );
     let base_points = calculate_base_points(new_han, score_result.fu, score_result.rank);
     score_result.dealer_ron = round_up_to_100(base_points * 6);
     score_result.dealer_tsumo_all = round_up_to_100(base_points * 2);
@@ -866,7 +872,10 @@ mod tests {
             &dora_indicators,
             &[],
             &[],
-            true,
+            &Settings {
+                three_player: true,
+                ..Settings::new()
+            },
         );
 
         assert!(
@@ -922,7 +931,10 @@ mod tests {
             &dora_indicators,
             &[],
             &pei_tiles,
-            true,
+            &Settings {
+                three_player: true,
+                ..Settings::new()
+            },
         );
 
         assert!(
@@ -1388,7 +1400,7 @@ mod tests {
             &dora_indicators,
             &uradora_indicators,
             &[],
-            false,
+            &Settings::new(),
         );
 
         assert_eq!(score.yaku_list.len(), 4);
@@ -1431,7 +1443,7 @@ mod tests {
             None,
         );
 
-        add_dora_to_score(&mut score, &hand, None, &[], &[], &[], false);
+        add_dora_to_score(&mut score, &hand, None, &[], &[], &[], &Settings::new());
 
         assert_eq!(
             score.yaku_list.last(),
@@ -1477,7 +1489,7 @@ mod tests {
             None,
         );
 
-        add_dora_to_score(&mut score, &hand, None, &[], &[], &[], false);
+        add_dora_to_score(&mut score, &hand, None, &[], &[], &[], &Settings::new());
 
         assert_eq!(
             score.yaku_list.last(),

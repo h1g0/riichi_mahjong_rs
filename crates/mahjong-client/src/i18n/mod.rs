@@ -308,32 +308,38 @@ pub enum Key {
     RuleSettingsButton,
     /// Rule-settings screen title
     RuleSettingsTitle,
+    /// Basic rule-settings category
+    RuleBasicPage,
+    /// Advanced rule-settings category
+    RuleAdvancedPage,
     /// Heading above the compact rule summary
     CurrentRulesTitle,
     /// Enabled value shown beside a rule
     RuleOn,
     /// Disabled value shown beside a rule
     RuleOff,
-    /// East-only games do not extend into South
-    NoSouthExtension,
-    /// Hanchan games do not extend into West
-    NoWestExtension,
-    /// Bankruptcy ends the game below zero points
-    FixedBankruptcy,
-    /// Winning with a yaku completed only by the winning tile is allowed
-    FixedAfterTheFactYaku,
-    /// Red-fives included in four-player games
-    FixedRedDoraFourPlayer,
-    /// Red-fives included in three-player games
-    FixedRedDoraThreePlayer,
-    /// Nagashi Mangan is enabled
-    FixedNagashiMangan,
-    /// Dealer-continuation conditions
-    FixedDealerContinuation,
-    /// Pinfu and fully concealed self-draw may combine
-    FixedPinfuTsumo,
-    /// Mangan rounding up is enabled
-    FixedKiriageMangan,
+    /// Red-five rule label
+    RuleRedFives,
+    /// Dealer-continuation rule label
+    RuleDealerContinuation,
+    /// South/West extension rule label
+    RuleRoundExtension,
+    /// Final-dealer stopping rule label
+    RuleAllLast,
+    /// Bankruptcy rule label
+    RuleBankruptcy,
+    /// 55,000-point cold-end rule label
+    RuleColdEnd,
+    /// Simultaneous-ron handling label
+    RuleRonMode,
+    /// Abortive-draw handling label
+    RuleAbortiveDrawMode,
+    /// Nagashi Mangan rule label
+    RuleNagashiMangan,
+    /// Kiriage Mangan rule label
+    RuleKiriageMangan,
+    /// Counted-yakuman rule label
+    RuleCountedYakuman,
     /// Open All Inside rule label
     RuleOpenAllInside,
     /// Swap-calling rule label
@@ -352,12 +358,30 @@ pub enum Key {
     RuleFourRiichiDraw,
     /// Nine-terminals abortive-draw rule label
     RuleNineTerminalsDraw,
-    /// Triple-ron abortive-draw rule label
-    RuleTripleRonDraw,
-    /// Multiple-ron rule label
-    RuleMultipleRon,
     /// Yakuman liability-payment rule label
     RuleYakumanPao,
+    /// Red-five rule description
+    RuleRedFivesDescription,
+    /// Dealer-continuation rule description
+    RuleDealerContinuationDescription,
+    /// South/West extension rule description
+    RuleRoundExtensionDescription,
+    /// Final-dealer stopping rule description
+    RuleAllLastDescription,
+    /// Bankruptcy rule description
+    RuleBankruptcyDescription,
+    /// Cold-end rule description
+    RuleColdEndDescription,
+    /// Simultaneous-ron rule description
+    RuleRonModeDescription,
+    /// Abortive-draw mode description
+    RuleAbortiveDrawModeDescription,
+    /// Nagashi Mangan rule description
+    RuleNagashiManganDescription,
+    /// Kiriage Mangan rule description
+    RuleKiriageManganDescription,
+    /// Counted-yakuman rule description
+    RuleCountedYakumanDescription,
     /// Open All Inside rule description
     RuleOpenAllInsideDescription,
     /// Swap-calling rule description
@@ -376,14 +400,8 @@ pub enum Key {
     RuleFourRiichiDrawDescription,
     /// Nine-terminals abortive-draw rule description
     RuleNineTerminalsDrawDescription,
-    /// Triple-ron abortive-draw rule description
-    RuleTripleRonDrawDescription,
-    /// Multiple-ron rule description
-    RuleMultipleRonDescription,
     /// Yakuman liability-payment rule description
     RuleYakumanPaoDescription,
-    /// Note that pei dora applies to three-player games only
-    SanmaOnlyNote,
     /// CPU-setup screen title / lobby CPU-setup button
     CpuSetupTitle,
     /// Confirm button (online CPU setup)
@@ -546,6 +564,14 @@ impl Key {
                 Lang::Ja => "対戦ルール設定",
                 Lang::En => "Game Rules",
             },
+            Key::RuleBasicPage => match lang {
+                Lang::Ja => "基本設定",
+                Lang::En => "Basic",
+            },
+            Key::RuleAdvancedPage => match lang {
+                Lang::Ja => "詳細設定",
+                Lang::En => "Advanced",
+            },
             Key::CurrentRulesTitle => match lang {
                 Lang::Ja => "現在の対戦ルール",
                 Lang::En => "Current Rules",
@@ -558,45 +584,49 @@ impl Key {
                 Lang::Ja => "なし",
                 Lang::En => "Off",
             },
-            Key::NoSouthExtension => match lang {
-                Lang::Ja => "南入なし",
-                Lang::En => "No South extension",
+            Key::RuleRedFives => match lang {
+                Lang::Ja => "赤ドラ",
+                Lang::En => "Red fives",
             },
-            Key::NoWestExtension => match lang {
-                Lang::Ja => "西入なし",
-                Lang::En => "No West extension",
+            Key::RuleDealerContinuation => match lang {
+                Lang::Ja => "連荘",
+                Lang::En => "Dealer continuation",
             },
-            Key::FixedBankruptcy => match lang {
-                Lang::Ja => "飛びあり（0点は続行）",
-                Lang::En => "Bankruptcy below zero: On",
+            Key::RuleRoundExtension => match lang {
+                Lang::Ja => "南入・西入",
+                Lang::En => "Round extension",
             },
-            Key::FixedAfterTheFactYaku => match lang {
-                Lang::Ja => "後付けあり",
-                Lang::En => "After-the-fact yaku: On",
+            Key::RuleAllLast => match lang {
+                Lang::Ja => "オーラス親の終了",
+                Lang::En => "Final dealer stop",
             },
-            Key::FixedRedDoraFourPlayer => match lang {
-                Lang::Ja => "赤ドラ：5m・5p・5s各1枚",
-                Lang::En => "Red fives: one each in 5m, 5p, and 5s",
+            Key::RuleBankruptcy => match lang {
+                Lang::Ja => "飛び終了",
+                Lang::En => "Bankruptcy",
             },
-            Key::FixedRedDoraThreePlayer => match lang {
-                Lang::Ja => "赤ドラ：5p・5s各1枚",
-                Lang::En => "Red fives: one each in 5p and 5s",
+            Key::RuleColdEnd => match lang {
+                Lang::Ja => "コールド終了",
+                Lang::En => "Cold end",
             },
-            Key::FixedNagashiMangan => match lang {
-                Lang::Ja => "流し満貫あり",
-                Lang::En => "Nagashi Mangan: On",
+            Key::RuleRonMode => match lang {
+                Lang::Ja => "同時ロン",
+                Lang::En => "Simultaneous ron",
             },
-            Key::FixedDealerContinuation => match lang {
-                Lang::Ja => "連荘：親の和了・聴牌、途中流局",
-                Lang::En => "Dealer continues after a win, tenpai, or abortive draw",
+            Key::RuleAbortiveDrawMode => match lang {
+                Lang::Ja => "途中流局",
+                Lang::En => "Abortive draws",
             },
-            Key::FixedPinfuTsumo => match lang {
-                Lang::Ja => "平和ツモ複合あり",
-                Lang::En => "Pinfu + concealed self-draw: On",
+            Key::RuleNagashiMangan => match lang {
+                Lang::Ja => "流し満貫",
+                Lang::En => "Nagashi Mangan",
             },
-            Key::FixedKiriageMangan => match lang {
-                Lang::Ja => "切り上げ満貫あり（3翻60符・4翻30符）",
-                Lang::En => "Mangan rounding: 3 han 60 fu / 4 han 30 fu",
+            Key::RuleKiriageMangan => match lang {
+                Lang::Ja => "切り上げ満貫",
+                Lang::En => "Kiriage Mangan",
+            },
+            Key::RuleCountedYakuman => match lang {
+                Lang::Ja => "数え役満",
+                Lang::En => "Counted yakuman",
             },
             Key::RuleOpenAllInside => match lang {
                 Lang::Ja => "喰いタン",
@@ -634,17 +664,85 @@ impl Key {
                 Lang::Ja => "九種九牌",
                 Lang::En => "Nine Terminals",
             },
-            Key::RuleTripleRonDraw => match lang {
-                Lang::Ja => "三家和",
-                Lang::En => "Triple-ron draw",
-            },
-            Key::RuleMultipleRon => match lang {
-                Lang::Ja => "複数ロン",
-                Lang::En => "Multiple ron",
-            },
             Key::RuleYakumanPao => match lang {
                 Lang::Ja => "責任払い",
                 Lang::En => "Liability payment",
+            },
+            Key::RuleRedFivesDescription => match lang {
+                Lang::Ja => "四麻は5萬・5筒・5索、三麻は5筒・5索に\n赤牌を各1枚入れます。",
+                Lang::En => "Adds one red five per available suit.\nSanma has red 5p and 5s.",
+            },
+            Key::RuleDealerContinuationDescription => match lang {
+                Lang::Ja => {
+                    "親の和了のみ、または親の和了・流局時の聴牌で連荘します。\n途中流局はどちらでも連荘します。"
+                }
+                Lang::En => {
+                    "Continue after dealer wins only, or after dealer wins/tenpai.\nAbortive draws always continue the hand."
+                }
+            },
+            Key::RuleRoundExtensionDescription => match lang {
+                Lang::Ja => {
+                    "規定局終了時に全員が返し点未満なら、東風戦は南場、\n半荘戦は西場へ入ります。延長は1場までです。"
+                }
+                Lang::En => {
+                    "If nobody reaches the target at the scheduled end, extend\nEast-only into South or hanchan into West, for at most one wind."
+                }
+            },
+            Key::RuleAllLastDescription => match lang {
+                Lang::Ja => {
+                    "オーラスの親が首位のとき、和了または聴牌を条件に\n対局を終了できるか設定します。"
+                }
+                Lang::En => {
+                    "Controls whether the leading final dealer may end the game\nafter winning, or after winning/declaring tenpai."
+                }
+            },
+            Key::RuleBankruptcyDescription => match lang {
+                Lang::Ja => {
+                    "持ち点がマイナス、または0点以下になった時点で\n対局を終了するか設定します。"
+                }
+                Lang::En => {
+                    "Ends the game when a score drops below zero, at zero or below,\nor never ends early for bankruptcy."
+                }
+            },
+            Key::RuleColdEndDescription => match lang {
+                Lang::Ja => "四麻で誰かが55,000点以上になった時点で対局を終了します。",
+                Lang::En => "Ends a four-player game when anyone reaches 55,000 points.",
+            },
+            Key::RuleRonModeDescription => match lang {
+                Lang::Ja => {
+                    "頭ハネ、ダブロン・トリロンあり、または三家和を\n途中流局として扱う方式から選びます。"
+                }
+                Lang::En => {
+                    "Choose head bump, all double/triple ron, or multiple ron\nwith triple ron treated as an abortive draw."
+                }
+            },
+            Key::RuleAbortiveDrawModeDescription => match lang {
+                Lang::Ja => {
+                    "四槓散了・四風連打・四家立直・九種九牌をまとめて設定します。\n詳細設定では各項目を個別に変更できます。"
+                }
+                Lang::En => {
+                    "Sets the four-quads, four-winds, four-riichi and nine-terminals\ndraws together. Advanced settings can override each one."
+                }
+            },
+            Key::RuleNagashiManganDescription => match lang {
+                Lang::Ja => {
+                    "流局時、鳴かれていない捨て牌がすべて么九牌なら\n流し満貫として精算します。"
+                }
+                Lang::En => {
+                    "At an exhaustive draw, awards Mangan when every unclaimed\ndiscard is a terminal or honour."
+                }
+            },
+            Key::RuleKiriageManganDescription => match lang {
+                Lang::Ja => "3翻60符と4翻30符を満貫として扱います。",
+                Lang::En => "Rounds 3 han 60 fu and 4 han 30 fu up to Mangan.",
+            },
+            Key::RuleCountedYakumanDescription => match lang {
+                Lang::Ja => {
+                    "役満役を含まない13翻以上の手を役満として扱います。\nなしの場合は三倍満です。"
+                }
+                Lang::En => {
+                    "Scores non-yakuman hands with 13+ han as yakuman.\nWhen off, they are capped at Sanbaiman."
+                }
             },
             Key::RuleOpenAllInsideDescription => match lang {
                 Lang::Ja => "副露した断么九を1翻役として認めます。",
@@ -690,25 +788,9 @@ impl Key {
                 Lang::Ja => "配牌で么九牌が9種以上なら流局を宣言できます。",
                 Lang::En => "Allows a draw declaration with nine kinds of terminals and honours.",
             },
-            Key::RuleTripleRonDrawDescription => match lang {
-                Lang::Ja => "3人が同じ牌にロンした場合は流局します。",
-                Lang::En => "Ends the hand when three players ron the same discard.",
-            },
-            Key::RuleMultipleRonDescription => match lang {
-                Lang::Ja => {
-                    "同じ捨て牌への複数人のロン（ダブロン・トリロン）をすべて認めます。\nオフの時は頭ハネ（放銃者からツモ順が最も早い和了者のみ）となります。\nオン・オフともに供託棒は頭ハネになります。"
-                }
-                Lang::En => {
-                    "Allows double and triple ron on the same discard.\nOff uses head bump: only the earliest winner after the discarder wins.\nRiichi deposits use head-bump priority in both modes."
-                }
-            },
             Key::RuleYakumanPaoDescription => match lang {
                 Lang::Ja => "大三元・大四喜・四槓子を確定させた打牌に責任払いを適用します。",
                 Lang::En => "Applies liability payment when a discard completes certain yakuman.",
-            },
-            Key::SanmaOnlyNote => match lang {
-                Lang::Ja => "（三麻のみ）",
-                Lang::En => " (3-player only)",
             },
             Key::CpuSetupTitle => match lang {
                 Lang::Ja => "CPU設定",

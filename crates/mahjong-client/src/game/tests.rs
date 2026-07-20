@@ -700,14 +700,19 @@ fn test_online_ui_build_rules_includes_selected_rules() {
 }
 
 #[test]
-fn test_every_rule_option_toggles_its_user_facing_state() {
-    let mut rules = mahjong_core::settings::Settings::new();
-    for rule in RuleOption::ALL {
-        let before = rule.is_enabled(&rules);
-        rule.toggle(&mut rules);
-        assert_ne!(rule.is_enabled(&rules), before, "{rule:?}");
-        rule.toggle(&mut rules);
-        assert_eq!(rule.is_enabled(&rules), before, "{rule:?}");
+fn test_every_rule_option_cycles_forward_and_backward() {
+    let mut options = RuleOption::options(RulePage::Basic, false);
+    options.extend(RuleOption::options(RulePage::Basic, true));
+    options.extend(RuleOption::options(RulePage::Advanced, false));
+    options.dedup();
+
+    for rule in options {
+        let mut rules = mahjong_core::settings::Settings::new();
+        let before = rules.clone();
+        rule.cycle(&mut rules, true);
+        assert_ne!(rules, before, "{rule:?}");
+        rule.cycle(&mut rules, false);
+        assert_eq!(rules, before, "{rule:?}");
     }
 }
 

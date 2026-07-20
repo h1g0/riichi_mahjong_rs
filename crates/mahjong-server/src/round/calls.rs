@@ -430,7 +430,7 @@ impl Round {
                 &dora_indicators,
                 &uradora_indicators,
                 &self.players[winner].pei_tiles,
-                self.settings.three_player,
+                &self.settings,
             );
 
             let winner_is_dealer = self.players[winner].is_dealer();
@@ -579,7 +579,7 @@ impl Round {
         if (Tile::Z1..=Tile::Z4).contains(&tt) && wind_meld_count == 4 {
             self.pao[caller].push((Kind::BigWinds, discarder));
         }
-        if is_daiminkan && self.players[caller].kan_count() == 4 {
+        if self.settings.four_quads_pao && is_daiminkan && self.players[caller].kan_count() == 4 {
             self.pao[caller].push((Kind::FourQuads, discarder));
         }
     }
