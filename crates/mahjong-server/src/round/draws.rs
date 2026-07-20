@@ -10,9 +10,11 @@ use super::{RIICHI_STICK_VALUE, Round, RoundResult, TurnPhase};
 impl Round {
     /// Handles an exhaustive draw, including the noten penalty.
     pub(super) fn do_exhaustive_draw(&mut self) {
-        let nagashi_winners = self.nagashi_mangan_players();
-        if !nagashi_winners.is_empty() && self.do_nagashi_mangan(nagashi_winners) {
-            return;
+        if self.settings.nagashi_mangan {
+            let nagashi_winners = self.nagashi_mangan_players();
+            if !nagashi_winners.is_empty() && self.do_nagashi_mangan(nagashi_winners) {
+                return;
+            }
         }
 
         let mut tenpai_players = Vec::new();

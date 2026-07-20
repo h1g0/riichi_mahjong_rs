@@ -27,7 +27,7 @@ impl Wall {
     ///
     /// Four-player: 136 tiles with red fives in 5m/5p/5s.
     /// Three-player: 108 tiles (2m-8m removed) with red fives in 5p/5s only.
-    fn create_all_tiles(three_player: bool) -> Vec<Tile> {
+    fn create_all_tiles(three_player: bool, red_fives: bool) -> Vec<Tile> {
         let mut tiles = Vec::with_capacity(136);
 
         for tile_type in 0..Tile::LEN as TileType {
@@ -36,7 +36,8 @@ impl Wall {
             }
             for copy in 0..4u8 {
                 // The first copy of each five becomes the red five.
-                let is_red = copy == 0
+                let is_red = red_fives
+                    && copy == 0
                     && (tile_type == Tile::M5 || tile_type == Tile::P5 || tile_type == Tile::S5);
 
                 if is_red {
@@ -52,7 +53,12 @@ impl Wall {
 
     /// Creates a shuffled wall.
     pub fn new(three_player: bool) -> Self {
-        let mut tiles = Self::create_all_tiles(three_player);
+        Self::new_with_red_fives(three_player, true)
+    }
+
+    /// Creates a shuffled wall with optional red fives.
+    pub fn new_with_red_fives(three_player: bool, red_fives: bool) -> Self {
+        let mut tiles = Self::create_all_tiles(three_player, red_fives);
         tiles.shuffle(&mut rand::rng());
         Self::from_shuffled(tiles)
     }
@@ -60,9 +66,14 @@ impl Wall {
     /// Creates a wall from a fixed seed, for simulations and
     /// reproducible tests.
     pub fn new_with_seed(seed: u64, three_player: bool) -> Self {
+        Self::new_with_seed_and_red_fives(seed, three_player, true)
+    }
+
+    /// Creates a reproducible wall with optional red fives.
+    pub fn new_with_seed_and_red_fives(seed: u64, three_player: bool, red_fives: bool) -> Self {
         use rand::SeedableRng;
         let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
-        let mut tiles = Self::create_all_tiles(three_player);
+        let mut tiles = Self::create_all_tiles(three_player, red_fives);
         tiles.shuffle(&mut rng);
         Self::from_shuffled(tiles)
     }
@@ -202,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_create_all_tiles() {
-        let tiles = Wall::create_all_tiles(false);
+        let tiles = Wall::create_all_tiles(false, true);
         assert_eq!(tiles.len(), 136);
 
         for tile_type in 0..Tile::LEN as TileType {
@@ -232,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_create_all_tiles_three_player() {
-        let tiles = Wall::create_all_tiles(true);
+        let tiles = Wall::create_all_tiles(true, true);
         // (34 - 7) kinds x 4 copies
         assert_eq!(tiles.len(), 108);
 
@@ -257,6 +268,17 @@ mod tests {
         let red_count = tiles.iter().filter(|t| t.is_red_dora()).count();
         assert_eq!(red_count, 2);
         assert!(!tiles.iter().any(|t| t.get() == Tile::M5 && t.is_red_dora()));
+    }
+
+    #[test]
+    fn test_create_all_tiles_without_red_fives() {
+        let four_player = Wall::create_all_tiles(false, false);
+        let three_player = Wall::create_all_tiles(true, false);
+
+        assert!(!four_player.iter().any(|tile| tile.is_red_dora()));
+        assert!(!three_player.iter().any(|tile| tile.is_red_dora()));
+        assert_eq!(four_player.len(), 136);
+        assert_eq!(three_player.len(), 108);
     }
 
     #[test]

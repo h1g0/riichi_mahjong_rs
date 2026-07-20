@@ -26,7 +26,7 @@ mod setup;
 mod tests;
 
 pub use labels::PlayerLabel;
-pub use setup::{GameMode, OnlineUiState, RoomViewUi, RuleOption, SetupState};
+pub use setup::{GameMode, OnlineUiState, RoomViewUi, RuleOption, RulePage, SetupState};
 
 use labels::*;
 
@@ -316,6 +316,8 @@ pub struct GameState {
     pub setup_state: SetupState,
     /// Rule whose description is shown on the rule-settings screen
     pub selected_rule: RuleOption,
+    /// Category shown on the rule-settings screen
+    pub rule_page: RulePage,
     /// Online UI state
     pub online_state: OnlineUiState,
     /// Player types per seat, in the same order as `scores`
@@ -442,7 +444,8 @@ impl GameState {
             pon_pending_options: Vec::new(),
             nine_terminals_pending: false,
             setup_state: SetupState::new(),
-            selected_rule: RuleOption::OpenAllInside,
+            selected_rule: RuleOption::RedFives,
+            rule_page: RulePage::Basic,
             online_state: OnlineUiState::new(),
             player_labels: [
                 PlayerLabel::Me,

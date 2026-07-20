@@ -79,6 +79,32 @@ fn test_nagashi_mangan_single_winner_settlement() {
 }
 
 #[test]
+fn test_nagashi_mangan_disabled_uses_exhaustive_draw() {
+    let mut round = Round::new(
+        Wind::East,
+        0,
+        [25000; 4],
+        0,
+        0,
+        0,
+        4,
+        Settings {
+            nagashi_mangan: false,
+            ..Settings::new()
+        },
+    );
+    round.drain_events();
+    round.players[1].discards = vec![nagashi_discard(Tile::new(Tile::M1), false)];
+
+    round.do_exhaustive_draw();
+
+    assert!(matches!(
+        round.result,
+        Some(RoundResult::ExhaustiveDraw { .. })
+    ));
+}
+
+#[test]
 fn test_multiple_nagashi_mangan_winners_share_payments_independently() {
     let mut round = Round::new(Wind::East, 0, [25000; 4], 1, 1, 0, 4, Settings::new());
     round.drain_events();
@@ -2002,6 +2028,29 @@ fn test_pao_recorded_on_fourth_kan_daiminkan() {
     round.execute_daiminkan(1, 0, Tile::new(Tile::Z1));
 
     assert_eq!(round.pao[1], vec![(Kind::FourQuads, 0)]);
+}
+
+#[test]
+fn test_four_quads_pao_can_be_disabled_independently() {
+    let mut round = Round::new_with_seed(
+        42,
+        Wind::East,
+        0,
+        [25000; 4],
+        0,
+        0,
+        0,
+        4,
+        Settings {
+            four_quads_pao: false,
+            ..Settings::new()
+        },
+    );
+    round.players[1].hand = Hand::from("44p111z 1111m 2222s 9999p");
+
+    round.execute_daiminkan(1, 0, Tile::new(Tile::Z1));
+
+    assert!(round.pao[1].is_empty());
 }
 
 /// With yakuman_pao off nothing is recorded.

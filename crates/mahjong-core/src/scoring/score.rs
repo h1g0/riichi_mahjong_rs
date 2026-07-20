@@ -248,7 +248,13 @@ fn calculate_score_for_decomposition(
     let fu_result = calculate_fu(analyzer, hand, status)?;
     let fu = fu_result.total;
 
-    let rank = determine_rank(han, fu, has_yakuman);
+    let rank = determine_rank_with_rules(
+        han,
+        fu,
+        has_yakuman,
+        settings.counted_yakuman,
+        settings.kiriage_mangan,
+    );
 
     // Counted yakuman is capped at one, while independently awarded yakuman
     // stack. Deriving the multiplier from total han would incorrectly turn a
@@ -345,7 +351,19 @@ fn extract_yaku_list(
 /// Determines the score rank, including mangan rounding up
 /// (4 han 30 fu / 3 han 60 fu count as mangan).
 pub fn determine_rank(han: u32, fu: u32, has_yakuman: bool) -> ScoreRank {
-    if has_yakuman || han >= 13 {
+    determine_rank_with_rules(han, fu, has_yakuman, true, true)
+}
+
+/// Determines the score rank using configurable counted-yakuman and
+/// kiriage-mangan rules.
+pub fn determine_rank_with_rules(
+    han: u32,
+    fu: u32,
+    has_yakuman: bool,
+    counted_yakuman: bool,
+    kiriage_mangan: bool,
+) -> ScoreRank {
+    if has_yakuman || (counted_yakuman && han >= 13) {
         ScoreRank::Yakuman
     } else if han >= 11 {
         ScoreRank::Sanbaiman
@@ -353,7 +371,7 @@ pub fn determine_rank(han: u32, fu: u32, has_yakuman: bool) -> ScoreRank {
         ScoreRank::Baiman
     } else if han >= 6 {
         ScoreRank::Haneman
-    } else if han >= 5 || (han == 4 && fu >= 30) || (han == 3 && fu >= 60) {
+    } else if han >= 5 || (kiriage_mangan && ((han == 4 && fu >= 30) || (han == 3 && fu >= 60))) {
         ScoreRank::Mangan
     } else {
         ScoreRank::Normal
@@ -535,6 +553,26 @@ mod tests {
         assert_eq!(determine_rank(12, 30, false), ScoreRank::Sanbaiman);
         assert_eq!(determine_rank(13, 30, false), ScoreRank::Yakuman);
         assert_eq!(determine_rank(13, 30, true), ScoreRank::Yakuman);
+    }
+
+    #[test]
+    fn test_determine_rank_respects_optional_limit_rules() {
+        assert_eq!(
+            determine_rank_with_rules(13, 30, false, false, true),
+            ScoreRank::Sanbaiman
+        );
+        assert_eq!(
+            determine_rank_with_rules(13, 30, true, false, true),
+            ScoreRank::Yakuman
+        );
+        assert_eq!(
+            determine_rank_with_rules(4, 30, false, true, false),
+            ScoreRank::Normal
+        );
+        assert_eq!(
+            determine_rank_with_rules(3, 60, false, true, false),
+            ScoreRank::Normal
+        );
     }
 
     /// Mangan, non-dealer tsumo: dealer 4000 + 2000 from each non-dealer.

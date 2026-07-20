@@ -160,7 +160,7 @@ impl Round {
         settings: Settings,
     ) -> Self {
         Self::with_wall(
-            Wall::new(settings.three_player),
+            Wall::new_with_red_fives(settings.three_player, settings.red_fives),
             round_wind,
             dealer,
             initial_scores,
@@ -187,7 +187,7 @@ impl Round {
         settings: Settings,
     ) -> Self {
         Self::with_wall(
-            Wall::new_with_seed(seed, settings.three_player),
+            Wall::new_with_seed_and_red_fives(seed, settings.three_player, settings.red_fives),
             round_wind,
             dealer,
             initial_scores,
