@@ -714,6 +714,20 @@ pub fn handle_mode_select_input(
 
 // ========== Rule-settings screen ==========
 
+const RULE_SETTINGS_TITLE_Y: f32 = PANEL_Y + 45.0;
+
+fn draw_rule_settings_panel(font: Option<&Font>, title: &str) {
+    draw_panel_background();
+    theme::draw_text_centered(
+        font,
+        title,
+        DESIGN_W / 2.0,
+        RULE_SETTINGS_TITLE_Y,
+        26,
+        theme::TEXT_BR,
+    );
+}
+
 fn rule_page_rect(page: RulePage) -> Rect2 {
     let width = (PANEL_W - 76.0) / 2.0;
     Rect2 {
@@ -941,7 +955,7 @@ pub enum RuleSettingsAction {
 pub fn draw_rule_settings(state: &GameState, font: Option<&Font>, origin: MenuOrigin) {
     let tr = state.tr();
     let rules = selected_rules(state, origin);
-    draw_menu_panel(font, tr.get(Key::RuleSettingsTitle), 26);
+    draw_rule_settings_panel(font, tr.get(Key::RuleSettingsTitle));
 
     for (page, key) in [
         (RulePage::Basic, Key::RuleBasicPage),
@@ -1188,5 +1202,12 @@ mod tests {
         cycle_selected_rule(&mut state, MenuOrigin::Local, true);
 
         assert_ne!(rule.is_enabled(&state.setup_state.rules), before);
+    }
+
+    #[test]
+    fn rule_settings_title_stays_above_page_tabs() {
+        let basic_tab = rule_page_rect(RulePage::Basic);
+
+        assert!(RULE_SETTINGS_TITLE_Y + 8.0 < basic_tab.y);
     }
 }
