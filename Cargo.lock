@@ -568,6 +568,7 @@ version = "0.1.0"
 dependencies = [
  "fontdue",
  "getrandom 0.4.3",
+ "image",
  "macroquad",
  "mahjong-core",
  "mahjong-server",

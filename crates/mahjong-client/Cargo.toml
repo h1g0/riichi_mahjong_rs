@@ -18,3 +18,6 @@ getrandom = "0.4"
 tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 # Installs rustls's process-default CryptoProvider before wss connections.
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Macroquad exposes screenshots as raw RGBA pixels, but its PNG helper
+# panics on write errors. Use image directly so a failed save stays non-fatal.
+image = { version = "0.24", default-features = false, features = ["png"] }
