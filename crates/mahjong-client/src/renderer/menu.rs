@@ -472,7 +472,7 @@ fn rule_value_text(state: &GameState, rule: RuleOption, rules: &Settings) -> Str
         RuleOption::ColdEnd => boolean(rules.cold_end),
         RuleOption::RonMode => match (state.lang, rules.multiple_ron, rules.triple_ron_draw) {
             (Lang::Ja, false, _) => "頭ハネ".into(),
-            (Lang::Ja, true, false) => "複数ロン".into(),
+            (Lang::Ja, true, false) => "ダブロン・トリロン".into(),
             (Lang::Ja, true, true) => "三家和流局".into(),
             (Lang::En, false, _) => "Head bump".into(),
             (Lang::En, true, false) => "Multiple ron".into(),
@@ -1116,7 +1116,11 @@ mod tests {
         assert_eq!(lines.len(), 4);
         assert!(lines.iter().any(|line| line.contains("赤ドラあり")));
         assert!(lines.iter().any(|line| line.contains("連荘：和了・聴牌")));
-        assert!(lines.iter().any(|line| line.contains("同時ロン：複数ロン")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("同時ロン：ダブロン・トリロン"))
+        );
         assert!(lines.iter().any(|line| line.contains("飛び終了：マイナス")));
         assert!(lines.iter().any(|line| line.contains("流し満貫あり")));
         assert!(lines.iter().any(|line| line.contains("切り上げ満貫あり")));
