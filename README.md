@@ -10,27 +10,24 @@ Implementation for Japanese Riichi Mahjong in Rust.
 
 ![Screenshot of gameplay](./docs/image1.png)
 
-## Current status
+## Features
 
-- Shanten calculation is implemented.
-- [Yaku](https://en.wikipedia.org/wiki/Japanese_Mahjong_yaku) evaluation is implemented.
-- Fu calculation and score calculation are implemented.
-- A playable client that runs in both native and WASM builds is included.
-- The native client saves a PNG screenshot to `screenshots/` when `F12` is pressed.
+- A playable Japanese Riichi Mahjong client that runs both as a native desktop application and in the browser via WASM.
+  - The native client saves a PNG screenshot to `screenshots/` when `F12` is pressed.
 - The client UI is multilingual (currently Japanese and English).
   - In English mode, each tile shows a small index label in its top-right corner so tiles can be identified without reading kanji: suit-colored digits for number tiles (man = red, pin = blue, sou = green), E/S/W/N for winds, and P/F/C for dragons.
-- CPU opponents are implemented.
-  - with selectable strengths (weak / normal / strong) and personalities (balanced / speedy / high-value / defensive).
+- CPU opponents with selectable strengths (weak / normal / strong) and personalities (balanced / speedy / high-value / defensive).
   - They use strategy conventions for discard efficiency, calling, riichi/damaten judgement, push/fold, and threat-based defense (including suji/flush/yakuman reads).
-- Online multiplayer (room-code based) is supported via `mahjong-net-server`.
+- Room-code-based online multiplayer via `mahjong-net-server`.
   - Host creates a room, shares a 6-character code, and friends join; empty seats are filled by the CPU.
   - Disconnected players are taken over by the CPU and can rejoin to resync.
-- Three-player mahjong (sanma) is supported, both locally and online.
-  - Characters 2–8 are removed (108 tiles, red fives 5p/5s only), chii is not available, and tsumo wins use tsumo-loss payments (per-person amounts are unchanged; the missing player's share is simply not received).
+- Four-player and three-player mahjong (sanma), both locally and online.
+  - Characters 2–8 are removed (108 tiles, red fives 5p/5s only), chii is not available, and tsumo loss can be toggled per game.
   - Pei (extracting a North tile as a bonus dora with a replacement draw) is supported and can be toggled per game; the manzu dora chain wraps 1m ↔ 9m.
   - Games start with 35,000 points; an East-only game is East 1–3, and a hanchan is East 1 through South 3.
-- Game length is selectable per game: East-only or hanchan, for both four-player and three-player modes.
-- Vercel deployment using the included scripts is supported (static web client).
+- A choice of East-only or hanchan games in both four-player and three-player modes.
+- Flexible per-game rule configuration. Examples: open Tan'yao, whether simultaneous ron wins are allowed, swap-calling, abortive draws, yakuman liability payment, double yakuman, and pei dora or tsumo loss in three-player games.
+- Included scripts and configuration for deploying the static web client to Vercel and the online multiplayer server to Fly.io.
 
 ## Structure
 
@@ -116,6 +113,14 @@ If Python is installed:
 ~~~sh
 python -m http.server 8080 --directory public
 ~~~
+
+## Contributing
+
+Contributions are welcome. Before contributing, please consult the
+[Ubiquitous Language Glossary](./docs/glossary.md) to understand the project's
+Riichi Mahjong terminology and to use it consistently when writing code,
+comments, and documentation. A [Japanese edition](./docs/glossary.ja.md) is
+also available.
 
 ## Vercel deployment
 
