@@ -43,6 +43,7 @@ pub const TEXT_DIM: Color = rgb(0xa3bcab);
 pub const TEXT_BR: Color = rgb(0xf5f0e0);
 pub const RED: Color = rgb(0xcc3333);
 pub const RED_LT: Color = rgb(0xe84444);
+pub const BLUE_LT: Color = rgb(0x70b7ff);
 
 /// Background center color of the setup/end screens.
 pub const SETUP_BG_INNER: Color = rgb(0x102a1e);

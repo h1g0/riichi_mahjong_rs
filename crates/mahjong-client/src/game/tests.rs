@@ -94,29 +94,29 @@ fn test_initial_dealer_seat_derived_from_game_started() {
 }
 
 #[test]
-fn test_final_rankings_tie_breaks_by_dealer_proximity() {
+fn test_rankings_tie_breaks_by_dealer_proximity() {
     // With equal scores the order runs counter-clockwise from the
     // starting dealer.
     let mut state = GameState::new();
     state.handle_event(game_started_4p(Wind::West, 0)); // starting dealer: seat 2
     state.scores = [25000; 4];
-    let order: Vec<usize> = state.final_rankings().iter().map(|r| r.0).collect();
+    let order: Vec<usize> = state.rankings().iter().map(|r| r.0).collect();
     assert_eq!(order, vec![2, 3, 0, 1]);
 
     // Differing scores outrank the seat order.
     state.scores = [30000, 20000, 25000, 25000];
-    let order: Vec<usize> = state.final_rankings().iter().map(|r| r.0).collect();
+    let order: Vec<usize> = state.rankings().iter().map(|r| r.0).collect();
     assert_eq!(order, vec![0, 2, 3, 1]);
 }
 
 #[test]
-fn test_final_rankings_sanma_excludes_dummy_seat() {
+fn test_rankings_sanma_excludes_dummy_seat() {
     // Three-player: starting dealer at seat 1 and equal scores give
     // 1, 2, 0, skipping the dummy.
     let mut state = GameState::new();
     state.handle_event(sanma_game_started(Wind::West)); // we as West puts the dealer at seat 1
     state.scores = [35000, 35000, 35000, 0];
-    let order: Vec<usize> = state.final_rankings().iter().map(|r| r.0).collect();
+    let order: Vec<usize> = state.rankings().iter().map(|r| r.0).collect();
     assert_eq!(order, vec![1, 2, 0]);
 }
 

@@ -173,20 +173,68 @@ pub(super) fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f
     }
 }
 
-/// Top-bar right: per-player score chips, ours highlighted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ScoreChip {
+    pub(super) seat: usize,
+    pub(super) relative_index: usize,
+    pub(super) rank: usize,
+    pub(super) score_delta: Option<i32>,
+}
+
+/// Builds the top-bar entries in standings order with scores relative to us.
+pub(super) fn score_chip_entries(state: &GameState) -> Vec<ScoreChip> {
+    let count = state.player_count;
+    let my_score = state.scores[state.my_seat];
+
+    state
+        .rankings()
+        .into_iter()
+        .enumerate()
+        .map(|(rank, (seat, score))| ScoreChip {
+            seat,
+            relative_index: (seat + count - state.my_seat) % count,
+            rank,
+            score_delta: (seat != state.my_seat).then_some(score - my_score),
+        })
+        .collect()
+}
+
+/// Score difference text with an explicit sign and digit grouping.
+pub(super) fn format_score_delta(delta: i32) -> String {
+    if delta > 0 {
+        format!("+{}", format_score(delta))
+    } else if delta < 0 {
+        format_score(delta)
+    } else {
+        "±0".to_string()
+    }
+}
+
+/// Color for an opponent's score difference relative to us.
+pub(super) fn score_delta_color(delta: i32) -> Color {
+    match delta.cmp(&0) {
+        std::cmp::Ordering::Greater => theme::BLUE_LT,
+        std::cmp::Ordering::Less => theme::RED_LT,
+        std::cmp::Ordering::Equal => theme::TEXT_DIM,
+    }
+}
+
+/// Top-bar right: standings and score differences, with ours highlighted.
 pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f32) {
-    const CHIP_W: f32 = 70.0;
+    const CHIP_W: f32 = 84.0;
     const CHIP_H: f32 = 38.0;
     const GAP: f32 = 7.0;
-    let count = state.player_count;
+    const VALUE_GAP: f32 = 4.0;
+    const VALUE_SIZE: u16 = 11;
+    let chips = score_chip_entries(state);
+    let count = chips.len();
     let total = count as f32 * CHIP_W + (count as f32 - 1.0) * GAP;
     let start_x = DESIGN_W - 14.0 - total;
     let chip_y = (bar_h - CHIP_H) / 2.0;
 
-    for rel in 0..state.player_count {
-        let seat = seat_at_relative_position(state.my_seat, rel, state.player_count);
-        let is_me = seat == state.my_seat;
-        let x = start_x + rel as f32 * (CHIP_W + GAP);
+    for (index, chip) in chips.iter().enumerate() {
+        let is_me = chip.seat == state.my_seat;
+        let x = start_x + index as f32 * (CHIP_W + GAP);
 
         let (fill, border) = if is_me {
             (theme::rgba(0xc8a227, 0.10), theme::rgba(0xc8a227, 0.28))
@@ -199,7 +247,11 @@ pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f3
         theme::draw_rounded_rect(x, chip_y, CHIP_W, CHIP_H, 4.0, fill);
         theme::draw_rounded_rect_lines(x, chip_y, CHIP_W, CHIP_H, 4.0, 1.0, border);
 
-        let name = short_player_name(&state.player_labels[seat], rel, state.lang);
+        let name = short_player_name(
+            &state.player_labels[chip.seat],
+            chip.relative_index,
+            state.lang,
+        );
         theme::draw_text_centered(
             font,
             &name,
@@ -208,9 +260,40 @@ pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f3
             9,
             theme::TEXT_DIM,
         );
-        let val = format_score(state.scores[seat]);
-        let val_color = if is_me { theme::GOLD_LT } else { theme::TEXT };
-        theme::draw_text_centered(font, &val, x + CHIP_W / 2.0, chip_y + 30.0, 13, val_color);
+
+        let rank_text = format!("{}{}", chip.rank + 1, state.tr().place_suffix(chip.rank));
+        let rank_color = if is_me { theme::GOLD_LT } else { theme::TEXT };
+        if let Some(score_delta) = chip.score_delta {
+            let delta_text = format_score_delta(score_delta);
+            let rank_width = theme::measure_scaled(font, &rank_text, VALUE_SIZE).width;
+            let delta_width = theme::measure_scaled(font, &delta_text, VALUE_SIZE).width;
+            let value_x = x + (CHIP_W - rank_width - VALUE_GAP - delta_width) / 2.0;
+            draw_jp_text(
+                font,
+                &rank_text,
+                value_x,
+                chip_y + 30.0,
+                VALUE_SIZE,
+                rank_color,
+            );
+            draw_jp_text(
+                font,
+                &delta_text,
+                value_x + rank_width + VALUE_GAP,
+                chip_y + 30.0,
+                VALUE_SIZE,
+                score_delta_color(score_delta),
+            );
+        } else {
+            theme::draw_text_centered(
+                font,
+                &rank_text,
+                x + CHIP_W / 2.0,
+                chip_y + 30.0,
+                VALUE_SIZE,
+                rank_color,
+            );
+        }
     }
 }
 

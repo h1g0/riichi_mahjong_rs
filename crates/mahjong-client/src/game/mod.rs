@@ -532,11 +532,11 @@ impl GameState {
         self.player_labels = seats.clone();
     }
 
-    /// Final standings as (seat, score) from first to last.
+    /// Standings as (seat, score) from first to last.
     ///
     /// Ties go to the seat closer to the starting dealer; the dummy seat
     /// is excluded in three-player games.
-    pub fn final_rankings(&self) -> Vec<(usize, i32)> {
+    pub fn rankings(&self) -> Vec<(usize, i32)> {
         let n = self.player_count;
         let mut rankings: Vec<(usize, i32)> = self
             .scores
