@@ -335,7 +335,7 @@ pub(super) fn draw_game_over(state: &GameState, font: Option<&Font>) {
 
     // Final standings; ties favor the seat nearer the starting dealer,
     // and three-player games skip the dummy seat.
-    let rankings = state.final_rankings();
+    let rankings = state.rankings();
 
     // Rank colors: gold, silver, bronze, rest.
     let rank_colors = [

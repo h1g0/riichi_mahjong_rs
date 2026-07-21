@@ -6,8 +6,10 @@ use super::{
     TILE_W, add_dora_tile_types, buffer_to_design, calc_meld_width, dora_tile_tint,
     dora_tile_tint_with_base, dora_tile_types, other_meld_x_positions, pei_tile_x,
     player_hand_start_x, player_hand_tile_x, public_tile_tint, public_tile_tint_with_base,
-    rotation_index, seat_at_relative_position, self_meld_x_positions, visible_tile_tint,
+    rotation_index, score_chip_entries, score_delta_color, seat_at_relative_position,
+    self_meld_x_positions, visible_tile_tint,
 };
+use super::{format_score_delta, theme};
 use crate::game::{GameState, SelfTedashiAnim, SelfTileOrigin};
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType};
@@ -197,6 +199,70 @@ fn sanma_seat_mapping_wraps_at_three() {
     assert_eq!(seat_at_relative_position(0, 2, 3), 2);
     assert_eq!(seat_at_relative_position(1, 2, 3), 0);
     assert_eq!(seat_at_relative_position(2, 1, 3), 0);
+}
+
+#[test]
+fn score_chips_follow_rankings_without_changing_player_identity() {
+    let mut state = GameState::new();
+    state.my_seat = 2;
+    state.initial_dealer_seat = 1;
+    state.scores = [24_000, 30_000, 25_000, 21_000];
+
+    let summary: Vec<_> = score_chip_entries(&state)
+        .iter()
+        .map(|chip| (chip.seat, chip.relative_index, chip.rank, chip.score_delta))
+        .collect();
+
+    assert_eq!(
+        summary,
+        vec![
+            (1, 3, 0, Some(5_000)),
+            (2, 0, 1, None),
+            (0, 2, 2, Some(-1_000)),
+            (3, 1, 3, Some(-4_000)),
+        ]
+    );
+}
+
+#[test]
+fn score_chips_keep_zero_delta_for_tied_opponents_only() {
+    let state = GameState::new();
+
+    let deltas: Vec<_> = score_chip_entries(&state)
+        .iter()
+        .map(|chip| chip.score_delta)
+        .collect();
+
+    assert_eq!(deltas, vec![None, Some(0), Some(0), Some(0)]);
+}
+
+#[test]
+fn score_chips_exclude_the_unused_sanma_seat() {
+    let mut state = GameState::new();
+    state.player_count = 3;
+    state.my_seat = 1;
+    state.scores = [35_000, 34_000, 36_000, 999_999];
+
+    let seats: Vec<_> = score_chip_entries(&state)
+        .iter()
+        .map(|chip| chip.seat)
+        .collect();
+
+    assert_eq!(seats, vec![2, 0, 1]);
+}
+
+#[test]
+fn score_deltas_have_explicit_signs_and_grouped_digits() {
+    assert_eq!(format_score_delta(12_300), "+12,300");
+    assert_eq!(format_score_delta(0), "±0");
+    assert_eq!(format_score_delta(-4_500), "-4,500");
+}
+
+#[test]
+fn score_delta_colors_distinguish_ahead_behind_and_tied() {
+    assert_eq!(score_delta_color(1), theme::BLUE_LT);
+    assert_eq!(score_delta_color(-1), theme::RED_LT);
+    assert_eq!(score_delta_color(0), theme::TEXT_DIM);
 }
 
 #[test]
