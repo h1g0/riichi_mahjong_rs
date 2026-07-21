@@ -29,6 +29,7 @@ cargo build --locked --release --target wasm32-unknown-unknown -p mahjong-client
 cp target/wasm32-unknown-unknown/release/mahjong-client.wasm public/mahjong-client.wasm
 cp crates/mahjong-client/js/ws.js public/ws.js
 cp crates/mahjong-client/js/storage.js public/storage.js
+cp crates/mahjong-client/js/loading.js public/loading.js
 cp assets/web/favicon.png public/favicon.png
 cp assets/web/index.html public/index.html
 
@@ -39,15 +40,18 @@ wasm_hash=$(sha1sum public/mahjong-client.wasm | cut -c1-8)
 js_hash=$(sha1sum public/mq_js_bundle.js | cut -c1-8)
 ws_hash=$(sha1sum public/ws.js | cut -c1-8)
 storage_hash=$(sha1sum public/storage.js | cut -c1-8)
+loading_hash=$(sha1sum public/loading.js | cut -c1-8)
 mv public/mahjong-client.wasm "public/mahjong-client.${wasm_hash}.wasm"
 mv public/mq_js_bundle.js "public/mq_js_bundle.${js_hash}.js"
 mv public/ws.js "public/ws.${ws_hash}.js"
 mv public/storage.js "public/storage.${storage_hash}.js"
+mv public/loading.js "public/loading.${loading_hash}.js"
 
 sed -i "s|load(\"mahjong-client.wasm\")|load(\"mahjong-client.${wasm_hash}.wasm\")|" public/index.html
 sed -i "s|src=\"mq_js_bundle.js\"|src=\"mq_js_bundle.${js_hash}.js\"|" public/index.html
 sed -i "s|src=\"ws.js\"|src=\"ws.${ws_hash}.js\"|" public/index.html
 sed -i "s|src=\"storage.js\"|src=\"storage.${storage_hash}.js\"|" public/index.html
+sed -i "s|src=\"loading.js\"|src=\"loading.${loading_hash}.js\"|" public/index.html
 
 # The online game server URL for the deployed client. Set the
 # MAHJONG_SERVER_URL environment variable in the Vercel project to

@@ -163,6 +163,13 @@ const USED_FONT_SIZES: [u16; 16] = [
     9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 24, 26, 28, 32,
 ];
 
+/// Startup units used to prepare the label font and all tile-related textures.
+pub const TEXTURE_LOAD_STEPS: usize = 1 + Tile::LEN + 3 + 4;
+
+/// Startup units used to prewarm each native font size.
+#[cfg(not(target_arch = "wasm32"))]
+pub const FONT_PREWARM_STEPS: usize = USED_FONT_SIZES.len();
+
 /// Design resolution. All UI coordinates live on this virtual canvas and
 /// scale to the real window. The HTML keeps this aspect ratio; native
 /// windows may be resized to a different one.
@@ -362,11 +369,17 @@ pub struct TileTextures {
 }
 
 impl TileTextures {
-    /// Loads every texture. `font_bytes` is the TTF used to bake labels;
-    /// when unavailable the unlabeled set stands in.
-    pub fn load(font_bytes: &[u8]) -> Self {
+    /// Loads every texture while yielding between tiles for startup animation.
+    ///
+    /// `font_bytes` is the TTF used to bake labels; when unavailable the
+    /// unlabeled set stands in.
+    pub async fn load(
+        font_bytes: &[u8],
+        loading_screen: &mut crate::loading::LoadingScreen,
+    ) -> Self {
         let label_font =
             fontdue::Font::from_bytes(font_bytes, fontdue::FontSettings::default()).ok();
+        loading_screen.complete_step().await;
 
         let mut standard_tiles = Vec::with_capacity(Tile::LEN);
         let mut labeled_tiles = Vec::with_capacity(Tile::LEN);
@@ -378,31 +391,52 @@ impl TileTextures {
                 tile_type as mahjong_core::tile::TileType,
                 label_font.as_ref(),
             ));
+            loading_screen.complete_step().await;
         }
 
         let red_5m_img = image_from_png(include_bytes!("../../../../assets/images/tiles/r5m.png"));
+        let red_5m = texture_from_image(&red_5m_img);
+        let labeled_red_5m = labeled_texture(red_5m_img, Tile::M5, label_font.as_ref());
+        loading_screen.complete_step().await;
+
         let red_5p_img = image_from_png(include_bytes!("../../../../assets/images/tiles/r5p.png"));
+        let red_5p = texture_from_image(&red_5p_img);
+        let labeled_red_5p = labeled_texture(red_5p_img, Tile::P5, label_font.as_ref());
+        loading_screen.complete_step().await;
+
         let red_5s_img = image_from_png(include_bytes!("../../../../assets/images/tiles/r5s.png"));
+        let red_5s = texture_from_image(&red_5s_img);
+        let labeled_red_5s = labeled_texture(red_5s_img, Tile::S5, label_font.as_ref());
+        loading_screen.complete_step().await;
+
+        let back =
+            load_texture_from_png(include_bytes!("../../../../assets/images/tiles/back.png"));
+        loading_screen.complete_step().await;
+        let stick1000 = load_texture_from_png(include_bytes!(
+            "../../../../assets/images/sticks/stick1000.png"
+        ));
+        loading_screen.complete_step().await;
+        let stick100 = load_texture_from_png(include_bytes!(
+            "../../../../assets/images/sticks/stick100.png"
+        ));
+        loading_screen.complete_step().await;
+        let logo =
+            load_texture_from_png(include_bytes!("../../../../assets/images/others/logo.png"));
+        loading_screen.complete_step().await;
 
         Self {
             standard_tiles,
             labeled_tiles,
-            red_5m: texture_from_image(&red_5m_img),
-            red_5p: texture_from_image(&red_5p_img),
-            red_5s: texture_from_image(&red_5s_img),
-            labeled_red_5m: labeled_texture(red_5m_img, Tile::M5, label_font.as_ref()),
-            labeled_red_5p: labeled_texture(red_5p_img, Tile::P5, label_font.as_ref()),
-            labeled_red_5s: labeled_texture(red_5s_img, Tile::S5, label_font.as_ref()),
-            back: load_texture_from_png(include_bytes!("../../../../assets/images/tiles/back.png")),
-            stick1000: load_texture_from_png(include_bytes!(
-                "../../../../assets/images/sticks/stick1000.png"
-            )),
-            stick100: load_texture_from_png(include_bytes!(
-                "../../../../assets/images/sticks/stick100.png"
-            )),
-            logo: load_texture_from_png(include_bytes!(
-                "../../../../assets/images/others/logo.png"
-            )),
+            red_5m,
+            red_5p,
+            red_5s,
+            labeled_red_5m,
+            labeled_red_5p,
+            labeled_red_5s,
+            back,
+            stick1000,
+            stick100,
+            logo,
             labels_enabled: std::cell::Cell::new(false),
         }
     }
@@ -496,7 +530,10 @@ fn draw_jp_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16,
 /// entirely (the black-square issue is native-only; verified absent on
 /// WASM without the prewarm).
 #[cfg(not(target_arch = "wasm32"))]
-pub fn prewarm_fonts(font: Option<&Font>) {
+pub async fn prewarm_fonts(
+    font: Option<&Font>,
+    loading_screen: &mut crate::loading::LoadingScreen,
+) {
     // Every glyph the UI shows (generated by scripts/extract_glyphs.py).
     let mut glyphs: String = include_str!("../../glyphs.txt").to_string();
     // ASCII too: digits, punctuation, Latin text like "CPU".
@@ -505,6 +542,7 @@ pub fn prewarm_fonts(font: Option<&Font>) {
     }
     for &base in &USED_FONT_SIZES {
         let _ = theme::measure_scaled(font, &glyphs, base);
+        loading_screen.complete_step().await;
     }
 }
 

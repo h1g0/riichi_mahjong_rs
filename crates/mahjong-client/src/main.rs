@@ -10,6 +10,7 @@ use macroquad::prelude::*;
 mod adapter;
 mod game;
 mod i18n;
+mod loading;
 mod persistence;
 mod renderer;
 #[cfg(not(target_arch = "wasm32"))]
@@ -196,9 +197,17 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    #[cfg(target_arch = "wasm32")]
+    let loading_steps = 1 + renderer::TEXTURE_LOAD_STEPS;
+    #[cfg(not(target_arch = "wasm32"))]
+    let loading_steps = 1 + renderer::TEXTURE_LOAD_STEPS + renderer::FONT_PREWARM_STEPS;
+    let mut loading_screen = loading::LoadingScreen::new(loading_steps);
+    loading_screen.next_frame().await;
+
     let font_bytes: &[u8] = include_bytes!("../../../assets/fonts/ShipporiMincho-Regular.ttf");
     let font = load_ttf_font_from_bytes(font_bytes).ok();
-    let tile_textures = TileTextures::load(font_bytes);
+    loading_screen.complete_step().await;
+    let tile_textures = TileTextures::load(font_bytes, &mut loading_screen).await;
 
     if font.is_none() {
         eprintln!("警告: 日本語フォントを読み込めませんでした。デフォルトフォントで表示します。");
@@ -216,7 +225,7 @@ async fn main() {
     // Skipping the prewarm lets glyphs cache one at a time as they
     // appear, avoiding the mass repacking.
     #[cfg(not(target_arch = "wasm32"))]
-    renderer::prewarm_fonts(font.as_ref());
+    renderer::prewarm_fonts(font.as_ref(), &mut loading_screen).await;
 
     // The in-game adapter (local or remote).
     let mut adapter: Option<Box<dyn GameAdapter>> = None;
