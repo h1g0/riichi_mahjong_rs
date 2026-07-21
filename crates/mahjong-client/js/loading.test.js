@@ -10,6 +10,10 @@ const loadingPluginSource = fs.readFileSync(
     path.join(__dirname, "loading.js"),
     "utf8",
 );
+const startupPageSource = fs.readFileSync(
+    path.join(__dirname, "../../../assets/web/index.html"),
+    "utf8",
+);
 
 function loadPlugin(overlay) {
     let plugin;
@@ -38,4 +42,11 @@ test("the WASM callback hides the startup overlay", () => {
 
 test("the WASM callback tolerates a missing startup overlay", () => {
     assert.doesNotThrow(() => loadPlugin(null)());
+});
+
+test("the startup overlay obscures the canvas until WASM hides it", () => {
+    assert.match(
+        startupPageSource,
+        /#loading\s*\{[^}]*background:\s*#060e09\s*;/s,
+    );
 });
