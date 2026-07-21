@@ -97,7 +97,14 @@ pub(super) fn draw_setup_option(
     };
     theme::draw_rounded_rect(btn.x, btn.y, btn.w, btn.h, 4.0, fill);
     theme::draw_rounded_rect_lines(btn.x, btn.y, btn.w, btn.h, 4.0, 1.0, border);
-    draw_jp_text(font, label, btn.x + 12.0, btn.y + 18.0, 13, text_color);
+    draw_jp_text(
+        font,
+        label,
+        btn.x + 12.0,
+        btn.y + 18.0,
+        theme::font_size::LABEL,
+        text_color,
+    );
 }
 
 /// Draws the CPU-setup screen.
@@ -127,7 +134,7 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
         tr.get(Key::CpuSetupTitle),
         cx,
         SETUP_PANEL_Y + 52.0,
-        26,
+        theme::font_size::TITLE,
         theme::TEXT_BR,
     );
     theme::draw_text_centered(
@@ -135,7 +142,7 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
         tr.get(setup.mode.label_key()),
         cx,
         SETUP_PANEL_Y + 78.0,
-        13,
+        theme::font_size::LABEL,
         theme::GOLD_LT,
     );
 
@@ -172,7 +179,7 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
             &format!("{}", cpu_idx + 1),
             ring_cx,
             ring_cy + 6.0,
-            16,
+            theme::font_size::BODY_LARGE,
             theme::GOLD_LT,
         );
         draw_jp_text(
@@ -180,7 +187,7 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
             &tr.cpu_slot(cpu_idx),
             card_x + 56.0,
             SETUP_CARD_Y + 39.0,
-            15,
+            theme::font_size::BODY,
             theme::TEXT,
         );
 
@@ -189,7 +196,7 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
             tr.get(Key::CpuStrengthLabel),
             card_x + 14.0,
             SETUP_CARD_Y + 76.0,
-            10,
+            theme::font_size::TINY,
             theme::TEXT_DIM,
         );
         for level_idx in 0..SetupState::level_count() {
@@ -207,7 +214,7 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
             tr.get(Key::CpuPersonalityLabel),
             card_x + 14.0,
             SETUP_CARD_Y + 202.0,
-            10,
+            theme::font_size::TINY,
             theme::TEXT_DIM,
         );
         for pers_idx in 0..SetupState::personality_count() {
@@ -242,14 +249,21 @@ pub(super) fn draw_setup(state: &GameState, font: Option<&Font>, origin: MenuOri
         tr.get(confirm_key),
         cx,
         s.y + 34.0,
-        20,
+        theme::font_size::HEADING,
         theme::GOLD_LT,
     );
 
     let b = setup_back_rect();
     theme::draw_rounded_rect(b.x, b.y, b.w, b.h, 6.0, theme::rgba(0xffffff, 0.05));
     theme::draw_rounded_rect_lines(b.x, b.y, b.w, b.h, 6.0, 1.0, theme::rgba(0xc8a227, 0.3));
-    theme::draw_text_centered(font, tr.get(Key::Back), cx, b.y + 24.0, 14, theme::TEXT);
+    theme::draw_text_centered(
+        font,
+        tr.get(Key::Back),
+        cx,
+        b.y + 24.0,
+        theme::font_size::LABEL,
+        theme::TEXT,
+    );
 }
 
 /// CPU-setup screen actions.

@@ -154,7 +154,7 @@ fn draw_menu_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool
             label,
             rect.center_x(),
             rect.center_y() + 7.0,
-            18,
+            theme::font_size::HEADING_SMALL,
             theme::GOLD_LT,
         );
     } else {
@@ -180,7 +180,7 @@ fn draw_menu_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool
             label,
             rect.center_x(),
             rect.center_y() + 6.0,
-            15,
+            theme::font_size::BODY,
             theme::TEXT,
         );
     }
@@ -210,7 +210,7 @@ fn draw_disabled_button(font: Option<&Font>, rect: &Rect2, label: &str) {
         label,
         rect.center_x(),
         rect.center_y() + 6.0,
-        15,
+        theme::font_size::BODY,
         theme::rgba(0xffffff, 0.25),
     );
 }
@@ -260,7 +260,7 @@ pub fn draw_top_menu(state: &GameState, font: Option<&Font>, tile_textures: &sup
         tr.get(Key::LanguageLabel),
         lang_rect.x,
         lang_rect.y - 12.0,
-        12,
+        theme::font_size::SMALL,
         theme::TEXT_DIM,
     );
     let active_lang = match state.lang {
@@ -268,7 +268,13 @@ pub fn draw_top_menu(state: &GameState, font: Option<&Font>, tile_textures: &sup
         Lang::En => 1,
     };
     for (idx, &label) in LANG_LABELS.iter().enumerate() {
-        draw_toggle(font, &top_lang_rect(idx), label, idx == active_lang, 14);
+        draw_toggle(
+            font,
+            &top_lang_rect(idx),
+            label,
+            idx == active_lang,
+            theme::font_size::LABEL,
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -277,7 +283,7 @@ pub fn draw_top_menu(state: &GameState, font: Option<&Font>, tile_textures: &sup
         tr.get(Key::ScreenshotHint),
         DESIGN_W / 2.0,
         664.0,
-        11,
+        theme::font_size::CAPTION,
         theme::TEXT_DIM,
     );
 }
@@ -628,7 +634,7 @@ fn mode_summary_lines(state: &GameState, origin: MenuOrigin) -> Vec<String> {
 /// Draws the mode-selection screen.
 pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrigin) {
     let tr = state.tr();
-    draw_menu_panel(font, tr.get(Key::ModeSelectTitle), 26);
+    draw_menu_panel(font, tr.get(Key::ModeSelectTitle), theme::font_size::TITLE);
 
     let current_mode = selected_mode(state, origin);
 
@@ -638,7 +644,7 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
             &mode_rect(idx),
             tr.get(mode.label_key()),
             mode == current_mode,
-            16,
+            theme::font_size::BODY_LARGE,
         );
     }
 
@@ -657,7 +663,7 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
         tr.get(Key::CurrentRulesTitle),
         summary.center_x(),
         summary.y + 22.0,
-        13,
+        theme::font_size::LABEL,
         theme::GOLD,
     );
     for (idx, line) in mode_summary_lines(state, origin).iter().enumerate() {
@@ -666,7 +672,7 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
             line,
             summary.center_x(),
             summary.y + 44.0 + idx as f32 * 20.0,
-            11,
+            theme::font_size::CAPTION,
             theme::TEXT_DIM,
         );
     }
@@ -729,7 +735,7 @@ fn draw_rule_settings_panel(font: Option<&Font>, title: &str) {
         title,
         DESIGN_W / 2.0,
         RULE_SETTINGS_TITLE_Y,
-        26,
+        theme::font_size::TITLE,
         theme::TEXT_BR,
     );
 }
@@ -872,7 +878,7 @@ fn draw_rule_button(
         label,
         rect.x + 12.0,
         rect.center_y() + 5.0,
-        12,
+        theme::font_size::SMALL,
         if selected {
             theme::GOLD_LT
         } else {
@@ -884,7 +890,7 @@ fn draw_rule_button(
         value,
         rect.x + rect.w - 64.0,
         rect.center_y() + 5.0,
-        9,
+        theme::font_size::MICRO,
         if enabled {
             theme::GOLD_LT
         } else {
@@ -957,7 +963,7 @@ fn draw_rule_value_selector(
         "←",
         previous.center_x(),
         previous.center_y() + 5.0,
-        12,
+        theme::font_size::SMALL,
         theme::GOLD_LT,
     );
     theme::draw_text_centered(
@@ -965,7 +971,7 @@ fn draw_rule_value_selector(
         value,
         selector.center_x(),
         selector.center_y() + 5.0,
-        12,
+        theme::font_size::SMALL,
         if enabled {
             theme::GOLD_LT
         } else {
@@ -977,7 +983,7 @@ fn draw_rule_value_selector(
         "→",
         next.center_x(),
         next.center_y() + 5.0,
-        12,
+        theme::font_size::SMALL,
         theme::GOLD_LT,
     );
 }
@@ -1046,7 +1052,7 @@ pub fn draw_rule_settings(state: &GameState, font: Option<&Font>, origin: MenuOr
             tr.get(key),
             rect.center_x(),
             rect.center_y() + 5.0,
-            12,
+            theme::font_size::SMALL,
             if selected {
                 theme::GOLD_LT
             } else {
@@ -1085,7 +1091,7 @@ pub fn draw_rule_settings(state: &GameState, font: Option<&Font>, origin: MenuOr
         tr.get(rule_label_key(state.selected_rule)),
         description.center_x(),
         description.y + 23.0,
-        14,
+        theme::font_size::LABEL,
         theme::GOLD,
     );
     let selected_enabled = state.selected_rule.is_enabled(rules);
@@ -1110,7 +1116,7 @@ pub fn draw_rule_settings(state: &GameState, font: Option<&Font>, origin: MenuOr
             line,
             description.center_x(),
             first_baseline + idx as f32 * 18.0,
-            11,
+            theme::font_size::CAPTION,
             theme::TEXT_DIM,
         );
     }

@@ -223,22 +223,51 @@ pub fn draw_radial_bg(
     }
 }
 
-/// Uniform font scale for readability.
-///
-/// The original pixel sizes feel small on the dark board, so text draws
-/// slightly larger; [`measure_scaled`] applies the same factor, keeping
-/// layout consistent.
-const FONT_SCALE: f32 = 1.2;
+/// Final rendered font sizes used by the UI, in design-canvas pixels.
+pub mod font_size {
+    pub const MICRO: u16 = 13;
+    pub const TINY: u16 = 14;
+    pub const CAPTION: u16 = 15;
+    pub const SMALL: u16 = 16;
+    pub const LABEL: u16 = 17;
+    pub const BODY: u16 = 18;
+    pub const BODY_LARGE: u16 = 19;
+    pub const SUBHEADING: u16 = 20;
+    pub const HEADING_SMALL: u16 = 22;
+    pub const HEADING: u16 = 24;
+    pub const HEADING_LARGE: u16 = 25;
+    pub const TITLE_SMALL: u16 = 29;
+    pub const TITLE: u16 = 31;
+    pub const DISPLAY: u16 = 34;
+    pub const DISPLAY_LARGE: u16 = 38;
 
-/// Base size to actual rendered size.
-pub fn scaled_size(base: u16) -> u16 {
-    (base as f32 * FONT_SCALE).round() as u16
+    /// Every font size used to prewarm the native font atlas.
+    pub const ALL: [u16; 15] = [
+        MICRO,
+        TINY,
+        CAPTION,
+        SMALL,
+        LABEL,
+        BODY,
+        BODY_LARGE,
+        SUBHEADING,
+        HEADING_SMALL,
+        HEADING,
+        HEADING_LARGE,
+        TITLE_SMALL,
+        TITLE,
+        DISPLAY,
+        DISPLAY_LARGE,
+    ];
 }
 
-/// Measures text at the scaled size, for manual layout.
-pub fn measure_scaled(font: Option<&Font>, text: &str, base: u16) -> TextDimensions {
-    measure_text(text, font, scaled_size(base), 1.0)
+/// Measures text at its final rendered size, for manual layout.
+pub fn measure_text_size(font: Option<&Font>, text: &str, font_size: u16) -> TextDimensions {
+    measure_text(text, font, font_size, 1.0)
 }
+
+/// Pixel offset used by the text shadow on both axes.
+pub(super) const TEXT_SHADOW_OFFSET: f32 = 1.0;
 
 /// Draws text with a shadow and faux bold (no scaling; internal).
 fn draw_text_raw(font: Option<&Font>, text: &str, x: f32, y: f32, fs: u16, color: Color) {
@@ -255,7 +284,11 @@ fn draw_text_raw(font: Option<&Font>, text: &str, x: f32, y: f32, fs: u16, color
             },
         );
     };
-    draw(Color::new(0.0, 0.0, 0.0, 0.55), 1.0, 1.0);
+    draw(
+        Color::new(0.0, 0.0, 0.0, 0.55),
+        TEXT_SHADOW_OFFSET,
+        TEXT_SHADOW_OFFSET,
+    );
     // Faux bold: draw twice with a slight horizontal offset.
     draw(color, 0.0, 0.0);
     draw(color, 0.55, 0.0);
@@ -264,9 +297,9 @@ fn draw_text_raw(font: Option<&Font>, text: &str, x: f32, y: f32, fs: u16, color
 /// Draws readable text; `x` is the left edge, `y` the baseline.
 ///
 /// A dark shadow boosts contrast and a slightly offset double draw fakes
-/// bold, keeping thin faces legible; sizes scale by [`FONT_SCALE`].
-pub fn draw_text(font: Option<&Font>, text: &str, x: f32, y: f32, base_size: u16, color: Color) {
-    draw_text_raw(font, text, x, y, scaled_size(base_size), color);
+/// bold, keeping thin faces legible.
+pub fn draw_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16, color: Color) {
+    draw_text_raw(font, text, x, y, font_size, color);
 }
 
 /// Draws centered text; `y` is the baseline.
@@ -275,17 +308,16 @@ pub fn draw_text_centered(
     text: &str,
     center_x: f32,
     baseline_y: f32,
-    base_size: u16,
+    font_size: u16,
     color: Color,
 ) {
-    let fs = scaled_size(base_size);
-    let dims = measure_text(text, font, fs, 1.0);
+    let dims = measure_text(text, font, font_size, 1.0);
     draw_text_raw(
         font,
         text,
         center_x - dims.width / 2.0,
         baseline_y,
-        fs,
+        font_size,
         color,
     );
 }

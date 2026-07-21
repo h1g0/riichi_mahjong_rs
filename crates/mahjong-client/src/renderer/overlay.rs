@@ -9,8 +9,9 @@ use mahjong_core::tile::Tile;
 use mahjong_server::protocol::{AvailableCall, ClientAction};
 
 use super::{
-    AGARI_FONT, DESIGN_W, DORA_TILE_TINT, DoraTileTypes, FONT_SIZE, SMALL_FONT, TileTextures,
-    dora_tile_tint, dora_tile_types, draw_jp_text, draw_tile_sprite, theme, visible_tile_tint,
+    ACTION_FONT_SIZE, AGARI_FONT_SIZE, DESIGN_W, DORA_TILE_TINT, DoraTileTypes,
+    SMALL_ACTION_FONT_SIZE, TileTextures, dora_tile_tint, dora_tile_types, draw_jp_text,
+    draw_tile_sprite, theme, visible_tile_tint,
 };
 use crate::game::GameState;
 use crate::i18n::Key;
@@ -115,7 +116,7 @@ fn draw_call_button(
         label,
         x + w / 2.0,
         y + h / 2.0 + 6.0,
-        FONT_SIZE,
+        ACTION_FONT_SIZE,
         color,
     );
 }
@@ -176,7 +177,7 @@ pub(super) fn draw_action_buttons(
             tr.get(Key::WaitingOtherPlayer),
             DESIGN_W / 2.0,
             HINT_Y,
-            FONT_SIZE,
+            ACTION_FONT_SIZE,
             theme::TEXT_DIM,
         );
         return None;
@@ -188,7 +189,7 @@ pub(super) fn draw_action_buttons(
             tr.get(Key::RiichiSelectHint),
             DESIGN_W / 2.0,
             HINT_Y,
-            FONT_SIZE,
+            ACTION_FONT_SIZE,
             theme::GOLD_LT,
         );
     } else if state.is_riichi {
@@ -197,7 +198,7 @@ pub(super) fn draw_action_buttons(
             tr.get(Key::RiichiAutoDiscard),
             DESIGN_W / 2.0,
             HINT_Y,
-            FONT_SIZE,
+            ACTION_FONT_SIZE,
             theme::RED_LT,
         );
     }
@@ -251,7 +252,7 @@ pub(super) fn draw_action_buttons(
             tr.get(Key::Riichi),
             AGARI_BTN_X + RIICHI_BTN_W / 2.0,
             riichi_y + RIICHI_BTN_H / 2.0 + 6.0,
-            SMALL_FONT,
+            SMALL_ACTION_FONT_SIZE,
             WHITE,
         );
         if clicked
@@ -274,7 +275,7 @@ pub(super) fn draw_action_buttons(
             tr.get(Key::NormalPlayHint),
             DESIGN_W / 2.0,
             HINT_Y,
-            SMALL_FONT,
+            SMALL_ACTION_FONT_SIZE,
             theme::TEXT_DIM,
         );
     }
@@ -302,7 +303,7 @@ fn draw_agari_button(font: Option<&Font>, x: f32, y: f32, label: &str) {
         label,
         x + AGARI_BTN_W / 2.0,
         y + 40.0,
-        AGARI_FONT,
+        AGARI_FONT_SIZE,
         WHITE,
     );
 }
@@ -741,7 +742,7 @@ fn draw_meld_selection_overlay(
         title,
         panel_x + 20.0,
         panel_y + 30.0,
-        FONT_SIZE,
+        ACTION_FONT_SIZE,
         Color::new(1.0, 0.95, 0.5, 1.0),
     );
 
@@ -814,7 +815,7 @@ fn draw_meld_selection_overlay(
         cancel_label,
         cancel_x + 10.0,
         cancel_y + 24.0,
-        FONT_SIZE,
+        ACTION_FONT_SIZE,
         WHITE,
     );
 
@@ -861,7 +862,7 @@ fn draw_nine_terminals_overlay(
         tr.get(Key::NineTerminals),
         PANEL_X + 16.0,
         PANEL_Y + 30.0,
-        FONT_SIZE,
+        ACTION_FONT_SIZE,
         Color::new(1.0, 0.95, 0.5, 1.0),
     );
     draw_jp_text(
@@ -869,7 +870,7 @@ fn draw_nine_terminals_overlay(
         tr.get(Key::DeclareDrawPrompt),
         PANEL_X + 16.0,
         PANEL_Y + 54.0,
-        FONT_SIZE,
+        ACTION_FONT_SIZE,
         WHITE,
     );
 
@@ -893,7 +894,7 @@ fn draw_nine_terminals_overlay(
         tr.get(Key::DeclareDraw),
         declare_x + 22.0,
         BTN_Y + 26.0,
-        FONT_SIZE,
+        ACTION_FONT_SIZE,
         WHITE,
     );
 
@@ -910,7 +911,7 @@ fn draw_nine_terminals_overlay(
         tr.get(Key::Continue),
         pass_x + 26.0,
         BTN_Y + 26.0,
-        FONT_SIZE,
+        ACTION_FONT_SIZE,
         WHITE,
     );
 

@@ -122,7 +122,14 @@ fn draw_online_panel(font: Option<&Font>, title: &str) {
         theme::PANEL_BORDER,
     );
     let cx = DESIGN_W / 2.0;
-    theme::draw_text_centered(font, title, cx, PANEL_Y + 60.0, 26, theme::TEXT_BR);
+    theme::draw_text_centered(
+        font,
+        title,
+        cx,
+        PANEL_Y + 60.0,
+        theme::font_size::TITLE,
+        theme::TEXT_BR,
+    );
 }
 
 fn draw_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool) {
@@ -143,7 +150,7 @@ fn draw_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool) {
             label,
             rect.center_x(),
             rect.y + rect.h / 2.0 + 7.0,
-            17,
+            theme::font_size::SUBHEADING,
             theme::GOLD_LT,
         );
     } else {
@@ -169,7 +176,7 @@ fn draw_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool) {
             label,
             rect.center_x(),
             rect.y + rect.h / 2.0 + 6.0,
-            15,
+            theme::font_size::BODY,
             theme::TEXT,
         );
     }
@@ -201,7 +208,7 @@ fn draw_input_box(font: Option<&Font>, rect: &Rect2, text: &str, focused: bool) 
         &shown,
         rect.x + 14.0,
         rect.y + rect.h / 2.0 + 7.0,
-        16,
+        theme::font_size::BODY_LARGE,
         theme::TEXT,
     );
 }
@@ -213,7 +220,7 @@ fn draw_status_line(state: &GameState, font: Option<&Font>, y: f32) {
         } else {
             theme::TEXT_DIM
         };
-        theme::draw_text_centered(font, line, DESIGN_W / 2.0, y, 15, color);
+        theme::draw_text_centered(font, line, DESIGN_W / 2.0, y, theme::font_size::BODY, color);
     }
 }
 
@@ -229,7 +236,7 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
         tr.get(Key::NameLabel),
         NAME_BOX.x,
         NAME_BOX.y - 9.0,
-        11,
+        theme::font_size::CAPTION,
         theme::TEXT_DIM,
     );
     draw_input_box(font, &NAME_BOX, &online.name_input, !online.code_focused);
@@ -239,7 +246,7 @@ pub fn draw_online_menu(state: &GameState, font: Option<&Font>) {
         tr.get(Key::RoomCodeJoinLabel),
         CODE_BOX.x,
         CODE_BOX.y - 9.0,
-        11,
+        theme::font_size::CAPTION,
         theme::TEXT_DIM,
     );
     draw_input_box(font, &CODE_BOX, &online.code_input, online.code_focused);
@@ -320,7 +327,14 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
     draw_online_panel(font, tr.get(Key::Lobby));
 
     let Some(room) = &online.room else {
-        theme::draw_text_centered(font, tr.get(Key::LoadingRoom), cx, 300.0, 18, theme::TEXT);
+        theme::draw_text_centered(
+            font,
+            tr.get(Key::LoadingRoom),
+            cx,
+            300.0,
+            theme::font_size::HEADING_SMALL,
+            theme::TEXT,
+        );
         draw_status_line(state, font, 340.0);
         return;
     };
@@ -331,7 +345,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
         &tr.room_code(&room.code),
         cx,
         210.0,
-        28,
+        theme::font_size::DISPLAY,
         theme::GOLD_LT,
     );
     theme::draw_text_centered(
@@ -339,7 +353,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
         tr.get(Key::ShareCodeHint),
         cx,
         236.0,
-        12,
+        theme::font_size::SMALL,
         theme::TEXT_DIM,
     );
     // Spell out the room's game mode.
@@ -348,7 +362,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
         tr.get(room.mode.label_key()),
         cx,
         256.0,
-        13,
+        theme::font_size::LABEL,
         theme::GOLD_LT,
     );
 
@@ -370,7 +384,14 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
         };
         theme::draw_rounded_rect(row_x, y, row_w, 38.0, 6.0, fill);
         theme::draw_rounded_rect_lines(row_x, y, row_w, 38.0, 6.0, 1.0, border);
-        draw_jp_text(font, label, row_x + 14.0, y + 24.0, 14, theme::TEXT);
+        draw_jp_text(
+            font,
+            label,
+            row_x + 14.0,
+            y + 24.0,
+            theme::font_size::LABEL,
+            theme::TEXT,
+        );
     }
 
     if room.is_host {
@@ -379,7 +400,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
             tr.get(Key::EmptySeatsCpu),
             cx,
             CPU_SETUP_BTN.y - 10.0,
-            12,
+            theme::font_size::SMALL,
             theme::TEXT_DIM,
         );
         draw_button(font, &CPU_SETUP_BTN, tr.get(Key::CpuSetupTitle), false);
@@ -390,7 +411,7 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
             tr.get(Key::WaitingHost),
             cx,
             START_BTN.y + 34.0,
-            16,
+            theme::font_size::BODY_LARGE,
             theme::TEXT_DIM,
         );
     }
@@ -432,7 +453,14 @@ pub fn draw_connection_banner(state: &GameState, font: Option<&Font>) {
         // A rounded red banner right under the top bar.
         theme::draw_rounded_rect(x, 56.0, w, 30.0, 6.0, theme::rgba(0x7a1010, 0.92));
         theme::draw_rounded_rect_lines(x, 56.0, w, 30.0, 6.0, 1.0, theme::RED);
-        theme::draw_text_centered(font, line, DESIGN_W / 2.0, 76.0, 13, WHITE);
+        theme::draw_text_centered(
+            font,
+            line,
+            DESIGN_W / 2.0,
+            76.0,
+            theme::font_size::LABEL,
+            WHITE,
+        );
     }
 }
 
@@ -465,7 +493,7 @@ pub fn draw_turn_timer(state: &GameState, font: Option<&Font>) {
         &state.tr().seconds_left(remaining),
         x + w / 2.0,
         y + h / 2.0 + 6.0,
-        16,
+        theme::font_size::BODY_LARGE,
         accent,
     );
 }

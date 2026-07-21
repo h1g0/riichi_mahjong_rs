@@ -10,8 +10,8 @@ use macroquad::prelude::*;
 use super::{BOARD_CENTER_Y, DESIGN_W, rotation_index, theme};
 use crate::game::{CALL_BANNER_SECS, GameState};
 
-/// Banner font size; must be one of `USED_FONT_SIZES`.
-const BANNER_FONT: u16 = 26;
+/// Banner font size from the shared typography scale.
+const BANNER_FONT: u16 = theme::font_size::TITLE;
 /// Fade-out duration in seconds.
 const FADE_SECS: f64 = 0.35;
 /// Bubble height.
@@ -97,7 +97,7 @@ pub(super) fn draw_call_banners(state: &GameState, font: Option<&Font>) {
 fn draw_banner_bubble(font: Option<&Font>, slot: usize, text: &str, alpha: f32) {
     let (cx, cy, tail) = banner_anchor(slot);
 
-    let dims = theme::measure_scaled(font, text, BANNER_FONT);
+    let dims = theme::measure_text_size(font, text, BANNER_FONT);
     let w = dims.width + 44.0;
     let h = BUBBLE_H;
     let x = cx - w / 2.0;

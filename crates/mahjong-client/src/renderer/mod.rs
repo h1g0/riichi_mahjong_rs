@@ -148,27 +148,16 @@ const SELF_MELD_GAP: f32 = 12.0;
 const SELF_MELD_RIGHT_EDGE: f32 = 1220.0;
 const SELF_HAND_MELD_GAP: f32 = 20.0;
 const SELF_HAND_LEFT_MARGIN: f32 = 40.0;
-const FONT_SIZE: u16 = 20;
-const SMALL_FONT: u16 = 16;
-const AGARI_FONT: u16 = 32;
-
-/// Every base font size actually used in the app (the `base_size`
-/// arguments of `draw_text`/`draw_text_centered`; add new sizes here
-/// when introducing them).
-///
-/// [`prewarm_fonts`] and `cache_dynamic_text` precache exactly these.
-/// Brute-forcing `8..=AGARI_FONT` (25 sizes) used to bloat the font
-/// atlas for the 16 sizes really in use (see the comment below).
-const USED_FONT_SIZES: [u16; 16] = [
-    9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 24, 26, 28, 32,
-];
+const ACTION_FONT_SIZE: u16 = theme::font_size::HEADING;
+const SMALL_ACTION_FONT_SIZE: u16 = theme::font_size::BODY_LARGE;
+const AGARI_FONT_SIZE: u16 = theme::font_size::DISPLAY_LARGE;
 
 /// Startup units used to prepare the label font and all tile-related textures.
 pub const TEXTURE_LOAD_STEPS: usize = 1 + Tile::LEN + 3 + 4;
 
 /// Startup units used to prewarm each native font size.
 #[cfg(not(target_arch = "wasm32"))]
-pub const FONT_PREWARM_STEPS: usize = USED_FONT_SIZES.len();
+pub const FONT_PREWARM_STEPS: usize = theme::font_size::ALL.len();
 
 /// Design resolution. All UI coordinates live on this virtual canvas and
 /// scale to the real window. The HTML keeps this aspect ratio; native
@@ -540,8 +529,8 @@ pub async fn prewarm_fonts(
     for c in 0x20u8..0x7f {
         glyphs.push(c as char);
     }
-    for &base in &USED_FONT_SIZES {
-        let _ = theme::measure_scaled(font, &glyphs, base);
+    for &font_size in &theme::font_size::ALL {
+        let _ = theme::measure_text_size(font, &glyphs, font_size);
         loading_screen.complete_step().await;
     }
 }
@@ -555,7 +544,7 @@ pub async fn prewarm_fonts(
 /// black-square glyphs) especially during the game screen's camera
 /// switches.
 ///
-/// Sizes are limited to [`USED_FONT_SIZES`], as in [`prewarm_fonts`]
+/// Sizes are limited to [`theme::font_size::ALL`], as in [`prewarm_fonts`]
 /// (see that function's comment for why).
 pub fn cache_dynamic_text(font: Option<&Font>, state: &GameState) {
     use crate::game::PlayerLabel;
@@ -563,43 +552,58 @@ pub fn cache_dynamic_text(font: Option<&Font>, state: &GameState) {
         if s.is_empty() {
             return;
         }
-        debug_assert!(sizes.iter().all(|size| USED_FONT_SIZES.contains(size)));
-        for &base in sizes {
-            let _ = theme::measure_scaled(font, s, base);
+        debug_assert!(
+            sizes
+                .iter()
+                .all(|size| theme::font_size::ALL.contains(size))
+        );
+        for &font_size in sizes {
+            let _ = theme::measure_text_size(font, s, font_size);
         }
     };
     for label in &state.player_labels {
         if let PlayerLabel::Human(name) = label {
             // Score chip, center detail, ranking, and win heading.
-            cache(name, &[9, 11, 14, 21]);
+            cache(
+                name,
+                &[
+                    theme::font_size::MICRO,
+                    theme::font_size::CAPTION,
+                    theme::font_size::LABEL,
+                    theme::font_size::HEADING_LARGE,
+                ],
+            );
         }
     }
     let online = &state.online_state;
-    cache(&online.name_input, &[16]);
-    cache(&online.code_input, &[16]);
+    cache(&online.name_input, &[theme::font_size::BODY_LARGE]);
+    cache(&online.code_input, &[theme::font_size::BODY_LARGE]);
     if let Some(status) = &online.status_line {
-        cache(status, &[13, 15]);
+        cache(status, &[theme::font_size::LABEL, theme::font_size::BODY]);
     }
     if let Some(room) = &online.room {
-        cache(&room.code, &[28]);
+        cache(&room.code, &[theme::font_size::DISPLAY]);
         for label in &room.seat_labels {
-            cache(label, &[14]);
+            cache(label, &[theme::font_size::LABEL]);
         }
     }
 
     // Round results (yaku names, ranks, winner names, draw messages)
     // are external too.
     if let Some(message) = &state.result_message {
-        cache(message, &[14, 20]);
+        cache(
+            message,
+            &[theme::font_size::LABEL, theme::font_size::HEADING],
+        );
     }
     if let Some(result) = state.current_win_result() {
-        cache(&result.winner_name, &[21]);
+        cache(&result.winner_name, &[theme::font_size::HEADING_LARGE]);
         if let Some(loser) = &result.loser_name {
-            cache(loser, &[21]);
+            cache(loser, &[theme::font_size::HEADING_LARGE]);
         }
-        cache(&result.rank_name, &[28]);
+        cache(&result.rank_name, &[theme::font_size::DISPLAY]);
         for (name, _) in &result.yaku {
-            cache(name, &[14]);
+            cache(name, &[theme::font_size::LABEL]);
         }
     }
 }
@@ -607,14 +611,14 @@ pub fn cache_dynamic_text(font: Option<&Font>, state: &GameState) {
 /// Precaches a transient native-client notification before other text draws.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn cache_notification_text(font: Option<&Font>, text: &str) {
-    let _ = theme::measure_scaled(font, text, 13);
+    let _ = theme::measure_text_size(font, text, theme::font_size::LABEL);
 }
 
 /// Draws a transient native-client notification over the current screen.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn draw_notification(font: Option<&Font>, text: &str, is_error: bool) {
     set_design_camera();
-    let dimensions = theme::measure_scaled(font, text, 13);
+    let dimensions = theme::measure_text_size(font, text, theme::font_size::LABEL);
     let width = (dimensions.width + 48.0).min(DESIGN_W - 40.0);
     let x = (DESIGN_W - width) / 2.0;
     let border = if is_error {
@@ -629,7 +633,14 @@ pub fn draw_notification(font: Option<&Font>, text: &str, is_error: bool) {
     };
 
     theme::draw_panel(x, 18.0, width, 42.0, 7.0, theme::PANEL_BG, border);
-    theme::draw_text_centered(font, text, DESIGN_W / 2.0, 45.0, 13, color);
+    theme::draw_text_centered(
+        font,
+        text,
+        DESIGN_W / 2.0,
+        45.0,
+        theme::font_size::LABEL,
+        color,
+    );
 }
 
 pub fn draw_game(
@@ -672,7 +683,7 @@ pub fn draw_game(
                 state.tr().get(Key::GameStarting),
                 DESIGN_W / 2.0,
                 400.0,
-                28,
+                theme::font_size::DISPLAY,
                 theme::TEXT_BR,
             );
             None

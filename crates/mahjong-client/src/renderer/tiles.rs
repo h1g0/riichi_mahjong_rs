@@ -44,7 +44,7 @@ pub(super) fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &
             tr.get(Key::Tsumo),
             drawn_x + TILE_W / 2.0,
             hand_y + y_offset - 8.0,
-            11,
+            theme::font_size::CAPTION,
             theme::GOLD_LT,
         );
 
@@ -63,7 +63,7 @@ pub(super) fn draw_hand(state: &GameState, font: Option<&Font>, tile_textures: &
 
     // Status badges (furiten, riichi, riichi-discard choice, swap-calling
     // warning) draw after the hand so tiles cannot cover them.
-    let badge_y = hand_y - 26.0;
+    let badge_y = hand_y - 28.0;
     let mut bx = hand_start_x;
     if state.is_furiten {
         bx = draw_badge(
@@ -469,6 +469,13 @@ pub(super) fn draw_tile_sprite_rotated(
     );
 }
 
+pub(super) const OTHER_HAND_TILE_W: f32 = 33.0;
+pub(super) const OTHER_HAND_TILE_H: f32 = 46.0;
+pub(super) const OTHER_MELD_GAP: f32 = 6.0;
+/// Keeps the opposite player's outer tile edge below the top bar.
+pub(super) const OTHER_HAND_OUTER_DISTANCE: f32 = BOARD_CENTER_Y - TOP_BAR_HEIGHT;
+/// Keeps a rotated side-player row above our hand.
+pub(super) const OTHER_HAND_MAX_ROW_WIDTH: f32 = 2.0 * (HAND_Y - BOARD_CENTER_Y);
 /// Gap for an opponent's drawn tile, matching their reduced tile size.
 pub(super) const OTHER_DRAWN_GAP: f32 = 8.0;
 /// Hand-discard animation: how long the vacated gap shows (seconds).
@@ -533,6 +540,89 @@ pub(super) fn opponent_drawn_slot_width(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct OpponentTileLayout {
+    pub(super) tile_w: f32,
+    pub(super) tile_h: f32,
+    pub(super) meld_gap: f32,
+    pub(super) drawn_gap: f32,
+    pub(super) drawn_slot: f32,
+    pub(super) row_width: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OpponentTileMetrics {
+    tile_w: f32,
+    tile_h: f32,
+    meld_gap: f32,
+    drawn_gap: f32,
+}
+
+fn opponent_row_width(
+    hand_count: usize,
+    has_drawn: bool,
+    revealed: bool,
+    melds: &[Meld],
+    metrics: OpponentTileMetrics,
+) -> (f32, f32) {
+    let drawn_slot = if revealed {
+        0.0
+    } else {
+        opponent_drawn_slot_width(hand_count, has_drawn, metrics.tile_w, metrics.drawn_gap)
+    };
+    let meld_widths: f32 = melds
+        .iter()
+        .map(|meld| calc_meld_width(meld, metrics.tile_w, metrics.tile_h))
+        .sum();
+    let row_width = hand_count as f32 * metrics.tile_w
+        + drawn_slot
+        + meld_widths
+        + melds.len() as f32 * metrics.meld_gap;
+    (row_width, drawn_slot)
+}
+
+/// Enlarges normal opponent tiles while fitting rare four-quad rows.
+pub(super) fn opponent_tile_layout(
+    hand_count: usize,
+    has_drawn: bool,
+    revealed: bool,
+    melds: &[Meld],
+) -> OpponentTileLayout {
+    let natural = OpponentTileMetrics {
+        tile_w: OTHER_HAND_TILE_W,
+        tile_h: OTHER_HAND_TILE_H,
+        meld_gap: OTHER_MELD_GAP,
+        drawn_gap: OTHER_DRAWN_GAP,
+    };
+    let (natural_width, _) = opponent_row_width(hand_count, has_drawn, revealed, melds, natural);
+    let scale = if natural_width > OTHER_HAND_MAX_ROW_WIDTH {
+        OTHER_HAND_MAX_ROW_WIDTH / natural_width
+    } else {
+        1.0
+    };
+    let tile_w = OTHER_HAND_TILE_W * scale;
+    let tile_h = OTHER_HAND_TILE_H * scale;
+    let meld_gap = OTHER_MELD_GAP * scale;
+    let drawn_gap = OTHER_DRAWN_GAP * scale;
+    let scaled = OpponentTileMetrics {
+        tile_w,
+        tile_h,
+        meld_gap,
+        drawn_gap,
+    };
+    let (row_width, drawn_slot) =
+        opponent_row_width(hand_count, has_drawn, revealed, melds, scaled);
+
+    OpponentTileLayout {
+        tile_w,
+        tile_h,
+        meld_gap,
+        drawn_gap,
+        drawn_slot,
+        row_width,
+    }
+}
+
 /// Draws the other players' hands.
 ///
 /// Like the discards, drawn in the normalized self view (left to right)
@@ -542,13 +632,6 @@ pub(super) fn opponent_drawn_slot_width(
 /// so centering never shifts the whole hand on each draw/discard; the
 /// drawn tile hangs out with a gap, as with our own hand.
 pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTextures) {
-    let tw: f32 = 28.0; // natural tile width
-    let th: f32 = 40.0; // natural tile height
-    let meld_gap: f32 = 6.0;
-    let tile_step: f32 = tw; // tiles touch
-    let hand_distance: f32 = 290.0; // center to the hand
-
-    let base_y = BOARD_CENTER_Y + hand_distance;
     let now = get_time();
     let selected_tile_type = state.selected_tile_type();
     let dora_tile_types = dora_tile_types(&state.dora_indicators, state.is_three_player());
@@ -565,19 +648,16 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
         } else {
             other.concealed_count
         };
-        let drawn_slot = if other.revealed {
-            0.0
-        } else {
-            opponent_drawn_slot_width(hand_count, other.has_drawn, tile_step, OTHER_DRAWN_GAP)
-        };
-        let meld_widths: f32 = other.melds.iter().map(|m| calc_meld_width(m, tw, th)).sum();
-        let meld_gaps = if other.melds.is_empty() {
-            0.0
-        } else {
-            meld_gap + (other.melds.len() as f32 - 1.0) * meld_gap
-        };
-        let total_width = hand_count as f32 * tile_step + drawn_slot + meld_widths + meld_gaps;
-        let start_x = BOARD_CENTER_X - total_width / 2.0;
+        let layout =
+            opponent_tile_layout(hand_count, other.has_drawn, other.revealed, &other.melds);
+        let tw = layout.tile_w;
+        let th = layout.tile_h;
+        let meld_gap = layout.meld_gap;
+        let drawn_gap = layout.drawn_gap;
+        let drawn_slot = layout.drawn_slot;
+        let tile_step = tw;
+        let base_y = BOARD_CENTER_Y + OTHER_HAND_OUTER_DISTANCE - th;
+        let start_x = BOARD_CENTER_X - layout.row_width / 2.0;
 
         set_camera(&make_board_camera(
             PLAYER_ROTATIONS[rotation_index(
@@ -615,7 +695,7 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
                         a.gap_index,
                         a.had_drawn,
                         tile_step,
-                        OTHER_DRAWN_GAP,
+                        drawn_gap,
                         p,
                     )
                 });
@@ -624,14 +704,7 @@ pub(super) fn draw_other_player_hands(state: &GameState, tile_textures: &TileTex
             }
 
             if other.has_drawn {
-                draw_tile_sprite(
-                    &tile_textures.back,
-                    x + OTHER_DRAWN_GAP,
-                    base_y,
-                    tw,
-                    th,
-                    WHITE,
-                );
+                draw_tile_sprite(&tile_textures.back, x + drawn_gap, base_y, tw, th, WHITE);
             }
             x += drawn_slot;
         }
