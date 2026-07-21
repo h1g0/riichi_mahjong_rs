@@ -1,18 +1,101 @@
 //! Unit tests for the rendering layout.
 
-use super::{
-    DORA_TILE_TINT, DRAWN_GAP, PLAYER_ROTATIONS, PUBLIC_TILE_HIGHLIGHT_TINT, SELF_HAND_LEFT_MARGIN,
-    SELF_HAND_MELD_GAP, SELF_MELD_GAP, SELF_MELD_RIGHT_EDGE, SELF_MELD_TILE_H, SELF_MELD_TILE_W,
-    TILE_W, add_dora_tile_types, buffer_to_design, calc_meld_width, dora_tile_tint,
-    dora_tile_tint_with_base, dora_tile_types, other_meld_x_positions, pei_tile_x,
-    player_hand_start_x, player_hand_tile_x, public_tile_tint, public_tile_tint_with_base,
-    rotation_index, score_chip_entries, score_delta_color, seat_at_relative_position,
-    self_meld_x_positions, visible_tile_tint,
+use super::board::{
+    DISCARD_FIRST_ROW_OFFSET, DISCARD_TILE_H, DORA_PANEL_HEIGHT, DORA_PANEL_Y,
+    TABLE_DORA_INDICATOR_TILE_H, TABLE_DORA_INDICATOR_TILE_W, TOP_BAR_HEIGHT,
 };
-use super::{format_score_delta, theme};
+use super::{
+    BOARD_CENTER_Y, DORA_TILE_TINT, DRAWN_GAP, HAND_Y, PLAYER_ROTATIONS,
+    PUBLIC_TILE_HIGHLIGHT_TINT, SELF_HAND_LEFT_MARGIN, SELF_HAND_MELD_GAP, SELF_MELD_GAP,
+    SELF_MELD_RIGHT_EDGE, SELF_MELD_TILE_H, SELF_MELD_TILE_W, TILE_W, add_dora_tile_types,
+    buffer_to_design, calc_meld_width, dora_tile_tint, dora_tile_tint_with_base, dora_tile_types,
+    other_meld_x_positions, pei_tile_x, player_hand_start_x, player_hand_tile_x, public_tile_tint,
+    public_tile_tint_with_base, rotation_index, score_chip_entries, score_delta_color,
+    seat_at_relative_position, self_meld_x_positions, visible_tile_tint,
+};
+use super::{
+    format_score_delta,
+    result::{
+        RESULT_INDICATOR_ROW_HEIGHT, RESULT_INDICATOR_TILE_H, RESULT_INDICATOR_TILE_W,
+        WIN_HAND_ROW_HEIGHT, WIN_HAND_TILE_H, WIN_HAND_TILE_W, WIN_PANEL_CONTENT_WIDTH,
+        WIN_PANEL_WIDTH, WIN_TILE_OUTLINE_MARGIN, YAKU_ROW_HEIGHT, result_indicator_rows_width,
+        win_hand_layout, yaku_right_aligned_x, yaku_row_baseline,
+    },
+    theme,
+};
 use crate::game::{GameState, SelfTedashiAnim, SelfTileOrigin};
+use macroquad::prelude::TextDimensions;
 use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
 use mahjong_core::tile::{Tile, TileType};
+
+#[test]
+fn named_font_sizes_match_the_rendered_pixel_sizes() {
+    let named_sizes = [
+        theme::font_size::MICRO,
+        theme::font_size::TINY,
+        theme::font_size::CAPTION,
+        theme::font_size::SMALL,
+        theme::font_size::LABEL,
+        theme::font_size::BODY,
+        theme::font_size::BODY_LARGE,
+        theme::font_size::SUBHEADING,
+        theme::font_size::HEADING_SMALL,
+        theme::font_size::HEADING,
+        theme::font_size::HEADING_LARGE,
+        theme::font_size::TITLE_SMALL,
+        theme::font_size::TITLE,
+        theme::font_size::DISPLAY,
+        theme::font_size::DISPLAY_LARGE,
+    ];
+    let expected = [13, 14, 15, 16, 17, 18, 19, 20, 22, 24, 25, 29, 31, 34, 38];
+
+    assert_eq!(named_sizes, expected);
+    assert_eq!(&theme::font_size::ALL[..], &expected);
+}
+
+#[test]
+fn font_size_catalog_is_strictly_increasing() {
+    assert!(
+        theme::font_size::ALL
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+    );
+}
+
+#[test]
+fn yaku_text_and_shadow_are_centered_between_row_dividers() {
+    let name = TextDimensions {
+        width: 48.0,
+        height: 16.0,
+        offset_y: 15.0,
+    };
+    let han = TextDimensions {
+        width: 24.0,
+        height: 17.0,
+        offset_y: 14.0,
+    };
+    let row_top = 100.0;
+    let baseline = yaku_row_baseline(row_top, YAKU_ROW_HEIGHT, name, Some(han));
+    let visible_top = baseline - name.offset_y.max(han.offset_y);
+    let visible_bottom = baseline
+        + (name.height - name.offset_y).max(han.height - han.offset_y)
+        + theme::TEXT_SHADOW_OFFSET;
+
+    assert!((visible_top - row_top - (row_top + YAKU_ROW_HEIGHT - visible_bottom)).abs() < 0.001);
+}
+
+#[test]
+fn yaku_han_shadow_ends_at_the_row_divider_edge() {
+    let dimensions = TextDimensions {
+        width: 24.0,
+        height: 17.0,
+        offset_y: 14.0,
+    };
+    let right = 620.0;
+    let x = yaku_right_aligned_x(right, dimensions);
+
+    assert_eq!(x + dimensions.width + theme::TEXT_SHADOW_OFFSET, right);
+}
 
 #[test]
 fn buffer_to_design_scales_each_axis_independently() {
@@ -124,6 +207,107 @@ fn called_kan(tile_type: TileType) -> Meld {
     }
 }
 
+/// Minimal added quad for vertical result-layout tests.
+fn added_kan(tile_type: TileType) -> Meld {
+    let tile = Tile::new(tile_type);
+    Meld {
+        tiles: vec![tile; 4],
+        category: MeldType::Kakan,
+        from: MeldFrom::Previous,
+        called_tile: Some(tile),
+    }
+}
+
+#[test]
+fn enlarged_dora_indicators_fit_their_rows() {
+    const {
+        assert!(TABLE_DORA_INDICATOR_TILE_H <= DORA_PANEL_HEIGHT);
+        assert!(DORA_PANEL_Y + DORA_PANEL_HEIGHT <= TOP_BAR_HEIGHT);
+        assert!(RESULT_INDICATOR_TILE_H <= RESULT_INDICATOR_ROW_HEIGHT);
+    }
+    assert_eq!(TABLE_DORA_INDICATOR_TILE_W, 26.0);
+    assert_eq!(TABLE_DORA_INDICATOR_TILE_H, 37.0);
+    assert_eq!(RESULT_INDICATOR_TILE_W, 30.0);
+    assert_eq!(RESULT_INDICATOR_TILE_H, 42.0);
+
+    let ten_tiles_without_labels = result_indicator_rows_width(5, 5, 0.0, 0.0);
+    assert_eq!(ten_tiles_without_labels, 350.0);
+    assert!(ten_tiles_without_labels < WIN_PANEL_CONTENT_WIDTH);
+}
+
+#[test]
+fn normal_win_hand_uses_the_enlarged_tile_size() {
+    const {
+        assert!(WIN_HAND_TILE_H + 2.0 * WIN_TILE_OUTLINE_MARGIN <= WIN_HAND_ROW_HEIGHT);
+    }
+    let layout = win_hand_layout(13, true, &[]);
+
+    assert_eq!(WIN_PANEL_WIDTH, 780.0);
+    assert_eq!(WIN_PANEL_CONTENT_WIDTH, 700.0);
+    assert_eq!(layout.tile_w, WIN_HAND_TILE_W);
+    assert_eq!(layout.tile_h, WIN_HAND_TILE_H);
+    assert_eq!(layout.row_width, 574.0);
+}
+
+#[test]
+fn widest_win_hand_scales_down_to_the_panel_width() {
+    let melds = vec![
+        called_kan(Tile::M1),
+        called_kan(Tile::P2),
+        called_kan(Tile::S3),
+        called_kan(Tile::Z1),
+    ];
+    let layout = win_hand_layout(1, true, &melds);
+
+    assert_eq!(WIN_HAND_TILE_W, 40.0);
+    assert_eq!(WIN_HAND_TILE_H, 56.0);
+    assert!(layout.tile_w >= 34.0);
+    assert!(layout.tile_h >= 47.0);
+    assert!(layout.tile_w < WIN_HAND_TILE_W);
+    assert!((layout.row_width - WIN_PANEL_CONTENT_WIDTH).abs() < 0.001);
+}
+
+#[test]
+fn added_quad_reserves_space_above_the_win_hand() {
+    let layout = win_hand_layout(10, true, &[added_kan(Tile::M1)]);
+
+    assert_eq!(layout.tile_w, WIN_HAND_TILE_W);
+    assert_eq!(layout.tile_h, WIN_HAND_TILE_H);
+    assert_eq!(layout.top_overhang, 24.0);
+}
+
+#[test]
+fn enlarged_opponent_tiles_fit_between_the_top_bar_and_our_hand() {
+    const DISCARD_ROW_COUNT: f32 = 3.0;
+
+    let normal = opponent_tile_layout(13, true, false, &[]);
+    assert_eq!(OTHER_HAND_TILE_W, 33.0);
+    assert_eq!(OTHER_HAND_TILE_H, 46.0);
+    assert_eq!(normal.tile_w, OTHER_HAND_TILE_W);
+    assert_eq!(normal.tile_h, OTHER_HAND_TILE_H);
+    assert_eq!(normal.row_width, 470.0);
+
+    let melds = vec![
+        called_kan(Tile::M1),
+        called_kan(Tile::P2),
+        called_kan(Tile::S3),
+        called_kan(Tile::Z1),
+    ];
+    let widest = opponent_tile_layout(1, true, false, &melds);
+    let half_width = widest.row_width / 2.0;
+
+    assert!(widest.tile_w < OTHER_HAND_TILE_W);
+    assert!(widest.row_width <= OTHER_HAND_MAX_ROW_WIDTH + 0.001);
+    assert!(BOARD_CENTER_Y - half_width >= TOP_BAR_HEIGHT);
+    assert!(BOARD_CENTER_Y + half_width <= HAND_Y);
+    assert_eq!(BOARD_CENTER_Y - OTHER_HAND_OUTER_DISTANCE, TOP_BAR_HEIGHT);
+
+    let discard_edge =
+        BOARD_CENTER_Y + DISCARD_FIRST_ROW_OFFSET + DISCARD_ROW_COUNT * DISCARD_TILE_H;
+    let stacked_kakan_edge = BOARD_CENTER_Y + OTHER_HAND_OUTER_DISTANCE - 2.0 * OTHER_HAND_TILE_W;
+    assert_eq!(stacked_kakan_edge - discard_edge, 2.0);
+}
+
 // Melds must lay out earliest-rightmost from the player's view;
 // our own pack right-to-left from the right edge.
 #[test]
@@ -149,7 +333,7 @@ fn self_melds_place_first_called_on_the_right() {
 // Opponents' melds are also earliest-rightmost from their own view.
 #[test]
 fn other_melds_place_first_called_on_the_right() {
-    let (tw, th, gap, start_x) = (28.0, 40.0, 6.0, 100.0);
+    let (tw, th, gap, start_x) = (OTHER_HAND_TILE_W, OTHER_HAND_TILE_H, OTHER_MELD_GAP, 100.0);
     let melds = vec![pon(Tile::M1), pon(Tile::P2), pon(Tile::S3)];
     let xs = other_meld_x_positions(&melds, tw, th, gap, start_x);
 
@@ -475,8 +659,9 @@ fn export_labeled_tiles_for_visual_check() {
 // --- Opponent hand-discard animation ---
 
 use super::tiles::{
-    TEDASHI_GAP_HOLD_SECS, TEDASHI_SLIDE_SECS, opponent_drawn_slot_width, tedashi_progress,
-    tedashi_tile_offset,
+    OTHER_HAND_MAX_ROW_WIDTH, OTHER_HAND_OUTER_DISTANCE, OTHER_HAND_TILE_H, OTHER_HAND_TILE_W,
+    OTHER_MELD_GAP, TEDASHI_GAP_HOLD_SECS, TEDASHI_SLIDE_SECS, opponent_drawn_slot_width,
+    opponent_tile_layout, tedashi_progress, tedashi_tile_offset,
 };
 
 #[test]

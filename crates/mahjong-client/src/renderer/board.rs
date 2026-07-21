@@ -3,6 +3,16 @@
 
 use super::*;
 
+pub(super) const TOP_BAR_HEIGHT: f32 = 50.0;
+pub(super) const DORA_PANEL_Y: f32 = 5.0;
+pub(super) const DORA_PANEL_HEIGHT: f32 = 40.0;
+pub(super) const TABLE_DORA_INDICATOR_TILE_W: f32 = 26.0;
+pub(super) const TABLE_DORA_INDICATOR_TILE_H: f32 = 37.0;
+pub(super) const DISCARD_TILE_W: f32 = 32.0;
+pub(super) const DISCARD_TILE_H: f32 = 44.0;
+/// Center-to-row distance that leaves the riichi stick unobstructed.
+pub(super) const DISCARD_FIRST_ROW_OFFSET: f32 = 130.0;
+
 /// Game background: radial felt, brighter at the center.
 pub(super) fn draw_felt_background() {
     theme::draw_radial_bg(
@@ -34,14 +44,18 @@ pub(super) fn draw_setup_background() {
 /// Draws the top bar: dora display, hand/remaining counters, and
 /// per-player score chips.
 pub(super) fn draw_top_bar(state: &GameState, font: Option<&Font>, tile_textures: &TileTextures) {
-    const BAR_H: f32 = 50.0;
-
-    draw_rectangle(0.0, 0.0, DESIGN_W, BAR_H, Color::new(0.0, 0.0, 0.0, 0.48));
-    draw_rectangle(0.0, BAR_H - 1.0, DESIGN_W, 1.0, theme::BORDER);
+    draw_rectangle(
+        0.0,
+        0.0,
+        DESIGN_W,
+        TOP_BAR_HEIGHT,
+        Color::new(0.0, 0.0, 0.0, 0.48),
+    );
+    draw_rectangle(0.0, TOP_BAR_HEIGHT - 1.0, DESIGN_W, 1.0, theme::BORDER);
 
     draw_dora_panel(state, font, tile_textures);
-    draw_round_center(state, font, BAR_H);
-    draw_score_chips(state, font, BAR_H);
+    draw_round_center(state, font, TOP_BAR_HEIGHT);
+    draw_score_chips(state, font, TOP_BAR_HEIGHT);
 }
 
 /// Top-bar left: dora indicators, riichi deposits, honba.
@@ -51,12 +65,12 @@ pub(super) fn draw_dora_panel(
     tile_textures: &TileTextures,
 ) {
     let panel_x = 12.0;
-    let panel_y = 8.0;
-    let panel_h = 34.0;
-    let dora_w = 20.0;
-    let dora_h = 28.0;
+    let panel_y = DORA_PANEL_Y;
+    let panel_h = DORA_PANEL_HEIGHT;
+    let dora_w = TABLE_DORA_INDICATOR_TILE_W;
+    let dora_h = TABLE_DORA_INDICATOR_TILE_H;
     let tiles_x = panel_x + 44.0;
-    let tiles_y = panel_y + 3.0;
+    let tiles_y = panel_y + (panel_h - dora_h) / 2.0;
     let sticks_x = tiles_x + 5.0 * (dora_w + 1.0) + 12.0;
     let panel_w = sticks_x + 64.0 - panel_x;
 
@@ -75,7 +89,7 @@ pub(super) fn draw_dora_panel(
         DoraLabel::Dora.name(state.lang),
         panel_x + 10.0,
         panel_y + 21.0,
-        11,
+        theme::font_size::CAPTION,
         theme::TEXT_DIM,
     );
 
@@ -112,7 +126,7 @@ pub(super) fn draw_dora_panel(
         &format!("×{}", state.riichi_sticks),
         sticks_x + 38.0,
         panel_y + 14.0,
-        11,
+        theme::font_size::CAPTION,
         theme::TEXT_DIM,
     );
     draw_tile_sprite(
@@ -128,7 +142,7 @@ pub(super) fn draw_dora_panel(
         &format!("×{}", state.honba),
         sticks_x + 38.0,
         panel_y + 28.0,
-        11,
+        theme::font_size::CAPTION,
         theme::TEXT_DIM,
     );
 }
@@ -146,11 +160,11 @@ pub(super) fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f
 
     let baseline = bar_h / 2.0 + 6.0;
     let gap = 12.0;
-    let gdims = theme::measure_scaled(font, &rule_text, 16);
-    let rdims = theme::measure_scaled(font, &round_text, 16);
+    let gdims = theme::measure_text_size(font, &rule_text, theme::font_size::BODY_LARGE);
+    let rdims = theme::measure_text_size(font, &round_text, theme::font_size::BODY_LARGE);
     let hdims = honba_text
         .as_ref()
-        .map(|t| theme::measure_scaled(font, t, 14));
+        .map(|t| theme::measure_text_size(font, t, theme::font_size::LABEL));
 
     let mut total_w = gdims.width + gap + rdims.width;
     if let Some(hd) = &hdims {
@@ -158,16 +172,30 @@ pub(super) fn draw_round_center(state: &GameState, font: Option<&Font>, bar_h: f
     }
     let start_x = DESIGN_W / 2.0 - total_w / 2.0;
 
-    draw_jp_text(font, &rule_text, start_x, baseline, 16, theme::GOLD_LT);
+    draw_jp_text(
+        font,
+        &rule_text,
+        start_x,
+        baseline,
+        theme::font_size::BODY_LARGE,
+        theme::GOLD_LT,
+    );
     let round_x = start_x + gdims.width + gap;
-    draw_jp_text(font, &round_text, round_x, baseline, 16, theme::GOLD_LT);
+    draw_jp_text(
+        font,
+        &round_text,
+        round_x,
+        baseline,
+        theme::font_size::BODY_LARGE,
+        theme::GOLD_LT,
+    );
     if let Some(honba_text) = &honba_text {
         draw_jp_text(
             font,
             honba_text,
             round_x + rdims.width + gap,
             baseline,
-            14,
+            theme::font_size::LABEL,
             theme::TEXT_DIM,
         );
     }
@@ -221,11 +249,11 @@ pub(super) fn score_delta_color(delta: i32) -> Color {
 
 /// Top-bar right: standings and score differences, with ours highlighted.
 pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f32) {
-    const CHIP_W: f32 = 84.0;
-    const CHIP_H: f32 = 38.0;
+    const CHIP_W: f32 = 90.0;
+    const CHIP_H: f32 = 40.0;
     const GAP: f32 = 7.0;
     const VALUE_GAP: f32 = 4.0;
-    const VALUE_SIZE: u16 = 11;
+    const VALUE_FONT_SIZE: u16 = theme::font_size::CAPTION;
     let chips = score_chip_entries(state);
     let count = chips.len();
     let total = count as f32 * CHIP_W + (count as f32 - 1.0) * GAP;
@@ -256,8 +284,8 @@ pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f3
             font,
             &name,
             x + CHIP_W / 2.0,
-            chip_y + 14.0,
-            9,
+            chip_y + 15.0,
+            theme::font_size::MICRO,
             theme::TEXT_DIM,
         );
 
@@ -265,23 +293,23 @@ pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f3
         let rank_color = if is_me { theme::GOLD_LT } else { theme::TEXT };
         if let Some(score_delta) = chip.score_delta {
             let delta_text = format_score_delta(score_delta);
-            let rank_width = theme::measure_scaled(font, &rank_text, VALUE_SIZE).width;
-            let delta_width = theme::measure_scaled(font, &delta_text, VALUE_SIZE).width;
+            let rank_width = theme::measure_text_size(font, &rank_text, VALUE_FONT_SIZE).width;
+            let delta_width = theme::measure_text_size(font, &delta_text, VALUE_FONT_SIZE).width;
             let value_x = x + (CHIP_W - rank_width - VALUE_GAP - delta_width) / 2.0;
             draw_jp_text(
                 font,
                 &rank_text,
                 value_x,
-                chip_y + 30.0,
-                VALUE_SIZE,
+                chip_y + 32.0,
+                VALUE_FONT_SIZE,
                 rank_color,
             );
             draw_jp_text(
                 font,
                 &delta_text,
                 value_x + rank_width + VALUE_GAP,
-                chip_y + 30.0,
-                VALUE_SIZE,
+                chip_y + 32.0,
+                VALUE_FONT_SIZE,
                 score_delta_color(score_delta),
             );
         } else {
@@ -289,8 +317,8 @@ pub(super) fn draw_score_chips(state: &GameState, font: Option<&Font>, bar_h: f3
                 font,
                 &rank_text,
                 x + CHIP_W / 2.0,
-                chip_y + 30.0,
-                VALUE_SIZE,
+                chip_y + 32.0,
+                VALUE_FONT_SIZE,
                 rank_color,
             );
         }
@@ -345,7 +373,8 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
 
     let my_wind_idx = state.my_wind_index();
     let my_initial_wind_idx = state.my_initial_wind_index();
-    let label_dist: f32 = 64.0;
+    let label_dist: f32 = 62.0;
+    let detail_line_step: f32 = 16.0;
 
     for rel in 0..state.player_count {
         // rel is the position relative to us. scores/player_labels are
@@ -371,7 +400,7 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
             display_wind.name(state.lang),
             BOARD_CENTER_X,
             BOARD_CENTER_Y + label_dist,
-            14,
+            theme::font_size::LABEL,
             theme::GOLD_LT,
         );
         let score_label = format_score(score);
@@ -379,8 +408,8 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
             font,
             &score_label,
             BOARD_CENTER_X,
-            BOARD_CENTER_Y + label_dist + 14.0,
-            11,
+            BOARD_CENTER_Y + label_dist + detail_line_step,
+            theme::font_size::CAPTION,
             theme::TEXT_DIM,
         );
 
@@ -391,8 +420,8 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
                 font,
                 &detail,
                 BOARD_CENTER_X,
-                BOARD_CENTER_Y + label_dist + 28.0,
-                11,
+                BOARD_CENTER_Y + label_dist + detail_line_step * 2.0,
+                theme::font_size::CAPTION,
                 theme::rgba(0x7a9880, 0.85),
             );
         }
@@ -412,7 +441,7 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         &round_text,
         BOARD_CENTER_X,
         BOARD_CENTER_Y - 8.0,
-        13,
+        theme::font_size::LABEL,
         theme::TEXT_DIM,
     );
     theme::draw_text_centered(
@@ -420,7 +449,7 @@ pub(super) fn draw_center_panel(state: &GameState, font: Option<&Font>) {
         &remaining_text,
         BOARD_CENTER_X,
         BOARD_CENTER_Y + 18.0,
-        21,
+        theme::font_size::HEADING_LARGE,
         theme::TEXT_BR,
     );
 }
@@ -456,23 +485,21 @@ pub(super) fn pei_tile_x(start_x: f32, tile_width: f32, index: usize) -> f32 {
 }
 
 pub(super) fn draw_discards(state: &GameState, tile_textures: &TileTextures) {
-    let dtw: f32 = 32.0; // natural tile width
-    let dth: f32 = 44.0; // natural tile height
+    let dtw = DISCARD_TILE_W;
+    let dth = DISCARD_TILE_H;
     let col_step: f32 = dtw; // columns touch
     let row_step: f32 = dth; // rows touch
 
     // Normalized layout in our own view: left-to-right, rows downward.
     let half_width = 3.0 * col_step; // half of six tiles = 108px
     let stick_offset: f32 = 108.0; // center to the riichi stick
-    let discard_offset: f32 = 130.0; // center to the first discard row
-    // (leaves room for the stick)
 
     // Riichi stick draw size (source ~800x117px, shrunk horizontal).
     let stick_w: f32 = 100.0;
     let stick_h: f32 = 14.0;
 
     let start_x = BOARD_CENTER_X - half_width;
-    let start_y = BOARD_CENTER_Y + discard_offset;
+    let start_y = BOARD_CENTER_Y + DISCARD_FIRST_ROW_OFFSET;
 
     let my_wind_idx = state.my_wind_index();
     let my_initial_wind_idx = state.my_initial_wind_index();
@@ -584,12 +611,19 @@ pub(super) fn draw_badge(
     border: Color,
     text_color: Color,
 ) -> f32 {
-    let dims = theme::measure_scaled(font, text, 11);
+    let dims = theme::measure_text_size(font, text, theme::font_size::CAPTION);
     let pad = 8.0;
     let w = dims.width + pad * 2.0;
-    let h = 18.0;
+    let h = 20.0;
     theme::draw_rounded_rect(x, y, w, h, 3.0, fill);
     theme::draw_rounded_rect_lines(x, y, w, h, 3.0, 1.0, border);
-    draw_jp_text(font, text, x + pad, y + 13.0, 11, text_color);
+    draw_jp_text(
+        font,
+        text,
+        x + pad,
+        y + 15.0,
+        theme::font_size::CAPTION,
+        text_color,
+    );
     x + w + 6.0
 }
