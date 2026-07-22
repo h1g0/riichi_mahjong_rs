@@ -88,10 +88,13 @@ mod tests {
         let limiter = RateLimiter::new();
         let now = Instant::now();
         for i in 0..MAX_ATTEMPTS {
-            assert!(limiter.check_at(ip(), now), "{i}回目は許可されるべき");
+            assert!(limiter.check_at(ip(), now), "request {i} should be allowed");
         }
 
-        assert!(!limiter.check_at(ip(), now), "上限超過は拒否されるべき");
+        assert!(
+            !limiter.check_at(ip(), now),
+            "a request above the limit should be rejected"
+        );
     }
 
     #[test]
@@ -123,7 +126,11 @@ mod tests {
         // An attempt after the window sweeps the stale IPs.
         let later = start + WINDOW + Duration::from_secs(1);
         assert!(limiter.check_at(ip(), later));
-        assert_eq!(limiter.tracked_ips(), 1, "古いIPの記録が残っている");
+        assert_eq!(
+            limiter.tracked_ips(),
+            1,
+            "the stale IP record was not removed"
+        );
     }
 
     #[test]

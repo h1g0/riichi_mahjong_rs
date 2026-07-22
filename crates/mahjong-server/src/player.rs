@@ -185,7 +185,7 @@ impl Player {
     pub fn discard(&mut self, tile: Option<Tile>) -> Tile {
         match self.try_discard(tile) {
             Some(discarded) => discarded,
-            None => panic!("捨てる牌が手牌またはツモ牌にありません"),
+            None => panic!("discarded tile is not in the hand or drawn tile slot"),
         }
     }
 
@@ -475,7 +475,11 @@ impl Player {
                 indices.push(i);
             }
         }
-        assert_eq!(indices.len(), 3, "大明カンに必要な3枚がありません");
+        assert_eq!(
+            indices.len(),
+            3,
+            "called quad requires three matching tiles"
+        );
 
         let t1 = self.hand.tiles()[indices[0]];
         let t2 = self.hand.tiles()[indices[1]];
@@ -507,7 +511,7 @@ impl Player {
         assert_eq!(
             indices.len() + usize::from(drawn_matches),
             4,
-            "暗カンに必要な4枚が揃っていません"
+            "concealed quad requires four matching tiles"
         );
 
         let mut kan_tiles: Vec<Tile> = indices.iter().map(|&idx| self.hand.tiles()[idx]).collect();
@@ -548,7 +552,10 @@ impl Player {
             .map(|t| t.get() == tile_type)
             .unwrap_or(false);
         let added_tile = if drawn_matches {
-            let tile = self.hand.drawn().expect("加カンに必要なツモ牌がありません");
+            let tile = self
+                .hand
+                .drawn()
+                .expect("promoted quad requires a drawn tile");
             self.hand.set_drawn(None);
             tile
         } else {
@@ -557,7 +564,7 @@ impl Player {
                 .tiles()
                 .iter()
                 .position(|t| t.get() == tile_type)
-                .expect("加カンに必要な牌が手牌にありません");
+                .expect("tile required for the promoted quad is not in the hand");
             let tile = self.hand.tiles_mut().remove(idx);
 
             if let Some(drawn_tile) = self.hand.drawn() {
@@ -573,7 +580,7 @@ impl Player {
             .melds_mut()
             .iter_mut()
             .find(|open| open.category == MeldType::Pon && open.tiles[0].get() == tile_type)
-            .expect("加カン対象のポンがありません");
+            .expect("matching triplet for the promoted quad was not found");
         open.category = MeldType::Kakan;
         open.called_tile = Some(added_tile);
 
@@ -921,7 +928,7 @@ mod tests {
                 .tiles
                 .iter()
                 .any(|tile| tile.is_red_dora()),
-            "暗カンの赤ドラ牌が副露情報に残ること"
+            "the red dora tile in a concealed quad should remain in the meld data"
         );
     }
 
@@ -940,15 +947,15 @@ mod tests {
         assert!(player.hand.drawn().is_none());
         assert!(
             !player.hand.tiles().iter().any(|t| t.get() == Tile::S9),
-            "9sは全てカンされて手牌に残らないこと"
+            "all 9s tiles should be moved into the quad"
         );
         assert!(
             player.hand.tiles().contains(&Tile::new(Tile::M1)),
-            "ツモ牌の1mが手牌に戻ること"
+            "the drawn 1m should return to the hand"
         );
         assert!(
             player.hand.tiles().contains(&Tile::new(Tile::P4)),
-            "カンと無関係な牌が誤って削除されないこと"
+            "tiles unrelated to the quad should not be removed"
         );
         assert_eq!(player.hand.melds().len(), 1);
         assert_eq!(player.hand.melds()[0].category, MeldType::Kan);

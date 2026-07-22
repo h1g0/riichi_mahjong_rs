@@ -730,7 +730,7 @@ mod tests {
             fu_result: FuResult {
                 total: 30,
                 details: vec![FuDetail {
-                    name: "副底",
+                    name: "Base fu",
                     fu: 20,
                 }],
             },
@@ -847,7 +847,7 @@ mod tests {
             fu_result: FuResult {
                 total: 30,
                 details: vec![FuDetail {
-                    name: "副底",
+                    name: "Base fu",
                     fu: 20,
                 }],
             },
@@ -882,7 +882,7 @@ mod tests {
             score
                 .yaku_list
                 .contains(&(ScoreItem::Dora(DoraLabel::Dora), 1)),
-            "三麻の1m表示で9mがドラとしてカウントされない: {:?}",
+            "9m was not counted as dora for a 1m indicator in a three-player game: {:?}",
             score.yaku_list
         );
     }
@@ -903,7 +903,7 @@ mod tests {
             fu_result: FuResult {
                 total: 30,
                 details: vec![FuDetail {
-                    name: "副底",
+                    name: "Base fu",
                     fu: 20,
                 }],
             },
@@ -941,14 +941,14 @@ mod tests {
             score
                 .yaku_list
                 .contains(&(ScoreItem::Dora(DoraLabel::PeiDora), 2)),
-            "北ドラ2翻が加算されていない: {:?}",
+            "two han of North dora were not added: {:?}",
             score.yaku_list
         );
         assert!(
             score
                 .yaku_list
                 .contains(&(ScoreItem::Dora(DoraLabel::Dora), 2)),
-            "西表示牌による北のドラ2翻が加算されていない: {:?}",
+            "two han of North dora from a West indicator were not added: {:?}",
             score.yaku_list
         );
         // 1 (All Inside) + 2 (pei dora) + 2 (indicator dora) = 5 han
@@ -1352,7 +1352,7 @@ mod tests {
         let fu_result = FuResult {
             total: 30,
             details: vec![FuDetail {
-                name: "副底",
+                name: "Base fu",
                 fu: 20,
             }],
         };
@@ -1415,7 +1415,7 @@ mod tests {
         let fu_result = FuResult {
             total: 30,
             details: vec![FuDetail {
-                name: "副底",
+                name: "Base fu",
                 fu: 20,
             }],
         };
@@ -1457,7 +1457,7 @@ mod tests {
         let fu_result = FuResult {
             total: 30,
             details: vec![FuDetail {
-                name: "副底",
+                name: "Base fu",
                 fu: 20,
             }],
         };

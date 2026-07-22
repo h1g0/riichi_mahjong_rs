@@ -52,20 +52,20 @@ impl ScreenshotNotice {
 fn app_icon() -> Icon {
     fn rgba(png: &[u8]) -> Vec<u8> {
         Image::from_file_with_format(png, Some(ImageFormat::Png))
-            .expect("組み込みアイコンPNGのデコードに失敗")
+            .expect("failed to decode the embedded icon PNG")
             .bytes
     }
 
     Icon {
         small: rgba(include_bytes!("../../../assets/images/others/icon-16.png"))
             .try_into()
-            .expect("16x16アイコンのサイズが不正"),
+            .expect("invalid dimensions for the 16x16 icon"),
         medium: rgba(include_bytes!("../../../assets/images/others/icon-32.png"))
             .try_into()
-            .expect("32x32アイコンのサイズが不正"),
+            .expect("invalid dimensions for the 32x32 icon"),
         big: rgba(include_bytes!("../../../assets/images/others/icon-64.png"))
             .try_into()
-            .expect("64x64アイコンのサイズが不正"),
+            .expect("invalid dimensions for the 64x64 icon"),
     }
 }
 
@@ -210,7 +210,7 @@ async fn main() {
     let tile_textures = TileTextures::load(font_bytes, &mut loading_screen).await;
 
     if font.is_none() {
-        eprintln!("警告: 日本語フォントを読み込めませんでした。デフォルトフォントで表示します。");
+        eprintln!("warning: failed to load the Japanese font; falling back to the default font");
     }
 
     // Build the font atlas up front on native, where lazily cached glyphs

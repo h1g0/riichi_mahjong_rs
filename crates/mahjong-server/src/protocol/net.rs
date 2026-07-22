@@ -260,7 +260,7 @@ mod tests {
             ClientMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
                 session_token: Some("abc123".to_string()),
-                display_name: "テスト".to_string(),
+                display_name: "Test".to_string(),
             },
             ClientMessage::Hello {
                 protocol_version: PROTOCOL_VERSION,
@@ -347,11 +347,11 @@ mod tests {
                 code: "XYZ789".to_string(),
                 seats: [
                     SeatInfo::Human {
-                        name: "ホスト".to_string(),
+                        name: "Host".to_string(),
                         connected: true,
                     },
                     SeatInfo::Human {
-                        name: "ゲスト".to_string(),
+                        name: "Guest".to_string(),
                         connected: false,
                     },
                     SeatInfo::Cpu {

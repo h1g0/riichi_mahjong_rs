@@ -88,7 +88,7 @@ impl TestClient {
     }
 
     async fn connect_with(request: tungstenite::handshake::client::Request) -> Self {
-        let (ws, _) = connect_async(request).await.expect("接続に失敗した");
+        let (ws, _) = connect_async(request).await.expect("connection failed");
         TestClient { ws }
     }
 
@@ -101,15 +101,15 @@ impl TestClient {
         loop {
             let frame = tokio::time::timeout(std::time::Duration::from_secs(30), self.ws.next())
                 .await
-                .expect("受信がタイムアウトした")
-                .expect("接続が閉じられた")
-                .expect("WebSocketエラー");
+                .expect("receive timed out")
+                .expect("connection closed")
+                .expect("WebSocket error");
             match frame {
                 Message::Text(text) => {
-                    return ServerMessage::from_json(text.as_str()).expect("不正なJSON");
+                    return ServerMessage::from_json(text.as_str()).expect("invalid JSON");
                 }
                 Message::Ping(_) | Message::Pong(_) => continue,
-                other => panic!("予期しないフレーム: {other:?}"),
+                other => panic!("unexpected frame: {other:?}"),
             }
         }
     }
@@ -123,7 +123,7 @@ impl TestClient {
         .await;
         match self.recv().await {
             ServerMessage::Welcome { .. } => {}
-            other => panic!("Welcomeでないメッセージ: {other:?}"),
+            other => panic!("expected Welcome message, got {other:?}"),
         }
     }
 
@@ -135,7 +135,7 @@ impl TestClient {
         .await;
         match self.recv().await {
             ServerMessage::RoomState { code, .. } => code,
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
     }
 
@@ -155,7 +155,7 @@ async fn test_join_foreign_room_returns_fly_replay() {
     let (machine_a, machine_b) = start_two_machines().await;
 
     let mut host = TestClient::connect(&format!("ws://{}/ws", machine_a.public)).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_room().await;
 
     // A ?room=CODE connection to machine B returns a fly-replay to
@@ -168,13 +168,13 @@ async fn test_join_foreign_room_returns_fly_replay() {
             let replay = response
                 .headers()
                 .get("fly-replay")
-                .expect("fly-replay ヘッダが無い")
+                .expect("fly-replay header is missing")
                 .to_str()
                 .unwrap();
             assert_eq!(replay, "instance=machinea");
         }
-        Ok(_) => panic!("アップグレードされてしまった（fly-replay が返るべき）"),
-        Err(other) => panic!("予期しないエラー: {other:?}"),
+        Ok(_) => panic!("connection was upgraded instead of returning fly-replay"),
+        Err(other) => panic!("unexpected error: {other:?}"),
     }
 }
 
@@ -185,15 +185,15 @@ async fn test_join_local_room_with_query_param() {
     let (machine_a, _machine_b) = start_two_machines().await;
 
     let mut host = TestClient::connect(&format!("ws://{}/ws", machine_a.public)).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_room().await;
 
     let mut guest =
         TestClient::connect(&format!("ws://{}/ws?room={}", machine_a.public, code)).await;
-    guest.hello("ゲスト").await;
+    guest.hello("Guest").await;
     match guest.join_room(&code).await {
         ServerMessage::RoomState { your_seat, .. } => assert_eq!(your_seat, 1),
-        other => panic!("RoomStateでないメッセージ: {other:?}"),
+        other => panic!("expected RoomState message, got {other:?}"),
     }
 }
 
@@ -207,7 +207,7 @@ async fn test_replayed_request_is_not_replayed_again() {
     let (machine_a, machine_b) = start_two_machines().await;
 
     let mut host = TestClient::connect(&format!("ws://{}/ws", machine_a.public)).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_room().await;
 
     let with_replay_src = |addr: SocketAddr| {
@@ -223,19 +223,19 @@ async fn test_replayed_request_is_not_replayed_again() {
 
     // Owning machine A: the replayed request joins normally.
     let mut guest = TestClient::connect_with(with_replay_src(machine_a.public)).await;
-    guest.hello("ゲスト").await;
+    guest.hello("Guest").await;
     match guest.join_room(&code).await {
         ServerMessage::RoomState { your_seat, .. } => assert_eq!(your_seat, 1),
-        other => panic!("RoomStateでないメッセージ: {other:?}"),
+        other => panic!("expected RoomState message, got {other:?}"),
     }
 
     // Non-owning machine B upgrades without re-forwarding;
     // JoinRoom yields RoomNotFound.
     let mut lost = TestClient::connect_with(with_replay_src(machine_b.public)).await;
-    lost.hello("迷子").await;
+    lost.hello("Lost Client").await;
     match lost.join_room(&code).await {
         ServerMessage::Error { code, .. } => assert_eq!(code, ErrorCode::RoomNotFound),
-        other => panic!("Errorでないメッセージ: {other:?}"),
+        other => panic!("expected Error message, got {other:?}"),
     }
 }
 
@@ -247,7 +247,7 @@ async fn test_unknown_or_invalid_code_upgrades_normally() {
     for room in ["ZZZZZZ", "abc", "%2F%2F", ""] {
         let mut client =
             TestClient::connect(&format!("ws://{}/ws?room={}", machine_a.public, room)).await;
-        client.hello("探検者").await;
+        client.hello("Explorer").await;
     }
 }
 
@@ -257,7 +257,7 @@ async fn test_peer_lookup_finds_room_owner() {
     let (machine_a, _machine_b) = start_two_machines().await;
 
     let mut host = TestClient::connect(&format!("ws://{}/ws", machine_a.public)).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_room().await;
 
     // Query machine A's internal listener from a third party's
@@ -301,7 +301,7 @@ async fn test_create_room_completes_with_lying_peer() {
     let machine = serve_machine(state, internal).await;
 
     let mut host = TestClient::connect(&format!("ws://{}/ws", machine.public)).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     // Past the collision-check cap, local uniqueness decides and
     // creation completes.
     let code = host.create_room().await;

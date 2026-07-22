@@ -493,16 +493,16 @@ mod tests {
         assert!(
             events.iter().any(|(seat, e)| *seat == 0
                 && matches!(e, ServerEvent::HandUpdated { hand } if *hand == expected_hand)),
-            "HandUpdated が送られていない"
+            "HandUpdated was not sent"
         );
         assert!(
             events.iter().any(|(seat, e)| *seat == 0
                 && matches!(e, ServerEvent::TileDrawn { tile, .. } if tile.get() == Tile::Z5)),
-            "TileDrawn が再送されていない"
+            "TileDrawn was not resent"
         );
         assert!(
             events.iter().all(|(seat, _)| *seat == 0),
-            "他プレイヤーへイベントが送られている"
+            "an event was sent to another player"
         );
     }
 
@@ -528,13 +528,13 @@ mod tests {
             events
                 .iter()
                 .any(|(seat, e)| *seat == 0 && matches!(e, ServerEvent::HandUpdated { .. })),
-            "HandUpdated が送られていない"
+            "HandUpdated was not sent"
         );
         assert!(
             !events
                 .iter()
                 .any(|(_, e)| matches!(e, ServerEvent::TileDrawn { .. })),
-            "ツモ牌が無いのに TileDrawn が送られている"
+            "TileDrawn was sent without a drawn tile"
         );
     }
 
@@ -570,12 +570,12 @@ mod tests {
             events
                 .iter()
                 .any(|(seat, e)| *seat == 0 && matches!(e, ServerEvent::HandUpdated { .. })),
-            "HandUpdated が送られていない"
+            "HandUpdated was not sent"
         );
         assert!(
             events.iter().any(|(seat, e)| *seat == 0
                 && matches!(e, ServerEvent::TileDrawn { tile, .. } if tile.get() == Tile::Z5)),
-            "TileDrawn が再送されていない"
+            "TileDrawn was not resent"
         );
     }
 
@@ -780,11 +780,7 @@ mod tests {
         // Three consecutive noten draws must end a three-player
         // East-only game.
         for i in 0..3 {
-            assert!(
-                !table.is_game_over,
-                "{}局目の前にゲームが終了している",
-                i + 1
-            );
+            assert!(!table.is_game_over, "game ended before hand {}", i + 1);
             table.start_round();
             let round = table.current_round_mut().unwrap();
             round.phase = TurnPhase::RoundOver;
@@ -794,7 +790,10 @@ mod tests {
             table.finish_round();
         }
 
-        assert!(table.is_game_over, "三麻の東風戦が3局で終了しない");
+        assert!(
+            table.is_game_over,
+            "three-player East-only game did not end after three hands"
+        );
     }
 
     #[test]
@@ -838,7 +837,7 @@ mod tests {
         }
         assert!(
             table.is_game_over,
-            "{max_rounds}局回してもゲームが終了しない"
+            "game did not end after {max_rounds} hands"
         );
         max_rounds
     }

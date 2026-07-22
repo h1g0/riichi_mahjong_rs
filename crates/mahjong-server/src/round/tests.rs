@@ -513,7 +513,7 @@ fn test_open_tanyao_disabled_does_not_offer_ron() {
         !call_state.available_calls[1]
             .iter()
             .any(|call| matches!(call, AvailableCall::Ron)),
-        "喰いタンなしではオープン断么九のみのロンを提示しない"
+        "an open All Simples-only ron should not be offered when open tanyao is disabled"
     );
 }
 
@@ -1069,7 +1069,10 @@ fn test_do_nine_terminals_declare() {
             }
         )
     });
-    assert!(has_round_draw, "九種九牌流局イベントが生成されていない");
+    assert!(
+        has_round_draw,
+        "Nine Terminals abortive-draw event was not generated"
+    );
 }
 
 #[test]
@@ -1122,7 +1125,7 @@ fn test_do_draw_triggers_nine_terminals_phase() {
     assert_eq!(
         round.phase,
         TurnPhase::WaitForNineTerminals,
-        "九種九牌条件達成時にWaitForNineTerminalsになるべき"
+        "the phase should be WaitForNineTerminals when its conditions are met"
     );
 
     let events = round.drain_events();
@@ -1131,7 +1134,7 @@ fn test_do_draw_triggers_nine_terminals_phase() {
         .any(|(_idx, e)| matches!(e, ServerEvent::NineTerminalsAvailable));
     assert!(
         has_available,
-        "NineTerminalsAvailableイベントが生成されていない"
+        "NineTerminalsAvailable event was not generated"
     );
 }
 
@@ -1166,7 +1169,7 @@ fn test_nine_terminals_continue_resends_tile_drawn() {
     let resent = events
         .iter()
         .any(|(idx, e)| *idx == 0 && matches!(e, ServerEvent::TileDrawn { .. }));
-    assert!(resent, "続行時に TileDrawn が再送されるべき");
+    assert!(resent, "TileDrawn should be resent when play continues");
 
     // The re-sent draw allows the discard; the hand moves on.
     assert!(round.do_discard(None));
@@ -1250,7 +1253,10 @@ fn test_triple_ron_draw_enabled() {
             }
         )
     });
-    assert!(has_triple_ron, "三家和流局イベントが生成されていない");
+    assert!(
+        has_triple_ron,
+        "Triple Ron abortive-draw event was not generated"
+    );
 }
 
 #[test]
@@ -1272,7 +1278,7 @@ fn test_triple_ron_draw_takes_priority_over_multiple_ron() {
     assert_eq!(round.phase, TurnPhase::RoundOver);
     assert!(
         matches!(round.result, Some(RoundResult::SpecialDraw)),
-        "triple_ron_draw が multiple_ron より優先されること"
+        "triple_ron_draw should take precedence over multiple_ron"
     );
     let events = round.drain_events();
     assert!(events.iter().any(|(_, e)| matches!(
@@ -1308,7 +1314,7 @@ fn test_triple_ron_draw_disabled_multiple_ron_disabled_picks_winner() {
             assert_eq!(winners, &vec![1]);
             assert_eq!(*loser, 0);
         }
-        _ => panic!("ロン結果が期待されたが別の結果: {:?}", round.result),
+        _ => panic!("expected a ron result, got {:?}", round.result),
     }
 }
 
@@ -1335,7 +1341,7 @@ fn test_two_ron_no_draw() {
             assert_eq!(winners, &vec![1, 2]);
             assert_eq!(*loser, 0);
         }
-        _ => panic!("Ron結果が期待されたが別の結果: {:?}", round.result),
+        _ => panic!("expected a ron result, got {:?}", round.result),
     }
 }
 
@@ -1362,7 +1368,7 @@ fn test_two_ron_disabled_picks_winner() {
             assert_eq!(winners, &vec![1]);
             assert_eq!(*loser, 0);
         }
-        _ => panic!("Ron結果が期待されたが別の結果: {:?}", round.result),
+        _ => panic!("expected a ron result, got {:?}", round.result),
     }
 }
 
@@ -1382,10 +1388,14 @@ fn test_double_ron_both_win() {
     assert_eq!(round.phase, TurnPhase::RoundOver);
     match &round.result {
         Some(RoundResult::Ron { winners, loser, .. }) => {
-            assert_eq!(winners, &vec![1, 2], "打順優先順で並んでいること");
+            assert_eq!(
+                winners,
+                &vec![1, 2],
+                "winners should be ordered by turn priority"
+            );
             assert_eq!(*loser, 0);
         }
-        _ => panic!("Ron結果が期待されたが別の結果: {:?}", round.result),
+        _ => panic!("expected a ron result, got {:?}", round.result),
     }
 }
 
@@ -1411,7 +1421,7 @@ fn test_triple_ron_all_win() {
             assert_eq!(winners, &vec![1, 2, 3]);
             assert_eq!(*loser, 0);
         }
-        _ => panic!("Ron結果が期待されたが別の結果: {:?}", round.result),
+        _ => panic!("expected a ron result, got {:?}", round.result),
     }
 }
 
@@ -1437,14 +1447,14 @@ fn test_double_ron_scores() {
     let p2_gain = round.players[2].score - initial_score_p2;
     assert!(
         p1_gain > p2_gain,
-        "最初の和了者が本場ボーナスを得ること: p1={}, p2={}",
+        "the first winner should receive the honba bonus: p1={}, p2={}",
         p1_gain,
         p2_gain
     );
     assert_eq!(
         p1_gain - p2_gain,
         300,
-        "本場ボーナスの差は1本場=300点であること"
+        "the honba bonus difference should be 300 points for one honba"
     );
 
     // The deal-in player pays both.
@@ -1452,7 +1462,7 @@ fn test_double_ron_scores() {
     let total_gain = p1_gain + p2_gain;
     assert_eq!(
         loser_loss, total_gain,
-        "放銃者の支払いが全和了者の取得合計と一致すること"
+        "the discarder payment should equal the total received by all winners"
     );
 }
 
@@ -1477,7 +1487,7 @@ fn test_double_ron_events_generated() {
     assert_eq!(
         won_events.len(),
         2,
-        "ダブロンで2件のRoundWonイベントが生成されること"
+        "a double ron should generate two RoundWon events"
     );
     let ServerEvent::RoundWon {
         honba: first_honba,
@@ -1521,9 +1531,12 @@ fn test_multi_ron_riichi_sticks_first_winner_only() {
     assert_eq!(
         p1_gain - p2_gain,
         2000,
-        "供託2本はプレイヤー1のみ取得: 差は2000点"
+        "only player 1 should receive the two riichi deposits, for a 2,000-point difference"
     );
-    assert_eq!(round.riichi_sticks, 0, "供託棒はすべて消費されること");
+    assert_eq!(
+        round.riichi_sticks, 0,
+        "all riichi deposits should be consumed"
+    );
 }
 
 // --- auto_pass_cpu ---
@@ -1723,7 +1736,7 @@ fn test_sanma_round_setup() {
         for tile in round.players[i].hand.tiles() {
             assert!(
                 !(Tile::M2..=Tile::M8).contains(&tile.get()),
-                "三麻の手牌に萬子2〜8が含まれている: {:?}",
+                "a three-player hand contains a 2-8 characters tile: {:?}",
                 tile
             );
         }
@@ -1800,7 +1813,7 @@ fn test_sanma_no_chi_offered() {
         call_state.available_calls[1]
             .iter()
             .all(|c| !matches!(c, AvailableCall::Chi { .. })),
-        "三麻でチーが提供された"
+        "chi was offered in a three-player game"
     );
 }
 
@@ -1816,7 +1829,7 @@ fn test_sanma_pon_still_offered() {
         call_state.available_calls[2]
             .iter()
             .any(|c| matches!(c, AvailableCall::Pon { .. })),
-        "三麻でポンが提供されない"
+        "pon was not offered in a three-player game"
     );
     // The dummy seat always counts as responded.
     assert!(call_state.responded[3]);
@@ -1938,7 +1951,7 @@ fn test_pei_win_adds_pei_dora() {
         .iter()
         .find(|(_, e)| matches!(e, ServerEvent::RoundWon { .. }));
     let Some((_, ServerEvent::RoundWon { yaku_list, .. })) = won else {
-        panic!("RoundWon イベントがない");
+        panic!("RoundWon event is missing");
     };
     assert!(
         yaku_list.iter().any(|(item, han)| *item
@@ -1946,7 +1959,7 @@ fn test_pei_win_adds_pei_dora() {
                 mahjong_core::scoring::score::DoraLabel::PeiDora
             )
             && *han == 1),
-        "北ドラが加算されていない: {:?}",
+        "North dora han were not added: {:?}",
         yaku_list
     );
 }
@@ -2168,7 +2181,10 @@ fn test_sanma_three_winds_draw() {
             is_called: false,
         });
     }
-    assert!(round.check_four_winds_draw(), "三麻の四風連打が成立しない");
+    assert!(
+        round.check_four_winds_draw(),
+        "Four Winds abortive draw was not recognized in a three-player game"
+    );
 }
 
 /// A hand-discard TileDiscarded carries the pre-discard sorted position.
@@ -2195,7 +2211,7 @@ fn test_tedashi_discard_event_includes_hand_index() {
             } => Some((*is_tsumogiri, *hand_index)),
             _ => None,
         })
-        .expect("TileDiscarded イベントがない");
+        .expect("TileDiscarded event is missing");
     assert_eq!(discarded, (false, Some(3)));
 }
 
@@ -2221,6 +2237,6 @@ fn test_tsumogiri_discard_event_has_no_hand_index() {
             } => Some((*is_tsumogiri, *hand_index)),
             _ => None,
         })
-        .expect("TileDiscarded イベントがない");
+        .expect("TileDiscarded event is missing");
     assert_eq!(discarded, (true, None));
 }

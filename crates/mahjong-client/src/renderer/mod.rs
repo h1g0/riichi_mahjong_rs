@@ -465,7 +465,7 @@ impl TileTextures {
 
 fn image_from_png(bytes: &[u8]) -> Image {
     Image::from_file_with_format(bytes, Some(ImageFormat::Png))
-        .expect("組み込み牌PNGのデコードに失敗")
+        .expect("failed to decode the embedded tile PNG")
 }
 
 fn texture_from_image(img: &Image) -> Texture2D {

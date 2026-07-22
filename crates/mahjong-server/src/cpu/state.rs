@@ -1101,7 +1101,7 @@ mod tests {
         assert_eq!(
             state.all_discards[0].len(),
             1,
-            "守備評価用の捨て牌は保持する"
+            "discards used for defensive evaluation should be retained"
         );
     }
 

@@ -65,7 +65,7 @@ fn test_should_attack_counts_melds_when_tenpai() {
 
     assert!(
         client.should_attack(),
-        "副露込みで聴牌している手は終盤でも攻撃を続けるはず"
+        "a hand in tenpai with melds should keep attacking late in the hand"
     );
 }
 
@@ -204,7 +204,10 @@ fn test_resync_hand_updated_does_not_trigger_discard() {
 
     // A resync HandUpdated (no own call): no discard.
     let action = client.handle_event(&ServerEvent::HandUpdated { hand: hand.clone() });
-    assert_eq!(action, None, "再同期の HandUpdated に打牌を返している");
+    assert_eq!(
+        action, None,
+        "the CPU returned a discard for a resynchronization HandUpdated event"
+    );
 
     // A HandUpdated following our pon still discards.
     client.handle_event(&ServerEvent::PlayerCalled {
@@ -216,7 +219,7 @@ fn test_resync_hand_updated_does_not_trigger_discard() {
     let action = client.handle_event(&ServerEvent::HandUpdated { hand });
     assert!(
         matches!(action, Some(ClientAction::Discard { .. })),
-        "ポン直後の HandUpdated で打牌していない"
+        "the CPU did not discard on HandUpdated immediately after a pon"
     );
 }
 
@@ -598,7 +601,11 @@ fn test_discards_isolated_guest_wind_before_terminal() {
     let action = client.handle_event(&draw_event(Tile::S9));
 
     let tile = discarded_tile(&action).expect("expected a hand discard");
-    assert_eq!(tile.get(), Tile::Z3, "客風牌を最初に切るべき");
+    assert_eq!(
+        tile.get(),
+        Tile::Z3,
+        "the guest wind should be discarded first"
+    );
 }
 
 #[test]
@@ -631,7 +638,7 @@ fn test_discard_prefers_breaking_penchan_over_ryanmen() {
     let tile = discarded_tile(&action).expect("expected a hand discard");
     assert!(
         tile.get() == Tile::P1 || tile.get() == Tile::P2,
-        "両面(S6S7)ではなく辺張(P1P2)を整理すべき, got {tile:?}"
+        "the edge wait (P1P2) should be discarded before the two-sided wait (S6S7), got {tile:?}"
     );
 }
 
@@ -674,7 +681,7 @@ fn test_dora_float_kept_over_plain_float() {
     let action = client.handle_event(&draw_event(Tile::S9));
     assert!(
         matches!(action, Some(ClientAction::Discard { tile: None })),
-        "ドラ(P9)を残して S9 をツモ切りすべき, got {action:?}"
+        "P9 dora should be kept and the drawn S9 discarded, got {action:?}"
     );
 
     // Control: with heuristics off P9 goes (no dora protection;
@@ -697,7 +704,7 @@ fn test_dora_float_kept_over_plain_float() {
     let action = client.handle_event(&draw_event(Tile::S9));
     assert!(
         matches!(action, Some(ClientAction::Discard { tile: Some(t) }) if t.get() == Tile::P9),
-        "定石無効時はドラ保護が効かない, got {action:?}"
+        "dora protection should be disabled when heuristics are disabled, got {action:?}"
     );
 }
 
@@ -741,7 +748,11 @@ fn test_weak_folds_with_genbutsu_against_riichi() {
     let action = client.handle_event(&draw_event(Tile::M5));
 
     let tile = discarded_tile(&action).expect("expected a hand discard");
-    assert_eq!(tile.get(), Tile::Z3, "現物(Z3)を最優先で切るべき");
+    assert_eq!(
+        tile.get(),
+        Tile::Z3,
+        "the guaranteed-safe Z3 should be discarded first"
+    );
 }
 
 #[test]
@@ -783,7 +794,11 @@ fn test_defense_prefers_suji_over_dangerous_tiles() {
     let action = client.handle_event(&draw_event(Tile::P5));
 
     let tile = discarded_tile(&action).expect("expected a hand discard");
-    assert_eq!(tile.get(), Tile::M7, "筋牌(M7)を選ぶべき, got {tile:?}");
+    assert_eq!(
+        tile.get(),
+        Tile::M7,
+        "the suji tile M7 should be selected, got {tile:?}"
+    );
 }
 
 #[test]
@@ -829,7 +844,7 @@ fn test_riichi_declared_with_no_yaku_tenpai() {
     let action = client.handle_event(&draw);
     assert!(
         matches!(action, Some(ClientAction::Riichi { .. })),
-        "役なし聴牌はリーチすべき, got {action:?}"
+        "a no-yaku tenpai hand should declare riichi, got {action:?}"
     );
 
     // Heuristics off: legacy stays quiet against two riichi.
@@ -888,7 +903,7 @@ fn test_damaten_with_confirmed_mangan() {
     let action = client.handle_event(&draw);
     assert!(
         matches!(action, Some(ClientAction::Discard { .. })),
-        "満貫確定はダマにすべき, got {action:?}"
+        "a guaranteed mangan hand should remain in damaten, got {action:?}"
     );
 
     // Heuristics off: the aggressiveness judgement declares.
@@ -940,7 +955,11 @@ fn test_cheap_bad_shape_tenpai_folds_against_riichi() {
     riichi_with_genbutsu(&mut client);
     let action = client.handle_event(&draw_event(Tile::Z4));
     let tile = discarded_tile(&action).expect("expected a hand discard");
-    assert_eq!(tile.get(), Tile::S2, "愚形安手聴牌は現物から降りるべき");
+    assert_eq!(
+        tile.get(),
+        Tile::S2,
+        "a cheap bad-wait tenpai hand should fold with a guaranteed-safe tile"
+    );
 
     // Heuristics off: keep tenpai and push (tsumogiri).
     let config = CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced).without_heuristics();
@@ -950,7 +969,7 @@ fn test_cheap_bad_shape_tenpai_folds_against_riichi() {
     let action = client.handle_event(&draw_event(Tile::Z4));
     assert!(
         matches!(action, Some(ClientAction::Discard { tile: None })),
-        "定石無効時は聴牌維持（ツモ切り）, got {action:?}"
+        "with heuristics disabled, tenpai should be maintained by discarding the drawn tile, got {action:?}"
     );
 }
 
@@ -1014,7 +1033,7 @@ fn test_folds_against_three_meld_opponent() {
     assert_eq!(
         tile.get(),
         Tile::Z3,
-        "3副露の他家に対して現物(Z3)からベタオリすべき"
+        "the CPU should fully fold against an opponent with three melds, starting with safe Z3"
     );
 
     // Heuristics off: melds are not a threat; normal discard.
@@ -1030,7 +1049,11 @@ fn test_folds_against_three_meld_opponent() {
     });
     let action = client.handle_event(&draw_event(Tile::M5));
     if let Some(t) = discarded_tile(&action) {
-        assert_ne!(t.get(), Tile::Z3, "定石無効時は対子の現物を崩さない");
+        assert_ne!(
+            t.get(),
+            Tile::Z3,
+            "with heuristics disabled, a safe pair should not be broken"
+        );
     }
 }
 
@@ -1075,7 +1098,7 @@ fn test_six_block_hand_dismantles_dead_kanchan_first() {
     let tile = discarded_tile(&action).expect("expected a hand discard");
     assert!(
         tile.get() == Tile::S2 || tile.get() == Tile::S4,
-        "死に嵌張(S2S4)を整理すべき, got {tile:?}"
+        "the dead closed wait (S2S4) should be discarded, got {tile:?}"
     );
 }
 
@@ -1151,7 +1174,7 @@ fn test_kokushi_hand_keeps_orphans() {
     if let Some(t) = tile {
         assert!(
             !t.is_1_9_honour(),
-            "国士無双ルートでは么九牌を切らない, got {t:?}"
+            "the Thirteen Orphans route should not discard a terminal or honour, got {t:?}"
         );
     }
 }
@@ -1797,7 +1820,7 @@ fn test_shuffle_cpu_configs_preserves_configs() {
             configs
                 .iter()
                 .any(|s| s.level == c.level && s.personality == c.personality),
-            "シャッフルで設定が失われた"
+            "the settings were lost during shuffling"
         );
     }
 }

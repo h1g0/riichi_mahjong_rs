@@ -719,12 +719,19 @@ fn post_call_discard_keeps_hand_edges_and_melds_fixed() {
     let before_slot = opponent_drawn_slot_width(before_count, false, step, gap);
     let after_slot = opponent_drawn_slot_width(after_count, false, step, gap);
 
-    assert_eq!(before_slot, gap, "鳴き直後は余分な手牌がツモ牌枠を占める");
-    assert_eq!(after_slot, step + gap, "打牌後は通常のツモ牌枠を戻す");
+    assert_eq!(
+        before_slot, gap,
+        "the extra concealed tile should occupy the drawn-tile slot immediately after a call"
+    );
+    assert_eq!(
+        after_slot,
+        step + gap,
+        "the normal drawn-tile slot should be restored after the discard"
+    );
     assert_eq!(
         before_count as f32 * step + before_slot,
         after_count as f32 * step + after_slot,
-        "打牌の前後で手牌領域の両端と後続する副露位置を固定する"
+        "the hand bounds and following meld position should stay fixed across the discard"
     );
 }
 
@@ -734,7 +741,7 @@ fn own_post_call_discard_keeps_the_hand_left_edge_fixed() {
     assert_eq!(
         player_hand_start_x(11, &melds),
         player_hand_start_x(10, &melds),
-        "鳴き直後の打牌で手牌の左端を動かさない"
+        "the left edge of the hand should not move on the discard after a call"
     );
 }
 
@@ -764,11 +771,14 @@ fn own_hand_shifts_left_to_clear_three_melds() {
     .into_iter()
     .fold(f32::INFINITY, f32::min);
 
-    assert!(hand_start_x < centered_x, "重なる場合だけ手牌を左へ寄せる");
+    assert!(
+        hand_start_x < centered_x,
+        "the hand should shift left only when it would overlap"
+    );
     assert_eq!(
         meld_left_x - reserved_hand_right_x,
         SELF_HAND_MELD_GAP,
-        "予約ツモ牌枠と副露の間に一定の余白を空ける"
+        "a fixed gap should remain between the reserved drawn-tile slot and melds"
     );
 }
 
@@ -820,12 +830,12 @@ fn own_tedashi_tiles_move_from_pre_discard_origins() {
     assert_eq!(
         player_hand_tile_x(&state, 1, 100.0),
         start_x + 2.0 * TILE_W,
-        "打牌位置の空きを保持する"
+        "the vacated discard position should remain open"
     );
     assert_eq!(
         player_hand_tile_x(&state, 2, 100.0),
         start_x + 3.0 * TILE_W + DRAWN_GAP,
-        "ツモ牌はツモ牌位置から移動を始める"
+        "the drawn tile should start moving from the drawn-tile position"
     );
 
     let finished_at = 100.0 + TEDASHI_GAP_HOLD_SECS + TEDASHI_SLIDE_SECS;
