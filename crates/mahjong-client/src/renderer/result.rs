@@ -121,7 +121,7 @@ pub(super) fn draw_result(state: &GameState, font: Option<&Font>, tile_textures:
         0.0,
         DESIGN_W,
         DESIGN_H,
-        Color::new(0.0, 0.0, 0.0, 0.78),
+        Color::new(0.0, 0.0, 0.0, 0.82),
     );
 
     if state.current_win_result().is_some() {
@@ -142,7 +142,7 @@ pub(super) fn draw_overlay_panel(panel_w: f32, panel_h: f32) -> (f32, f32, f32) 
         panel_w,
         panel_h,
         12.0,
-        theme::rgba(0x050e08, 0.97),
+        theme::rgba(0x050e08, 0.5),
         theme::GOLD_DK,
     );
     (panel_x, panel_y, panel_x + panel_w)
