@@ -434,19 +434,30 @@ mod tests {
             run_simulation(&fast_sanma_config(2, 42)).expect("sanma simulation should complete");
 
         assert_eq!(stats.games, 2);
-        assert!(stats.rounds >= 3 * 2, "三麻の東風戦は最低3局のはず");
+        assert!(
+            stats.rounds >= 3 * 2,
+            "three-player East-only games should have at least three hands"
+        );
 
         // Three players means placements 1-3 only; the dummy seat
         // (config 3) must never place.
         for rank in 0..3 {
             let total: u32 = stats.per_cpu.iter().map(|c| c.placements[rank]).sum();
-            assert_eq!(total, stats.games, "{}着の合計がゲーム数と不一致", rank + 1);
+            assert_eq!(
+                total,
+                stats.games,
+                "total finishes at rank {} do not match the game count",
+                rank + 1
+            );
         }
         let fourth_total: u32 = stats.per_cpu.iter().map(|c| c.placements[3]).sum();
-        assert_eq!(fourth_total, 0, "三麻で4着が発生している");
+        assert_eq!(
+            fourth_total, 0,
+            "a fourth-place finish occurred in a three-player game"
+        );
         assert_eq!(
             stats.per_cpu[3].placements, [0; 4],
-            "ダミー席が集計されている"
+            "the dummy seat was included in the statistics"
         );
 
         // Total final scores cannot exceed games x starting score x 3
@@ -459,7 +470,10 @@ mod tests {
     fn test_sanma_simulation_is_deterministic_with_same_seed() {
         let first = run_simulation(&fast_sanma_config(1, 7)).expect("first run should complete");
         let second = run_simulation(&fast_sanma_config(1, 7)).expect("second run should complete");
-        assert_eq!(first, second, "同一シードの三麻結果が一致しない");
+        assert_eq!(
+            first, second,
+            "three-player results differ for the same seed"
+        );
     }
 
     #[test]
@@ -467,11 +481,19 @@ mod tests {
         let stats = run_simulation(&fast_config(1, 42)).expect("simulation should complete");
 
         assert_eq!(stats.games, 1);
-        assert!(stats.rounds >= 4, "東風戦は最低4局のはず");
+        assert!(
+            stats.rounds >= 4,
+            "East-only games should have at least four hands"
+        );
 
         for rank in 0..4 {
             let total: u32 = stats.per_cpu.iter().map(|c| c.placements[rank]).sum();
-            assert_eq!(total, stats.games, "{}着の合計がゲーム数と不一致", rank + 1);
+            assert_eq!(
+                total,
+                stats.games,
+                "total finishes at rank {} do not match the game count",
+                rank + 1
+            );
         }
 
         // Total final scores cannot exceed games x starting score x 4
@@ -484,7 +506,7 @@ mod tests {
     fn test_simulation_is_deterministic_with_same_seed() {
         let first = run_simulation(&fast_config(2, 7)).expect("first run should complete");
         let second = run_simulation(&fast_config(2, 7)).expect("second run should complete");
-        assert_eq!(first, second, "同一シードの結果が一致しない");
+        assert_eq!(first, second, "results differ for the same seed");
     }
 
     #[test]
@@ -496,7 +518,7 @@ mod tests {
         let b = run_simulation(&fast_config(2, 2)).expect("run b should complete");
         assert_ne!(
             a, b,
-            "異なるシードで結果が完全一致（シードが効いていない疑い）"
+            "results are identical for different seeds; the seed may have no effect"
         );
     }
 

@@ -675,7 +675,10 @@ mod tests {
         state.all_discards[2] = vec![Tile::new(Tile::Z7); 2];
         state.my_hand = vec![Tile::new(Tile::Z7); 2]; // publicly only 2 visible
         let threat = assess_threat(&state, 1, &test_config()).expect("kokushi signs");
-        assert!(threat.kokushi_alert, "自分の手牌を見切り判定に含めない");
+        assert!(
+            threat.kokushi_alert,
+            "the CPU's own hand should not count toward the tile-visibility check"
+        );
 
         // Fewer than five discards is too early to judge.
         let mut state = CpuGameState::new();
@@ -713,11 +716,17 @@ mod tests {
         let honour = evaluate_safety(Tile::new(Tile::Z1), &state, &config);
         let middle = evaluate_safety(Tile::new(Tile::S2), &state, &config);
 
-        assert!(terminal <= 0.1, "生牌の么九牌は最危険: {terminal}");
-        assert!(honour <= 0.1, "生牌の字牌は最危険: {honour}");
+        assert!(
+            terminal <= 0.1,
+            "an unseen terminal should be in the highest-risk tier: {terminal}"
+        );
+        assert!(
+            honour <= 0.1,
+            "an unseen honour should be in the highest-risk tier: {honour}"
+        );
         assert!(
             middle > terminal && middle > honour,
-            "中張牌は么九牌より安全: {middle}"
+            "a simple tile should be safer than a terminal or honour: {middle}"
         );
 
         let genbutsu = evaluate_safety(Tile::new(Tile::M5), &state, &config);
@@ -754,9 +763,12 @@ mod tests {
 
         assert!(
             in_suit < off_suit,
-            "染め色は他色より危険: {in_suit} vs {off_suit}"
+            "the flush suit should be riskier than an off-suit tile: {in_suit} vs {off_suit}"
         );
-        assert!(honour < 1.0, "染め手相手の字牌も警戒する");
+        assert!(
+            honour < 1.0,
+            "honours should also be treated cautiously against a flush hand"
+        );
     }
 
     #[test]
@@ -790,7 +802,7 @@ mod tests {
         let guest = evaluate_safety(Tile::new(Tile::Z3), &state, &config);
         assert!(
             yakuhai < guest,
-            "生牌役牌({yakuhai}) < 客風({guest}) のはず"
+            "an unseen value honour ({yakuhai}) should be riskier than a guest wind ({guest})"
         );
 
         // The weak level keeps the visibility-only estimate.

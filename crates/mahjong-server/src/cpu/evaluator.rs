@@ -304,10 +304,10 @@ mod tests {
         let z7 = candidates
             .iter()
             .find(|c| c.tile.get() == Tile::Z7)
-            .expect("7z は打牌候補にあるはず");
+            .expect("7z should be among the discard candidates");
         assert!(
             z7.shanten.is_ready(),
-            "副露を含めれば 7z 切りで聴牌のはず（shanten = {}）",
+            "discarding 7z should leave the hand in tenpai when melds are included (shanten = {})",
             z7.shanten
         );
     }

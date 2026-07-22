@@ -35,7 +35,7 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
         return Ok(FuResult {
             total: 30,
             details: vec![FuDetail {
-                name: "流し満貫",
+                name: "Nagashi Mangan",
                 fu: 30,
             }],
         });
@@ -46,7 +46,7 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
         return Ok(FuResult {
             total: 25,
             details: vec![FuDetail {
-                name: "七対子",
+                name: "Seven Pairs",
                 fu: 25,
             }],
         });
@@ -57,7 +57,7 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
         return Ok(FuResult {
             total: 30,
             details: vec![FuDetail {
-                name: "国士無双",
+                name: "Thirteen Orphans",
                 fu: 30,
             }],
         });
@@ -67,7 +67,7 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
 
     // Base fu (futei / 副底).
     details.push(FuDetail {
-        name: "副底",
+        name: "Base fu",
         fu: 20,
     });
 
@@ -88,7 +88,7 @@ pub fn calculate_fu(analyzer: &HandAnalyzer, hand: &Hand, status: &Status) -> Re
         return Ok(FuResult {
             total: 20,
             details: vec![FuDetail {
-                name: "平和ツモ",
+                name: "Pinfu tsumo",
                 fu: 20,
             }],
         });
@@ -204,15 +204,15 @@ fn calculate_mentsu_fu(
 
         let name = if is_concealed {
             if is_terminal_or_honour {
-                "么九牌暗刻"
+                "Concealed terminal or honour triplet"
             } else {
-                "中張牌暗刻"
+                "Concealed simple triplet"
             }
         } else {
             if is_terminal_or_honour {
-                "么九牌明刻"
+                "Open terminal or honour triplet"
             } else {
-                "中張牌明刻"
+                "Open simple triplet"
             }
         };
 
@@ -225,9 +225,9 @@ fn calculate_mentsu_fu(
                 let is_terminal_or_honour = open.tiles[0].is_1_9_honour();
                 let fu = if is_terminal_or_honour { 4 } else { 2 };
                 let name = if is_terminal_or_honour {
-                    "么九牌明刻"
+                    "Open terminal or honour triplet"
                 } else {
-                    "中張牌明刻"
+                    "Open simple triplet"
                 };
                 details.push(FuDetail { name, fu });
             }
@@ -241,15 +241,15 @@ fn calculate_mentsu_fu(
                 };
                 let name = if is_concealed {
                     if is_terminal_or_honour {
-                        "么九牌暗槓"
+                        "Concealed terminal or honour quad"
                     } else {
-                        "中張牌暗槓"
+                        "Concealed simple quad"
                     }
                 } else {
                     if is_terminal_or_honour {
-                        "么九牌明槓"
+                        "Open terminal or honour quad"
                     } else {
-                        "中張牌明槓"
+                        "Open simple quad"
                     }
                 };
                 details.push(FuDetail { name, fu });
@@ -274,21 +274,21 @@ fn calculate_jantou_fu(
 
         if Dragon::is_tile_type(tile).is_some() {
             details.push(FuDetail {
-                name: "三元牌雀頭",
+                name: "Dragon pair",
                 fu: 2,
             });
         }
 
         if Wind::is_tile_type(tile) == Some(status.seat_wind) {
             details.push(FuDetail {
-                name: "自風牌雀頭",
+                name: "Seat-wind pair",
                 fu: 2,
             });
         }
 
         if Wind::is_tile_type(tile) == Some(status.round_wind) {
             details.push(FuDetail {
-                name: "場風牌雀頭",
+                name: "Round-wind pair",
                 fu: 2,
             });
         }
@@ -309,7 +309,7 @@ fn calculate_machi_fu(
         match analyzer.winning_tile_placement {
             Some(WinningTilePlacement::Pair) => {
                 details.push(FuDetail {
-                    name: "単騎待ち",
+                    name: "Single wait",
                     fu: 2,
                 });
                 return Ok(());
@@ -326,7 +326,7 @@ fn calculate_machi_fu(
         for head in &analyzer.same2 {
             if head.get()[0] == wt {
                 details.push(FuDetail {
-                    name: "単騎待ち",
+                    name: "Single wait",
                     fu: 2,
                 });
                 return Ok(());
@@ -354,7 +354,7 @@ fn add_sequence_wait_fu(
     // Closed wait (kanchan / 嵌張): won on the middle tile.
     if winning_tile == tiles[1] {
         details.push(FuDetail {
-            name: "嵌張待ち",
+            name: "Closed wait",
             fu: 2,
         });
         return true;
@@ -365,7 +365,7 @@ fn add_sequence_wait_fu(
         || (winning_tile == tiles[0] && suit_rank(tiles[0]) == Some(7))
     {
         details.push(FuDetail {
-            name: "辺張待ち",
+            name: "Edge wait",
             fu: 2,
         });
         return true;
@@ -384,7 +384,7 @@ fn calculate_tsumo_fu(
     // breakdown afterwards, so no exception is needed.
     if status.is_self_drawn {
         details.push(FuDetail {
-            name: "自摸",
+            name: "Tsumo",
             fu: 2,
         });
     }
@@ -396,7 +396,7 @@ fn calculate_tsumo_fu(
 fn calculate_menzen_ron_fu(status: &Status, details: &mut Vec<FuDetail>) -> Result<()> {
     if !status.has_claimed_open && !status.is_self_drawn {
         details.push(FuDetail {
-            name: "門前加符",
+            name: "Closed ron",
             fu: 10,
         });
     }

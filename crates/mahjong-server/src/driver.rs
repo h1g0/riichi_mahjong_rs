@@ -646,7 +646,7 @@ mod tests {
             seen.insert(dealer);
         }
         // Odds of one dealer in 64 runs are (1/4)^63: effectively zero.
-        assert!(seen.len() > 1, "起家がランダム化されていない");
+        assert!(seen.len() > 1, "starting dealer was not randomized");
     }
 
     /// Seeded starts keep the dealer at seat 0 for reproducibility.
@@ -667,7 +667,7 @@ mod tests {
             events
                 .iter()
                 .any(|e| matches!(e, ServerEvent::GameStarted { .. })),
-            "GameStartedイベントが人間座席に届いていない"
+            "GameStarted event was not delivered to the human seat"
         );
 
         // Pure CPU seats never buffer.
@@ -747,10 +747,10 @@ mod tests {
             }
         }
 
-        assert!(driver.is_round_over(), "局が終了しなかった");
+        assert!(driver.is_round_over(), "round did not end");
 
         let round = driver.table().current_round().unwrap();
-        assert!(round.result.is_some(), "局結果が設定されていない");
+        assert!(round.result.is_some(), "round result was not set");
     }
 
     /// A shadow CPU receives events but never acts.
@@ -775,7 +775,7 @@ mod tests {
             events
                 .iter()
                 .any(|e| matches!(e, ServerEvent::TileDrawn { .. })),
-            "シャドーCPU座席にTileDrawnが届いていない"
+            "TileDrawn event was not delivered to the shadow CPU seat"
         );
     }
 
@@ -798,7 +798,10 @@ mod tests {
         assert!(driver.force_default_action(0));
         driver.run_until_blocked();
 
-        assert!(driver.is_round_over(), "代打ち後に局が進行しなかった");
+        assert!(
+            driver.is_round_over(),
+            "round did not progress after the substitute CPU took over"
+        );
     }
 
     /// Shadow seats must keep buffering during substitution, so the room
@@ -830,12 +833,12 @@ mod tests {
         let events = driver.drain_events(0);
         assert!(
             !events.is_empty(),
-            "代打ち中のシャドーCPU席にイベントが記録されていない"
+            "no event was recorded for the shadow CPU seat during substitution"
         );
 
         assert!(
             driver.drain_events(1).is_empty(),
-            "純粋なCPU席にイベントがバッファされている"
+            "events were buffered for a CPU-only seat"
         );
     }
 
@@ -848,7 +851,10 @@ mod tests {
         let round = driver.table().current_round().unwrap();
         assert_eq!(round.current_player, 0);
         assert_eq!(round.phase, TurnPhase::WaitForDiscard);
-        assert!(!driver.needs_tick(), "人間の打牌待ちでは tick 不要");
+        assert!(
+            !driver.needs_tick(),
+            "a tick should not be needed while waiting for a human discard"
+        );
 
         driver.handle_action(0, ClientAction::Discard { tile: None });
         // Immediate mode races through the CPUs, so use a paced driver
@@ -862,9 +868,15 @@ mod tests {
             }
             paced.tick_at(0.0);
         }
-        assert!(!paced.needs_tick(), "人間の打牌待ちで停止するはず");
+        assert!(
+            !paced.needs_tick(),
+            "the driver should stop while waiting for a human discard"
+        );
         paced.handle_action_at(0, ClientAction::Discard { tile: None }, 0.0);
-        assert!(paced.needs_tick(), "打牌後は CPU 進行のため tick が必要");
+        assert!(
+            paced.needs_tick(),
+            "a tick should be needed for CPU progression after the discard"
+        );
     }
 
     #[test]
@@ -959,7 +971,11 @@ mod tests {
 
         assert!(driver.force_default_action(0));
         let round = driver.table().current_round().unwrap();
-        assert_eq!(round.players[0].discards.len(), 1, "既定打牌が空振りした");
+        assert_eq!(
+            round.players[0].discards.len(),
+            1,
+            "default discard had no effect"
+        );
         // Skips the forbidden 3p and discards the next-from-last 2p.
         assert_eq!(round.players[0].discards[0].tile.get(), Tile::P2);
     }
@@ -991,7 +1007,7 @@ mod tests {
         assert_eq!(
             round.players[1].discards.len(),
             1,
-            "却下されたCPUアクションがフォールバックされず局が停止している"
+            "a rejected CPU action did not fall back and stalled the round"
         );
     }
 
@@ -1035,19 +1051,22 @@ mod tests {
                 tile_index: Tile::M1 as usize,
             },
         );
-        assert!(kan_result, "カンが失敗した");
+        assert!(kan_result, "quad declaration failed");
 
         {
             let round = driver.table().current_round().unwrap();
             assert_eq!(
                 round.phase,
                 TurnPhase::WaitForDiscard,
-                "カン後のフェーズがWaitForDiscardでない"
+                "phase after the quad is not WaitForDiscard"
             );
-            assert_eq!(round.current_player, 0, "カン後の現在プレイヤーが0でない");
+            assert_eq!(
+                round.current_player, 0,
+                "current player after the quad is not player 0"
+            );
             assert!(
                 round.players[0].hand.drawn().is_some(),
-                "カン後に嶺上牌が設定されていない"
+                "replacement tile was not set after the quad"
             );
         }
 
@@ -1057,7 +1076,7 @@ mod tests {
             .any(|e| matches!(e, ServerEvent::TileDrawn { .. }));
         assert!(
             has_tile_drawn,
-            "カン後にTileDrawnイベントが来なかった: {:?}",
+            "TileDrawn event did not arrive after the quad: {:?}",
             events
                 .iter()
                 .map(std::mem::discriminant)
@@ -1065,7 +1084,7 @@ mod tests {
         );
 
         let discard_result = driver.handle_action(0, ClientAction::Discard { tile: None });
-        assert!(discard_result, "カン後の打牌が失敗した");
+        assert!(discard_result, "discard after the quad failed");
     }
 
     #[test]
@@ -1096,7 +1115,7 @@ mod tests {
             phase == TurnPhase::WaitForDiscard
                 || phase == TurnPhase::Draw
                 || phase == TurnPhase::WaitForCalls,
-            "CPUカン後にゲームが詰まった: フェーズ = {:?}",
+            "game stalled after a CPU quad: phase = {:?}",
             phase
         );
 
@@ -1147,7 +1166,7 @@ mod tests {
                 events
                     .iter()
                     .any(|e| matches!(e, ServerEvent::GameStarted { .. })),
-                "座席{}にGameStartedが届いていない",
+                "seat {} did not receive GameStarted",
                 seat
             );
         }
@@ -1327,7 +1346,7 @@ mod tests {
             per_seat[0]
                 .iter()
                 .any(|e| matches!(e, ServerEvent::CallAvailable { .. })),
-            "座席0にCallAvailableが同一フラッシュで届いていない: {:?}",
+            "seat 0 did not receive CallAvailable in the same flush: {:?}",
             per_seat[0]
         );
     }

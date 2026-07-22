@@ -51,11 +51,14 @@ async fn start_server(config: RoomConfig) -> SocketAddr {
 /// 1000 x the remaining deposits.
 fn assert_scores_consistent(scores: [i32; 4]) {
     let sum: i32 = scores.iter().sum();
-    assert!(sum <= 25000 * 4, "総和が初期点数を超えている: {scores:?}");
+    assert!(
+        sum <= 25000 * 4,
+        "score total exceeds the initial points: {scores:?}"
+    );
     assert_eq!(
         (25000 * 4 - sum) % 1000,
         0,
-        "総和の差が供託単位でない: {scores:?}"
+        "score-total difference is not a multiple of the deposit value: {scores:?}"
     );
 }
 
@@ -106,16 +109,16 @@ impl TestClient {
         loop {
             let frame = tokio::time::timeout(Duration::from_secs(30), self.ws.next())
                 .await
-                .expect("受信がタイムアウトした")
-                .expect("接続が閉じられた")
-                .expect("WebSocketエラー");
+                .expect("receive timed out")
+                .expect("connection closed")
+                .expect("WebSocket error");
             match frame {
                 Message::Text(text) => {
-                    return ServerMessage::from_json(text.as_str()).expect("不正なJSON");
+                    return ServerMessage::from_json(text.as_str()).expect("invalid JSON");
                 }
                 Message::Ping(_) | Message::Pong(_) => continue,
-                Message::Close(_) => panic!("接続が閉じられた"),
-                other => panic!("予期しないフレーム: {other:?}"),
+                Message::Close(_) => panic!("connection closed"),
+                other => panic!("unexpected frame: {other:?}"),
             }
         }
     }
@@ -127,7 +130,7 @@ impl TestClient {
                 return code;
             }
         }
-        panic!("Errorメッセージが届かなかった");
+        panic!("Error message did not arrive");
     }
 
     /// Sends Hello and returns Welcome's session token.
@@ -145,7 +148,7 @@ impl TestClient {
         .await;
         match self.recv().await {
             ServerMessage::Welcome { session_token, .. } => session_token,
-            other => panic!("Welcomeでないメッセージ: {other:?}"),
+            other => panic!("expected Welcome message, got {other:?}"),
         }
     }
 
@@ -158,7 +161,7 @@ impl TestClient {
         .await;
         match self.recv().await {
             ServerMessage::RoomState { code, .. } => code,
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
     }
 
@@ -176,11 +179,11 @@ impl TestClient {
             ServerMessage::RoomState { code, rules, .. } => {
                 assert!(
                     rules.three_player,
-                    "三麻ルームの RoomState に three_player が立っていない"
+                    "three_player is not set in a three-player room's RoomState"
                 );
                 code
             }
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
     }
 
@@ -199,7 +202,7 @@ impl TestClient {
             };
             match frame {
                 Message::Text(text) => {
-                    batch.push(ServerMessage::from_json(text.as_str()).expect("不正なJSON"));
+                    batch.push(ServerMessage::from_json(text.as_str()).expect("invalid JSON"));
                 }
                 Message::Ping(_) | Message::Pong(_) => continue,
                 _ => break,
@@ -264,7 +267,7 @@ impl TestClient {
                         // harmless for a tsumogiri bot.
                     }
                     ServerMessage::Error { code, message } => {
-                        panic!("予期しないエラー: {code:?} {message}");
+                        panic!("unexpected error: {code:?} {message}");
                     }
                     _ => {}
                 }
@@ -280,18 +283,18 @@ async fn test_full_game_with_two_humans() {
         let addr = start_server(fast_config()).await;
 
         let mut host = TestClient::connect(addr).await;
-        host.hello("ホスト").await;
+        host.hello("Host").await;
         let code = host.create_room().await;
 
         let mut guest = TestClient::connect(addr).await;
-        guest.hello("ゲスト").await;
+        guest.hello("Guest").await;
         guest
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
 
         match guest.recv().await {
             ServerMessage::RoomState { your_seat, .. } => assert_eq!(your_seat, 1),
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
         match host.recv().await {
             ServerMessage::RoomState { seats, .. } => {
@@ -300,7 +303,7 @@ async fn test_full_game_with_two_humans() {
                     mahjong_server::protocol::net::SeatInfo::Human { .. }
                 ));
             }
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
 
         host.send(&ClientMessage::StartGame { cpu_configs: None })
@@ -316,7 +319,7 @@ async fn test_full_game_with_two_humans() {
         assert_scores_consistent(host_scores);
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }
 
 /// The auto-advance must reach GameOver even when nobody sends
@@ -327,7 +330,7 @@ async fn test_ready_timeout_auto_advances() {
         let addr = start_server(fast_config()).await;
 
         let mut host = TestClient::connect(addr).await;
-        host.hello("ホスト").await;
+        host.hello("Host").await;
         host.create_room().await;
         host.send(&ClientMessage::StartGame { cpu_configs: None })
             .await;
@@ -336,7 +339,7 @@ async fn test_ready_timeout_auto_advances() {
         assert_scores_consistent(scores);
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }
 
 /// The host's CPU configs must reach the seats.
@@ -348,7 +351,7 @@ async fn test_host_chosen_cpu_configs_apply() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let addr = start_server(fast_config()).await;
         let mut host = TestClient::connect(addr).await;
-        host.hello("ホスト").await;
+        host.hello("Host").await;
         host.create_room().await;
 
         let specs = [
@@ -389,12 +392,12 @@ async fn test_host_chosen_cpu_configs_apply() {
                 .count();
             assert_eq!(
                 count, 1,
-                "指定したCPU構成 {spec:?} がCPU席にちょうど1つ存在するべき"
+                "exactly one CPU seat should have the requested configuration {spec:?}"
             );
         }
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }
 
 /// The host's SetCpuConfigs must reach everyone's RoomState (#245).
@@ -406,11 +409,11 @@ async fn test_set_cpu_configs_shared_in_lobby() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let addr = start_server(fast_config()).await;
         let mut host = TestClient::connect(addr).await;
-        host.hello("ホスト").await;
+        host.hello("Host").await;
         let code = host.create_room().await;
 
         let mut guest = TestClient::connect(addr).await;
-        guest.hello("ゲスト").await;
+        guest.hello("Guest").await;
         guest
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
@@ -419,10 +422,10 @@ async fn test_set_cpu_configs_shared_in_lobby() {
             ServerMessage::RoomState { cpu_configs, .. } => {
                 assert!(
                     cpu_configs.is_some(),
-                    "ロビーの RoomState はCPU設定を含むべき"
+                    "lobby RoomState should include the CPU configuration"
                 );
             }
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
         host.recv().await;
 
@@ -460,12 +463,12 @@ async fn test_set_cpu_configs_shared_in_lobby() {
                     // them.
                     assert!(matches!(seats[2], SeatInfo::Empty));
                 }
-                other => panic!("RoomStateでないメッセージ: {other:?}"),
+                other => panic!("expected RoomState message, got {other:?}"),
             }
         }
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }
 
 /// A protocol-version mismatch errors with VersionMismatch.
@@ -477,7 +480,7 @@ async fn test_version_mismatch() {
         .send(&ClientMessage::Hello {
             protocol_version: PROTOCOL_VERSION + 1,
             session_token: None,
-            display_name: "古いクライアント".to_string(),
+            display_name: "Old Client".to_string(),
         })
         .await;
     assert_eq!(client.recv_error().await, ErrorCode::VersionMismatch);
@@ -499,7 +502,7 @@ async fn test_message_before_hello() {
 async fn test_join_unknown_room() {
     let addr = start_server(fast_config()).await;
     let mut client = TestClient::connect(addr).await;
-    client.hello("迷子").await;
+    client.hello("Lost Client").await;
     client
         .send(&ClientMessage::JoinRoom {
             code: "ZZZZZZ".to_string(),
@@ -514,25 +517,25 @@ async fn test_room_full() {
     let addr = start_server(fast_config()).await;
 
     let mut host = TestClient::connect(addr).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_room().await;
 
     let mut guests = Vec::new();
     for i in 0..3 {
         let mut guest = TestClient::connect(addr).await;
-        guest.hello(&format!("ゲスト{i}")).await;
+        guest.hello(&format!("Guest {i}")).await;
         guest
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
         match guest.recv().await {
             ServerMessage::RoomState { .. } => {}
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
         guests.push(guest);
     }
 
     let mut fifth = TestClient::connect(addr).await;
-    fifth.hello("5人目").await;
+    fifth.hello("Fifth Player").await;
     fifth
         .send(&ClientMessage::JoinRoom { code: code.clone() })
         .await;
@@ -545,25 +548,25 @@ async fn test_sanma_room_full_at_three() {
     let addr = start_server(fast_config()).await;
 
     let mut host = TestClient::connect(addr).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_sanma_room().await;
 
     let mut guests = Vec::new();
     for i in 0..2 {
         let mut guest = TestClient::connect(addr).await;
-        guest.hello(&format!("ゲスト{i}")).await;
+        guest.hello(&format!("Guest {i}")).await;
         guest
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
         match guest.recv().await {
             ServerMessage::RoomState { your_seat, .. } => assert_eq!(your_seat, i + 1),
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
         guests.push(guest);
     }
 
     let mut fourth = TestClient::connect(addr).await;
-    fourth.hello("4人目").await;
+    fourth.hello("Fourth Player").await;
     fourth
         .send(&ClientMessage::JoinRoom { code: code.clone() })
         .await;
@@ -578,21 +581,21 @@ async fn test_sanma_full_game_with_two_humans() {
         let addr = start_server(fast_config()).await;
 
         let mut host = TestClient::connect(addr).await;
-        host.hello("ホスト").await;
+        host.hello("Host").await;
         let code = host.create_sanma_room().await;
 
         let mut guest = TestClient::connect(addr).await;
-        guest.hello("ゲスト").await;
+        guest.hello("Guest").await;
         guest
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
         match guest.recv().await {
             ServerMessage::RoomState { your_seat, .. } => assert_eq!(your_seat, 1),
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
         match host.recv().await {
             ServerMessage::RoomState { .. } => {}
-            other => panic!("RoomStateでないメッセージ: {other:?}"),
+            other => panic!("expected RoomState message, got {other:?}"),
         }
 
         host.send(&ClientMessage::StartGame { cpu_configs: None })
@@ -605,21 +608,24 @@ async fn test_sanma_full_game_with_two_humans() {
 
         assert_eq!(host_scores, guest_scores);
         // The dummy seat's score stays 0.
-        assert_eq!(host_scores[3], 0, "三麻でシート3に点数が入っている");
+        assert_eq!(
+            host_scores[3], 0,
+            "seat 3 has points in a three-player game"
+        );
         // The total is at most 35000 x 3, short only by whole deposits.
         let sum: i32 = host_scores.iter().sum();
         assert!(
             sum <= 35000 * 3,
-            "総和が初期点数を超えている: {host_scores:?}"
+            "score total exceeds the initial points: {host_scores:?}"
         );
         assert_eq!(
             (35000 * 3 - sum) % 1000,
             0,
-            "総和の差が供託単位でない: {host_scores:?}"
+            "score-total difference is not a multiple of the deposit value: {host_scores:?}"
         );
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }
 
 /// StartGame from a non-host errors with NotHost.
@@ -628,11 +634,11 @@ async fn test_non_host_cannot_start() {
     let addr = start_server(fast_config()).await;
 
     let mut host = TestClient::connect(addr).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_room().await;
 
     let mut guest = TestClient::connect(addr).await;
-    guest.hello("ゲスト").await;
+    guest.hello("Guest").await;
     guest
         .send(&ClientMessage::JoinRoom { code: code.clone() })
         .await;
@@ -648,11 +654,11 @@ async fn test_out_of_turn_action_rejected() {
     let addr = start_server(fast_config()).await;
 
     let mut host = TestClient::connect(addr).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_room().await;
 
     let mut guest = TestClient::connect(addr).await;
-    guest.hello("ゲスト").await;
+    guest.hello("Guest").await;
     guest
         .send(&ClientMessage::JoinRoom { code: code.clone() })
         .await;
@@ -696,13 +702,13 @@ async fn test_join_after_start_rejected() {
     let addr = start_server(fast_config()).await;
 
     let mut host = TestClient::connect(addr).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_room().await;
     host.send(&ClientMessage::StartGame { cpu_configs: None })
         .await;
 
     let mut late = TestClient::connect(addr).await;
-    late.hello("遅刻").await;
+    late.hello("Late Player").await;
     late.send(&ClientMessage::JoinRoom { code: code.clone() })
         .await;
     assert_eq!(late.recv_error().await, ErrorCode::GameInProgress);
@@ -718,13 +724,13 @@ async fn test_lobby_room_expires() {
     let addr = start_server(config).await;
 
     let mut host = TestClient::connect(addr).await;
-    host.hello("ホスト").await;
+    host.hello("Host").await;
     let code = host.create_room().await;
 
     tokio::time::sleep(Duration::from_millis(600)).await;
 
     let mut guest = TestClient::connect(addr).await;
-    guest.hello("ゲスト").await;
+    guest.hello("Guest").await;
     guest
         .send(&ClientMessage::JoinRoom { code: code.clone() })
         .await;
@@ -739,11 +745,11 @@ async fn test_disconnect_mid_game_cpu_takes_over() {
         let addr = start_server(fast_config()).await;
 
         let mut host = TestClient::connect(addr).await;
-        host.hello("ホスト").await;
+        host.hello("Host").await;
         let code = host.create_room().await;
 
         let mut guest = TestClient::connect(addr).await;
-        guest.hello("ゲスト").await;
+        guest.hello("Guest").await;
         guest
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
@@ -765,7 +771,7 @@ async fn test_disconnect_mid_game_cpu_takes_over() {
         assert_scores_consistent(scores);
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }
 
 /// The game must finish despite an AFK player, via the turn timeout.
@@ -779,7 +785,7 @@ async fn test_action_timeout_auto_acts() {
         let addr = start_server(config).await;
 
         let mut host = TestClient::connect(addr).await;
-        host.hello("AFKホスト").await;
+        host.hello("AFK Host").await;
         host.create_room().await;
         host.send(&ClientMessage::StartGame { cpu_configs: None })
             .await;
@@ -800,10 +806,10 @@ async fn test_action_timeout_auto_acts() {
                 _ => {}
             }
         }
-        assert!(saw_turn_timer, "TurnTimer が一度も届かなかった");
+        assert!(saw_turn_timer, "TurnTimer never arrived");
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }
 
 /// Spamming invalid actions must not extend the turn timer.
@@ -821,7 +827,7 @@ async fn test_action_timeout_not_extended_by_invalid_actions() {
         let addr = start_server(config).await;
 
         let mut host = TestClient::connect(addr).await;
-        host.hello("ホスト").await;
+        host.hello("Host").await;
         host.create_room().await;
         host.send(&ClientMessage::StartGame { cpu_configs: None })
             .await;
@@ -838,7 +844,7 @@ async fn test_action_timeout_not_extended_by_invalid_actions() {
         loop {
             assert!(
                 start.elapsed() < Duration::from_secs(5),
-                "制限時間が延長され続けてタイムアウトしなかった"
+                "the deadline kept being extended and never timed out"
             );
             host.send(&ClientMessage::Action(ClientAction::Ron)).await;
             let deadline = tokio::time::sleep(Duration::from_millis(100));
@@ -861,7 +867,7 @@ async fn test_action_timeout_not_extended_by_invalid_actions() {
         }
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }
 
 /// Too many join attempts from one IP get RateLimited.
@@ -869,7 +875,7 @@ async fn test_action_timeout_not_extended_by_invalid_actions() {
 async fn test_join_rate_limit() {
     let addr = start_server(fast_config()).await;
     let mut client = TestClient::connect(addr).await;
-    client.hello("スパマー").await;
+    client.hello("Spammer").await;
 
     // Up to the cap (10), a missing room answers RoomNotFound.
     for _ in 0..10 {
@@ -908,11 +914,11 @@ async fn test_reconnect_resyncs_and_resumes() {
         let addr = start_server(config).await;
 
         let mut host = TestClient::connect(addr).await;
-        host.hello("ホスト").await;
+        host.hello("Host").await;
         let code = host.create_room().await;
 
         let mut guest = TestClient::connect(addr).await;
-        let guest_token = guest.hello("ゲスト").await;
+        let guest_token = guest.hello("Guest").await;
         guest
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
@@ -937,7 +943,7 @@ async fn test_reconnect_resyncs_and_resumes() {
             tokio::time::sleep(Duration::from_millis(300)).await;
 
             let mut rejoin = TestClient::connect(addr).await;
-            rejoin.hello_with_token("ゲスト", Some(guest_token)).await;
+            rejoin.hello_with_token("Guest", Some(guest_token)).await;
             rejoin
                 .send(&ClientMessage::JoinRoom { code: code.clone() })
                 .await;
@@ -948,7 +954,10 @@ async fn test_reconnect_resyncs_and_resumes() {
             for _ in 0..100 {
                 match rejoin.recv().await {
                     ServerMessage::RoomState { your_seat, .. } => {
-                        assert_eq!(your_seat, 1, "再入室の座席が元と違う");
+                        assert_eq!(
+                            your_seat, 1,
+                            "the rejoined client received a different seat"
+                        );
                         saw_room_state = true;
                     }
                     ServerMessage::Resync { events } => {
@@ -958,8 +967,8 @@ async fn test_reconnect_resyncs_and_resumes() {
                     _ => {}
                 }
             }
-            assert!(saw_room_state, "再入室で RoomState が届かなかった");
-            let events = resync_events.expect("Resync が届かなかった");
+            assert!(saw_room_state, "RoomState did not arrive after rejoining");
+            let events = resync_events.expect("Resync did not arrive");
             // The replay starts at the current hand's GameStarted;
             // histories reset per hand.
             assert_eq!(
@@ -968,7 +977,7 @@ async fn test_reconnect_resyncs_and_resumes() {
                     .filter(|e| matches!(e, ServerEvent::GameStarted { .. }))
                     .count(),
                 1,
-                "Resync に GameStarted がちょうど1つ含まれるべき"
+                "Resync should contain exactly one GameStarted event"
             );
 
             // Verification done, disconnect again without acting; the
@@ -980,7 +989,7 @@ async fn test_reconnect_resyncs_and_resumes() {
         assert_scores_consistent(scores);
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }
 
 /// A stale disconnect notice from an old connection must not disconnect
@@ -992,11 +1001,11 @@ async fn test_reconnect_keeps_seat_connected() {
         let addr = start_server(fast_config()).await;
 
         let mut host = TestClient::connect(addr).await;
-        host.hello("ホスト").await;
+        host.hello("Host").await;
         let code = host.create_room().await;
 
         let mut guest = TestClient::connect(addr).await;
-        let guest_token = guest.hello("ゲスト").await;
+        let guest_token = guest.hello("Guest").await;
         guest
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
@@ -1012,7 +1021,7 @@ async fn test_reconnect_keeps_seat_connected() {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let mut rejoin = TestClient::connect(addr).await;
-        rejoin.hello_with_token("ゲスト", Some(guest_token)).await;
+        rejoin.hello_with_token("Guest", Some(guest_token)).await;
         rejoin
             .send(&ClientMessage::JoinRoom { code: code.clone() })
             .await;
@@ -1035,8 +1044,11 @@ async fn test_reconnect_keeps_seat_connected() {
                 break;
             }
         }
-        assert!(saw_reconnect, "ホストに再接続通知が届かなかった");
+        assert!(
+            saw_reconnect,
+            "the host did not receive a reconnection notification"
+        );
     })
     .await
-    .expect("テスト全体がタイムアウトした");
+    .expect("test timed out");
 }

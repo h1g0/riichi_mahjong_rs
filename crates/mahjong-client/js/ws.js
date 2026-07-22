@@ -55,11 +55,11 @@ function mahjong_ws_connect(url_ptr, url_len) {
             }
         };
         ws.onerror = (event) => {
-            console.error("mahjong_ws: WebSocketエラー", event);
+            console.error("mahjong_ws: WebSocket error", event);
             entry.status = MAHJONG_WS_ERROR;
         };
     } catch (err) {
-        console.error("mahjong_ws: 接続に失敗しました", err);
+        console.error("mahjong_ws: connection failed", err);
         entry.status = MAHJONG_WS_ERROR;
     }
 
@@ -82,7 +82,7 @@ function mahjong_ws_send(handle, ptr, len) {
         entry.ws.send(mahjong_ws.read_str(ptr, len));
         return 0;
     } catch (err) {
-        console.error("mahjong_ws: 送信に失敗しました", err);
+        console.error("mahjong_ws: send failed", err);
         entry.status = MAHJONG_WS_ERROR;
         return -1;
     }
@@ -141,7 +141,7 @@ function mahjong_ws_default_url(buf_ptr, cap) {
     }
     const bytes = mahjong_ws.encoder.encode(url);
     if (bytes.length > cap) {
-        console.error("mahjong_ws: MAHJONG_SERVER_URL が長すぎます");
+        console.error("mahjong_ws: MAHJONG_SERVER_URL is too long");
         return 0;
     }
     new Uint8Array(wasm_memory.buffer, buf_ptr, bytes.length).set(bytes);

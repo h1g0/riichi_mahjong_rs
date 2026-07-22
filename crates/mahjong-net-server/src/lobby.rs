@@ -126,7 +126,7 @@ mod tests {
             assert_eq!(code.len(), CODE_LEN);
             assert!(
                 code.bytes().all(|b| CODE_ALPHABET.contains(&b)),
-                "コードに不正な文字が含まれる: {code}"
+                "room code contains an invalid character: {code}"
             );
             // No confusable characters.
             assert!(!code.contains(['0', 'O', '1', 'I']));

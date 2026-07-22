@@ -677,9 +677,9 @@ mod tests {
     fn build_test(transport: Box<dyn Transport>, intent: LobbyIntent) -> RemoteAdapter {
         RemoteAdapter::build(
             transport,
-            Box::new(|_| panic!("このテストでは再接続を想定していません")),
+            Box::new(|_| panic!("this test does not expect a reconnection attempt")),
             Box::new(|| 0.0),
-            "テスト",
+            "Test",
             intent,
         )
     }
@@ -708,7 +708,7 @@ mod tests {
             code: "ABC234".to_string(),
             seats: [
                 SeatInfo::Human {
-                    name: "ホスト".to_string(),
+                    name: "Host".to_string(),
                     connected: true,
                 },
                 SeatInfo::Empty,
@@ -756,9 +756,9 @@ mod tests {
                 ..
             } => {
                 assert_eq!(*protocol_version, PROTOCOL_VERSION);
-                assert_eq!(display_name, "テスト");
+                assert_eq!(display_name, "Test");
             }
-            other => panic!("Helloでないメッセージ: {other:?}"),
+            other => panic!("expected Hello message, got {other:?}"),
         }
 
         handle.push_msg(&welcome());
@@ -772,7 +772,7 @@ mod tests {
                 assert_eq!(*length, GameLength::EastOnly);
                 assert_eq!(*rules, Settings::new());
             }
-            other => panic!("CreateRoomでないメッセージ: {other:?}"),
+            other => panic!("expected CreateRoom message, got {other:?}"),
         }
     }
 
@@ -796,14 +796,14 @@ mod tests {
         let sent = handle.sent();
         match &sent[1] {
             ClientMessage::CreateRoom { length, .. } => assert_eq!(*length, GameLength::Hanchan),
-            other => panic!("CreateRoomでないメッセージ: {other:?}"),
+            other => panic!("expected CreateRoom message, got {other:?}"),
         }
 
         let msg = ServerMessage::RoomState {
             code: "ABC234".to_string(),
             seats: [
                 SeatInfo::Human {
-                    name: "ホスト".to_string(),
+                    name: "Host".to_string(),
                     connected: true,
                 },
                 SeatInfo::Empty,
@@ -819,7 +819,7 @@ mod tests {
         handle.push_msg(&msg);
         adapter.tick();
 
-        let room = adapter.room().expect("入室しているはず");
+        let room = adapter.room().expect("adapter should be in a room");
         assert_eq!(room.length, GameLength::Hanchan);
         assert!(!room.three_player());
     }
@@ -841,7 +841,7 @@ mod tests {
         let sent = handle.sent();
         match &sent[1] {
             ClientMessage::JoinRoom { code } => assert_eq!(code, "ABC234"),
-            other => panic!("JoinRoomでないメッセージ: {other:?}"),
+            other => panic!("expected JoinRoom message, got {other:?}"),
         }
     }
 
@@ -853,7 +853,7 @@ mod tests {
         handle.push_msg(&room_state(0));
         adapter.tick();
 
-        let room = adapter.room().expect("ルーム情報が無い");
+        let room = adapter.room().expect("room information is missing");
         assert_eq!(room.code, "ABC234");
         assert_eq!(room.your_seat, 0);
         assert!(room.is_host());
@@ -892,7 +892,7 @@ mod tests {
             code: "ABC234".to_string(),
             seats: [
                 SeatInfo::Human {
-                    name: "ホスト".to_string(),
+                    name: "Host".to_string(),
                     connected: true,
                 },
                 SeatInfo::Empty,
@@ -908,7 +908,7 @@ mod tests {
         handle.push_msg(&msg);
         adapter.tick();
 
-        let room = adapter.room().expect("入室しているはず");
+        let room = adapter.room().expect("adapter should be in a room");
         assert_eq!(room.cpu_configs, Some(specs));
     }
 
@@ -936,7 +936,7 @@ mod tests {
         });
         adapter.tick();
 
-        let err = adapter.take_error().expect("エラーが記録されていない");
+        let err = adapter.take_error().expect("error was not recorded");
         assert_eq!(err.code, Some(ErrorCode::RoomNotFound));
         assert!(adapter.take_error().is_none());
     }
@@ -969,7 +969,7 @@ mod tests {
     #[test]
     fn test_transport_error_disconnects() {
         let (mut adapter, handle) = create_adapter();
-        handle.push(WsEvent::Error("接続に失敗しました".to_string()));
+        handle.push(WsEvent::Error("connection failed".to_string()));
         adapter.tick();
 
         assert_eq!(adapter.status(), ConnStatus::Disconnected);
@@ -1032,7 +1032,7 @@ mod tests {
     /// Start the server first with `cargo run -p mahjong-net-server`:
     /// `cargo test -p mahjong-client -- --ignored e2e`
     #[test]
-    #[ignore = "要ローカルサーバ (cargo run -p mahjong-net-server)"]
+    #[ignore = "requires a local server (cargo run -p mahjong-net-server)"]
     fn test_e2e_full_game_against_local_server() {
         let url = crate::transport::default_server_url();
         // The production clock needs a macroquad window; headless E2E
@@ -1044,7 +1044,7 @@ mod tests {
             transport,
             connector,
             Box::new(move || clock_start.elapsed().as_secs_f64()),
-            "E2Eテスト",
+            "E2E Test",
             LobbyIntent::Create {
                 length: GameLength::EastOnly,
                 rules: Settings::new(),
@@ -1061,18 +1061,18 @@ mod tests {
         loop {
             assert!(
                 start.elapsed() < std::time::Duration::from_secs(120),
-                "E2Eテストがタイムアウトした"
+                "E2E test timed out"
             );
             std::thread::sleep(std::time::Duration::from_millis(5));
 
             adapter.tick();
             if let Some(err) = adapter.take_error() {
-                panic!("サーバエラー: {:?} {}", err.code, err.message);
+                panic!("server error: {:?} {}", err.code, err.message);
             }
             assert_ne!(
                 adapter.status(),
                 ConnStatus::Disconnected,
-                "サーバから切断された"
+                "disconnected from the server"
             );
             if adapter.is_game_over() {
                 break;
@@ -1177,7 +1177,9 @@ mod tests {
         let record = calls.clone();
         let connector = Box::new(move |room: Option<&str>| {
             record.borrow_mut().push(room.map(String::from));
-            queue.pop_front().expect("コネクタが想定より多く呼ばれた")
+            queue
+                .pop_front()
+                .expect("connector was called more times than expected")
         });
         (connector, calls)
     }
@@ -1195,7 +1197,7 @@ mod tests {
             t1,
             connector,
             Box::new(move || *now_clock.borrow()),
-            "テスト",
+            "Test",
             LobbyIntent::Join {
                 code: "ABC234".to_string(),
             },
@@ -1279,7 +1281,7 @@ mod tests {
             t1,
             connector,
             Box::new(move || *now_clock.borrow()),
-            "テスト",
+            "Test",
             LobbyIntent::Join {
                 code: "ABC234".to_string(),
             },
@@ -1338,7 +1340,7 @@ mod tests {
             t1,
             connector,
             Box::new(move || *now_clock.borrow()),
-            "テスト",
+            "Test",
             LobbyIntent::Join {
                 code: "ABC234".to_string(),
             },
@@ -1384,7 +1386,7 @@ mod tests {
             t1,
             connector,
             Box::new(move || *now_clock.borrow()),
-            "テスト",
+            "Test",
             LobbyIntent::Join {
                 code: "ABC234".to_string(),
             },
@@ -1415,7 +1417,7 @@ mod tests {
             adapter.status_text(Lang::Ja).as_deref(),
             Some("ルームが見つかりません")
         );
-        let err = adapter.take_error().expect("エラーが記録されていない");
+        let err = adapter.take_error().expect("error was not recorded");
         assert_eq!(err.code, Some(ErrorCode::RoomNotFound));
     }
 
@@ -1432,7 +1434,7 @@ mod tests {
             t1,
             connector,
             Box::new(move || *now_clock.borrow()),
-            "テスト",
+            "Test",
             LobbyIntent::Join {
                 code: "ABC234".to_string(),
             },
@@ -1515,9 +1517,9 @@ mod tests {
         let now_clock = now.clone();
         let mut adapter = RemoteAdapter::build(
             transport,
-            Box::new(|_| panic!("再接続なし")),
+            Box::new(|_| panic!("unexpected reconnection attempt")),
             Box::new(move || *now_clock.borrow()),
-            "テスト",
+            "Test",
             LobbyIntent::Create {
                 length: GameLength::EastOnly,
                 rules: Settings::new(),
@@ -1543,9 +1545,9 @@ mod tests {
         let now_clock = now.clone();
         let mut adapter = RemoteAdapter::build(
             transport,
-            Box::new(|_| panic!("再接続なし")),
+            Box::new(|_| panic!("unexpected reconnection attempt")),
             Box::new(move || *now_clock.borrow()),
-            "テスト",
+            "Test",
             LobbyIntent::Create {
                 length: GameLength::EastOnly,
                 rules: Settings::new(),
@@ -1567,7 +1569,7 @@ mod tests {
         handle.push_msg(&room_state(0));
         adapter.tick();
 
-        handle.push(WsEvent::Error("接続失敗".to_string()));
+        handle.push(WsEvent::Error("connection failed".to_string()));
         adapter.tick();
 
         assert_eq!(adapter.status(), ConnStatus::Disconnected);

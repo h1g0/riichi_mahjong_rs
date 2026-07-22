@@ -37,7 +37,7 @@ fn test_set_local_players_assigns_cpu_labels_to_seats_1_to_3() {
 fn test_set_online_players_keeps_seat_order_and_self() {
     let mut state = GameState::new();
     let labels = [
-        PlayerLabel::Human("ホスト".to_string()),
+        PlayerLabel::Human("Host".to_string()),
         PlayerLabel::Me,
         PlayerLabel::Cpu {
             level: "Normal".to_string(),
@@ -54,7 +54,7 @@ fn test_set_online_players_keeps_seat_order_and_self() {
     assert!(matches!(state.player_labels[1], PlayerLabel::Me));
     assert_eq!(
         state.player_labels[0].detail(3, Lang::Ja),
-        Some("ホスト".to_string())
+        Some("Host".to_string())
     );
     assert_eq!(
         state.player_labels[2].detail(1, Lang::Ja),
@@ -385,7 +385,7 @@ fn test_hand_selection_still_discards_on_second_click_during_our_turn() {
         state
             .self_tedashi_anim
             .as_ref()
-            .expect("手出しアニメーションが開始されていない")
+            .expect("discard-from-hand animation did not start")
             .origins,
         vec![SelfTileOrigin::Hand(0), SelfTileOrigin::Drawn]
     );
@@ -417,7 +417,7 @@ fn test_local_hand_discard_tracks_origins_through_sorting() {
     let anim = state
         .self_tedashi_anim
         .as_ref()
-        .expect("手出しアニメーションが開始されていない");
+        .expect("discard-from-hand animation did not start");
     assert_eq!(anim.pre_hand_len, 3);
     assert_eq!(anim.started_at, 100.0);
     assert_eq!(
@@ -522,7 +522,7 @@ fn test_sanma_relative_player_index_wraps_at_three() {
     assert_eq!(
         state.discards[1].len(),
         1,
-        "三麻で西家から見た東家は下家（相対1）のはず"
+        "in a three-player game, East should be to West's right (relative seat 1)"
     );
 }
 
@@ -555,7 +555,10 @@ fn test_sanma_can_pei_with_north_in_hand() {
         can_riichi: false,
         is_furiten: false,
     });
-    assert!(state.can_pei, "手牌に北があるのに北抜き不可");
+    assert!(
+        state.can_pei,
+        "North extraction should be available when North is in the hand"
+    );
 
     // Under riichi a North in the hand alone is not extractable.
     state.is_riichi = true;
@@ -566,7 +569,10 @@ fn test_sanma_can_pei_with_north_in_hand() {
         can_riichi: false,
         is_furiten: false,
     });
-    assert!(!state.can_pei, "リーチ中の手牌北で北抜き可になっている");
+    assert!(
+        !state.can_pei,
+        "North extraction should not be available for a concealed North during riichi"
+    );
 
     // A drawn North is.
     state.handle_event(ServerEvent::TileDrawn {
@@ -576,7 +582,10 @@ fn test_sanma_can_pei_with_north_in_hand() {
         can_riichi: false,
         is_furiten: false,
     });
-    assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
+    assert!(
+        state.can_pei,
+        "a drawn North should be extractable during riichi"
+    );
 }
 
 /// Regression: a North drawn under riichi must offer pei instead of
@@ -595,7 +604,10 @@ fn test_riichi_drawn_north_holds_auto_discard_for_pei() {
         can_riichi: false,
         is_furiten: false,
     });
-    assert!(state.can_pei, "リーチ中のツモ北で北抜き不可");
+    assert!(
+        state.can_pei,
+        "a drawn North should be extractable during riichi"
+    );
 
     // While pei is available the auto-discard stays held even past
     // its delay (#291).
@@ -605,7 +617,10 @@ fn test_riichi_drawn_north_holds_auto_discard_for_pei() {
             .handle_input(None, 100.0 + RIICHI_AUTO_DISCARD_SECS * 2.0)
             .is_none()
     );
-    assert!(state.drawn.is_some(), "自動ツモ切りが発火した");
+    assert!(
+        state.drawn.is_some(),
+        "automatic discard of the drawn tile was triggered"
+    );
 
     let action = state.handle_input(
         Some(crate::renderer::OverlayClick::Action(ClientAction::Pei)),
@@ -634,7 +649,10 @@ fn test_riichi_pei_pass_discards_drawn_north() {
     // The pass discards immediately, with no delay.
     let action = state.handle_input(Some(crate::renderer::OverlayClick::PassSelfCall), 100.0);
     assert!(matches!(action, Some(ClientAction::Discard { tile: None })));
-    assert!(state.drawn.is_none(), "ツモ切り後もツモ牌が残っている");
+    assert!(
+        state.drawn.is_none(),
+        "the drawn tile should be cleared after discarding it"
+    );
     assert!(!state.can_pei);
 }
 
@@ -654,7 +672,10 @@ fn test_sanma_no_pei_on_last_draw() {
         can_riichi: false,
         is_furiten: false,
     });
-    assert!(!state.can_pei, "海底ツモで北抜き可になっている");
+    assert!(
+        !state.can_pei,
+        "North extraction should not be available on the last tile"
+    );
 }
 
 #[test]
@@ -663,7 +684,11 @@ fn test_setup_state_build_game_settings() {
     let settings = setup.build_game_settings();
     assert!(!settings.rules.three_player);
     assert!(settings.rules.double_yakuman);
-    assert_eq!(settings.length, GameLength::EastOnly, "既定は東風戦");
+    assert_eq!(
+        settings.length,
+        GameLength::EastOnly,
+        "the default game length should be East-only"
+    );
     assert_eq!(setup.cpu_count(), 3);
 
     setup.mode = GameMode::ThreeHanchan;
@@ -680,7 +705,7 @@ fn test_setup_state_build_game_settings() {
     assert_eq!(
         settings.length,
         GameLength::Hanchan,
-        "半荘戦が length に反映されない"
+        "a hanchan game should update the length setting"
     );
     assert_eq!(settings.initial_score, 35000);
     assert_eq!(setup.cpu_count(), 2);
@@ -1491,7 +1516,10 @@ fn test_other_player_draw_marks_drawn_without_moving_hand() {
 
     let other = &state.other_players[0];
     assert!(other.has_drawn);
-    assert_eq!(other.concealed_count, 13, "ツモ牌は手牌の枚数に含めない");
+    assert_eq!(
+        other.concealed_count, 13,
+        "the drawn tile should not count toward the concealed hand size"
+    );
 }
 
 /// A tsumogiri leaves the hand untouched, with no gap animation.
@@ -1514,7 +1542,10 @@ fn test_other_player_tsumogiri_keeps_hand_untouched() {
     let other = &state.other_players[0];
     assert!(!other.has_drawn);
     assert_eq!(other.concealed_count, 13);
-    assert!(other.tedashi_anim.is_none(), "ツモ切りでは詰め演出をしない");
+    assert!(
+        other.tedashi_anim.is_none(),
+        "discarding the drawn tile should not start a hand-compaction animation"
+    );
 }
 
 /// A hand discard merges the drawn tile in (count unchanged) and starts
@@ -1537,8 +1568,13 @@ fn test_other_player_tedashi_starts_gap_animation() {
 
     let other = &state.other_players[0];
     assert!(!other.has_drawn);
-    assert_eq!(other.concealed_count, 13, "手出しではツモ牌が手牌へ入る");
-    let anim = other.tedashi_anim.expect("詰め演出が開始されていない");
+    assert_eq!(
+        other.concealed_count, 13,
+        "discarding from the hand should move the drawn tile into the hand"
+    );
+    let anim = other
+        .tedashi_anim
+        .expect("hand-compaction animation did not start");
     assert_eq!(anim.gap_index, 4);
     assert!(anim.had_drawn);
     assert_eq!(anim.started_at, 100.0);
@@ -1569,7 +1605,9 @@ fn test_other_player_tedashi_after_call_decrements_count() {
 
     let other = &state.other_players[0];
     assert_eq!(other.concealed_count, 10);
-    let anim = other.tedashi_anim.expect("詰め演出が開始されていない");
+    let anim = other
+        .tedashi_anim
+        .expect("hand-compaction animation did not start");
     assert!(!anim.had_drawn);
 }
 
@@ -1593,7 +1631,10 @@ fn test_other_player_ankan_consumes_four_tiles() {
     });
 
     let other = &state.other_players[0];
-    assert_eq!(other.concealed_count, 10, "13枚＋ツモ1枚から4枚が副露へ");
+    assert_eq!(
+        other.concealed_count, 10,
+        "four tiles should move into the meld from 13 concealed tiles plus one draw"
+    );
     assert!(!other.has_drawn);
 
     // The replacement draw restores the overhang.
@@ -1632,7 +1673,10 @@ fn test_sanma_pei_with_drawn_keeps_hand_count() {
 fn test_turn_player_tracks_events() {
     let mut state = GameState::new();
     state.handle_event(game_started_4p(Wind::East, 0));
-    assert_eq!(state.turn_player, None, "局開始直後は手番未確定");
+    assert_eq!(
+        state.turn_player, None,
+        "the current player should be unknown immediately after the round starts"
+    );
 
     // Our own draw makes it our turn.
     state.handle_event(ServerEvent::TileDrawn {
@@ -1682,5 +1726,8 @@ fn test_turn_player_tracks_events() {
         player_hands: vec![],
         declarer: None,
     });
-    assert_eq!(state.turn_player, None, "流局後も手番表示が残っている");
+    assert_eq!(
+        state.turn_player, None,
+        "the current-player indicator should be cleared after a drawn round"
+    );
 }

@@ -137,12 +137,16 @@ fn test_isolated_tile_bonus_ordering() {
 
     let bonus = |t: u32| isolated_tile_bonus(&ctx, &make_candidate(t));
 
-    assert!(bonus(Tile::Z3) > bonus(Tile::M1), "客風 > 1/9");
-    assert!(bonus(Tile::M1) > bonus(Tile::Z5), "1/9 > 役牌");
-    assert!(bonus(Tile::Z5) > bonus(Tile::S8), "役牌 > 2/8");
-    assert!(bonus(Tile::S8) > bonus(Tile::M5), "2/8 > 中張");
-    assert_eq!(bonus(Tile::M5), 0.0, "孤立中張牌は雑に切らない");
-    assert_eq!(bonus(Tile::P7), 0.0, "対子は孤立牌ではない");
+    assert!(bonus(Tile::Z3) > bonus(Tile::M1), "guest wind > terminal");
+    assert!(bonus(Tile::M1) > bonus(Tile::Z5), "terminal > value honour");
+    assert!(bonus(Tile::Z5) > bonus(Tile::S8), "value honour > 2 or 8");
+    assert!(bonus(Tile::S8) > bonus(Tile::M5), "2 or 8 > middle tile");
+    assert_eq!(
+        bonus(Tile::M5),
+        0.0,
+        "an isolated middle tile should not be discarded indiscriminately"
+    );
+    assert_eq!(bonus(Tile::P7), 0.0, "a pair is not an isolated tile");
 }
 
 #[test]
@@ -180,12 +184,27 @@ fn test_shape_protection_bonus() {
 
     let bonus = |t: u32| shape_protection_bonus(&ctx, &make_candidate(t));
 
-    assert!(bonus(Tile::M2) < 0.0, "両面の牌は守る");
-    assert!(bonus(Tile::M3) < 0.0, "両面の牌は守る");
-    assert!(bonus(Tile::P1) > 0.0, "辺張は整理しやすい");
-    assert!(bonus(Tile::S3) > 0.0, "嵌張は整理しやすい");
-    assert!(bonus(Tile::S5) > 0.0, "嵌張は整理しやすい");
-    assert_eq!(bonus(Tile::S8), 0.0, "対子は対象外");
+    assert!(
+        bonus(Tile::M2) < 0.0,
+        "tiles in a two-sided shape should be protected"
+    );
+    assert!(
+        bonus(Tile::M3) < 0.0,
+        "tiles in a two-sided shape should be protected"
+    );
+    assert!(
+        bonus(Tile::P1) > 0.0,
+        "an edge-wait shape should be easier to discard"
+    );
+    assert!(
+        bonus(Tile::S3) > 0.0,
+        "a closed-wait shape should be easier to discard"
+    );
+    assert!(
+        bonus(Tile::S5) > 0.0,
+        "a closed-wait shape should be easier to discard"
+    );
+    assert_eq!(bonus(Tile::S8), 0.0, "pairs should be excluded");
 }
 
 #[test]
@@ -482,8 +501,8 @@ fn test_excess_pair_bonus() {
     let m5 = excess_pair_bonus(&ctx, &make_candidate(Tile::M5));
     let m9 = excess_pair_bonus(&ctx, &make_candidate(Tile::M9));
     let z2 = excess_pair_bonus(&ctx, &make_candidate(Tile::Z2));
-    assert!(m5 > m9, "中張牌対子からほぐす");
-    assert!(m9 > z2, "字牌対子は残す");
+    assert!(m5 > m9, "a simple-tile pair should be broken first");
+    assert!(m9 > z2, "an honour pair should be retained");
     assert_eq!(z2, 0.0);
 
     // Non-pair tiles are exempt.
@@ -632,7 +651,10 @@ fn test_is_stiff_pair() {
     assert!(is_stiff_pair(&counts, Tile::Z1));
     assert!(is_stiff_pair(&counts, Tile::M9));
     assert!(is_stiff_pair(&counts, Tile::P5));
-    assert!(!is_stiff_pair(&counts, Tile::S5), "S6が隣にあるので伸びる");
+    assert!(
+        !is_stiff_pair(&counts, Tile::S5),
+        "the adjacent S6 gives the pair room to develop"
+    );
 }
 
 #[test]
@@ -666,7 +688,7 @@ fn test_route_lock_penalizes_off_route_discards() {
     let cut_float = route_lock_bonus(&ctx, &make_candidate(Tile::M1));
     assert!(
         break_taatsu < cut_float,
-        "ターツ壊し({break_taatsu}) < 浮き牌切り({cut_float}) のはず"
+        "breaking a taatsu ({break_taatsu}) should score below discarding a floating tile ({cut_float})"
     );
     assert_eq!(cut_float, 0.0);
 }
@@ -706,7 +728,7 @@ fn test_route_lock_follows_seven_pairs_route() {
     let cut_float = route_lock_bonus(&ctx, &make_candidate(Tile::M2));
     assert!(
         break_pair < cut_float,
-        "対子壊し({break_pair}) < 浮き牌切り({cut_float}) のはず"
+        "breaking a pair ({break_pair}) should score below discarding a floating tile ({cut_float})"
     );
     assert_eq!(cut_float, 0.0);
 }
