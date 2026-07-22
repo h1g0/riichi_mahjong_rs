@@ -15,7 +15,7 @@ use crate::i18n::{Key, Translator};
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 use mahjong_server::protocol::net::CpuSpec;
 use mahjong_server::protocol::{
-    AvailableCall, CallType, ClientAction, PlayerHandInfo, ServerEvent,
+    AvailableCall, CallType, ClientAction, DrawReason, PlayerHandInfo, ServerEvent,
 };
 
 mod events;
@@ -36,6 +36,8 @@ pub const CALL_HOLD_SECS: f64 = 0.9;
 pub const WIN_HOLD_SECS: f64 = 1.2;
 /// Seconds a declaration banner stays visible.
 pub const CALL_BANNER_SECS: f64 = 1.5;
+/// Seconds each player has to declare tenpai or noten at an exhaustive draw.
+pub const DRAW_REVEAL_STEP_SECS: f64 = 1.0;
 /// Delay before the automatic riichi tsumogiri, so the drawn tile is
 /// visible first.
 pub const RIICHI_AUTO_DISCARD_SECS: f64 = 1.0;
@@ -58,6 +60,13 @@ struct Declaration {
     hold_secs: f64,
     /// Whether the event itself is also held (wins, nine terminals)
     before_apply: bool,
+}
+
+/// Dealer-first tenpai/noten reveal shown before an exhaustive-draw result.
+struct ExhaustiveDrawReveal {
+    players: Vec<PlayerHandInfo>,
+    tenpai: Vec<Wind>,
+    next_player: usize,
 }
 
 /// Value of one riichi deposit stick, in points. Mirrors the server's
@@ -345,6 +354,8 @@ pub struct GameState {
     event_hold_until: f64,
     /// Whether the front event's banner has been shown (pre-apply hold)
     head_announced: bool,
+    /// Player-by-player reveal while an exhaustive-draw event stays queued
+    exhaustive_draw_reveal: Option<ExhaustiveDrawReveal>,
     /// The time last passed to [`process_events`](Self::process_events)
     /// or `handle_input`; used as the animation start time.
     clock: f64,
@@ -473,6 +484,7 @@ impl GameState {
             pending_events: VecDeque::new(),
             event_hold_until: 0.0,
             head_announced: false,
+            exhaustive_draw_reveal: None,
             clock: 0.0,
             lang: crate::persistence::load_lang().unwrap_or(Lang::Ja),
         }
@@ -614,6 +626,8 @@ impl GameState {
     /// ([`WIN_HOLD_SECS`] for wins), so the "call-out" is seen before its
     /// effect and players notice the declaration. Wins and nine terminals
     /// also hold the event itself (the result-screen transition).
+    /// Exhaustive draws stay queued while each player declares tenpai or
+    /// noten in dealer-first turn order.
     pub fn process_events(&mut self, now: f64) {
         self.clock = now;
 
@@ -627,6 +641,23 @@ impl GameState {
         loop {
             if now < self.event_hold_until || self.pending_events.is_empty() {
                 return;
+            }
+
+            if self.exhaustive_draw_reveal.is_none()
+                && !self.head_announced
+                && let Some(reveal) = self.exhaustive_draw_reveal_for(&self.pending_events[0])
+            {
+                self.exhaustive_draw_reveal = Some(reveal);
+                self.head_announced = true;
+                self.available_calls.clear();
+                self.can_tsumo = false;
+                self.can_riichi = false;
+                self.turn_player = None;
+                self.is_my_turn = false;
+            }
+
+            if self.exhaustive_draw_reveal.is_some() && self.show_next_exhaustive_draw_player(now) {
+                continue;
             }
 
             if !self.head_announced
@@ -670,6 +701,70 @@ impl GameState {
             self.head_announced = false;
             self.handle_event(event);
         }
+    }
+
+    /// Builds the dealer-first reveal sequence for an exhaustive draw.
+    fn exhaustive_draw_reveal_for(&self, event: &ServerEvent) -> Option<ExhaustiveDrawReveal> {
+        let ServerEvent::RoundDraw {
+            reason: DrawReason::Exhaustive,
+            tenpai,
+            player_hands,
+            ..
+        } = event
+        else {
+            return None;
+        };
+        if self.phase != GamePhase::Playing {
+            return None;
+        }
+
+        let mut players = player_hands.clone();
+        players.sort_by_key(|info| info.wind.to_index());
+        Some(ExhaustiveDrawReveal {
+            players,
+            tenpai: tenpai.clone(),
+            next_player: 0,
+        })
+    }
+
+    /// Shows one tenpai/noten declaration and schedules the next one.
+    ///
+    /// Returns false after the final player's one-second hold has elapsed,
+    /// allowing the queued result event to be applied.
+    fn show_next_exhaustive_draw_player(&mut self, now: f64) -> bool {
+        let step = self.exhaustive_draw_reveal.as_mut().and_then(|reveal| {
+            let player = reveal.players.get(reveal.next_player)?.clone();
+            reveal.next_player += 1;
+            let is_tenpai = reveal.tenpai.contains(&player.wind);
+            Some((player, is_tenpai))
+        });
+        let Some((player, is_tenpai)) = step else {
+            self.exhaustive_draw_reveal = None;
+            self.call_banners = [None; 4];
+            return false;
+        };
+
+        // A declaration lasts exactly one step, so adjacent players never
+        // overlap even though ordinary call banners live longer.
+        self.call_banners = [None; 4];
+        let relative_idx = self.relative_player_index(player.wind);
+        self.call_banners[relative_idx] = Some(CallBanner {
+            label: if is_tenpai { Key::Tenpai } else { Key::Noten },
+            shown_at: now,
+        });
+
+        let revealed_winds = if is_tenpai {
+            vec![player.wind]
+        } else {
+            Vec::new()
+        };
+        self.update_other_player_hands_on_draw(
+            std::slice::from_ref(&player),
+            &revealed_winds,
+            None,
+        );
+        self.event_hold_until = now + DRAW_REVEAL_STEP_SECS;
+        true
     }
 
     /// The declaration display for an event, when it has one.
@@ -735,15 +830,6 @@ impl GameState {
                 before_apply: true,
             }),
             _ => None,
-        }
-    }
-
-    /// Seat name for winners and deal-in players
-    /// (Japanese 「東家」, English "East").
-    fn wind_to_name(&self, wind: Wind) -> String {
-        match self.lang {
-            Lang::Ja => format!("{}家", wind.name(Lang::Ja)),
-            Lang::En => wind.name(Lang::En).to_string(),
         }
     }
 

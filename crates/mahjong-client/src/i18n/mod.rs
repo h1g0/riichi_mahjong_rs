@@ -223,13 +223,9 @@ impl Translator {
         }
     }
 
-    /// Draw heading (JA 「流局（{reason}）」 / EN "Draw ({reason})").
+    /// Draw-reason heading shown below the generic draw label.
     pub fn draw_headline(&self, reason: DrawReason) -> String {
-        let reason = self.draw_reason(reason);
-        match self.lang {
-            Lang::Ja => format!("流局（{reason}）"),
-            Lang::En => format!("Draw ({reason})"),
-        }
+        self.draw_reason(reason).to_string()
     }
 
     /// Tenpai-players line (JA 「テンパイ: {names}」 / EN "Tenpai: {names}").
@@ -455,6 +451,10 @@ pub enum Key {
     Next,
     /// Draw
     RoundDraw,
+    /// Tenpai declaration at an exhaustive draw
+    Tenpai,
+    /// Noten declaration at an exhaustive draw
+    Noten,
     /// Game over
     GameOver,
     /// Play again
@@ -895,6 +895,14 @@ impl Key {
                 Lang::Ja => "流局",
                 Lang::En => "Draw",
             },
+            Key::Tenpai => match lang {
+                Lang::Ja => "テンパイ",
+                Lang::En => "Tenpai",
+            },
+            Key::Noten => match lang {
+                Lang::Ja => "ノーテン",
+                Lang::En => "Noten",
+            },
             Key::GameOver => match lang {
                 Lang::Ja => "ゲーム終了",
                 Lang::En => "Game Over",
@@ -1087,6 +1095,15 @@ mod tests {
     fn key_resolves_both_languages() {
         assert_eq!(Key::StartGame.text(Lang::Ja), "対局開始");
         assert_eq!(Key::StartGame.text(Lang::En), "Start Game");
+    }
+
+    #[test]
+    fn draw_headline_uses_only_the_reason_below_the_generic_label() {
+        let ja = Translator::new(Lang::Ja);
+        let en = Translator::new(Lang::En);
+        assert_eq!(ja.draw_headline(DrawReason::Exhaustive), "荒牌流局");
+        assert_eq!(ja.draw_headline(DrawReason::FourWinds), "四風連打");
+        assert_eq!(en.draw_headline(DrawReason::Exhaustive), "Exhaustive draw");
     }
 
     #[test]

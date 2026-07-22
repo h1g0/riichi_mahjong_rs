@@ -84,6 +84,7 @@ impl GameState {
                     OtherPlayerHand::new(),
                     OtherPlayerHand::new(),
                 ];
+                self.exhaustive_draw_reveal = None;
                 self.last_discarder = None;
                 self.call_banners = [None; 4];
                 self.turn_player = None;
@@ -595,8 +596,10 @@ impl GameState {
                 let mut msg = tr.draw_headline(reason);
 
                 if !tenpai.is_empty() {
-                    let tenpai_names: Vec<String> =
-                        tenpai.iter().map(|w| self.wind_to_name(*w)).collect();
+                    let tenpai_names: Vec<String> = tenpai
+                        .iter()
+                        .map(|wind| self.player_display_name(*wind))
+                        .collect();
                     msg.push('\n');
                     msg.push_str(&tr.tenpai_list(&tenpai_names.join(", ")));
                 }

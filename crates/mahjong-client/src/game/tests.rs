@@ -1218,6 +1218,152 @@ fn test_round_won_deferred_until_banner_hold_elapses() {
 }
 
 #[test]
+fn test_exhaustive_draw_reveals_players_one_at_a_time_in_turn_order() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    // The protocol payload order is not part of the presentation contract.
+    let player_hands = [Wind::West, Wind::North, Wind::South, Wind::East]
+        .into_iter()
+        .map(|wind| PlayerHandInfo {
+            wind,
+            hand: vec![Tile::new(Tile::M1); 13],
+            melds: vec![],
+            pei: vec![],
+        })
+        .collect();
+    state.queue_event(ServerEvent::RoundDraw {
+        scores: [28_000, 22_000, 28_000, 22_000],
+        reason: DrawReason::Exhaustive,
+        tenpai: vec![Wind::East, Wind::West],
+        riichi_sticks: 0,
+        player_hands,
+        declarer: None,
+    });
+    state.process_events(100.0);
+
+    assert_eq!(state.phase, GamePhase::Playing);
+    assert_eq!(state.scores, [25_000; 4]);
+    assert_eq!(
+        state.call_banners[0].map(|banner| banner.label),
+        Some(Key::Tenpai)
+    );
+    assert_eq!(state.call_banners.iter().flatten().count(), 1);
+    assert!(!state.other_players[0].revealed);
+    assert!(!state.other_players[1].revealed);
+    assert!(!state.other_players[2].revealed);
+
+    state.process_events(100.0 + DRAW_REVEAL_STEP_SECS / 2.0);
+    assert_eq!(state.phase, GamePhase::Playing);
+    assert_eq!(
+        state.call_banners[0].map(|banner| banner.label),
+        Some(Key::Tenpai)
+    );
+
+    state.process_events(100.0 + DRAW_REVEAL_STEP_SECS);
+    assert_eq!(
+        state.call_banners[1].map(|banner| banner.label),
+        Some(Key::Noten)
+    );
+    assert_eq!(state.call_banners.iter().flatten().count(), 1);
+    assert!(!state.other_players[0].revealed);
+
+    state.process_events(100.0 + DRAW_REVEAL_STEP_SECS * 2.0);
+    assert_eq!(
+        state.call_banners[2].map(|banner| banner.label),
+        Some(Key::Tenpai)
+    );
+    assert_eq!(state.call_banners.iter().flatten().count(), 1);
+    assert!(state.other_players[1].revealed);
+    assert_eq!(state.other_players[1].hand, vec![Tile::new(Tile::M1); 13]);
+
+    state.process_events(100.0 + DRAW_REVEAL_STEP_SECS * 3.0);
+    assert_eq!(
+        state.call_banners[3].map(|banner| banner.label),
+        Some(Key::Noten)
+    );
+    assert_eq!(state.call_banners.iter().flatten().count(), 1);
+    assert_eq!(state.phase, GamePhase::Playing);
+
+    state.process_events(100.0 + DRAW_REVEAL_STEP_SECS * 4.0);
+    assert_eq!(state.phase, GamePhase::RoundResult);
+    assert_eq!(state.scores, [28_000, 22_000, 28_000, 22_000]);
+    assert!(state.call_banners.iter().all(Option::is_none));
+    let result_message = state
+        .result_message
+        .as_deref()
+        .expect("draw result message");
+    assert!(result_message.contains("テンパイ: あなた, CPU2"));
+    assert!(!result_message.contains("東家"));
+}
+
+#[test]
+fn test_sanma_exhaustive_draw_reveal_stops_after_three_players() {
+    let mut state = GameState::new();
+    state.handle_event(sanma_game_started(Wind::West));
+
+    let player_hands = [Wind::West, Wind::South, Wind::East]
+        .into_iter()
+        .map(|wind| PlayerHandInfo {
+            wind,
+            hand: vec![Tile::new(Tile::P1); 13],
+            melds: vec![],
+            pei: vec![],
+        })
+        .collect();
+    state.queue_event(ServerEvent::RoundDraw {
+        scores: [35_000, 35_000, 35_000, 0],
+        reason: DrawReason::Exhaustive,
+        tenpai: vec![Wind::South],
+        riichi_sticks: 0,
+        player_hands,
+        declarer: None,
+    });
+
+    state.process_events(100.0);
+    assert_eq!(
+        state.call_banners[1].map(|banner| banner.label),
+        Some(Key::Noten)
+    );
+
+    state.process_events(100.0 + DRAW_REVEAL_STEP_SECS);
+    assert_eq!(
+        state.call_banners[2].map(|banner| banner.label),
+        Some(Key::Tenpai)
+    );
+    assert!(state.other_players[1].revealed);
+
+    state.process_events(100.0 + DRAW_REVEAL_STEP_SECS * 2.0);
+    assert_eq!(
+        state.call_banners[0].map(|banner| banner.label),
+        Some(Key::Noten)
+    );
+
+    state.process_events(100.0 + DRAW_REVEAL_STEP_SECS * 3.0);
+    assert_eq!(state.phase, GamePhase::RoundResult);
+    assert!(state.call_banners.iter().all(Option::is_none));
+}
+
+#[test]
+fn test_abortive_draw_skips_tenpai_reveal_hold() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+
+    state.queue_event(ServerEvent::RoundDraw {
+        scores: [25_000; 4],
+        reason: DrawReason::FourWinds,
+        tenpai: vec![],
+        riichi_sticks: 0,
+        player_hands: vec![],
+        declarer: None,
+    });
+    state.process_events(100.0);
+
+    assert_eq!(state.phase, GamePhase::RoundResult);
+    assert!(state.call_banners.iter().all(Option::is_none));
+}
+
+#[test]
 fn test_round_won_separates_honba_and_deposits_from_hand_points() {
     let mut state = GameState::new();
     state.handle_event(game_started_4p(Wind::East, 0));
