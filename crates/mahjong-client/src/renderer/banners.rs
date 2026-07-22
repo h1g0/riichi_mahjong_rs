@@ -1,7 +1,8 @@
 //! Declaration banners (speech bubbles) for calls, riichi, wins, etc.
 //!
 //! Whenever a player would call out (pon, chii, kan, riichi, pei, ron,
-//! tsumo, nine terminals) a bubble appears near their hand for a while.
+//! tsumo, nine terminals, tenpai, noten) a bubble appears near their hand
+//! for a while.
 //! `GameState::process_events` creates and expires the banners; this
 //! module only draws `state.call_banners`.
 
