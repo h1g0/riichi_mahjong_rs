@@ -457,8 +457,16 @@ pub enum Key {
     Noten,
     /// Game over
     GameOver,
-    /// Play again
-    PlayAgain,
+    /// Start a fresh local match with the same settings
+    SameSettingsRematch,
+    /// Return to match setup
+    ChangeMatchSettings,
+    /// Return to the current online room
+    ReturnToRoom,
+    /// Leave the room for the online menu
+    OnlineMenu,
+    /// Leave the results for the title screen
+    BackToTitle,
     /// Win button
     Win,
     /// Waiting-for-others hint
@@ -515,6 +523,10 @@ pub enum Key {
     EmptySeatsCpu,
     /// Waiting-for-host caption
     WaitingHost,
+    /// Start another game in the same room
+    StartRematch,
+    /// Waiting for players who are still reading the final results
+    WaitingResultReview,
     /// Leave button
     Leave,
     /// "You" seat marker
@@ -523,6 +535,8 @@ pub enum Key {
     MarkerHost,
     /// "Offline" seat marker
     MarkerDisconnected,
+    /// "Reviewing results" seat marker
+    MarkerReviewingResults,
     /// Connecting caption
     Connecting,
     /// Disconnected caption
@@ -907,9 +921,25 @@ impl Key {
                 Lang::Ja => "ゲーム終了",
                 Lang::En => "Game Over",
             },
-            Key::PlayAgain => match lang {
-                Lang::Ja => "もう一度",
-                Lang::En => "Play Again",
+            Key::SameSettingsRematch => match lang {
+                Lang::Ja => "同じ設定で再戦",
+                Lang::En => "Rematch with Same Settings",
+            },
+            Key::ChangeMatchSettings => match lang {
+                Lang::Ja => "対局設定を変更",
+                Lang::En => "Change Match Settings",
+            },
+            Key::ReturnToRoom => match lang {
+                Lang::Ja => "ルームに戻る",
+                Lang::En => "Return to Room",
+            },
+            Key::OnlineMenu => match lang {
+                Lang::Ja => "オンラインメニューへ",
+                Lang::En => "Online Menu",
+            },
+            Key::BackToTitle => match lang {
+                Lang::Ja => "タイトルへ",
+                Lang::En => "Title Screen",
             },
             Key::Win => match lang {
                 Lang::Ja => "和了",
@@ -1025,6 +1055,14 @@ impl Key {
                 Lang::Ja => "ホストの開始を待っています...",
                 Lang::En => "Waiting for the host to start...",
             },
+            Key::StartRematch => match lang {
+                Lang::Ja => "再戦を開始",
+                Lang::En => "Start Rematch",
+            },
+            Key::WaitingResultReview => match lang {
+                Lang::Ja => "結果を確認中のプレイヤーを待っています...",
+                Lang::En => "Waiting for players reviewing the results...",
+            },
             Key::Leave => match lang {
                 Lang::Ja => "退出",
                 Lang::En => "Leave",
@@ -1040,6 +1078,10 @@ impl Key {
             Key::MarkerDisconnected => match lang {
                 Lang::Ja => "（切断中）",
                 Lang::En => " (offline)",
+            },
+            Key::MarkerReviewingResults => match lang {
+                Lang::Ja => "（結果確認中）",
+                Lang::En => " (reviewing results)",
             },
             Key::Connecting => match lang {
                 Lang::Ja => "サーバに接続中...",

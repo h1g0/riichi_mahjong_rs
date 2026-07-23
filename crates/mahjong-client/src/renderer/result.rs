@@ -1,6 +1,7 @@
 //! Result and game-over overlay rendering.
 
 use super::*;
+use crate::game::MatchKind;
 
 const YAKU_FONT_SIZE: u16 = theme::font_size::LABEL;
 pub(super) const YAKU_ROW_HEIGHT: f32 = 22.0;
@@ -20,6 +21,87 @@ const RESULT_INDICATOR_GAP: f32 = 2.0;
 const RESULT_INDICATOR_LABEL_GAP: f32 = 6.0;
 const RESULT_INDICATOR_SECTION_GAP: f32 = 18.0;
 const WIN_PANEL_BASE_HEIGHT: f32 = 340.0;
+const GAME_OVER_PANEL_W: f32 = 620.0;
+const GAME_OVER_PANEL_H: f32 = 520.0;
+
+#[derive(Debug, Clone, Copy)]
+struct GameOverButton {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
+impl GameOverButton {
+    fn contains(self, x: f32, y: f32) -> bool {
+        x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
+    }
+
+    fn center_x(self) -> f32 {
+        self.x + self.w / 2.0
+    }
+}
+
+const GAME_OVER_PRIMARY: GameOverButton = GameOverButton {
+    x: 470.0,
+    y: 472.0,
+    w: 340.0,
+    h: 52.0,
+};
+const GAME_OVER_SECONDARY: GameOverButton = GameOverButton {
+    x: 470.0,
+    y: 538.0,
+    w: 340.0,
+    h: 46.0,
+};
+const GAME_OVER_TITLE: GameOverButton = GameOverButton {
+    x: 540.0,
+    y: 588.0,
+    w: 200.0,
+    h: 28.0,
+};
+
+/// Action selected on the final-results screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameOverAction {
+    RematchLocal,
+    ChangeSettings,
+    ReturnToRoom,
+    OnlineMenu,
+    Title,
+}
+
+fn game_over_action_at(state: &GameState, x: f32, y: f32) -> Option<GameOverAction> {
+    let online = state.match_kind == Some(MatchKind::Online);
+    if GAME_OVER_PRIMARY.contains(x, y) {
+        return Some(if online {
+            GameOverAction::ReturnToRoom
+        } else {
+            GameOverAction::RematchLocal
+        });
+    }
+    if GAME_OVER_SECONDARY.contains(x, y) {
+        return Some(if online {
+            GameOverAction::OnlineMenu
+        } else {
+            GameOverAction::ChangeSettings
+        });
+    }
+    if GAME_OVER_TITLE.contains(x, y) {
+        return Some(GameOverAction::Title);
+    }
+    None
+}
+
+/// Handles explicit final-results buttons; clicks elsewhere preserve the
+/// standings for review.
+pub fn handle_game_over_input(state: &GameState) -> Option<GameOverAction> {
+    if !is_mouse_button_pressed(MouseButton::Left) {
+        return None;
+    }
+    let (x, y) = super::mouse_position_design();
+    game_over_action_at(state, x, y)
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct WinHandLayout {
@@ -501,8 +583,8 @@ pub(super) fn draw_draw_panel(state: &GameState, font: Option<&Font>) {
 pub(super) fn draw_game_over(state: &GameState, font: Option<&Font>) {
     draw_setup_background();
 
-    let panel_w = 620.0;
-    let panel_h = 420.0;
+    let panel_w = GAME_OVER_PANEL_W;
+    let panel_h = GAME_OVER_PANEL_H;
     let panel_x = (DESIGN_W - panel_w) / 2.0;
     let panel_y = (DESIGN_H - panel_h) / 2.0;
     theme::draw_panel(
@@ -602,15 +684,17 @@ pub(super) fn draw_game_over(state: &GameState, font: Option<&Font>) {
         ry += row_h + row_gap;
     }
 
-    let btn_w = 200.0;
-    let btn_h = 50.0;
-    let btn_x = cx - btn_w / 2.0;
-    let btn_y = panel_y + panel_h - btn_h - 24.0;
+    let online = state.match_kind == Some(MatchKind::Online);
+    let primary_label = if online {
+        tr.get(Key::ReturnToRoom)
+    } else {
+        tr.get(Key::SameSettingsRematch)
+    };
     theme::draw_gradient_button(
-        btn_x,
-        btn_y,
-        btn_w,
-        btn_h,
+        GAME_OVER_PRIMARY.x,
+        GAME_OVER_PRIMARY.y,
+        GAME_OVER_PRIMARY.w,
+        GAME_OVER_PRIMARY.h,
         8.0,
         theme::rgb_pub(0x9a7a1a),
         theme::rgb_pub(0x6a5210),
@@ -619,10 +703,83 @@ pub(super) fn draw_game_over(state: &GameState, font: Option<&Font>) {
     );
     theme::draw_text_centered(
         font,
-        tr.get(Key::PlayAgain),
-        cx,
-        btn_y + 31.0,
+        primary_label,
+        GAME_OVER_PRIMARY.center_x(),
+        GAME_OVER_PRIMARY.y + 33.0,
         theme::font_size::BODY_LARGE,
         theme::GOLD_LT,
     );
+
+    theme::draw_rounded_rect(
+        GAME_OVER_SECONDARY.x,
+        GAME_OVER_SECONDARY.y,
+        GAME_OVER_SECONDARY.w,
+        GAME_OVER_SECONDARY.h,
+        8.0,
+        theme::rgba(0xffffff, 0.05),
+    );
+    theme::draw_rounded_rect_lines(
+        GAME_OVER_SECONDARY.x,
+        GAME_OVER_SECONDARY.y,
+        GAME_OVER_SECONDARY.w,
+        GAME_OVER_SECONDARY.h,
+        8.0,
+        1.0,
+        theme::rgba(0xc8a227, 0.3),
+    );
+    let secondary_label = if online {
+        tr.get(Key::OnlineMenu)
+    } else {
+        tr.get(Key::ChangeMatchSettings)
+    };
+    theme::draw_text_centered(
+        font,
+        secondary_label,
+        GAME_OVER_SECONDARY.center_x(),
+        GAME_OVER_SECONDARY.y + 29.0,
+        theme::font_size::BODY,
+        theme::TEXT,
+    );
+
+    theme::draw_text_centered(
+        font,
+        tr.get(Key::BackToTitle),
+        GAME_OVER_TITLE.center_x(),
+        GAME_OVER_TITLE.y + 22.0,
+        theme::font_size::BODY,
+        theme::TEXT_DIM,
+    );
+}
+
+#[cfg(test)]
+mod game_over_tests {
+    use super::*;
+
+    #[test]
+    fn game_over_actions_depend_on_match_kind_and_ignore_background() {
+        let mut state = GameState::new();
+        assert_eq!(
+            game_over_action_at(&state, 640.0, 490.0),
+            Some(GameOverAction::RematchLocal)
+        );
+        assert_eq!(
+            game_over_action_at(&state, 640.0, 550.0),
+            Some(GameOverAction::ChangeSettings)
+        );
+        assert_eq!(game_over_action_at(&state, 100.0, 100.0), None);
+
+        state.match_kind = Some(MatchKind::Online);
+        assert_eq!(
+            game_over_action_at(&state, 640.0, 490.0),
+            Some(GameOverAction::ReturnToRoom)
+        );
+        assert_eq!(
+            game_over_action_at(&state, 640.0, 550.0),
+            Some(GameOverAction::OnlineMenu)
+        );
+        assert_eq!(
+            game_over_action_at(&state, 640.0, 600.0),
+            Some(GameOverAction::Title)
+        );
+    }
 }

@@ -126,13 +126,17 @@ struct Room {
     settings: GameSettings,
     config: RoomConfig,
     seats: [Option<Seat>; 4],
+    /// The seat currently allowed to configure and start the room.
+    host_seat: usize,
     driver: Option<GameDriver>,
     /// Whether the room awaits result-screen confirmations
     awaiting_ready: bool,
     /// Per-seat next-hand confirmations
     ready: [bool; 4],
-    /// Whether GameOver has been sent
-    game_over_sent: bool,
+    /// Whether the completed game is waiting in the rematch lobby.
+    post_game: bool,
+    /// Players who have closed the final-results screen.
+    returned_to_lobby: [bool; 4],
     /// Deadline for auto-advancing to the next hand
     ready_deadline: Option<Instant>,
     /// Deadline for discarding the room
@@ -158,10 +162,16 @@ struct Room {
 
 /// The CPU config for a seat.
 ///
-/// Seats 1-3 (the host's right, across, left) map to `configs[0..3]` in
-/// order; seat 0 (the host) reuses `configs[0]` for its shadow CPU.
-fn config_for_seat(configs: &[CpuConfig; 3], seat: usize) -> CpuConfig {
-    let idx = seat.saturating_sub(1).min(2);
+/// Seats to the host's right, across, and left map to `configs[0..3]`;
+/// the host reuses `configs[0]` for its shadow CPU.
+fn config_for_seat(
+    configs: &[CpuConfig; 3],
+    seat: usize,
+    host_seat: usize,
+    player_count: usize,
+) -> CpuConfig {
+    let relative = (seat + player_count - host_seat) % player_count;
+    let idx = relative.saturating_sub(1).min(2);
     configs[idx].clone()
 }
 
@@ -178,10 +188,12 @@ pub async fn run_room(
         settings,
         config,
         seats: [None, None, None, None],
+        host_seat: HOST_SEAT,
         driver: None,
         awaiting_ready: false,
         ready: [false; 4],
-        game_over_sent: false,
+        post_game: false,
+        returned_to_lobby: [false; 4],
         ready_deadline: None,
         close_deadline: Some(Instant::now() + config.lobby_timeout),
         action_deadline: None,
@@ -242,9 +254,10 @@ fn deadline_or_far(deadline: Option<Instant>) -> Instant {
 }
 
 impl Room {
-    /// Whether the game has started.
-    fn game_started(&self) -> bool {
-        self.driver.is_some()
+    /// Whether a game is actively running rather than waiting in either
+    /// lobby state.
+    fn game_in_progress(&self) -> bool {
+        self.driver.is_some() && !self.post_game
     }
 
     /// Player count (4 or 3; the three-player seat 3 stays empty).
@@ -312,7 +325,7 @@ impl Room {
     }
 
     /// Handles a join or reconnect: mid-game a matching token reclaims
-    /// its disconnected seat; before the game a new joiner takes an
+    /// its disconnected seat; either lobby accepts a new player in an
     /// empty seat.
     fn try_join(
         &mut self,
@@ -320,7 +333,7 @@ impl Room {
         token: String,
         tx: mpsc::Sender<ServerMessage>,
     ) -> Result<JoinOutcome, ErrorCode> {
-        if self.game_started() {
+        if self.game_in_progress() {
             let seat = self
                 .seats
                 .iter()
@@ -355,6 +368,11 @@ impl Room {
             conn_gen,
             history: Vec::new(),
         });
+        if self.post_game {
+            // A player joining the rematch lobby is already past the
+            // result screen and must not block the host's start button.
+            self.returned_to_lobby[seat] = true;
+        }
         tracing::info!(code = self.code, seat, "player joined");
         Ok(JoinOutcome {
             seat,
@@ -367,10 +385,7 @@ impl Room {
     fn handle_reconnect(&mut self, seat: usize) {
         // The abandonment deadline is armed only while nobody is connected;
         // keeping it would expire an active game after a successful reconnect.
-        // A finished game's deadline remains a deliberate result-screen cap.
-        if !self.game_over_sent {
-            self.close_deadline = None;
-        }
+        self.close_deadline = None;
         if let Some(driver) = self.driver.as_mut() {
             driver.set_cpu_controlled(seat, false);
         }
@@ -396,7 +411,7 @@ impl Room {
             }
             ClientMessage::StartGame { cpu_configs } => self.handle_start_game(seat, cpu_configs),
             ClientMessage::Action(action) => {
-                if !self.game_started() || self.awaiting_ready {
+                if !self.game_in_progress() || self.awaiting_ready {
                     self.send_error(seat, ErrorCode::InvalidAction, "no action expected now");
                     return;
                 }
@@ -427,6 +442,7 @@ impl Room {
                     self.advance_round();
                 }
             }
+            ClientMessage::ReturnToLobby => self.handle_return_to_lobby(seat),
             // Hello/CreateRoom/JoinRoom/LeaveRoom were handled by the
             // connection task.
             _ => {
@@ -437,11 +453,11 @@ impl Room {
 
     /// Stores the host's CPU configs and shares them with every lobby.
     fn handle_set_cpu_configs(&mut self, seat: usize, cpu_configs: [CpuSpec; 3]) {
-        if seat != HOST_SEAT {
+        if seat != self.host_seat {
             self.send_error(seat, ErrorCode::NotHost, "only the host can configure CPUs");
             return;
         }
-        if self.game_started() {
+        if self.game_in_progress() {
             self.send_error(seat, ErrorCode::GameInProgress, "game already started");
             return;
         }
@@ -450,12 +466,20 @@ impl Room {
     }
 
     fn handle_start_game(&mut self, seat: usize, cpu_configs: Option<[CpuSpec; 3]>) {
-        if seat != HOST_SEAT {
+        if seat != self.host_seat {
             self.send_error(seat, ErrorCode::NotHost, "only the host can start");
             return;
         }
-        if self.game_started() {
+        if self.game_in_progress() {
             self.send_error(seat, ErrorCode::GameInProgress, "game already started");
+            return;
+        }
+        if self.post_game && !self.all_post_game_humans_ready() {
+            self.send_error(
+                seat,
+                ErrorCode::PlayersNotReady,
+                "a player is still reviewing the final results",
+            );
             return;
         }
 
@@ -470,7 +494,7 @@ impl Room {
 
         let mut driver = GameDriver::new(self.settings.clone());
         for s in 0..self.player_count() {
-            let config = config_for_seat(&self.cpu_configs, s);
+            let config = config_for_seat(&self.cpu_configs, s, self.host_seat, self.player_count());
             if self.seats[s].is_some() {
                 // Human seats get a resident shadow CPU for instant
                 // substitution on disconnect.
@@ -482,6 +506,11 @@ impl Room {
         driver.set_cpu_action_delay(self.config.cpu_action_delay.as_secs_f64());
         driver.start_game();
         self.driver = Some(driver);
+        self.post_game = false;
+        self.returned_to_lobby = [false; 4];
+        self.awaiting_ready = false;
+        self.ready = [false; 4];
+        self.ready_deadline = None;
         // Start the clock for the CPU delay; now_secs() feeds it
         // from here on.
         self.game_clock = Some(Instant::now());
@@ -491,6 +520,49 @@ impl Room {
         tracing::info!(code = self.code, "game started");
         self.broadcast_room_state();
         self.progress_game();
+    }
+
+    /// Marks a player as available for a same-room rematch.
+    fn handle_return_to_lobby(&mut self, seat: usize) {
+        if !self.post_game {
+            self.send_error(
+                seat,
+                ErrorCode::InvalidAction,
+                "the room is not awaiting a rematch",
+            );
+            return;
+        }
+        self.returned_to_lobby[seat] = true;
+        self.close_deadline = Some(Instant::now() + self.config.lobby_timeout);
+        self.broadcast_room_state();
+    }
+
+    /// Whether every human still occupying a seat has returned from the
+    /// final-results screen.
+    fn all_post_game_humans_ready(&self) -> bool {
+        (0..self.player_count())
+            .filter(|&seat| self.seats[seat].is_some())
+            .all(|seat| self.returned_to_lobby[seat])
+    }
+
+    /// Turns mid-game disconnected seats into ordinary lobby vacancies
+    /// and preserves a host among the players who remain online.
+    fn prepare_post_game_lobby(&mut self) {
+        for seat in 0..self.player_count() {
+            if self.seats[seat]
+                .as_ref()
+                .is_some_and(|player| player.tx.is_none())
+            {
+                self.seats[seat] = None;
+            }
+        }
+        if self.seats[self.host_seat].is_none()
+            && let Some(next_host) = self.seats[..self.player_count()]
+                .iter()
+                .position(Option::is_some)
+        {
+            self.host_seat = next_host;
+        }
     }
 
     /// Delivers the last action's results, checks for hand end, and
@@ -521,7 +593,7 @@ impl Room {
     /// Whether a tick is needed for CPU progress (draws, pending
     /// delayed actions).
     fn needs_game_tick(&self) -> bool {
-        if self.awaiting_ready || self.game_over_sent {
+        if self.awaiting_ready || self.post_game {
             return false;
         }
         self.driver.as_ref().is_some_and(|d| d.needs_tick())
@@ -551,7 +623,7 @@ impl Room {
             self.clear_action_deadline();
             return;
         };
-        if self.awaiting_ready || self.game_over_sent {
+        if self.awaiting_ready || self.post_game {
             self.clear_action_deadline();
             return;
         }
@@ -654,7 +726,7 @@ impl Room {
         let Some(driver) = self.driver.as_ref() else {
             return;
         };
-        if self.awaiting_ready || self.game_over_sent {
+        if self.awaiting_ready || self.post_game {
             return;
         }
         let round_over = driver
@@ -690,10 +762,17 @@ impl Room {
         if driver.is_game_over() {
             let final_scores = driver.table().scores;
             self.broadcast(ServerMessage::GameOver { final_scores });
-            self.game_over_sent = true;
+            self.post_game = true;
+            self.returned_to_lobby = [false; 4];
+            self.prepare_post_game_lobby();
             self.clear_action_deadline();
-            // Close once everyone is gone; set the deadline as a backstop.
-            self.close_deadline = Some(Instant::now() + self.config.abandoned_timeout);
+            // The post-game room follows the same lifetime as the initial
+            // lobby, giving players time to review results before returning.
+            self.close_deadline = Some(Instant::now() + self.config.lobby_timeout);
+            self.broadcast_room_state();
+            if !self.any_connected_human() {
+                self.closing = true;
+            }
             tracing::info!(code = self.code, "game over");
         } else {
             self.progress_game();
@@ -718,11 +797,32 @@ impl Room {
 
     /// Handles a leave or disconnect.
     fn handle_departure(&mut self, seat: usize) {
+        // Post-game seats are no longer protected by CPU substitution;
+        // leaving makes room for a replacement player or a CPU next game.
+        if self.post_game {
+            let was_host = seat == self.host_seat;
+            self.seats[seat] = None;
+            self.returned_to_lobby[seat] = false;
+            tracing::info!(code = self.code, seat, "player left rematch lobby");
+            let Some(next_host) = self.seats[..self.player_count()]
+                .iter()
+                .position(Option::is_some)
+            else {
+                self.closing = true;
+                return;
+            };
+            if was_host {
+                self.host_seat = next_host;
+            }
+            self.broadcast_room_state();
+            return;
+        }
+
         // Pre-game: vacate the seat; the host leaving closes the room.
-        if !self.game_started() {
+        if !self.game_in_progress() {
             self.seats[seat] = None;
             tracing::info!(code = self.code, seat, "player left");
-            if seat == HOST_SEAT {
+            if seat == self.host_seat {
                 self.broadcast_error(ErrorCode::NotInRoom, "room closed by host");
                 self.closing = true;
                 return;
@@ -732,15 +832,6 @@ impl Room {
                 return;
             }
             self.broadcast_room_state();
-            return;
-        }
-
-        // Post-game: vacate; close once empty.
-        if self.game_over_sent {
-            self.seats[seat] = None;
-            if self.seats.iter().all(|s| s.is_none()) {
-                self.closing = true;
-            }
             return;
         }
 
@@ -796,10 +887,11 @@ impl Room {
                 connected: seat.tx.is_some(),
             },
             None => {
-                if self.game_started() && s < self.player_count() {
+                if self.game_in_progress() && s < self.player_count() {
                     // Same level/personality rule as the game-start
                     // assignment.
-                    let config = config_for_seat(&self.cpu_configs, s);
+                    let config =
+                        config_for_seat(&self.cpu_configs, s, self.host_seat, self.player_count());
                     SeatInfo::Cpu {
                         level: config.level,
                         personality: config.personality,
@@ -830,13 +922,15 @@ impl Room {
         let msg = ServerMessage::RoomState {
             code: self.code.clone(),
             seats: seats_info.clone(),
-            host_seat: HOST_SEAT,
+            host_seat: self.host_seat,
             your_seat: seat,
             rules: self.settings.rules.clone(),
             length: self.settings.length,
             cpu_configs: Some(std::array::from_fn(|i| {
                 CpuSpec::from_config(&self.cpu_configs[i])
             })),
+            post_game: self.post_game,
+            returned_to_lobby: self.returned_to_lobby,
         };
         self.send_to_seat(seat, msg);
     }
@@ -905,10 +999,12 @@ mod tests {
                 None,
                 None,
             ],
+            host_seat: HOST_SEAT,
             driver: None,
             awaiting_ready: false,
             ready: [false; 4],
-            game_over_sent: false,
+            post_game: false,
+            returned_to_lobby: [false; 4],
             ready_deadline: None,
             close_deadline: None,
             action_deadline: None,
@@ -969,14 +1065,72 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_keeps_post_game_deadline() {
+    fn post_game_rematch_waits_for_result_return() {
         let mut room = room_with_connection(7);
-        let deadline = Instant::now() + Duration::from_secs(1);
-        room.game_over_sent = true;
-        room.close_deadline = Some(deadline);
+        let (tx, _rx) = mpsc::channel(8);
+        room.seats[1] = Some(Seat {
+            token: "guest-token".to_string(),
+            name: "guest".to_string(),
+            tx: Some(tx),
+            conn_gen: 8,
+            history: Vec::new(),
+        });
+        room.post_game = true;
 
-        room.handle_reconnect(HOST_SEAT);
+        room.handle_start_game(HOST_SEAT, None);
+        assert!(room.driver.is_none());
 
-        assert_eq!(room.close_deadline, Some(deadline));
+        room.handle_return_to_lobby(HOST_SEAT);
+        assert!(room.returned_to_lobby[HOST_SEAT]);
+        room.handle_start_game(HOST_SEAT, None);
+        assert!(room.driver.is_none());
+
+        room.handle_return_to_lobby(1);
+        room.handle_start_game(HOST_SEAT, None);
+
+        assert!(room.driver.is_some());
+        assert!(!room.post_game);
+        assert_eq!(room.returned_to_lobby, [false; 4]);
+    }
+
+    #[test]
+    fn post_game_guest_departure_unblocks_rematch() {
+        let mut room = room_with_connection(7);
+        let (tx, _rx) = mpsc::channel(4);
+        room.seats[1] = Some(Seat {
+            token: "guest-token".to_string(),
+            name: "guest".to_string(),
+            tx: Some(tx),
+            conn_gen: 8,
+            history: Vec::new(),
+        });
+        room.post_game = true;
+
+        room.handle_return_to_lobby(HOST_SEAT);
+        room.handle_departure(1);
+        room.handle_start_game(HOST_SEAT, None);
+
+        assert!(room.driver.is_some());
+        assert!(!room.closing);
+    }
+
+    #[test]
+    fn post_game_host_departure_transfers_control() {
+        let mut room = room_with_connection(7);
+        let (tx, _rx) = mpsc::channel(4);
+        room.seats[1] = Some(Seat {
+            token: "guest-token".to_string(),
+            name: "guest".to_string(),
+            tx: Some(tx),
+            conn_gen: 8,
+            history: Vec::new(),
+        });
+        room.post_game = true;
+
+        room.handle_departure(HOST_SEAT);
+
+        assert!(!room.closing);
+        assert!(room.seats[HOST_SEAT].is_none());
+        assert_eq!(room.host_seat, 1);
     }
 }

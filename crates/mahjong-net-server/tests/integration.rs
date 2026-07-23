@@ -342,6 +342,53 @@ async fn test_ready_timeout_auto_advances() {
     .expect("test timed out");
 }
 
+/// A player can leave the final results, return to the same room, and
+/// start a fresh game without recreating the room.
+#[tokio::test]
+async fn test_post_game_lobby_starts_rematch() {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let addr = start_server(fast_config()).await;
+
+        let mut host = TestClient::connect(addr).await;
+        host.hello("Host").await;
+        host.create_room().await;
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
+        host.play_until_game_over(true).await;
+
+        host.send(&ClientMessage::ReturnToLobby).await;
+        loop {
+            if let ServerMessage::RoomState {
+                post_game,
+                returned_to_lobby,
+                ..
+            } = host.recv().await
+                && post_game
+                && returned_to_lobby[0]
+            {
+                break;
+            }
+        }
+
+        host.send(&ClientMessage::StartGame { cpu_configs: None })
+            .await;
+        loop {
+            if let ServerMessage::Event(ServerEvent::GameStarted {
+                scores,
+                round_number,
+                ..
+            }) = host.recv().await
+            {
+                assert_eq!(scores, [25000; 4]);
+                assert_eq!(round_number, 0);
+                break;
+            }
+        }
+    })
+    .await
+    .expect("test timed out");
+}
+
 /// The host's CPU configs must reach the seats.
 #[tokio::test]
 async fn test_host_chosen_cpu_configs_apply() {

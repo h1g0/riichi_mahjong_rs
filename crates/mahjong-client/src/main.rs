@@ -21,13 +21,16 @@ mod transport;
 #[cfg(target_arch = "wasm32")]
 mod wasm_rng;
 
-use adapter::{ConnStatus, GameAdapter, LocalAdapter, RemoteAdapter, RoomView, error_code_message};
-use game::{GameMode, GamePhase, GameState, MenuOrigin, PlayerLabel, RoomViewUi};
+use adapter::{
+    ActiveAdapter, ConnStatus, GameAdapter, LocalAdapter, RemoteAdapter, RoomView,
+    error_code_message,
+};
+use game::{GameMode, GamePhase, GameState, MatchKind, MenuOrigin, PlayerLabel, RoomViewUi};
 use mahjong_core::settings::Lang;
 use mahjong_server::protocol::net::SeatInfo;
 use renderer::{
-    ModeSelectAction, OnlineLobbyAction, OnlineMenuAction, RuleSettingsAction, SetupAction,
-    TileTextures, TopMenuAction,
+    GameOverAction, ModeSelectAction, OnlineLobbyAction, OnlineMenuAction, RuleSettingsAction,
+    SetupAction, TileTextures, TopMenuAction,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -103,13 +106,13 @@ fn build_seat_labels(room: &RoomView, lang: Lang) -> [String; 4] {
         if i >= room.player_count() {
             return String::new();
         }
-        let who = match &room.seats[i] {
+        let mut who = match &room.seats[i] {
             SeatInfo::Empty => match room.cpu_configs {
                 // Attach the CPU config that would fill the seat, using
-                // the server's config_for_seat rule (seats 1-3 map to
-                // configs[0..3]).
+                // the server's host-relative config_for_seat rule.
                 Some(configs) => {
-                    let spec = configs[i.saturating_sub(1).min(2)];
+                    let relative = (i + room.player_count() - room.host_seat) % room.player_count();
+                    let spec = configs[relative.saturating_sub(1).min(2)];
                     tr.empty_seat_cpu_label(spec.level, spec.personality)
                 }
                 None => tr.get(i18n::Key::EmptySeat).to_string(),
@@ -123,6 +126,12 @@ fn build_seat_labels(room: &RoomView, lang: Lang) -> [String; 4] {
                 }
             }
         };
+        if room.post_game
+            && matches!(&room.seats[i], SeatInfo::Human { .. })
+            && !room.returned_to_lobby[i]
+        {
+            who.push_str(tr.get(i18n::Key::MarkerReviewingResults));
+        }
         let mut marks = String::new();
         if i == room.your_seat {
             marks.push_str(tr.get(i18n::Key::MarkerYou));
@@ -155,11 +164,27 @@ fn build_online_player_labels(room: &RoomView) -> [PlayerLabel; 4] {
 /// Copies the remote adapter's state for UI display.
 fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
     let lang = state.lang;
+    let was_host = state
+        .online_state
+        .room
+        .as_ref()
+        .is_some_and(|room| room.is_host);
+    if let Some(room) = remote.room()
+        && room.is_host()
+        && !was_host
+        && let Some(specs) = room.cpu_configs
+    {
+        // A migrated host inherits the room's choices instead of silently
+        // replacing them with that client's unrelated local defaults.
+        state.setup_state.apply_cpu_specs(specs);
+    }
     state.online_state.room = remote.room().map(|room| RoomViewUi {
         code: room.code.clone(),
         seat_labels: build_seat_labels(room, lang),
         is_host: room.is_host(),
         mode: GameMode::from_parts(room.three_player(), room.length),
+        post_game: room.post_game,
+        can_start: room.can_start(),
     });
 
     if let Some(err) = remote.take_error() {
@@ -195,6 +220,33 @@ fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
     }
 }
 
+/// Builds a completely new local driver while retaining the selected
+/// match and CPU settings in `state`.
+fn start_local_match(
+    state: &mut GameState,
+    mut configs: [mahjong_server::cpu::client::CpuConfig; 3],
+) -> ActiveAdapter {
+    let settings = state.setup_state.build_game_settings();
+    // A rematch is a fresh game, so CPU seats and the starting dealer
+    // receive the same randomization as the initial start.
+    let cpu_count = settings.rules.player_count() - 1;
+    mahjong_server::cpu::client::shuffle_cpu_configs(&mut configs[..cpu_count]);
+    state.set_local_players(&configs);
+    state.match_kind = Some(MatchKind::Local);
+
+    let mut adapter = LocalAdapter::with_settings(settings, configs);
+    adapter.start_game();
+    for event in adapter.poll_events() {
+        state.queue_event(event);
+    }
+    state.process_events(get_time());
+    ActiveAdapter::Local(Box::new(adapter))
+}
+
+fn take_remote_adapter(adapter: &mut Option<ActiveAdapter>) -> Option<RemoteAdapter> {
+    adapter.take().and_then(ActiveAdapter::into_remote)
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     #[cfg(target_arch = "wasm32")]
@@ -228,7 +280,7 @@ async fn main() {
     renderer::prewarm_fonts(font.as_ref(), &mut loading_screen).await;
 
     // The in-game adapter (local or remote).
-    let mut adapter: Option<Box<dyn GameAdapter>> = None;
+    let mut adapter: Option<ActiveAdapter> = None;
     // The lobby-stage remote connection, handed to `adapter` at
     // game start.
     let mut online: Option<RemoteAdapter> = None;
@@ -284,7 +336,10 @@ async fn main() {
                     let your_seat = room.your_seat;
                     game_state.set_online_players(&labels, your_seat);
                 }
-                adapter = Some(Box::new(online.take().expect("checked above")));
+                game_state.match_kind = Some(MatchKind::Online);
+                adapter = Some(ActiveAdapter::Remote(Box::new(
+                    online.take().expect("checked above"),
+                )));
             }
         }
 
@@ -302,6 +357,12 @@ async fn main() {
             game_state.online_state.status_is_error = game_state.online_state.status_line.is_some();
             // Turn timer (online only).
             game_state.online_state.turn_remaining = adp.turn_remaining_secs();
+            if adp.is_game_over() && game_state.phase == GamePhase::RoundResult {
+                // The final result has already been acknowledged; waiting
+                // for another click would make the visible "Next" action
+                // appear to do nothing on network latency or local finish.
+                game_state.phase = GamePhase::GameOver;
+            }
         }
 
         match game_state.phase {
@@ -365,26 +426,8 @@ async fn main() {
                     renderer::handle_setup_input(&mut game_state, font.as_ref(), origin)
                 {
                     match action {
-                        SetupAction::StartLocal(mut configs) => {
-                            let settings = game_state.setup_state.build_game_settings();
-                            // Shuffle the participating CPUs' seats
-                            // (GameDriver::start_game randomizes the
-                            // dealer). Must happen before
-                            // set_local_players so labels stay aligned
-                            // with seats.
-                            let cpu_count = settings.rules.player_count() - 1;
-                            mahjong_server::cpu::client::shuffle_cpu_configs(
-                                &mut configs[..cpu_count],
-                            );
-                            game_state.set_local_players(&configs);
-                            let mut new_adapter = LocalAdapter::with_settings(settings, configs);
-                            new_adapter.start_game();
-                            let events = new_adapter.poll_events();
-                            for event in events {
-                                game_state.queue_event(event);
-                            }
-                            game_state.process_events(get_time());
-                            adapter = Some(Box::new(new_adapter));
+                        SetupAction::StartLocal(configs) => {
+                            adapter = Some(start_local_match(&mut game_state, configs));
                         }
                         SetupAction::ApplyOnline => {
                             // Send the CPU configs so everyone's lobby
@@ -493,16 +536,64 @@ async fn main() {
                             game_state.phase = GamePhase::GameOver;
                         } else {
                             adp.request_next_round();
+                            if adp.is_game_over() {
+                                game_state.phase = GamePhase::GameOver;
+                            }
                         }
                     }
                 }
             }
 
             GamePhase::GameOver => {
-                if is_mouse_button_pressed(MouseButton::Left) {
-                    game_state = GameState::new();
-                    adapter = None;
-                    online = None;
+                if let Some(action) = renderer::handle_game_over_input(&game_state) {
+                    match action {
+                        GameOverAction::RematchLocal => {
+                            let configs = game_state.setup_state.build_configs();
+                            let mut next =
+                                game_state.fresh_for_navigation(GamePhase::WaitingForStart);
+                            next.online_state.room = None;
+                            game_state = next;
+                            adapter = Some(start_local_match(&mut game_state, configs));
+                            online = None;
+                        }
+                        GameOverAction::ChangeSettings => {
+                            game_state = game_state
+                                .fresh_for_navigation(GamePhase::ModeSelect(MenuOrigin::Local));
+                            game_state.online_state.room = None;
+                            adapter = None;
+                            online = None;
+                        }
+                        GameOverAction::ReturnToRoom => {
+                            if let Some(mut remote) = take_remote_adapter(&mut adapter) {
+                                remote.return_to_lobby();
+                                game_state =
+                                    game_state.fresh_for_navigation(GamePhase::OnlineLobby);
+                                online = Some(remote);
+                            } else {
+                                game_state = game_state.fresh_for_navigation(GamePhase::OnlineMenu);
+                                game_state.online_state.room = None;
+                                online = None;
+                            }
+                        }
+                        GameOverAction::OnlineMenu => {
+                            if let Some(mut remote) = take_remote_adapter(&mut adapter) {
+                                remote.leave_room();
+                            }
+                            game_state = game_state.fresh_for_navigation(GamePhase::OnlineMenu);
+                            game_state.online_state.room = None;
+                            online = None;
+                        }
+                        GameOverAction::Title => {
+                            if let Some(mut remote) = take_remote_adapter(&mut adapter) {
+                                remote.leave_room();
+                            } else {
+                                adapter = None;
+                            }
+                            game_state = game_state.fresh_for_navigation(GamePhase::TopMenu);
+                            game_state.online_state.room = None;
+                            online = None;
+                        }
+                    }
                 }
             }
 
