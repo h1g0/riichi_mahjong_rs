@@ -25,6 +25,7 @@ pub use online::{
 };
 pub use overlay::OverlayClick;
 use result::*;
+pub use result::{GameOverAction, handle_game_over_input};
 use setup::*;
 use tiles::*;
 

@@ -1,6 +1,47 @@
 //! Unit tests for the game state.
 
 use super::*;
+
+#[test]
+fn fresh_navigation_state_keeps_preferences_and_resets_match_data() {
+    let mut state = GameState::new();
+    state.setup_state.mode = GameMode::ThreeHanchan;
+    state.setup_state.cpu_levels = [2, 0, 1];
+    state.online_state.name_input = "Player".to_string();
+    state.scores = [40000, 30000, 20000, 10000];
+    state.match_kind = Some(MatchKind::Local);
+
+    let next = state.fresh_for_navigation(GamePhase::ModeSelect(MenuOrigin::Local));
+
+    assert_eq!(next.setup_state.mode, GameMode::ThreeHanchan);
+    assert_eq!(next.setup_state.cpu_levels, [2, 0, 1]);
+    assert_eq!(next.online_state.name_input, "Player");
+    assert_eq!(next.scores, [25000; 4]);
+    assert_eq!(next.match_kind, None);
+    assert_eq!(next.phase, GamePhase::ModeSelect(MenuOrigin::Local));
+}
+
+#[test]
+fn cpu_specs_can_be_inherited_by_a_migrated_host() {
+    let mut setup = SetupState::new();
+    setup.apply_cpu_specs([
+        CpuSpec {
+            level: CpuLevel::Strong,
+            personality: CpuPersonality::Defensive,
+        },
+        CpuSpec {
+            level: CpuLevel::Weak,
+            personality: CpuPersonality::Speedy,
+        },
+        CpuSpec {
+            level: CpuLevel::Normal,
+            personality: CpuPersonality::HighValue,
+        },
+    ]);
+
+    assert_eq!(setup.cpu_levels, [2, 0, 1]);
+    assert_eq!(setup.cpu_personalities, [3, 1, 2]);
+}
 use mahjong_core::scoring::score::{DoraLabel, ScoreItem, ScoreRank};
 use mahjong_core::settings::{AllLastRule, BankruptcyRule, Settings};
 use mahjong_core::winning_hand::name::Kind;

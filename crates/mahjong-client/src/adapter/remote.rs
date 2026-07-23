@@ -46,6 +46,10 @@ pub struct RoomView {
     pub length: GameLength,
     /// CPU configs for empty seats (None from old servers)
     pub cpu_configs: Option<[CpuSpec; 3]>,
+    /// Whether the room is between completed games
+    pub post_game: bool,
+    /// Seats whose players have returned from the final results
+    pub returned_to_lobby: [bool; 4],
 }
 
 impl RoomView {
@@ -62,6 +66,18 @@ impl RoomView {
     /// Player count (4 or 3).
     pub fn player_count(&self) -> usize {
         self.rules.player_count()
+    }
+
+    /// Whether every seated human is available for a rematch.
+    pub fn can_start(&self) -> bool {
+        !self.post_game
+            || self
+                .seats
+                .iter()
+                .enumerate()
+                .take(self.player_count())
+                .filter(|(_, seat)| matches!(seat, SeatInfo::Human { .. }))
+                .all(|(seat, _)| self.returned_to_lobby[seat])
     }
 }
 
@@ -222,6 +238,16 @@ impl RemoteAdapter {
     pub fn leave_room(&mut self) {
         self.send(&ClientMessage::LeaveRoom);
         self.room = None;
+    }
+
+    /// Returns the connection to the room after the final results.
+    pub fn return_to_lobby(&mut self) {
+        self.send(&ClientMessage::ReturnToLobby);
+        self.game_started = false;
+        self.game_over = false;
+        self.ready_sent = false;
+        self.events.clear();
+        self.turn_deadline = None;
     }
 
     /// The current connection state.
@@ -401,6 +427,8 @@ impl RemoteAdapter {
                 rules,
                 length,
                 cpu_configs,
+                post_game,
+                returned_to_lobby,
             } => {
                 self.room_code = Some(code.clone());
                 // Pull the humans' connection states from the seats.
@@ -418,11 +446,14 @@ impl RemoteAdapter {
                     rules,
                     length,
                     cpu_configs,
+                    post_game,
+                    returned_to_lobby,
                 });
             }
             ServerMessage::Event(event) => {
                 if matches!(event, ServerEvent::GameStarted { .. }) {
                     self.game_started = true;
+                    self.game_over = false;
                     // A new hand begins; the next-hand ack may be
                     // sent again.
                     self.ready_sent = false;
@@ -439,6 +470,7 @@ impl RemoteAdapter {
                 for event in events {
                     if matches!(event, ServerEvent::GameStarted { .. }) {
                         self.game_started = true;
+                        self.game_over = false;
                         self.ready_sent = false;
                     }
                     self.events.push(event);
@@ -594,6 +626,7 @@ pub fn error_code_message(code: ErrorCode, lang: Lang) -> &'static str {
             ErrorCode::NotHost => "ホストのみ操作できます",
             ErrorCode::NotInRoom => "ルームに参加していません",
             ErrorCode::GameInProgress => "対局中のため参加できません",
+            ErrorCode::PlayersNotReady => "結果を確認中のプレイヤーがいます",
             ErrorCode::InvalidAction => "無効な操作です",
             ErrorCode::BadMessage => "不正なメッセージです",
             ErrorCode::RateLimited => "操作が頻繁すぎます。しばらく待ってください",
@@ -605,6 +638,7 @@ pub fn error_code_message(code: ErrorCode, lang: Lang) -> &'static str {
             ErrorCode::NotHost => "Only the host can do that",
             ErrorCode::NotInRoom => "You are not in a room",
             ErrorCode::GameInProgress => "Cannot join: a game is in progress",
+            ErrorCode::PlayersNotReady => "A player is still reviewing the results",
             ErrorCode::InvalidAction => "Invalid action",
             ErrorCode::BadMessage => "Malformed message",
             ErrorCode::RateLimited => "Too many actions; please wait a moment",
@@ -720,6 +754,8 @@ mod tests {
             rules: Settings::new(),
             length: GameLength::EastOnly,
             cpu_configs: None,
+            post_game: false,
+            returned_to_lobby: [false; 4],
         }
     }
 
@@ -815,6 +851,8 @@ mod tests {
             rules: Settings::new(),
             length: GameLength::Hanchan,
             cpu_configs: None,
+            post_game: false,
+            returned_to_lobby: [false; 4],
         };
         handle.push_msg(&msg);
         adapter.tick();
@@ -904,6 +942,8 @@ mod tests {
             rules: Settings::new(),
             length: GameLength::EastOnly,
             cpu_configs: Some(specs),
+            post_game: false,
+            returned_to_lobby: [false; 4],
         };
         handle.push_msg(&msg);
         adapter.tick();
@@ -1138,6 +1178,81 @@ mod tests {
         });
         adapter.tick();
         assert!(adapter.is_game_over());
+    }
+
+    #[test]
+    fn test_return_to_lobby_sends_intent_and_resets_game_flags() {
+        let (mut adapter, handle) = create_adapter();
+        handle.push_msg(&ServerMessage::Event(game_started_event()));
+        handle.push_msg(&ServerMessage::GameOver {
+            final_scores: [30000, 25000, 25000, 20000],
+        });
+        adapter.tick();
+        assert!(adapter.game_started());
+        assert!(adapter.is_game_over());
+
+        adapter.return_to_lobby();
+
+        assert!(!adapter.game_started());
+        assert!(!adapter.is_game_over());
+        assert!(matches!(
+            handle.sent().last(),
+            Some(ClientMessage::ReturnToLobby)
+        ));
+    }
+
+    #[test]
+    fn test_post_game_room_waits_for_every_seated_human() {
+        let (mut adapter, handle) = create_adapter();
+        handle.push_msg(&ServerMessage::RoomState {
+            code: "ABC234".to_string(),
+            seats: [
+                SeatInfo::Human {
+                    name: "Host".to_string(),
+                    connected: true,
+                },
+                SeatInfo::Human {
+                    name: "Guest".to_string(),
+                    connected: true,
+                },
+                SeatInfo::Empty,
+                SeatInfo::Empty,
+            ],
+            host_seat: 0,
+            your_seat: 0,
+            rules: Settings::new(),
+            length: GameLength::EastOnly,
+            cpu_configs: None,
+            post_game: true,
+            returned_to_lobby: [true, false, false, false],
+        });
+        adapter.tick();
+        assert!(!adapter.room().expect("room").can_start());
+
+        handle.push_msg(&ServerMessage::RoomState {
+            code: "ABC234".to_string(),
+            seats: [
+                SeatInfo::Human {
+                    name: "Host".to_string(),
+                    connected: true,
+                },
+                SeatInfo::Human {
+                    name: "Guest".to_string(),
+                    connected: true,
+                },
+                SeatInfo::Empty,
+                SeatInfo::Empty,
+            ],
+            host_seat: 0,
+            your_seat: 0,
+            rules: Settings::new(),
+            length: GameLength::EastOnly,
+            cpu_configs: None,
+            post_game: true,
+            returned_to_lobby: [true, true, false, false],
+        });
+        adapter.tick();
+        assert!(adapter.room().expect("room").can_start());
     }
 
     #[test]

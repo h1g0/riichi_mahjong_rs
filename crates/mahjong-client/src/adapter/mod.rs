@@ -41,3 +41,72 @@ pub trait GameAdapter {
         None
     }
 }
+
+/// The active in-game adapter, kept as an enum so an online connection
+/// can move back to the lobby after the final results.
+pub enum ActiveAdapter {
+    Local(Box<LocalAdapter>),
+    Remote(Box<RemoteAdapter>),
+}
+
+impl ActiveAdapter {
+    /// Recovers the remote connection when an online game returns to its
+    /// room. A local adapter has no lobby connection to recover.
+    pub fn into_remote(self) -> Option<RemoteAdapter> {
+        match self {
+            ActiveAdapter::Local(_) => None,
+            ActiveAdapter::Remote(remote) => Some(*remote),
+        }
+    }
+}
+
+impl GameAdapter for ActiveAdapter {
+    fn send_action(&mut self, action: ClientAction) {
+        match self {
+            ActiveAdapter::Local(adapter) => adapter.send_action(action),
+            ActiveAdapter::Remote(adapter) => adapter.send_action(action),
+        }
+    }
+
+    fn poll_events(&mut self) -> Vec<ServerEvent> {
+        match self {
+            ActiveAdapter::Local(adapter) => adapter.poll_events(),
+            ActiveAdapter::Remote(adapter) => adapter.poll_events(),
+        }
+    }
+
+    fn tick(&mut self) {
+        match self {
+            ActiveAdapter::Local(adapter) => adapter.tick(),
+            ActiveAdapter::Remote(adapter) => adapter.tick(),
+        }
+    }
+
+    fn request_next_round(&mut self) {
+        match self {
+            ActiveAdapter::Local(adapter) => adapter.request_next_round(),
+            ActiveAdapter::Remote(adapter) => adapter.request_next_round(),
+        }
+    }
+
+    fn is_game_over(&self) -> bool {
+        match self {
+            ActiveAdapter::Local(adapter) => adapter.is_game_over(),
+            ActiveAdapter::Remote(adapter) => adapter.is_game_over(),
+        }
+    }
+
+    fn status_text(&self, lang: Lang) -> Option<String> {
+        match self {
+            ActiveAdapter::Local(adapter) => adapter.status_text(lang),
+            ActiveAdapter::Remote(adapter) => adapter.status_text(lang),
+        }
+    }
+
+    fn turn_remaining_secs(&self) -> Option<u32> {
+        match self {
+            ActiveAdapter::Local(adapter) => adapter.turn_remaining_secs(),
+            ActiveAdapter::Remote(adapter) => adapter.turn_remaining_secs(),
+        }
+    }
+}

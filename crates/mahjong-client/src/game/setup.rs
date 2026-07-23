@@ -357,6 +357,11 @@ pub struct RoomViewUi {
     pub is_host: bool,
     /// The room's game mode
     pub mode: GameMode,
+    /// Whether this lobby follows a completed game
+    pub post_game: bool,
+    /// Whether the host can start without interrupting another player's
+    /// final-results screen
+    pub can_start: bool,
 }
 
 /// State of the pre-game setup screen.
@@ -444,5 +449,22 @@ impl SetupState {
     pub fn build_cpu_specs(&self) -> [CpuSpec; 3] {
         self.build_configs()
             .map(|config| CpuSpec::from_config(&config))
+    }
+
+    /// Loads the server's host-relative CPU choices after host migration.
+    pub fn apply_cpu_specs(&mut self, specs: [CpuSpec; 3]) {
+        for (index, spec) in specs.into_iter().enumerate() {
+            self.cpu_levels[index] = match spec.level {
+                CpuLevel::Weak => 0,
+                CpuLevel::Normal => 1,
+                CpuLevel::Strong => 2,
+            };
+            self.cpu_personalities[index] = match spec.personality {
+                CpuPersonality::Balanced => 0,
+                CpuPersonality::Speedy => 1,
+                CpuPersonality::HighValue => 2,
+                CpuPersonality::Defensive => 3,
+            };
+        }
     }
 }

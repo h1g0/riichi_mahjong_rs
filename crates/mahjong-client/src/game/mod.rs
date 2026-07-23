@@ -286,6 +286,9 @@ pub struct GameState {
     pub turn_player: Option<Wind>,
     /// Game phase
     pub phase: GamePhase,
+    /// Origin of the active match; retained through the final-results
+    /// screen so its actions can differ between local and online play.
+    pub match_kind: Option<MatchKind>,
     /// Available calls
     pub available_calls: Vec<AvailableCall>,
     /// The tile the calls are on
@@ -373,6 +376,13 @@ pub enum MenuOrigin {
     Online,
 }
 
+/// Transport context of the active match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchKind {
+    Local,
+    Online,
+}
+
 /// Game phase.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GamePhase {
@@ -433,6 +443,7 @@ impl GameState {
             is_my_turn: false,
             turn_player: None,
             phase: GamePhase::TopMenu,
+            match_kind: None,
             available_calls: Vec::new(),
             call_target_tile: None,
             call_discarder: None,
@@ -488,6 +499,20 @@ impl GameState {
             clock: 0.0,
             lang: crate::persistence::load_lang().unwrap_or(Lang::Ja),
         }
+    }
+
+    /// Creates a clean match state while retaining the user's menu and
+    /// room preferences for the next navigation target.
+    pub fn fresh_for_navigation(&self, phase: GamePhase) -> Self {
+        let mut next = Self::new();
+        next.lang = self.lang;
+        next.setup_state = self.setup_state.clone();
+        next.online_state = self.online_state.clone();
+        next.online_state.turn_remaining = None;
+        next.online_state.status_line = None;
+        next.online_state.status_is_error = false;
+        next.phase = phase;
+        next
     }
 
     /// Whether this is a three-player game.

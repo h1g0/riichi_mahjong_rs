@@ -18,7 +18,8 @@ use crate::table::GameLength;
 /// `Settings`).
 /// v4: structured Nagashi Mangan round-end events.
 /// v5: double-yakuman settings and dedicated special-yakuman score items.
-pub const PROTOCOL_VERSION: u32 = 5;
+/// v6: post-game lobby state and same-room rematches.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// A CPU's level and personality.
 ///
@@ -103,6 +104,10 @@ pub enum ClientMessage {
     /// The player has reviewed the result screen and is ready for
     /// the next hand
     ReadyNextRound,
+
+    /// The player has left the final-results screen and returned to the
+    /// room for a possible rematch.
+    ReturnToLobby,
 }
 
 /// Messages from the server to a client.
@@ -140,6 +145,15 @@ pub enum ServerMessage {
         /// to `None`.
         #[serde(default)]
         cpu_configs: Option<[CpuSpec; 3]>,
+        /// Whether the room is between completed games.
+        #[serde(default)]
+        post_game: bool,
+        /// Seats whose players have left the final-results screen.
+        ///
+        /// Only meaningful while `post_game` is true. Empty seats are
+        /// ignored when deciding whether the host can start a rematch.
+        #[serde(default)]
+        returned_to_lobby: [bool; 4],
     },
 
     /// An in-game event
@@ -212,6 +226,8 @@ pub enum ErrorCode {
     NotInRoom,
     /// Rejected because a game is in progress
     GameInProgress,
+    /// A rematch cannot start while a player is still reviewing results
+    PlayersNotReady,
     /// Invalid action (wrong turn, wrong phase, ...)
     InvalidAction,
     /// Unparseable message
@@ -324,6 +340,7 @@ mod tests {
             }),
             ClientMessage::Action(ClientAction::Riichi { tile: None }),
             ClientMessage::ReadyNextRound,
+            ClientMessage::ReturnToLobby,
         ];
 
         for msg in messages {
@@ -378,6 +395,8 @@ mod tests {
                         personality: CpuPersonality::HighValue,
                     },
                 ]),
+                post_game: true,
+                returned_to_lobby: [true, false, true, false],
             },
             ServerMessage::Event(ServerEvent::TileDrawn {
                 tile: Tile::new(Tile::P5),
@@ -442,6 +461,7 @@ mod tests {
             ErrorCode::NotHost,
             ErrorCode::NotInRoom,
             ErrorCode::GameInProgress,
+            ErrorCode::PlayersNotReady,
             ErrorCode::InvalidAction,
             ErrorCode::BadMessage,
             ErrorCode::RateLimited,
@@ -478,7 +498,16 @@ mod tests {
         let json = r#"{"RoomState":{"code":"ABC234","seats":["Empty","Empty","Empty","Empty"],"host_seat":0,"your_seat":1}}"#;
         let decoded = ServerMessage::from_json(json).expect("decode");
         match decoded {
-            ServerMessage::RoomState { cpu_configs, .. } => assert_eq!(cpu_configs, None),
+            ServerMessage::RoomState {
+                cpu_configs,
+                post_game,
+                returned_to_lobby,
+                ..
+            } => {
+                assert_eq!(cpu_configs, None);
+                assert!(!post_game);
+                assert_eq!(returned_to_lobby, [false; 4]);
+            }
             _ => panic!("variant changed"),
         }
     }

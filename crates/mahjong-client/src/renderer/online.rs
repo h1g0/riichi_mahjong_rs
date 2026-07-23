@@ -182,6 +182,34 @@ fn draw_button(font: Option<&Font>, rect: &Rect2, label: &str, accent: bool) {
     }
 }
 
+fn draw_disabled_button(font: Option<&Font>, rect: &Rect2, label: &str) {
+    theme::draw_rounded_rect(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        8.0,
+        theme::rgba(0xffffff, 0.025),
+    );
+    theme::draw_rounded_rect_lines(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        8.0,
+        1.0,
+        theme::rgba(0xffffff, 0.10),
+    );
+    theme::draw_text_centered(
+        font,
+        label,
+        rect.center_x(),
+        rect.y + rect.h / 2.0 + 7.0,
+        theme::font_size::SUBHEADING,
+        theme::TEXT_DIM,
+    );
+}
+
 fn draw_input_box(font: Option<&Font>, rect: &Rect2, text: &str, focused: bool) {
     theme::draw_rounded_rect(
         rect.x,
@@ -404,11 +432,33 @@ pub fn draw_online_lobby(state: &GameState, font: Option<&Font>) {
             theme::TEXT_DIM,
         );
         draw_button(font, &CPU_SETUP_BTN, tr.get(Key::CpuSetupTitle), false);
-        draw_button(font, &START_BTN, tr.get(Key::StartGame), true);
+        let start_label = if room.post_game {
+            tr.get(Key::StartRematch)
+        } else {
+            tr.get(Key::StartGame)
+        };
+        if room.can_start {
+            draw_button(font, &START_BTN, start_label, true);
+        } else {
+            draw_disabled_button(font, &START_BTN, start_label);
+            theme::draw_text_centered(
+                font,
+                tr.get(Key::WaitingResultReview),
+                cx,
+                START_BTN.y + START_BTN.h + 20.0,
+                theme::font_size::SMALL,
+                theme::TEXT_DIM,
+            );
+        }
     } else {
+        let waiting = if room.post_game && !room.can_start {
+            tr.get(Key::WaitingResultReview)
+        } else {
+            tr.get(Key::WaitingHost)
+        };
         theme::draw_text_centered(
             font,
-            tr.get(Key::WaitingHost),
+            waiting,
             cx,
             START_BTN.y + 34.0,
             theme::font_size::BODY_LARGE,
@@ -427,15 +477,13 @@ pub fn handle_online_lobby_input(state: &GameState) -> Option<OnlineLobbyAction>
     }
     let (mx, my) = super::mouse_position_design();
 
-    let is_host = state
-        .online_state
-        .room
-        .as_ref()
-        .is_some_and(|room| room.is_host);
+    let room = state.online_state.room.as_ref();
+    let is_host = room.is_some_and(|room| room.is_host);
+    let can_start = room.is_some_and(|room| room.can_start);
     if is_host && CPU_SETUP_BTN.contains(mx, my) {
         return Some(OnlineLobbyAction::OpenCpuSettings);
     }
-    if is_host && START_BTN.contains(mx, my) {
+    if is_host && can_start && START_BTN.contains(mx, my) {
         return Some(OnlineLobbyAction::StartGame);
     }
     if LEAVE_BTN.contains(mx, my) {
