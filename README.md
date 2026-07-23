@@ -1,14 +1,19 @@
 # Riichi Mahjong RS
 
-[日本語版はこちら](./docs/README.ja.md)
-
 [![Build and test](https://github.com/h1g0/mahjong_rs/actions/workflows/build_and_test.yml/badge.svg?branch=main)](https://github.com/h1g0/mahjong_rs/actions/workflows/build_and_test.yml)
 
-Implementation for Japanese Riichi Mahjong in Rust.
+![Logo](./docs/img/logo_small.png)
 
+[日本語版はこちら](./docs/README.ja.md)
+
+Implementation for Japanese Riichi Mahjong Game in Rust.
 **You can [play it here](https://riichi-mahjong-rs.vercel.app).**
 
-![Screenshot of gameplay](./docs/image1.png)
+## Screenshots
+
+| ![Screenshot of gameplay 1](./docs/img/screenshots/en/image1.png) | ![Screenshot of gameplay 2](./docs/img/screenshots/en/image2.png) |
+|---|---|
+| ![Screenshot of gameplay 3](./docs/img/screenshots/en/image3.png) | ![Screenshot of gameplay 4](./docs/img/screenshots/en/image4.png) |
 
 ## Features
 
