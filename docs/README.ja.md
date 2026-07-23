@@ -1,14 +1,19 @@
 # Riichi Mahjong RS
 
-[English version](../README.md)
-
 [![Build and test](https://github.com/h1g0/mahjong_rs/actions/workflows/build_and_test.yml/badge.svg?branch=main)](https://github.com/h1g0/mahjong_rs/actions/workflows/build_and_test.yml)
 
-麻雀（一般的なリーチ麻雀）のRustでの実装です。
+![ロゴ](./img/logo_small.png)
 
+[English version](../README.md)
+
+麻雀（一般的なリーチ麻雀）のRustでの実装です。
 **[こちら](https://riichi-mahjong-rs.vercel.app) でプレイすることができます。**
 
-![プレイ中の画面](./image1.png)
+## スクリーンショット
+
+| ![プレイ中の画面1](./img/screenshots/ja/image1.png) | ![プレイ中の画面2](./img/screenshots/ja/image2.png) |
+|---|---|
+| ![細かいルール設定が可能](./img/screenshots/ja/image3.png) | ![CPUも設定可能](./img/screenshots/ja/image4.png) |
 
 ## 特徴
 
