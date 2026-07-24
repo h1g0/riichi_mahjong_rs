@@ -7,7 +7,7 @@
 [日本語版はこちら](./docs/README.ja.md)
 
 Implementation for Japanese Riichi Mahjong Game in Rust.
-**You can [play it here](https://riichi-mahjong-rs.vercel.app).**
+**You can [play it here](https://h1g0.itch.io/riichi-mahjong-rs).**
 
 ## Screenshots
 
