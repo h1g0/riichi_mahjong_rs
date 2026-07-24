@@ -7,7 +7,7 @@
 [English version](../README.md)
 
 麻雀（一般的なリーチ麻雀）のRustでの実装です。
-**[こちら](https://riichi-mahjong-rs.vercel.app) でプレイすることができます。**
+**[こちら](https://h1g0.itch.io/riichi-mahjong-rs) でプレイすることができます。**
 
 ## スクリーンショット
 
