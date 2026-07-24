@@ -78,9 +78,9 @@ pub async fn ws_handler(
     Query(query): Query<WsQuery>,
     headers: HeaderMap,
 ) -> Response {
-    // Origin restriction, only when ALLOWED_ORIGIN is set.
+    // A missing Origin must not bypass a configured browser allowlist.
     let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
-    if !origin_allowed(state.allowed_origin.as_deref(), origin) {
+    if !origin_allowed(state.allowed_origins.as_deref(), origin) {
         tracing::warn!(?origin, "rejected connection from disallowed origin");
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -138,12 +138,14 @@ async fn maybe_replay(state: &AppState, code: &str, headers: &HeaderMap) -> Opti
     )
 }
 
-/// Whether the Origin is allowed: None allows all, Some requires an
-/// exact Origin-header match.
-fn origin_allowed(allowed: Option<&str>, origin: Option<&str>) -> bool {
+/// Whether the Origin is allowed.
+///
+/// `None` allows all clients. A configured list requires an exact
+/// match and rejects clients without an Origin header.
+fn origin_allowed(allowed: Option<&[String]>, origin: Option<&str>) -> bool {
     match allowed {
         None => true,
-        Some(allowed) => origin == Some(allowed),
+        Some(allowed) => origin.is_some_and(|origin| allowed.iter().any(|item| item == origin)),
     }
 }
 
@@ -532,11 +534,24 @@ mod tests {
 
     #[test]
     fn test_origin_allowed_requires_exact_match() {
-        let allowed = Some("https://mahjong.example.com");
-        assert!(origin_allowed(allowed, Some("https://mahjong.example.com")));
+        let allowed = vec![
+            "https://mahjong.example.com".to_string(),
+            "https://html.example.com".to_string(),
+        ];
+        assert!(origin_allowed(
+            Some(&allowed),
+            Some("https://mahjong.example.com")
+        ));
+        assert!(origin_allowed(
+            Some(&allowed),
+            Some("https://html.example.com")
+        ));
         // Mismatches and missing headers are rejected.
-        assert!(!origin_allowed(allowed, Some("https://evil.example.com")));
-        assert!(!origin_allowed(allowed, None));
+        assert!(!origin_allowed(
+            Some(&allowed),
+            Some("https://evil.example.com")
+        ));
+        assert!(!origin_allowed(Some(&allowed), None));
     }
 
     #[test]

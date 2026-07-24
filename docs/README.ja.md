@@ -32,7 +32,7 @@
   - 35,000 点持ち。東風戦は東 1〜3 局、半荘戦は東 1〜南 3 局
 - 四人麻雀・三人麻雀ともに、東風戦と半荘戦を対局ごとに選択可能
 - 細かなルールを対局ごとに柔軟に設定可能。例：喰いタン、複数ロンの可否（頭ハネ）、喰い替え、各種途中流局、役満の包、ダブル役満、三人麻雀の北抜きやツモ損
-- 同梱のスクリプトと設定により、静的 Web クライアントを Vercel、オンライン対戦サーバを Fly.io にデプロイ可能
+- 同梱のスクリプトと設定により、静的 Web クライアントを Vercel または itch.io、オンライン対戦サーバを Fly.io にデプロイ可能
 
 ## 構成
 
@@ -153,6 +153,35 @@ Vercel のビルドでは次の処理を行います。
 
 デプロイした Web クライアントをオンラインサーバへ接続させるには、Vercel プロジェクトの環境変数 `MAHJONG_SERVER_URL` を設定します（例: `wss://your-app.fly.dev/ws`）。ビルド時に `window.MAHJONG_SERVER_URL` へ注入されます。未設定の場合は `ws://127.0.0.1:8080/ws`（ローカル開発用）にフォールバックします。
 
+## itch.io デプロイ
+
+GitHub Actions のワークフローは、生成した `public/` ディレクトリを
+[butler](https://itch.io/docs/butler/) で itch.io へアップロードできます。
+`main` への push ですべてのチェックに成功したときだけデプロイし、Pull
+Request では実行しません。必要な設定がない場合、デプロイ処理はスキップします。
+
+初回のみ、次の設定が必要です。
+
+1. itch.io でプロジェクトページを作成し、ゲームの種類を HTML にします。
+2. GitHub Actions の Repository secret `BUTLER_API_KEY` を追加します。
+   `butler login` または itch.io の API keys 設定画面で取得し、ログには
+   出力しないでください。
+3. Actions の Repository variable `ITCH_TARGET` を
+   `作者名/ゲームのURLスラッグ` 形式で追加します。たとえばページが
+   `https://creator.itch.io/riichi-mahjong-rs` なら
+   `creator/riichi-mahjong-rs` です。
+4. Actions の Repository variable `MAHJONG_SERVER_URL` に本番の
+   WebSocket エンドポイント（例: `wss://your-app.fly.dev/ws`）を設定します。
+   オンライン対戦にはこの設定が必要です。未設定の場合、itch.io 版は
+   ローカル開発用の接続先へフォールバックします。
+5. 最初のワークフロー実行で `html5` チャンネルが作られた後、itch.io の
+   プロジェクト編集画面で、そのアップロードを HTML5 / Playable in browser
+   に指定し、埋め込み設定を行って保存します。
+
+ワークフローは `public/` を直接 `butler push` に渡すため、CI で ZIP を作る
+必要はありません。以後、`main` への push が成功するたびに同じ `html5`
+チャンネルを更新し、Web ビルドの内容が同一の場合はアップロードを省略します。
+
 ## オンライン対戦サーバ
 
 `mahjong-net-server` はルームコード制のオンライン対戦をホストします。静的 Web クライアントとゲームサーバは別々にデプロイします（Vercel は静的配信のみのため、WebSocket サーバは別ホストが必要）。
@@ -167,7 +196,8 @@ cargo run -p mahjong-net-server
 
 - `PORT`: リッスンポート（デフォルト `8080`）
 - `RUST_LOG`: ログフィルタ（例: `mahjong_net_server=debug`）
-- `ALLOWED_ORIGIN`: 設定すると、`Origin` ヘッダが一致する WebSocket 接続のみ許可（例: `https://your-app.vercel.app`）。未設定なら全許可。**ネイティブクライアントは `Origin` ヘッダを送らないため、設定中は弾かれます（HTTP 403）** — ネイティブから接続したい場合は未設定にし、ブラウザクライアント + 組み込みのレート制限で運用してください
+- `ALLOWED_ORIGINS`: WebSocket 接続を許可する完全一致の `Origin` をカンマ区切りで指定（例: `https://your-app.vercel.app,https://html-classic.itch.zone`）。どちらの Origin 設定もなければ全許可
+- `ALLOWED_ORIGIN`: 従来の単一 Origin 設定。後方互換性のため、設定した値は `ALLOWED_ORIGINS` に追加されます。**どちらかの設定に Origin が含まれる場合、`Origin` ヘッダを送らないネイティブクライアントは弾かれます（HTTP 403）** — ネイティブから接続したい場合は両方とも未設定にし、ブラウザクライアント + 組み込みのレート制限で運用してください
 - `INTERNAL_PORT`: 複数マシン構成でルーム所在を照会し合う、マシン間専用リスナーのポート（デフォルト `8081`）。Fly 上ではプライベートネットワーク（6PN）のアドレス（`FLY_PRIVATE_IP`）に、ローカルでは `127.0.0.1` に bind します
 - `MAHJONG_PEERS`: ピアの内部リスナーをカンマ区切りの `host:port` で指定し、デフォルトのピア発見（`<FLY_APP_NAME>.internal` DNS）を上書きします。複数マシン構成をローカルで試すときに使います
 
@@ -188,7 +218,7 @@ MAHJONG_SERVER_URL=ws://127.0.0.1:8080/ws cargo run -p mahjong-client
 fly launch --no-deploy
 
 # （任意）接続を許可する Origin を Web クライアントに制限
-fly secrets set ALLOWED_ORIGIN=https://your-app.vercel.app
+fly secrets set ALLOWED_ORIGINS=https://your-app.vercel.app,https://html-classic.itch.zone
 
 # デプロイ
 fly deploy

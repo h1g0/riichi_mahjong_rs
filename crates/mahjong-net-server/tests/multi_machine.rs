@@ -68,7 +68,7 @@ async fn start_two_machines() -> (Machine, Machine) {
     let state = |machine_id: &str, peer: String| AppState {
         lobby: Lobby::new(RoomConfig::default()),
         rate_limiter: RateLimiter::new(),
-        allowed_origin: None,
+        allowed_origins: None,
         peers: Peers::with_static(Some(machine_id), vec![peer]),
     };
 
@@ -294,7 +294,7 @@ async fn test_create_room_completes_with_lying_peer() {
     let state = AppState {
         lobby: Lobby::new(RoomConfig::default()),
         rate_limiter: RateLimiter::new(),
-        allowed_origin: None,
+        allowed_origins: None,
         peers: Peers::with_static(Some("machinea"), vec![liar_addr]),
     };
     let internal = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

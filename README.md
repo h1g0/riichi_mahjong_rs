@@ -32,7 +32,7 @@ Implementation for Japanese Riichi Mahjong Game in Rust.
   - Games start with 35,000 points; an East-only game is East 1–3, and a hanchan is East 1 through South 3.
 - A choice of East-only or hanchan games in both four-player and three-player modes.
 - Flexible per-game rule configuration. Examples: open Tan'yao, whether simultaneous ron wins are allowed, swap-calling, abortive draws, yakuman liability payment, double yakuman, and pei dora or tsumo loss in three-player games.
-- Included scripts and configuration for deploying the static web client to Vercel and the online multiplayer server to Fly.io.
+- Included scripts and configuration for deploying the static web client to Vercel or itch.io and the online multiplayer server to Fly.io.
 
 ## Structure
 
@@ -156,6 +156,35 @@ uses the bundle shipped with that resolved package version.
 
 To point the deployed web client at your online server, set the `MAHJONG_SERVER_URL` environment variable in the Vercel project (for example `wss://your-app.fly.dev/ws`). The build injects it into `window.MAHJONG_SERVER_URL`. If it is unset, the client falls back to `ws://127.0.0.1:8080/ws` (local development only).
 
+## itch.io deployment
+
+The GitHub Actions workflow can upload the generated `public/` directory to
+itch.io with [butler](https://itch.io/docs/butler/). It deploys only after all
+checks pass on a push to `main`; pull requests never deploy. If the required
+configuration is absent, the deployment steps are skipped.
+
+One-time setup:
+
+1. Create the itch.io project page. Set its game kind to HTML.
+2. Add a GitHub Actions repository secret named `BUTLER_API_KEY`. Obtain the
+   key through `butler login` or the itch.io API keys settings page and keep it
+   out of logs.
+3. Add an Actions repository variable named `ITCH_TARGET` in
+   `creator/game-slug` format (for example, the page
+   `https://creator.itch.io/riichi-mahjong-rs` uses
+   `creator/riichi-mahjong-rs`).
+4. Add an Actions repository variable named `MAHJONG_SERVER_URL` with the
+   production WebSocket endpoint (for example,
+   `wss://your-app.fly.dev/ws`). This is required for online play; without it,
+   the itch.io build uses the local-development fallback.
+5. After the first workflow upload creates the `html5` channel, open the
+   itch.io project editor, mark that upload as HTML5 / Playable in browser,
+   configure its embed options, and save the page.
+
+The workflow passes `public/` directly to `butler push`, so no ZIP archive is
+created in CI. Subsequent successful pushes to `main` update the same `html5`
+channel, and unchanged web builds are skipped.
+
 ## Online multiplayer server
 
 `mahjong-net-server` hosts room-code online matches. The static web client (above) and the game server are deployed separately: Vercel only serves static files, so the WebSocket server needs its own host.
@@ -170,7 +199,8 @@ Environment variables:
 
 - `PORT`: listen port (default `8080`).
 - `RUST_LOG`: log filter (for example `mahjong_net_server=debug`).
-- `ALLOWED_ORIGIN`: if set, only WebSocket connections with a matching `Origin` header are accepted (for example `https://your-app.vercel.app`). If unset, all origins are allowed. Note that **native clients do not send an `Origin` header and are rejected (HTTP 403) while this is set** — leave it unset if you need native clients to connect, and rely on browser clients plus the built-in rate limiting otherwise.
+- `ALLOWED_ORIGINS`: comma-separated exact `Origin` values allowed to open WebSocket connections (for example `https://your-app.vercel.app,https://html-classic.itch.zone`). If neither Origin setting is present, all origins are allowed.
+- `ALLOWED_ORIGIN`: legacy single-Origin setting. When present, its value is added to `ALLOWED_ORIGINS` for backward compatibility. Note that **native clients do not send an `Origin` header and are rejected (HTTP 403) while either setting contains an Origin** — leave both unset if you need native clients to connect, and rely on browser clients plus the built-in rate limiting otherwise.
 - `INTERNAL_PORT`: port of the private machine-to-machine listener used for room lookups in multi-machine deployments (default `8081`). On Fly it binds to the 6PN private address (`FLY_PRIVATE_IP`), locally to `127.0.0.1`.
 - `MAHJONG_PEERS`: comma-separated `host:port` list of peer internal listeners, overriding the default peer discovery via `<FLY_APP_NAME>.internal` DNS. Useful for testing the multi-machine setup locally.
 
@@ -190,8 +220,8 @@ The repository includes a `Dockerfile` and `fly.toml`. TLS (`wss://`) is termina
 # one-time: create the app (edit the app name in fly.toml or let fly launch set it)
 fly launch --no-deploy
 
-# (optional) restrict accepted origins to your web client
-fly secrets set ALLOWED_ORIGIN=https://your-app.vercel.app
+# (optional) restrict accepted origins to your web clients
+fly secrets set ALLOWED_ORIGINS=https://your-app.vercel.app,https://html-classic.itch.zone
 
 # deploy
 fly deploy
