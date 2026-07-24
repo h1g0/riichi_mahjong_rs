@@ -29,4 +29,33 @@ jobs:
     - name: Run tests
       run: cargo test --workspace --all-targets --all-features --locked --verbose
     - name: Build web client
+      env:
+        MAHJONG_SERVER_URL: ${{ vars.MAHJONG_SERVER_URL }}
       run: bash scripts/vercel-build.sh
+    - name: Check itch.io deployment configuration
+      id: itch-config
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      shell: bash
+      env:
+        BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        ITCH_TARGET: ${{ vars.ITCH_TARGET }}
+        MAHJONG_SERVER_URL: ${{ vars.MAHJONG_SERVER_URL }}
+      run: |
+        if [[ -n "$BUTLER_API_KEY" && -n "$ITCH_TARGET" && -n "$MAHJONG_SERVER_URL" ]]; then
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::Skipping itch.io deployment because BUTLER_API_KEY, ITCH_TARGET, or MAHJONG_SERVER_URL is not configured."
+        fi
+    - name: Set up butler
+      if: steps.itch-config.outputs.enabled == 'true'
+      uses: remarkablegames/setup-butler@v3
+    - name: Deploy web client to itch.io
+      if: steps.itch-config.outputs.enabled == 'true'
+      env:
+        BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        ITCH_TARGET: ${{ vars.ITCH_TARGET }}
+      run: >
+        butler push public "${ITCH_TARGET}:html5"
+        --userversion "$GITHUB_SHA"
+        --if-changed

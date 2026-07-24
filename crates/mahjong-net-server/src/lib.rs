@@ -39,27 +39,49 @@ pub struct AppState {
     pub lobby: Lobby,
     /// Per-IP join rate limiter
     pub rate_limiter: RateLimiter,
-    /// Allowed Origin; None allows all
-    pub allowed_origin: Option<String>,
+    /// Allowed browser Origins; `None` allows all
+    pub allowed_origins: Option<Vec<String>>,
     /// Peer (other machine) discovery and lookup
     pub peers: Peers,
 }
 
 /// Builds the shared state from environment variables.
 ///
-/// When `ALLOWED_ORIGIN` is set, only WebSocket connections from that
-/// Origin are accepted (otherwise all are). Peer configuration is
+/// `ALLOWED_ORIGINS` accepts a comma-separated list of exact Origins.
+/// The legacy `ALLOWED_ORIGIN` value is added to that list when set. If
+/// neither contains an Origin, all are accepted. Peer configuration is
 /// described at [`Peers::from_env`].
 pub fn build_state(config: RoomConfig) -> AppState {
-    let allowed_origin = std::env::var("ALLOWED_ORIGIN")
-        .ok()
-        .filter(|s| !s.is_empty());
+    let allowed_origins = std::env::var("ALLOWED_ORIGINS").ok();
+    let allowed_origin = std::env::var("ALLOWED_ORIGIN").ok();
     AppState {
         lobby: Lobby::new(config),
         rate_limiter: RateLimiter::new(),
-        allowed_origin,
+        allowed_origins: parse_allowed_origins(
+            allowed_origins.as_deref(),
+            allowed_origin.as_deref(),
+        ),
         peers: Peers::from_env(),
     }
+}
+
+fn parse_allowed_origins(
+    allowed_origins: Option<&str>,
+    allowed_origin: Option<&str>,
+) -> Option<Vec<String>> {
+    let mut origins = Vec::new();
+    for origin in allowed_origins
+        .into_iter()
+        .flat_map(|value| value.split(','))
+        .chain(allowed_origin)
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+    {
+        if !origins.iter().any(|existing| existing == origin) {
+            origins.push(origin.to_owned());
+        }
+    }
+    (!origins.is_empty()).then_some(origins)
 }
 
 /// Builds the public router: `/ws` for WebSocket, `/healthz` for
@@ -95,5 +117,38 @@ async fn internal_room_lookup(Path(code): Path<String>, State(state): State<AppS
     match (state.peers.machine_id(), state.lobby.get(&code)) {
         (Some(id), Some(_)) => (StatusCode::OK, id.to_string()).into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_allowed_origins;
+
+    #[test]
+    fn test_parse_allowed_origins_combines_current_and_legacy_settings() {
+        assert_eq!(
+            parse_allowed_origins(
+                Some("https://web.example.com, https://html.example.com"),
+                Some("https://legacy.example.com"),
+            ),
+            Some(vec![
+                "https://web.example.com".to_string(),
+                "https://html.example.com".to_string(),
+                "https://legacy.example.com".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parse_allowed_origins_ignores_empty_and_duplicate_values() {
+        assert_eq!(
+            parse_allowed_origins(
+                Some(" ,https://web.example.com,https://web.example.com, "),
+                Some(""),
+            ),
+            Some(vec!["https://web.example.com".to_string()])
+        );
+        assert_eq!(parse_allowed_origins(Some(" , "), None), None);
+        assert_eq!(parse_allowed_origins(None, None), None);
     }
 }
