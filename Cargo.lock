@@ -595,6 +595,7 @@ name = "mahjong-mjai"
 version = "0.1.0"
 dependencies = [
  "mahjong-core",
+ "mahjong-server",
  "rstest",
  "serde",
  "serde_json",

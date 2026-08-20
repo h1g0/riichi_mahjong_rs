@@ -5,8 +5,10 @@
 //! directions: an mjai bot such as Mortal can take a seat at our table, and
 //! our own CPU opponent can be reviewed and benchmarked by mjai tooling.
 //!
-//! This crate is the mjai wire format: event types, tile notation, and
-//! newline-delimited JSON framing.
+//! The `server` feature, on by default, adds translation to and from
+//! `mahjong_server::protocol`. With it turned off the crate is just the wire
+//! format — event types, tile notation, and newline-delimited JSON framing —
+//! and depends only on `mahjong-core`.
 //!
 //! # Modes
 //!
@@ -37,10 +39,14 @@
 //! # Ok::<(), serde_json::Error>(())
 //! ```
 
+#[cfg(feature = "server")]
+pub mod encode;
 pub mod event;
 pub mod tile;
 pub mod yaku;
 
+#[cfg(feature = "server")]
+pub use encode::MjaiEncoder;
 pub use event::{Actor, MjaiEvent, RyukyokuReason};
 pub use tile::{MjaiTile, tile_from_str, tile_to_str, wind_from_str, wind_to_str};
 pub use yaku::score_item_name;
@@ -72,3 +78,6 @@ mod tests;
 
 #[cfg(test)]
 mod yaku_tests;
+
+#[cfg(all(test, feature = "server"))]
+mod encode_tests;
