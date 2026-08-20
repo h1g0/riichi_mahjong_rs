@@ -40,20 +40,28 @@
 //! ```
 
 #[cfg(feature = "server")]
+pub mod bot;
+#[cfg(feature = "server")]
 pub mod decode;
 #[cfg(feature = "server")]
 pub mod encode;
 pub mod event;
+#[cfg(feature = "server")]
+pub mod host;
 #[cfg(feature = "server")]
 pub mod record;
 pub mod tile;
 pub mod yaku;
 
 #[cfg(feature = "server")]
+pub use bot::MjaiBot;
+#[cfg(feature = "server")]
 pub use decode::MjaiDecoder;
 #[cfg(feature = "server")]
 pub use encode::MjaiEncoder;
 pub use event::{Actor, MjaiEvent, RyukyokuReason};
+#[cfg(feature = "server")]
+pub use host::MjaiHost;
 #[cfg(feature = "server")]
 pub use record::MjaiRecorder;
 pub use tile::{MjaiTile, tile_from_str, tile_to_str, wind_from_str, wind_to_str};
@@ -86,6 +94,9 @@ mod tests;
 
 #[cfg(test)]
 mod yaku_tests;
+
+#[cfg(all(test, feature = "server"))]
+mod bot_tests;
 
 #[cfg(all(test, feature = "server"))]
 mod decode_tests;

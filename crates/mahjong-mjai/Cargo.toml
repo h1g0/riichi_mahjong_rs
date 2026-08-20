@@ -4,6 +4,11 @@ version = "0.1.0"
 authors = ["hi_go <me@clutte.red>"]
 edition = "2024"
 
+[[bin]]
+name = "mjai-bot"
+path = "src/bin/mjai_bot.rs"
+required-features = ["server"]
+
 [features]
 default = ["server"]
 # Translation to and from the game server's own protocol. Turning this off
