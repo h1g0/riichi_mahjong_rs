@@ -598,6 +598,7 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
+ "strum",
 ]
 
 [[package]]

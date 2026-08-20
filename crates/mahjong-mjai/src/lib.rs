@@ -39,9 +39,11 @@
 
 pub mod event;
 pub mod tile;
+pub mod yaku;
 
 pub use event::{Actor, MjaiEvent, RyukyokuReason};
 pub use tile::{MjaiTile, tile_from_str, tile_to_str, wind_from_str, wind_to_str};
+pub use yaku::score_item_name;
 
 /// Parses one event from a single line of JSON.
 pub fn from_json(line: &str) -> Result<MjaiEvent, serde_json::Error> {
@@ -67,3 +69,6 @@ pub fn from_json_lines(input: &str) -> Result<Vec<MjaiEvent>, serde_json::Error>
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod yaku_tests;
