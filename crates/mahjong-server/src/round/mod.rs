@@ -23,9 +23,6 @@ use crate::wall::Wall;
 
 /// Value of one riichi deposit
 const RIICHI_STICK_VALUE: i32 = 1000;
-/// Minimum score required to declare riichi
-const RIICHI_MIN_SCORE: i32 = 1000;
-
 /// Whether verbose round diagnostics were explicitly enabled for this process.
 pub(super) fn diagnostics_enabled() -> bool {
     if !cfg!(debug_assertions) {
@@ -301,6 +298,17 @@ impl Round {
     }
 
     /// Next seat in turn order, wrapping at the player count.
+    /// Bundles the table facts the legality rules need.
+    pub(crate) fn table_context(&self) -> crate::legality::TableContext<'_> {
+        crate::legality::TableContext {
+            round_wind: self.round_wind,
+            settings: &self.settings,
+            wall_remaining: self.wall.remaining(),
+            last_draw_was_dead_wall: self.last_draw_was_dead_wall,
+            total_kan_count: self.total_kan_count(),
+        }
+    }
+
     fn next_seat(&self, seat: usize) -> usize {
         (seat + 1) % self.player_count
     }
