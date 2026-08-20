@@ -40,6 +40,8 @@
 //! ```
 
 #[cfg(feature = "server")]
+pub mod decode;
+#[cfg(feature = "server")]
 pub mod encode;
 pub mod event;
 #[cfg(feature = "server")]
@@ -47,6 +49,8 @@ pub mod record;
 pub mod tile;
 pub mod yaku;
 
+#[cfg(feature = "server")]
+pub use decode::MjaiDecoder;
 #[cfg(feature = "server")]
 pub use encode::MjaiEncoder;
 pub use event::{Actor, MjaiEvent, RyukyokuReason};
@@ -82,6 +86,9 @@ mod tests;
 
 #[cfg(test)]
 mod yaku_tests;
+
+#[cfg(all(test, feature = "server"))]
+mod decode_tests;
 
 #[cfg(all(test, feature = "server"))]
 mod encode_tests;
