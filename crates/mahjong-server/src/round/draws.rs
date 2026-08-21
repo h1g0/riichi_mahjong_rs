@@ -231,22 +231,7 @@ impl Round {
     /// draw: no discard made yet, and the hand plus the drawn tile holds
     /// nine or more distinct terminal/honour kinds.
     pub(super) fn check_nine_terminals(&self) -> bool {
-        let player = &self.players[self.current_player];
-        if !player.discards.is_empty() {
-            return false;
-        }
-        let mut tile_types = std::collections::HashSet::new();
-        for tile in player.hand.tiles() {
-            if tile.is_1_9_honour() {
-                tile_types.insert(tile.get());
-            }
-        }
-        if let Some(tile) = player.hand.drawn()
-            && tile.is_1_9_honour()
-        {
-            tile_types.insert(tile.get());
-        }
-        tile_types.len() >= 9
+        crate::legality::can_nine_terminals(&self.players[self.current_player])
     }
 
     /// Handles the nine-terminals declaration.

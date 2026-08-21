@@ -297,7 +297,6 @@ impl Round {
             .collect()
     }
 
-    /// Next seat in turn order, wrapping at the player count.
     /// Bundles the table facts the legality rules need.
     pub(crate) fn table_context(&self) -> crate::legality::TableContext<'_> {
         crate::legality::TableContext {
@@ -309,6 +308,7 @@ impl Round {
         }
     }
 
+    /// Next seat in turn order, wrapping at the player count.
     fn next_seat(&self, seat: usize) -> usize {
         (seat + 1) % self.player_count
     }

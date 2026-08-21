@@ -156,6 +156,24 @@ pub fn can_tsumo(player: &Player, ctx: &TableContext<'_>) -> bool {
     .is_win
 }
 
+/// Whether the player may declare a nine-terminals abortive draw.
+///
+/// It is available before the player's first discard when the concealed hand
+/// and drawn tile contain at least nine distinct terminal or honour kinds.
+pub fn can_nine_terminals(player: &Player) -> bool {
+    if !player.discards.is_empty() {
+        return false;
+    }
+
+    let mut kinds = [false; Tile::LEN];
+    for tile in player.hand.tiles().iter().chain(player.hand.drawn().iter()) {
+        if tile.is_1_9_honour() {
+            kinds[tile.get() as usize] = true;
+        }
+    }
+    kinds.into_iter().filter(|present| *present).count() >= 9
+}
+
 /// Whether the player may win on `discarded_tile`.
 ///
 /// Furiten blocks a ron outright; a player in riichi may still ron.

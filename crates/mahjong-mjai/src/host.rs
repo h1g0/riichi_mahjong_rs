@@ -55,6 +55,13 @@ impl MjaiHost {
     /// Returns `None` when the declaration is not an action on its own — a
     /// pass with nothing to pass on, or the first half of a riichi.
     pub fn to_client_action(&mut self, event: &MjaiEvent) -> Option<ClientAction> {
+        if event.validate().is_err()
+            || event
+                .actor()
+                .is_some_and(|actor| self.actor() != Some(actor))
+        {
+            return None;
+        }
         match event {
             MjaiEvent::Reach { .. } => {
                 // Held until the declaring discard names the tile.
@@ -92,6 +99,11 @@ impl MjaiHost {
             MjaiEvent::Ankan { consumed, .. } => consumed.first().map(|tile| ClientAction::Kan {
                 tile_index: tile.get() as usize,
             }),
+            MjaiEvent::Ryukyoku {
+                reason: crate::event::RyukyokuReason::Kyushukyuhai,
+                actor: Some(_),
+                ..
+            } => Some(ClientAction::NineTerminals { declare: true }),
             MjaiEvent::Pass => Some(ClientAction::Pass),
             // Nothing a player declares.
             _ => None,
@@ -105,11 +117,12 @@ impl MjaiHost {
 
     /// The action to take for a prompt mjai cannot put to the player.
     ///
-    /// The server asks whether to abort the hand on nine terminals, and mjai
-    /// has no event to ask that with — [`MjaiHost::encode`] produces nothing
-    /// for it. Something still has to answer, because the server waits on that
-    /// seat and the hand stops dead until it does. Declining matches the
-    /// server's own default for an unanswered prompt and keeps the hand going.
+    /// The server asks whether to abort the hand in a separate event, while an
+    /// mjai player derives the option from its draw and either declares
+    /// `ryukyoku` or passes. [`MjaiHost::encode`] therefore produces nothing
+    /// for the later server prompt. If the player passed, something still has
+    /// to answer that prompt or the hand stops; declining matches the server's
+    /// own default and keeps the hand going.
     ///
     /// A host must call this for every server event it forwards, and submit
     /// whatever comes back alongside the player's own declarations.

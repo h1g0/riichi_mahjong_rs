@@ -66,6 +66,15 @@ fn a_recorded_game_conceals_nothing() {
                     );
                 }
             }
+            MjaiEvent::Ryukyoku {
+                tehais: Some(tehais),
+                ..
+            } => {
+                assert!(
+                    tehais.iter().flatten().all(|slot| !slot.is_hidden()),
+                    "replay-mode draw results must not conceal final hands"
+                );
+            }
             _ => {}
         }
     }

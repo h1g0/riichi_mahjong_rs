@@ -118,6 +118,8 @@ fn known_tile_serialises_as_notation() {
 #[case(r#"{"type":"dora","dora_marker":"3s"}"#)]
 #[case(r#"{"type":"reach","actor":2}"#)]
 #[case(r#"{"type":"reach_accepted","actor":2}"#)]
+#[case(r#"{"type":"ryukyoku","reason":"kyushukyuhai","actor":1}"#)]
+#[case(r#"{"type":"start_game","id":0}"#)]
 #[case(r#"{"type":"end_kyoku"}"#)]
 #[case(r#"{"type":"end_game"}"#)]
 #[case(r#"{"type":"none"}"#)]
@@ -192,6 +194,24 @@ fn replay_hora_keeps_the_score_breakdown() {
     assert_eq!(deltas.as_ref().unwrap()[0], 5200);
 }
 
+#[test]
+fn replay_ryukyoku_keeps_tenpai_and_hands() {
+    let json = r#"{"type":"ryukyoku","reason":"fanpai","tenpais":[true,false,false,true],"tehais":[["1m"],["?"],["?"],["9s"]],"deltas":[1500,-1500,-1500,1500],"scores":[26500,23500,23500,26500]}"#;
+    let event = from_json(json).expect("should decode");
+    let MjaiEvent::Ryukyoku {
+        tenpais, tehais, ..
+    } = &event
+    else {
+        panic!("expected ryukyoku");
+    };
+    assert_eq!(tenpais.as_ref().unwrap(), &vec![true, false, false, true]);
+    assert_eq!(
+        tehais.as_ref().unwrap()[3][0].known(),
+        Some(Tile::new(Tile::S9))
+    );
+    assert_eq!(to_json(&event).unwrap(), json);
+}
+
 #[rstest]
 #[case("fanpai", RyukyokuReason::Fanpai)]
 #[case("kyushukyuhai", RyukyokuReason::Kyushukyuhai)]
@@ -262,6 +282,12 @@ fn only_declarable_events_count_as_player_responses() {
 
     let dora = from_json(r#"{"type":"dora","dora_marker":"1p"}"#).unwrap();
     assert!(!dora.is_player_response());
+
+    let declared_draw =
+        from_json(r#"{"type":"ryukyoku","reason":"kyushukyuhai","actor":0}"#).unwrap();
+    assert!(declared_draw.is_player_response());
+    let announced_draw = from_json(r#"{"type":"ryukyoku","reason":"fanpai"}"#).unwrap();
+    assert!(!announced_draw.is_player_response());
 }
 
 #[rstest]
@@ -278,6 +304,16 @@ fn wrong_consumed_arity_is_caught_by_validate(#[case] json: &str) {
 fn correct_consumed_arity_validates() {
     let json = r#"{"type":"chi","actor":1,"target":0,"pai":"5p","consumed":["6p","7p"]}"#;
     assert!(from_json(json).unwrap().validate().is_ok());
+}
+
+#[rstest]
+#[case(r#"{"type":"start_game","id":4,"names":["a","b","c","d"]}"#)]
+#[case(r#"{"type":"dahai","actor":4,"pai":"1m","tsumogiri":true}"#)]
+#[case(r#"{"type":"pon","actor":0,"target":9,"pai":"1m","consumed":["1m","1m"]}"#)]
+#[case(r#"{"type":"hora","actor":0,"target":4,"pai":"1m"}"#)]
+fn out_of_range_actors_are_caught_by_validate(#[case] json: &str) {
+    let event = from_json(json).expect("decoding stays permissive");
+    assert!(event.validate().is_err());
 }
 
 #[test]

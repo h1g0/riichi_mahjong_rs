@@ -20,7 +20,7 @@
 use mahjong_core::settings::Settings;
 use mahjong_core::tile::Tile;
 use mahjong_server::cpu::client::{CpuClient, CpuConfig};
-use mahjong_server::protocol::ClientAction;
+use mahjong_server::protocol::{AvailableCall, ClientAction, ServerEvent};
 
 use crate::decode::MjaiDecoder;
 use crate::event::{Actor, MjaiEvent};
@@ -69,6 +69,10 @@ impl MjaiBot {
     /// Always returns something, because the protocol expects a reply to every
     /// event; [`MjaiEvent::Pass`] is the reply that declares nothing.
     pub fn respond(&mut self, event: &MjaiEvent) -> MjaiEvent {
+        if event.validate().is_err() {
+            return MjaiEvent::Pass;
+        }
+
         match event {
             MjaiEvent::Hello { .. } => {
                 return MjaiEvent::Join {
@@ -77,18 +81,34 @@ impl MjaiBot {
                 };
             }
             MjaiEvent::StartGame { id, .. } => {
-                // The seat is only known here, so everything that depends on it
-                // is built now rather than at construction.
-                let actor = id.unwrap_or(0);
-                self.seat = Some(Seat {
-                    actor,
-                    decoder: MjaiDecoder::with_settings(actor, self.settings.clone()),
-                    cpu: CpuClient::new_with_rules(self.config.clone(), &self.settings),
-                });
+                self.seat = None;
                 self.pending_riichi_discard = None;
+                if let Some(actor) = id {
+                    self.set_actor(*actor);
+                }
                 return MjaiEvent::Pass;
             }
             _ => {}
+        }
+
+        // `start_game.id` is optional. In in-game mode exactly one starting
+        // hand is visible, so that hand identifies this bot's seat without
+        // guessing that an omitted id means seat 0.
+        if self.seat.is_none()
+            && let MjaiEvent::StartKyoku { tehais, .. } = event
+        {
+            let mut visible = tehais
+                .iter()
+                .take(4)
+                .enumerate()
+                .filter_map(|(actor, hand)| {
+                    hand.iter().any(|tile| !tile.is_hidden()).then_some(actor)
+                });
+            if let Some(actor) = visible.next()
+                && visible.next().is_none()
+            {
+                self.set_actor(actor);
+            }
         }
 
         let Some(seat) = self.seat.as_mut() else {
@@ -119,7 +139,8 @@ impl MjaiBot {
             if matches!(action, ClientAction::Pass)
                 && matches!(
                     server_event,
-                    mahjong_server::protocol::ServerEvent::CallAvailable { .. }
+                    ServerEvent::CallAvailable { ref calls, .. }
+                        if calls.iter().any(|call| matches!(call, AvailableCall::Ron))
                 )
             {
                 seat.decoder.declined_ron();
@@ -135,6 +156,14 @@ impl MjaiBot {
             }
         }
         response.unwrap_or(MjaiEvent::Pass)
+    }
+
+    fn set_actor(&mut self, actor: Actor) {
+        self.seat = Some(Seat {
+            actor,
+            decoder: MjaiDecoder::with_settings(actor, self.settings.clone()),
+            cpu: CpuClient::new_with_rules(self.config.clone(), &self.settings),
+        });
     }
 
     /// The handshake a host opens with, provided so tests and in-process hosts

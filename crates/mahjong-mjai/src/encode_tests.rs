@@ -1,11 +1,12 @@
 //! Tests for the `ServerEvent` to mjai translation.
 
 use mahjong_core::scoring::score::{DoraLabel, ScoreItem, ScoreRank};
+use mahjong_core::settings::BankruptcyRule;
 use mahjong_core::tile::{Tile, Wind};
 use mahjong_core::winning_hand::name::Kind;
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 use mahjong_server::driver::GameDriver;
-use mahjong_server::protocol::{CallType, DrawReason, ServerEvent};
+use mahjong_server::protocol::{CallType, DrawReason, PlayerHandInfo, ServerEvent};
 use mahjong_server::table::GameSettings;
 
 use crate::encode::MjaiEncoder;
@@ -132,7 +133,11 @@ fn scores_are_passed_through_in_seat_order() {
 /// file's own assumption, in a hand whose dealer is not seat 0.
 #[test]
 fn encoded_scores_match_the_tables_own_per_seat_scores() {
-    let mut driver = GameDriver::new(GameSettings::default());
+    let mut game_settings = GameSettings::default();
+    // Later rounds are intentionally not seeded yet (#377), so prevent a
+    // random early bankruptcy from ending this structural test before East 4.
+    game_settings.rules.bankruptcy_rule = BankruptcyRule::None;
+    let mut driver = GameDriver::new(game_settings);
     for seat in 1..4 {
         driver.set_cpu(
             seat,
@@ -229,7 +234,14 @@ fn riichi_brackets_the_declaring_discard() {
         player: Wind::South,
         remaining_tiles: 60,
     });
-    assert_eq!(next[0], MjaiEvent::ReachAccepted { actor: 0 });
+    assert_eq!(
+        next[0],
+        MjaiEvent::ReachAccepted {
+            actor: 0,
+            deltas: Some(vec![-1000, 0, 0, 0]),
+            scores: Some(vec![24000, 25000, 25000, 25000]),
+        }
+    );
 }
 
 #[test]
@@ -254,7 +266,14 @@ fn a_ronned_riichi_discard_is_never_accepted() {
             .any(|e| matches!(e, MjaiEvent::ReachAccepted { .. })),
         "reach_accepted must be suppressed when the declaring discard is ronned"
     );
-    assert!(matches!(won[0], MjaiEvent::Hora { .. }));
+    let MjaiEvent::Hora {
+        deltas: Some(deltas),
+        ..
+    } = &won[0]
+    else {
+        panic!("expected hora with score changes");
+    };
+    assert_eq!(deltas, &vec![-6200, 6200, 0, 0]);
 }
 
 // --- calls ---------------------------------------------------------------
@@ -336,7 +355,11 @@ fn a_win_reports_score_changes_against_the_previous_scores() {
     assert_eq!(*fu, Some(40));
     assert_eq!(*fan, Some(3));
     assert_eq!(deltas.as_ref().unwrap(), &vec![5200, -5200, 0, 0]);
-    assert_eq!(won[1], MjaiEvent::EndKyoku);
+    assert_eq!(won.len(), 1, "the hand may still have another ron winner");
+    assert_eq!(
+        enc.end_game(),
+        vec![MjaiEvent::EndKyoku, MjaiEvent::EndGame]
+    );
 }
 
 #[test]
@@ -388,17 +411,14 @@ fn a_double_ron_reports_both_wins_but_ends_the_hand_once() {
         [17000, 30000, 28000, 25000],
     ));
 
-    assert!(matches!(first[0], MjaiEvent::Hora { .. }));
-    assert_eq!(first[1], MjaiEvent::EndKyoku);
-    assert!(matches!(second[0], MjaiEvent::Hora { .. }));
-    assert_eq!(
-        second.len(),
-        1,
-        "the second win must not close the hand again: {second:?}"
-    );
+    assert!(matches!(first.as_slice(), [MjaiEvent::Hora { .. }]));
+    assert!(matches!(second.as_slice(), [MjaiEvent::Hora { .. }]));
 
-    // A new hand re-arms the guard.
+    // The hand closes only after every winner has been reported. Emitting
+    // end_kyoku between the two hora events makes replay readers attach the
+    // second winner to the next hand.
     let next = enc.encode(&game_started(Wind::East, 1, [17000, 30000, 28000, 25000]));
+    assert_eq!(next[0], MjaiEvent::EndKyoku);
     assert!(
         next.iter()
             .any(|e| matches!(e, MjaiEvent::StartKyoku { .. }))
@@ -449,6 +469,47 @@ fn draw_reasons_map_to_the_reference_spellings() {
             panic!("expected ryukyoku");
         };
         assert_eq!(reason.as_str(), expected);
+    }
+}
+
+#[test]
+fn an_exhaustive_draw_reports_tenpai_and_only_revealed_hands_in_game() {
+    let mut enc = encoder();
+    enc.encode(&game_started(Wind::East, 0, [25000; 4]));
+    let player_hands = [Wind::East, Wind::South, Wind::West, Wind::North]
+        .into_iter()
+        .map(|wind| PlayerHandInfo {
+            wind,
+            hand: vec![Tile::new(Tile::M1 + wind.to_index() as u32); 13],
+            melds: Vec::new(),
+            pei: Vec::new(),
+        })
+        .collect();
+
+    let drawn = enc.encode(&ServerEvent::RoundDraw {
+        scores: [25000; 4],
+        reason: DrawReason::Exhaustive,
+        tenpai: vec![Wind::South, Wind::West],
+        riichi_sticks: 0,
+        player_hands,
+        declarer: None,
+    });
+    let MjaiEvent::Ryukyoku {
+        tenpais: Some(tenpais),
+        tehais: Some(tehais),
+        ..
+    } = &drawn[0]
+    else {
+        panic!("expected a draw with revealed state");
+    };
+    assert_eq!(tenpais, &vec![false, true, true, false]);
+    for (actor, hand) in tehais.iter().enumerate() {
+        assert_eq!(hand.len(), 13);
+        assert_eq!(
+            hand.iter().all(|tile| !tile.is_hidden()),
+            matches!(actor, 1 | 2),
+            "unexpected visibility for seat {actor}"
+        );
     }
 }
 
@@ -531,7 +592,9 @@ fn a_real_game_encodes_into_a_well_formed_log() {
             continue;
         };
         let resolved = log[index + 1..].iter().find_map(|later| match later {
-            MjaiEvent::ReachAccepted { actor: accepted } if accepted == actor => Some(true),
+            MjaiEvent::ReachAccepted {
+                actor: accepted, ..
+            } if accepted == actor => Some(true),
             MjaiEvent::Hora { .. } => Some(false),
             _ => None,
         });

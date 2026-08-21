@@ -1,15 +1,18 @@
 //! End-to-end tests: the CPU opponent playing a real game over the mjai
 //! protocol.
 
+use mahjong_core::hand::Hand;
 use mahjong_core::settings::Settings;
+use mahjong_core::tile::{Tile, Wind};
 use mahjong_server::cpu::client::{CpuConfig, CpuLevel, CpuPersonality};
 use mahjong_server::driver::GameDriver;
-use mahjong_server::protocol::ServerEvent;
+use mahjong_server::protocol::{ClientAction, ServerEvent};
 use mahjong_server::table::GameSettings;
 
 use crate::bot::MjaiBot;
 use crate::event::MjaiEvent;
 use crate::host::MjaiHost;
+use crate::tile::MjaiTile;
 
 fn names() -> Vec<String> {
     (0..4).map(|seat| format!("p{seat}")).collect()
@@ -234,6 +237,199 @@ fn the_bot_takes_the_seat_the_host_gives_it() {
         names: names(),
     });
     assert_eq!(bot.actor(), Some(2));
+}
+
+#[test]
+fn the_bot_infers_its_seat_when_start_game_omits_it() {
+    let mut bot = MjaiBot::new(
+        "bot",
+        CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced),
+        Settings::default(),
+    );
+    bot.respond(&MjaiEvent::StartGame {
+        id: None,
+        names: names(),
+    });
+    assert_eq!(
+        bot.actor(),
+        None,
+        "an absent id must not be guessed as seat 0"
+    );
+
+    let mut tehais = vec![vec![MjaiTile::Hidden; 13]; 4];
+    tehais[2] = Hand::from("123m123p123s11z55m")
+        .tiles()
+        .iter()
+        .copied()
+        .map(MjaiTile::Known)
+        .collect();
+    bot.respond(&MjaiEvent::StartKyoku {
+        bakaze: Wind::East,
+        kyoku: 1,
+        honba: 0,
+        kyotaku: 0,
+        oya: 0,
+        dora_marker: Tile::new(Tile::P1),
+        scores: vec![25000; 4],
+        tehais,
+    });
+    assert_eq!(bot.actor(), Some(2));
+}
+
+#[test]
+fn passing_a_non_ron_call_does_not_make_the_bot_furiten() {
+    let mut bot = MjaiBot::new(
+        "bot",
+        CpuConfig::new(CpuLevel::Normal, CpuPersonality::HighValue),
+        Settings::default(),
+    );
+    bot.respond(&MjaiEvent::StartGame {
+        id: Some(0),
+        names: names(),
+    });
+
+    // Closed sanshoku waits on 5p. The 1m discard only offers pon/daiminkan;
+    // declining it is unrelated to ron and must not create temporary furiten.
+    let mut tehais = vec![vec![MjaiTile::Hidden; 13]; 4];
+    tehais[0] = Hand::from("111m234m234p234s5p")
+        .tiles()
+        .iter()
+        .copied()
+        .map(MjaiTile::Known)
+        .collect();
+    assert_eq!(
+        bot.respond(&MjaiEvent::StartKyoku {
+            bakaze: Wind::East,
+            kyoku: 1,
+            honba: 0,
+            kyotaku: 0,
+            oya: 0,
+            dora_marker: Tile::new(Tile::S9),
+            scores: vec![25000; 4],
+            tehais,
+        }),
+        MjaiEvent::Pass
+    );
+    assert_eq!(
+        bot.respond(&MjaiEvent::Dahai {
+            actor: 1,
+            pai: Tile::new(Tile::M1),
+            tsumogiri: false,
+        }),
+        MjaiEvent::Pass
+    );
+
+    assert!(matches!(
+        bot.respond(&MjaiEvent::Dahai {
+            actor: 2,
+            pai: Tile::new(Tile::P5),
+            tsumogiri: false,
+        }),
+        MjaiEvent::Hora {
+            actor: 0,
+            target: 2,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn the_bot_can_declare_nine_terminals_over_mjai() {
+    let mut bot = MjaiBot::new(
+        "bot",
+        CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced),
+        Settings::default(),
+    );
+    bot.respond(&MjaiEvent::StartGame {
+        id: Some(0),
+        names: names(),
+    });
+
+    let mut tehais = vec![vec![MjaiTile::Hidden; 13]; 4];
+    tehais[0] = Hand::from("1119m1119p119s12z")
+        .tiles()
+        .iter()
+        .copied()
+        .map(MjaiTile::Known)
+        .collect();
+    bot.respond(&MjaiEvent::StartKyoku {
+        bakaze: Wind::East,
+        kyoku: 1,
+        honba: 0,
+        kyotaku: 0,
+        oya: 0,
+        dora_marker: Tile::new(Tile::P2),
+        scores: vec![25000; 4],
+        tehais,
+    });
+
+    assert_eq!(
+        bot.respond(&MjaiEvent::Tsumo {
+            actor: 0,
+            pai: MjaiTile::Known(Tile::new(Tile::Z3)),
+        }),
+        MjaiEvent::Ryukyoku {
+            reason: crate::event::RyukyokuReason::Kyushukyuhai,
+            actor: Some(0),
+            tenpais: None,
+            tehais: None,
+            deltas: None,
+            scores: None,
+        }
+    );
+}
+
+#[test]
+fn the_host_accepts_nine_terminals_only_from_its_own_seat() {
+    let mut host = MjaiHost::new(names());
+    host.encode(&ServerEvent::GameStarted {
+        seat_wind: Wind::East,
+        hand: vec![Tile::new(Tile::M1); 13],
+        scores: [25000; 4],
+        round_wind: Wind::East,
+        dora_indicators: vec![Tile::new(Tile::P1)],
+        round_number: 0,
+        total_rounds: 4,
+        honba: 0,
+        riichi_sticks: 0,
+        three_player: false,
+        nuki_dora: false,
+    });
+
+    let mut declaration = MjaiEvent::Ryukyoku {
+        reason: crate::event::RyukyokuReason::Kyushukyuhai,
+        actor: Some(0),
+        tenpais: None,
+        tehais: None,
+        deltas: None,
+        scores: None,
+    };
+    assert_eq!(
+        host.to_client_action(&declaration),
+        Some(ClientAction::NineTerminals { declare: true })
+    );
+
+    if let MjaiEvent::Ryukyoku { actor, .. } = &mut declaration {
+        *actor = Some(1);
+    }
+    assert_eq!(host.to_client_action(&declaration), None);
+}
+
+#[test]
+fn malformed_actor_is_refused_without_initialising_the_bot() {
+    let mut bot = MjaiBot::new(
+        "bot",
+        CpuConfig::new(CpuLevel::Normal, CpuPersonality::Balanced),
+        Settings::default(),
+    );
+    assert_eq!(
+        bot.respond(&MjaiEvent::StartGame {
+            id: Some(4),
+            names: names(),
+        }),
+        MjaiEvent::Pass
+    );
+    assert_eq!(bot.actor(), None);
 }
 
 #[test]

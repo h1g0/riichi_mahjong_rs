@@ -8,10 +8,43 @@ use mahjong_server::table::GameSettings;
 
 use crate::decode::MjaiDecoder;
 use crate::encode::MjaiEncoder;
-use crate::event::MjaiEvent;
+use crate::event::{MjaiEvent, RyukyokuReason};
+use crate::tile::MjaiTile;
 
 fn names() -> Vec<String> {
     (0..4).map(|seat| format!("p{seat}")).collect()
+}
+
+#[test]
+fn a_draw_rebuilds_reported_tenpai_and_hands() {
+    let mut decoder = MjaiDecoder::new(0);
+    let events = decoder.decode(&MjaiEvent::Ryukyoku {
+        reason: RyukyokuReason::Fanpai,
+        actor: None,
+        tenpais: Some(vec![false, true, false, false]),
+        tehais: Some(vec![
+            vec![MjaiTile::Hidden; 13],
+            vec![MjaiTile::Known(Tile::new(Tile::M1)); 13],
+            vec![MjaiTile::Hidden; 13],
+            vec![MjaiTile::Hidden; 13],
+        ]),
+        deltas: Some(vec![0, 3000, -1000, -2000]),
+        scores: Some(vec![25000, 28000, 24000, 23000]),
+    });
+    let [
+        ServerEvent::RoundDraw {
+            tenpai,
+            player_hands,
+            ..
+        },
+    ] = events.as_slice()
+    else {
+        panic!("expected a round draw");
+    };
+    assert_eq!(tenpai, &vec![Wind::South]);
+    assert_eq!(player_hands.len(), 1);
+    assert_eq!(player_hands[0].wind, Wind::South);
+    assert_eq!(player_hands[0].hand.len(), 13);
 }
 
 /// Plays a game and returns seat 0's in-game-mode mjai log.
@@ -53,20 +86,32 @@ fn in_game_log(seed: u64) -> Vec<MjaiEvent> {
 /// score breakdown that never reach the wire in the first place.
 fn normalise(event: &MjaiEvent) -> MjaiEvent {
     let mut event = event.clone();
-    if let MjaiEvent::Hora {
-        yakus,
-        fu,
-        fan,
-        hora_points,
-        deltas,
-        ..
-    } = &mut event
-    {
-        *yakus = None;
-        *fu = None;
-        *fan = None;
-        *hora_points = None;
-        *deltas = None;
+    match &mut event {
+        MjaiEvent::Hora {
+            yakus,
+            fu,
+            fan,
+            hora_points,
+            deltas,
+            ..
+        } => {
+            *yakus = None;
+            *fu = None;
+            *fan = None;
+            *hora_points = None;
+            *deltas = None;
+        }
+        MjaiEvent::Ryukyoku {
+            tehais: Some(tehais),
+            ..
+        } => {
+            // ServerEvent can carry revealed tiles but has no representation
+            // for the number of concealed placeholders in an unrevealed hand.
+            for hand in tehais {
+                hand.retain(|tile| !tile.is_hidden());
+            }
+        }
+        _ => {}
     }
     event
 }
@@ -176,7 +221,11 @@ fn riichi_takes_the_deposit_when_it_is_declared() {
     // Acceptance is bookkeeping the server does not model.
     assert!(
         decoder
-            .decode(&MjaiEvent::ReachAccepted { actor: 0 })
+            .decode(&MjaiEvent::ReachAccepted {
+                actor: 0,
+                deltas: None,
+                scores: None,
+            })
             .is_empty()
     );
 }
@@ -271,6 +320,36 @@ fn actions_mjai_cannot_express_are_refused() {
     assert!(decoder.encode_action(&ClientAction::Pei).is_none());
     assert_eq!(
         decoder.encode_action(&ClientAction::Pass),
+        Some(MjaiEvent::Pass)
+    );
+}
+
+#[test]
+fn nine_terminals_is_derived_and_encoded_as_a_draw_declaration() {
+    let hand = mahjong_core::hand::Hand::from("1119m1119p119s12z");
+    let mut decoder = MjaiDecoder::new(0);
+    decoder.decode(&start_kyoku_with(hand.tiles()));
+
+    let events = decoder.decode(&MjaiEvent::Tsumo {
+        actor: 0,
+        pai: MjaiTile::Known(Tile::new(Tile::Z3)),
+    });
+    assert!(matches!(events[0], ServerEvent::TileDrawn { .. }));
+    assert!(matches!(events[1], ServerEvent::NineTerminalsAvailable));
+
+    assert_eq!(
+        decoder.encode_action(&ClientAction::NineTerminals { declare: true }),
+        Some(MjaiEvent::Ryukyoku {
+            reason: RyukyokuReason::Kyushukyuhai,
+            actor: Some(0),
+            tenpais: None,
+            tehais: None,
+            deltas: None,
+            scores: None,
+        })
+    );
+    assert_eq!(
+        decoder.encode_action(&ClientAction::NineTerminals { declare: false }),
         Some(MjaiEvent::Pass)
     );
 }

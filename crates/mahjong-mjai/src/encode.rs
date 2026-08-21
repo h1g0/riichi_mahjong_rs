@@ -21,7 +21,7 @@
 use std::collections::VecDeque;
 
 use mahjong_core::tile::{Tile, Wind};
-use mahjong_server::protocol::{CallType, DrawReason, ServerEvent};
+use mahjong_server::protocol::{CallType, DrawReason, PlayerHandInfo, ServerEvent};
 
 use crate::event::{Actor, MjaiEvent, RyukyokuReason};
 use crate::tile::MjaiTile;
@@ -45,6 +45,13 @@ pub struct Reveal {
     pub draws: Vec<VecDeque<Tile>>,
 }
 
+/// A riichi deposit waiting for the declaring discard to survive.
+struct PendingReach {
+    actor: Actor,
+    deltas: Vec<i32>,
+    scores: Vec<i32>,
+}
+
 /// Translates one seat's `ServerEvent` stream into mjai events.
 pub struct MjaiEncoder {
     /// Absolute seat of the player this stream belongs to. Known once the
@@ -55,18 +62,21 @@ pub struct MjaiEncoder {
     player_count: usize,
     /// How many dora indicators have already been announced this hand.
     dora_announced: usize,
-    /// Scores before the current payment, in seat-wind order.
+    /// Scores before the current payment, in absolute seat order.
     scores: Vec<i32>,
     /// Seat of the most recent discard, which is the `target` of any call.
     last_discarder: Option<Actor>,
     /// Riichi declared but whose declaring discard has not been seen yet.
-    awaiting_reach_discard: Option<Actor>,
+    awaiting_reach_discard: Option<PendingReach>,
     /// Riichi whose discard has been seen; `reach_accepted` is held back one
     /// event so that a ron on the declaring discard can suppress it.
-    pending_reach_accepted: Option<Actor>,
+    pending_reach_accepted: Option<PendingReach>,
     /// Whether the current hand has already been closed with `end_kyoku`.
     /// A double ron reports one `RoundWon` per winner, but the hand ends once.
     hand_ended: bool,
+    /// A win may be followed by another win on the same discard, so closing
+    /// the hand is delayed until the next non-win event.
+    pending_end_kyoku: bool,
     /// Whether `start_game` has been emitted.
     game_started: bool,
     /// Player names used for `start_game`.
@@ -86,6 +96,7 @@ impl MjaiEncoder {
             scores: Vec::new(),
             last_discarder: None,
             hand_ended: false,
+            pending_end_kyoku: false,
             awaiting_reach_discard: None,
             pending_reach_accepted: None,
             game_started: false,
@@ -112,7 +123,8 @@ impl MjaiEncoder {
     /// Translates one server event. May produce zero, one, or several mjai
     /// events; events with no mjai counterpart produce none.
     pub fn encode(&mut self, event: &ServerEvent) -> Vec<MjaiEvent> {
-        let mut out = self.release_pending_reach(event);
+        let mut out = self.release_pending_end_kyoku(event);
+        out.extend(self.release_pending_reach(event));
         match event {
             ServerEvent::GameStarted { .. } => self.encode_start_kyoku(event, &mut out),
             ServerEvent::TileDrawn { tile, .. } => {
@@ -142,9 +154,12 @@ impl MjaiEncoder {
                     tsumogiri: *is_tsumogiri,
                 });
                 self.last_discarder = Some(actor);
-                if self.awaiting_reach_discard == Some(actor) {
-                    self.awaiting_reach_discard = None;
-                    self.pending_reach_accepted = Some(actor);
+                if self
+                    .awaiting_reach_discard
+                    .as_ref()
+                    .is_some_and(|reach| reach.actor == actor)
+                {
+                    self.pending_reach_accepted = self.awaiting_reach_discard.take();
                 }
             }
             ServerEvent::PlayerCalled {
@@ -162,11 +177,17 @@ impl MjaiEncoder {
             } => {
                 let actor = self.actor_of(*player);
                 out.push(MjaiEvent::Reach { actor });
-                self.awaiting_reach_discard = Some(actor);
-                // The deposit is already deducted here. Record the new scores
-                // so a later payment is measured against the post-deposit
-                // total and the deposit is not counted twice in the deltas.
-                self.scores = scores.to_vec();
+                let after = scores[..self.player_count].to_vec();
+                let deltas = after
+                    .iter()
+                    .zip(self.scores.iter())
+                    .map(|(new, old)| new - old)
+                    .collect();
+                self.awaiting_reach_discard = Some(PendingReach {
+                    actor,
+                    deltas,
+                    scores: after,
+                });
             }
             ServerEvent::DoraIndicatorsUpdated { dora_indicators } => {
                 for indicator in dora_indicators.iter().skip(self.dora_announced) {
@@ -177,7 +198,14 @@ impl MjaiEncoder {
                 self.dora_announced = dora_indicators.len();
             }
             ServerEvent::RoundWon { .. } => self.encode_hora(event, &mut out),
-            ServerEvent::RoundDraw { scores, reason, .. } => {
+            ServerEvent::RoundDraw {
+                scores,
+                reason,
+                tenpai,
+                player_hands,
+                declarer,
+                ..
+            } => {
                 let mjai_reason = match reason {
                     DrawReason::Exhaustive => RyukyokuReason::Fanpai,
                     DrawReason::NineTerminals => RyukyokuReason::Kyushukyuhai,
@@ -186,11 +214,21 @@ impl MjaiEncoder {
                     DrawReason::FourKans => RyukyokuReason::Sukaikan,
                     DrawReason::TripleRon => RyukyokuReason::Sanchaho,
                 };
-                out.push(self.ryukyoku(mjai_reason, scores));
+                out.push(self.ryukyoku(mjai_reason, scores, tenpai, player_hands, *declarer));
                 self.end_kyoku(&mut out);
             }
-            ServerEvent::RoundNagashiMangan { scores, .. } => {
-                out.push(self.ryukyoku(RyukyokuReason::Nagashimangan, scores));
+            ServerEvent::RoundNagashiMangan {
+                scores,
+                player_hands,
+                ..
+            } => {
+                out.push(self.ryukyoku(
+                    RyukyokuReason::Nagashimangan,
+                    scores,
+                    &[],
+                    player_hands,
+                    None,
+                ));
                 self.end_kyoku(&mut out);
             }
             // No mjai counterpart. HandUpdated and CallAvailable are resync
@@ -208,7 +246,12 @@ impl MjaiEncoder {
     /// Emits `end_game`. The server has no event for it, so the caller signals
     /// the end of the match itself.
     pub fn end_game(&self) -> Vec<MjaiEvent> {
-        vec![MjaiEvent::EndGame]
+        let mut out = Vec::new();
+        if self.pending_end_kyoku {
+            out.push(MjaiEvent::EndKyoku);
+        }
+        out.push(MjaiEvent::EndGame);
+        out
     }
 
     fn encode_start_kyoku(&mut self, event: &ServerEvent, out: &mut Vec<MjaiEvent>) {
@@ -236,6 +279,7 @@ impl MjaiEncoder {
         self.pending_reach_accepted = None;
         self.last_discarder = None;
         self.hand_ended = false;
+        self.pending_end_kyoku = false;
 
         let actor = (*round_number + seat_wind.to_index()) % self.player_count;
         self.self_actor = Some(actor);
@@ -375,7 +419,7 @@ impl MjaiEncoder {
             pao: None,
         });
         self.scores = scores.to_vec();
-        self.end_kyoku(out);
+        self.pending_end_kyoku = true;
     }
 
     /// Closes the hand, at most once.
@@ -385,13 +429,63 @@ impl MjaiEncoder {
     fn end_kyoku(&mut self, out: &mut Vec<MjaiEvent>) {
         if !self.hand_ended {
             self.hand_ended = true;
+            self.pending_end_kyoku = false;
             out.push(MjaiEvent::EndKyoku);
         }
     }
 
-    fn ryukyoku(&mut self, reason: RyukyokuReason, scores: &[i32]) -> MjaiEvent {
+    /// Releases a delayed hand ending before the first event that cannot be
+    /// another winner on the same discard.
+    fn release_pending_end_kyoku(&mut self, next: &ServerEvent) -> Vec<MjaiEvent> {
+        if self.pending_end_kyoku && !matches!(next, ServerEvent::RoundWon { .. }) {
+            self.pending_end_kyoku = false;
+            self.hand_ended = true;
+            vec![MjaiEvent::EndKyoku]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn ryukyoku(
+        &mut self,
+        reason: RyukyokuReason,
+        scores: &[i32],
+        tenpai_winds: &[Wind],
+        player_hands: &[PlayerHandInfo],
+        declarer: Option<Wind>,
+    ) -> MjaiEvent {
+        let mut tenpais = vec![false; self.player_count];
+        for wind in tenpai_winds {
+            tenpais[self.actor_of(*wind)] = true;
+        }
+        // Four-riichi reveals all four locked hands in the reference host.
+        if matches!(reason, RyukyokuReason::Suchareach) {
+            tenpais.fill(true);
+        }
+
+        let mut tehais = vec![Vec::new(); self.player_count];
+        for info in player_hands {
+            let actor = self.actor_of(info.wind);
+            let visible = self.reveal.is_some() || tenpais[actor] || declarer == Some(info.wind);
+            tehais[actor] = info
+                .hand
+                .iter()
+                .copied()
+                .map(|tile| {
+                    if visible {
+                        MjaiTile::Known(tile)
+                    } else {
+                        MjaiTile::Hidden
+                    }
+                })
+                .collect();
+        }
+        let has_hands = !player_hands.is_empty();
         let event = MjaiEvent::Ryukyoku {
             reason,
+            actor: declarer.map(|wind| self.actor_of(wind)),
+            tenpais: has_hands.then_some(tenpais),
+            tehais: has_hands.then_some(tehais),
             deltas: Some(self.deltas(scores)),
             scores: Some(scores[..self.player_count].to_vec()),
         };
@@ -402,17 +496,22 @@ impl MjaiEncoder {
     /// Emits a withheld `reach_accepted`, unless `next` shows the declaring
     /// discard was ronned — in which case the declaration never stood.
     fn release_pending_reach(&mut self, next: &ServerEvent) -> Vec<MjaiEvent> {
-        let Some(actor) = self.pending_reach_accepted.take() else {
+        let Some(reach) = self.pending_reach_accepted.take() else {
             return Vec::new();
         };
         if let ServerEvent::RoundWon {
             loser: Some(loser), ..
         } = next
-            && self.actor_of(*loser) == actor
+            && self.actor_of(*loser) == reach.actor
         {
             return Vec::new();
         }
-        vec![MjaiEvent::ReachAccepted { actor }]
+        self.scores = reach.scores.clone();
+        vec![MjaiEvent::ReachAccepted {
+            actor: reach.actor,
+            deltas: Some(reach.deltas),
+            scores: Some(reach.scores),
+        }]
     }
 
     /// Maps a seat wind to its absolute seat.

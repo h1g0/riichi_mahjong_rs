@@ -26,9 +26,6 @@
 //! log, so a decoder fed only a log reports hand-based furiten only. A bot that
 //! declines a ron should say so through [`MjaiDecoder::declined_ron`].
 //!
-//! Nine-terminals abortive draws are not offered either: the server prompts for
-//! them and mjai has no equivalent event to prompt from.
-//!
 //! # What does not survive the trip
 //!
 //! mjai collapses several yaku onto one name, so decoding picks a documented
@@ -155,6 +152,9 @@ impl MjaiDecoder {
     /// Translates one mjai event. Events with no server counterpart produce
     /// nothing.
     pub fn decode(&mut self, event: &MjaiEvent) -> Vec<ServerEvent> {
+        if self.self_actor >= self.player_count || event.validate().is_err() {
+            return Vec::new();
+        }
         match event {
             MjaiEvent::StartKyoku { .. } => self.decode_start_kyoku(event),
             MjaiEvent::Tsumo { actor, pai } => self.decode_tsumo(*actor, *pai),
@@ -204,13 +204,14 @@ impl MjaiDecoder {
             }
 
             MjaiEvent::Reach { actor } => self.decode_reach(*actor),
+            MjaiEvent::ReachAccepted { actor, scores, .. } => {
+                self.decode_reach_accepted(*actor, scores)
+            }
             MjaiEvent::Hora { .. } => self.decode_hora(event),
             MjaiEvent::Ryukyoku { .. } => self.decode_ryukyoku(event),
 
-            // The deposit was already taken at `reach`; acceptance adds nothing
-            // the server models. The rest carry no game state.
-            MjaiEvent::ReachAccepted { .. }
-            | MjaiEvent::StartGame { .. }
+            // The remaining protocol events carry no server-side game state.
+            MjaiEvent::StartGame { .. }
             | MjaiEvent::EndKyoku
             | MjaiEvent::EndGame
             | MjaiEvent::Hello { .. }
@@ -263,9 +264,18 @@ impl MjaiDecoder {
             // Three-player only. mjai's four-player vocabulary has no North
             // extraction, so there is nothing honest to send.
             ClientAction::Pei => None,
-            // The server prompts for a nine-terminals draw; mjai never asks,
-            // so a bot has no opportunity to answer.
-            ClientAction::NineTerminals { .. } => None,
+            ClientAction::NineTerminals { declare } => Some(if *declare {
+                MjaiEvent::Ryukyoku {
+                    reason: RyukyokuReason::Kyushukyuhai,
+                    actor: Some(actor),
+                    tenpais: None,
+                    tehais: None,
+                    deltas: None,
+                    scores: None,
+                }
+            } else {
+                MjaiEvent::Pass
+            }),
         }
     }
 
@@ -473,13 +483,17 @@ impl MjaiDecoder {
         self.player.is_temporary_furiten = false;
 
         let ctx = self.table_context();
-        vec![ServerEvent::TileDrawn {
+        let mut out = vec![ServerEvent::TileDrawn {
             tile,
             remaining_tiles: self.remaining_tiles,
             can_tsumo: legality::can_tsumo(&self.player, &ctx),
             can_riichi: legality::can_riichi(&self.player, &ctx),
             is_furiten: self.player.is_furiten(),
-        }]
+        }];
+        if self.settings.nine_terminals_draw && legality::can_nine_terminals(&self.player) {
+            out.push(ServerEvent::NineTerminalsAvailable);
+        }
+        out
     }
 
     fn decode_dahai(&mut self, actor: Actor, pai: Tile, tsumogiri: bool) -> Vec<ServerEvent> {
@@ -709,12 +723,21 @@ impl MjaiDecoder {
     }
 
     fn decode_ryukyoku(&mut self, event: &MjaiEvent) -> Vec<ServerEvent> {
-        let MjaiEvent::Ryukyoku { reason, scores, .. } = event else {
+        let MjaiEvent::Ryukyoku {
+            reason,
+            actor,
+            tenpais,
+            tehais,
+            scores,
+            ..
+        } = event
+        else {
             return Vec::new();
         };
         if let Some(scores) = scores {
             self.scores = scores.clone();
         }
+        let player_hands = self.revealed_hands(tehais);
         // Nagashi Mangan is a payout, not a draw, and the server models it as
         // its own event.
         if matches!(reason, RyukyokuReason::Nagashimangan) {
@@ -722,7 +745,7 @@ impl MjaiDecoder {
                 winners: Vec::new(),
                 scores: self.scores_by_seat(),
                 riichi_sticks: self.riichi_sticks,
-                player_hands: Vec::new(),
+                player_hands,
             }];
         }
         vec![ServerEvent::RoundDraw {
@@ -738,12 +761,50 @@ impl MjaiDecoder {
                 RyukyokuReason::Fanpai | RyukyokuReason::Other(_) => DrawReason::Exhaustive,
                 RyukyokuReason::Nagashimangan => unreachable!("handled above"),
             },
-            // Not on the wire.
-            tenpai: Vec::new(),
+            tenpai: tenpais
+                .iter()
+                .flatten()
+                .enumerate()
+                .filter(|(_, ready)| **ready)
+                .map(|(actor, _)| self.wind_of(actor))
+                .collect(),
             riichi_sticks: self.riichi_sticks,
-            player_hands: Vec::new(),
-            declarer: None,
+            player_hands,
+            declarer: actor.map(|actor| self.wind_of(actor)),
         }]
+    }
+
+    fn decode_reach_accepted(
+        &mut self,
+        actor: Actor,
+        scores: &Option<Vec<i32>>,
+    ) -> Vec<ServerEvent> {
+        if let Some(scores) = scores {
+            self.scores = scores.clone();
+            if actor == self.self_actor
+                && let Some(score) = self.scores.get(actor)
+            {
+                self.player.score = *score;
+            }
+        }
+        Vec::new()
+    }
+
+    fn revealed_hands(&self, tehais: &Option<Vec<Vec<MjaiTile>>>) -> Vec<PlayerHandInfo> {
+        tehais
+            .iter()
+            .flatten()
+            .enumerate()
+            .filter_map(|(actor, slots)| {
+                let hand: Vec<Tile> = slots.iter().filter_map(|slot| slot.known()).collect();
+                (!hand.is_empty()).then(|| PlayerHandInfo {
+                    wind: self.wind_of(actor),
+                    hand,
+                    melds: Vec::new(),
+                    pei: Vec::new(),
+                })
+            })
+            .collect()
     }
 
     /// Maps an absolute seat to its seat wind for the current hand.

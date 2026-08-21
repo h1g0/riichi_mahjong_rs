@@ -105,6 +105,7 @@ pub enum MjaiEvent {
         /// Seat this player occupies; absent in a replay.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<Actor>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         names: Vec<String>,
     },
 
@@ -212,7 +213,15 @@ pub enum MjaiEvent {
     Reach { actor: Actor },
 
     /// The riichi declaration stood and the deposit was placed.
-    ReachAccepted { actor: Actor },
+    ReachAccepted {
+        actor: Actor,
+        /// Score change for the deposit, per seat.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deltas: Option<Vec<i32>>,
+        /// Scores after the deposit, per seat.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scores: Option<Vec<i32>>,
+    },
 
     /// A player won.
     Hora {
@@ -263,6 +272,18 @@ pub enum MjaiEvent {
     /// The hand ended without a win.
     Ryukyoku {
         reason: RyukyokuReason,
+        /// Seat declaring a nine-terminals abortive draw. Absent for
+        /// host-announced draws without a single declarer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Actor>,
+        /// Whether each seat was ready. Present when the host supplied the
+        /// end-of-hand state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tenpais: Option<Vec<bool>>,
+        /// Concealed hands at the end of the hand, indexed by seat. In-game
+        /// mode hides hands that were not revealed; replay mode reveals all.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tehais: Option<Vec<Vec<MjaiTile>>>,
         /// Score change per seat
         #[serde(default, skip_serializing_if = "Option::is_none")]
         deltas: Option<Vec<i32>>,
@@ -297,8 +318,9 @@ impl MjaiEvent {
             | MjaiEvent::Ankan { actor, .. }
             | MjaiEvent::Kakan { actor, .. }
             | MjaiEvent::Reach { actor }
-            | MjaiEvent::ReachAccepted { actor }
+            | MjaiEvent::ReachAccepted { actor, .. }
             | MjaiEvent::Hora { actor, .. } => Some(*actor),
+            MjaiEvent::Ryukyoku { actor, .. } => *actor,
             _ => None,
         }
     }
@@ -319,17 +341,57 @@ impl MjaiEvent {
                 | MjaiEvent::Kakan { .. }
                 | MjaiEvent::Reach { .. }
                 | MjaiEvent::Hora { .. }
-                | MjaiEvent::Ryukyoku { .. }
+                | MjaiEvent::Ryukyoku {
+                    reason: RyukyokuReason::Kyushukyuhai,
+                    actor: Some(_),
+                    ..
+                }
                 | MjaiEvent::Pass
         )
     }
 
-    /// Checks the arity of `consumed` against the call type.
+    /// Checks actor bounds and the arity of `consumed` against the call type.
     ///
     /// `consumed` is typed as a `Vec` rather than a fixed-size array so that a
     /// wrong length from a peer surfaces here as a protocol error, instead of
     /// as a `serde` type error that would abort the whole stream.
     pub fn validate(&self) -> Result<(), String> {
+        let out_of_range = |actor: &Actor| (*actor >= 4).then_some(*actor);
+        let invalid_actor = match self {
+            MjaiEvent::StartGame {
+                id: Some(actor), ..
+            }
+            | MjaiEvent::StartKyoku { oya: actor, .. }
+            | MjaiEvent::Tsumo { actor, .. }
+            | MjaiEvent::Dahai { actor, .. }
+            | MjaiEvent::Ankan { actor, .. }
+            | MjaiEvent::Kakan { actor, .. }
+            | MjaiEvent::Reach { actor }
+            | MjaiEvent::ReachAccepted { actor, .. }
+            | MjaiEvent::Ryukyoku {
+                actor: Some(actor), ..
+            } => out_of_range(actor),
+            MjaiEvent::Chi { actor, target, .. }
+            | MjaiEvent::Pon { actor, target, .. }
+            | MjaiEvent::Daiminkan { actor, target, .. }
+            | MjaiEvent::Hora { actor, target, .. } => {
+                out_of_range(actor).or_else(|| out_of_range(target))
+            }
+            _ => None,
+        };
+        if let Some(actor) = invalid_actor {
+            return Err(format!("actor must be in 0..4, got {actor}"));
+        }
+        if let MjaiEvent::Ryukyoku {
+            reason,
+            actor: Some(_),
+            ..
+        } = self
+            && !matches!(reason, RyukyokuReason::Kyushukyuhai)
+        {
+            return Err("only a nine-terminals draw may name an actor".to_owned());
+        }
+
         let (label, consumed, expected) = match self {
             MjaiEvent::Chi { consumed, .. } => ("chi", consumed, 2),
             MjaiEvent::Pon { consumed, .. } => ("pon", consumed, 2),

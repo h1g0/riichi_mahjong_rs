@@ -9,6 +9,11 @@ name = "mjai-bot"
 path = "src/bin/mjai_bot.rs"
 required-features = ["server"]
 
+[[example]]
+name = "mjai_export"
+path = "examples/mjai_export.rs"
+required-features = ["server"]
+
 [features]
 default = ["server"]
 # Translation to and from the game server's own protocol. Turning this off
