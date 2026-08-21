@@ -1,9 +1,10 @@
 //! Call detection and resolution (ron, pon, kan, chii).
 
-use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+use mahjong_core::hand_info::meld::MeldType;
 use mahjong_core::tile::{Tile, TileType};
 use mahjong_core::winning_hand::name::Kind;
 
+use crate::legality;
 use crate::player::Player;
 use crate::protocol::{AvailableCall, CallType, DrawReason, ServerEvent};
 use crate::scoring;
@@ -11,37 +12,6 @@ use crate::scoring;
 use super::{
     CallResolution, CallResponse, CallState, RIICHI_STICK_VALUE, Round, RoundResult, TurnPhase,
 };
-
-/// Whether applying this call leaves at least one legal discard under
-/// the swap-calling rule.
-fn call_leaves_legal_discard(
-    player: &Player,
-    called_tile: Tile,
-    hand_tiles: [Tile; 2],
-    category: MeldType,
-) -> bool {
-    let mut remaining = player.hand.tiles().to_vec();
-    for target in hand_tiles {
-        let Some(position) = remaining.iter().position(|tile| *tile == target) else {
-            return false;
-        };
-        remaining.remove(position);
-    }
-
-    let mut meld_tiles = vec![called_tile, hand_tiles[0], hand_tiles[1]];
-    meld_tiles.sort();
-    let forbidden = Meld {
-        tiles: meld_tiles,
-        category,
-        from: MeldFrom::Unknown,
-        called_tile: Some(called_tile),
-    }
-    .forbidden_swap_tiles();
-
-    remaining
-        .iter()
-        .any(|tile| !forbidden.contains(&tile.get()))
-}
 
 impl Round {
     /// Announces a discard, checks call options, and advances the phase.
@@ -96,15 +66,16 @@ impl Round {
     }
 
     /// Collects every player's call options for a discard.
+    ///
+    /// The rules themselves live in [`crate::legality`]; this only walks the
+    /// seats and records who still owes a response.
     pub(super) fn check_available_calls(
         &self,
         discarded_tile: Tile,
         discarder: usize,
     ) -> CallState {
-        let wall_exhausted = self.wall.is_empty();
-        // A discard after a replacement draw is followed by exhaustion, but
-        // it is not the last live-wall discard and cannot award Houtei.
-        let is_last_tile_claim = wall_exhausted && !self.last_draw_was_dead_wall;
+        let ctx = self.table_context();
+        let next_player = self.next_seat(discarder);
         let mut available_calls: [Vec<AvailableCall>; 4] =
             [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         // Players with no options (and the dummy seat) count as already
@@ -115,63 +86,12 @@ impl Round {
             if i == discarder {
                 continue;
             }
-
-            let player = &self.players[i];
-
-            // Furiten blocks ron entirely; riichi players may still ron.
-            if !player.is_furiten() {
-                let win_result = scoring::check_ron_with_settings(
-                    player,
-                    discarded_tile,
-                    self.round_wind,
-                    is_last_tile_claim,
-                    &self.settings,
-                );
-                if win_result.is_win {
-                    available_calls[i].push(AvailableCall::Ron);
-                }
-            }
-
-            // A riichi player cannot call anything except ron. The final
-            // discard likewise has no following turn in which a meld caller
-            // could discard, so only ron remains legal.
-            if player.is_riichi || wall_exhausted {
-                if !available_calls[i].is_empty() {
-                    responded[i] = false;
-                }
-                continue;
-            }
-
-            let mut pon_opts = player.pon_options(discarded_tile);
-            if self.settings.forbid_swap_calling {
-                pon_opts.retain(|option| {
-                    call_leaves_legal_discard(player, discarded_tile, *option, MeldType::Pon)
-                });
-            }
-            if !pon_opts.is_empty() {
-                available_calls[i].push(AvailableCall::Pon { options: pon_opts });
-            }
-
-            // No further quads once four exist on the table.
-            if self.total_kan_count() < 4 && player.can_daiminkan(discarded_tile) {
-                available_calls[i].push(AvailableCall::Daiminkan);
-            }
-
-            // Chii is only allowed from the left player (= the next seat)
-            // and does not exist in three-player games.
-            let next_player = self.next_seat(discarder);
-            if !self.settings.three_player && i == next_player {
-                let mut chi_opts = player.chi_options(discarded_tile);
-                if self.settings.forbid_swap_calling {
-                    chi_opts.retain(|option| {
-                        call_leaves_legal_discard(player, discarded_tile, *option, MeldType::Chi)
-                    });
-                }
-                if !chi_opts.is_empty() {
-                    available_calls[i].push(AvailableCall::Chi { options: chi_opts });
-                }
-            }
-
+            available_calls[i] = legality::available_calls_for(
+                &self.players[i],
+                discarded_tile,
+                i == next_player,
+                &ctx,
+            );
             if !available_calls[i].is_empty() {
                 responded[i] = false;
             }

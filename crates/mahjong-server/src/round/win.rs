@@ -1,14 +1,12 @@
 //! Riichi declaration and tsumo wins.
 
-use mahjong_core::hand_info::hand_analyzer;
 use mahjong_core::tile::Tile;
 
+use crate::legality;
 use crate::protocol::ServerEvent;
 use crate::scoring;
 
-use super::{
-    RIICHI_MIN_SCORE, RIICHI_STICK_VALUE, Round, RoundResult, TurnPhase, diagnostics_enabled,
-};
+use super::{RIICHI_STICK_VALUE, Round, RoundResult, TurnPhase, diagnostics_enabled};
 
 impl Round {
     pub(super) fn can_player_riichi_with_discard(
@@ -16,91 +14,26 @@ impl Round {
         player_idx: usize,
         tile: Option<Tile>,
     ) -> bool {
-        let player = &self.players[player_idx];
-        let mut hand = player.hand.clone();
-
-        match tile {
-            Some(target) => {
-                let drawn = hand.drawn();
-                let tiles = hand.tiles_mut();
-                let Some(idx) = tiles.iter().position(|t| *t == target) else {
-                    return false;
-                };
-                tiles.remove(idx);
-                if let Some(drawn_tile) = drawn {
-                    tiles.push(drawn_tile);
-                    tiles.sort();
-                }
-                hand.set_drawn(None);
-            }
-            None => {
-                if hand.drawn().is_none() {
-                    return false;
-                }
-                hand.set_drawn(None);
-            }
-        }
-
-        hand_analyzer::calc_shanten_number(&hand).is_ready()
+        legality::can_riichi_with_discard(&self.players[player_idx], tile)
     }
 
     /// Whether the player may declare riichi.
     ///
-    /// Requirements:
-    /// - closed hand
-    /// - at least 1000 points (for the deposit)
-    /// - has not already declared riichi
-    /// - at least one tile left in the wall, so at least one more draw
-    ///   happens after the declaration discard
-    /// - at least one discard from the 14 tiles keeps the hand tenpai
+    /// The requirements live in [`legality::check_riichi`]; this adds only the
+    /// rejection logging.
     pub(super) fn can_player_riichi(&self, player_idx: usize) -> bool {
-        let player = &self.players[player_idx];
-
-        // Verbose rejection logging is opt-in because this check runs for
-        // every discard candidate and otherwise dominates debug simulations.
-        let log_reject = |detail: std::fmt::Arguments| {
-            if player_idx == 0 && diagnostics_enabled() {
-                eprintln!("[riichi-reject] {detail}");
+        match legality::check_riichi(&self.players[player_idx], &self.table_context()) {
+            Ok(()) => true,
+            Err(reason) => {
+                // Verbose rejection logging is opt-in because this check runs
+                // for every discard candidate and otherwise dominates debug
+                // simulations.
+                if player_idx == 0 && diagnostics_enabled() {
+                    eprintln!("[riichi-reject] reason={reason:?} player={player_idx}");
+                }
+                false
             }
-        };
-
-        if player.is_riichi {
-            log_reject(format_args!("reason=already_riichi player={player_idx}"));
-            return false;
         }
-        if !player.is_menzen() {
-            log_reject(format_args!("reason=not_menzen player={player_idx}"));
-            return false;
-        }
-        if player.score < RIICHI_MIN_SCORE {
-            log_reject(format_args!(
-                "reason=score_too_low player={player_idx} score={}",
-                player.score
-            ));
-            return false;
-        }
-        if self.wall.remaining() < 1 {
-            log_reject(format_args!(
-                "reason=wall_empty player={player_idx} remaining={}",
-                self.wall.remaining()
-            ));
-            return false;
-        }
-        if player.hand.drawn().is_none() {
-            log_reject(format_args!("reason=no_drawn player={player_idx}"));
-            return false;
-        }
-
-        if self.can_player_riichi_with_discard(player_idx, None) {
-            return true;
-        }
-
-        player
-            .hand
-            .tiles()
-            .iter()
-            .copied()
-            .any(|tile| self.can_player_riichi_with_discard(player_idx, Some(tile)))
     }
 
     /// Declares riichi.
@@ -169,17 +102,7 @@ impl Round {
         if self.phase != TurnPhase::WaitForDiscard {
             return false;
         }
-        let player = &self.players[self.current_player];
-        let is_last_tile = self.wall.is_empty() && !self.last_draw_was_dead_wall;
-        let result = scoring::check_win_with_settings(
-            player,
-            self.round_wind,
-            true,
-            is_last_tile,
-            self.last_draw_was_dead_wall,
-            &self.settings,
-        );
-        result.is_win
+        legality::can_tsumo(&self.players[self.current_player], &self.table_context())
     }
 
     /// Executes a tsumo win: applies the payments and ends the hand.

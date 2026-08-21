@@ -591,6 +591,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mahjong-mjai"
+version = "0.1.0"
+dependencies = [
+ "mahjong-core",
+ "mahjong-server",
+ "rstest",
+ "serde",
+ "serde_json",
+ "strum",
+]
+
+[[package]]
 name = "mahjong-net-server"
 version = "0.1.0"
 dependencies = [
