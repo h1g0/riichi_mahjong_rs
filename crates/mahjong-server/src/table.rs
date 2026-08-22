@@ -99,6 +99,24 @@ pub struct Table {
     pub scores: [i32; 4],
     /// Whether the game is over
     pub is_game_over: bool,
+    /// Base seed for deterministic walls; `None` shuffles at random.
+    seed: Option<u64>,
+    /// Hands started since the seed was set, mixed into each wall seed.
+    round_serial: u64,
+}
+
+/// Derives the wall seed of the `serial`-th hand from a game's base seed.
+///
+/// The splitmix64 finalizer scrambles the bits so consecutive hands do not
+/// get correlated walls.
+pub fn derive_wall_seed(base_seed: u64, serial: u64) -> u64 {
+    let mut x = base_seed ^ serial.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    x
 }
 
 impl Table {
@@ -117,6 +135,8 @@ impl Table {
             dealer: 0,
             scores,
             is_game_over: false,
+            seed: None,
+            round_serial: 0,
         }
     }
 
@@ -145,35 +165,63 @@ impl Table {
     }
 
     /// Starts a new hand.
+    ///
+    /// Once a seed is set the wall stays deterministic for every later
+    /// hand too, so a whole game is reproducible and not just its opening
+    /// hand (#377).
     pub fn start_round(&mut self) {
-        let round = Round::new(
-            self.round_wind,
-            self.dealer,
-            self.scores,
-            self.honba,
-            self.riichi_sticks,
-            self.round_number,
-            self.maximum_rounds(),
-            self.settings.rules.clone(),
-        );
+        let round = match self.seed {
+            Some(base) => {
+                // The opening hand uses the base seed unchanged so a given
+                // seed keeps producing the wall it always produced.
+                let seed = match self.round_serial {
+                    0 => base,
+                    serial => derive_wall_seed(base, serial),
+                };
+                self.round_serial += 1;
+                Round::new_with_seed(
+                    seed,
+                    self.round_wind,
+                    self.dealer,
+                    self.scores,
+                    self.honba,
+                    self.riichi_sticks,
+                    self.round_number,
+                    self.maximum_rounds(),
+                    self.settings.rules.clone(),
+                )
+            }
+            None => Round::new(
+                self.round_wind,
+                self.dealer,
+                self.scores,
+                self.honba,
+                self.riichi_sticks,
+                self.round_number,
+                self.maximum_rounds(),
+                self.settings.rules.clone(),
+            ),
+        };
         self.round = Some(round);
     }
 
     /// Starts a new hand with a seeded, deterministic wall, for
     /// simulations and reproducible tests.
+    ///
+    /// The seed also drives every hand started afterwards through
+    /// [`Table::start_round`].
     pub fn start_round_with_seed(&mut self, seed: u64) {
-        let round = Round::new_with_seed(
-            seed,
-            self.round_wind,
-            self.dealer,
-            self.scores,
-            self.honba,
-            self.riichi_sticks,
-            self.round_number,
-            self.maximum_rounds(),
-            self.settings.rules.clone(),
-        );
-        self.round = Some(round);
+        self.set_seed(seed);
+        self.start_round();
+    }
+
+    /// Makes every hand from the next one on deterministic.
+    ///
+    /// The next hand uses `seed` itself; later hands derive their wall
+    /// seeds from it.
+    pub fn set_seed(&mut self, seed: u64) {
+        self.seed = Some(seed);
+        self.round_serial = 0;
     }
 
     pub fn current_round(&self) -> Option<&Round> {
@@ -655,6 +703,90 @@ mod tests {
         table.finish_round();
         assert!(table.round.is_none());
         assert_eq!(table.honba, 1); // Draws increment the honba counter.
+    }
+
+    /// Collects the dealt hands of the first `count` hands of a game,
+    /// ending each hand immediately as an exhaustive draw.
+    fn deal_several_rounds(table: &mut Table, count: usize) -> Vec<String> {
+        let mut deals = Vec::new();
+        for _ in 0..count {
+            table.start_round();
+            {
+                let round = table.current_round().unwrap();
+                deals.push(
+                    round
+                        .players
+                        .iter()
+                        .map(|p| p.hand.to_short_string())
+                        .collect::<Vec<_>>()
+                        .join("|"),
+                );
+            }
+            let round = table.current_round_mut().unwrap();
+            round.phase = TurnPhase::RoundOver;
+            round.result = Some(RoundResult::ExhaustiveDraw {
+                dealer_tenpai: false,
+            });
+            table.finish_round();
+        }
+        deals
+    }
+
+    /// A seed must fix every hand of the game, not just the first one (#377).
+    #[test]
+    fn test_seed_makes_every_round_deterministic() {
+        let settings = || GameSettings {
+            length: GameLength::Hanchan,
+            ..Default::default()
+        };
+
+        let mut first = Table::new(settings());
+        first.set_seed(4242);
+        let mut second = Table::new(settings());
+        second.set_seed(4242);
+
+        let deals = deal_several_rounds(&mut first, 6);
+        assert_eq!(deals, deal_several_rounds(&mut second, 6));
+    }
+
+    /// Different seeds must still give different games.
+    #[test]
+    fn test_different_seeds_give_different_rounds() {
+        let mut first = Table::new(GameSettings::default());
+        first.set_seed(1);
+        let mut second = Table::new(GameSettings::default());
+        second.set_seed(2);
+
+        assert_ne!(
+            deal_several_rounds(&mut first, 4),
+            deal_several_rounds(&mut second, 4)
+        );
+    }
+
+    /// Each hand of a seeded game gets its own wall.
+    #[test]
+    fn test_seeded_rounds_differ_from_each_other() {
+        let mut table = Table::new(GameSettings::default());
+        table.set_seed(7);
+
+        let deals = deal_several_rounds(&mut table, 4);
+        let unique: std::collections::HashSet<&String> = deals.iter().collect();
+        assert_eq!(unique.len(), deals.len(), "a wall was reused: {deals:?}");
+    }
+
+    /// The opening wall of a seeded game is unchanged by the per-hand
+    /// derivation, so seeds used in existing tests keep their meaning (#377).
+    #[test]
+    fn test_seed_keeps_opening_wall() {
+        let mut carried = Table::new(GameSettings::default());
+        carried.start_round_with_seed(42);
+        let carried_deal = carried.current_round().unwrap().players[0]
+            .hand
+            .to_short_string();
+
+        let expected =
+            Round::new_with_seed(42, Wind::East, 0, [25000; 4], 0, 0, 0, 4, Settings::new());
+        assert_eq!(carried_deal, expected.players[0].hand.to_short_string());
     }
 
     #[test]

@@ -23,7 +23,7 @@ use mahjong_core::hand_info::hand_analyzer::calc_shanten_number;
 
 use crate::cpu::client::{CpuClient, CpuConfig, CpuLevel, CpuPersonality};
 use crate::round::{RoundResult, TurnPhase};
-use crate::table::{GameSettings, Table};
+use crate::table::{self, GameSettings, Table};
 
 /// Step budget per hand; exceeding it is treated as a stall.
 const MAX_STEPS_PER_ROUND: usize = 5000;
@@ -180,18 +180,14 @@ fn config_label(config: &CpuConfig) -> String {
 
 /// Derives a wall seed from the base seed, game number, and hand serial.
 ///
-/// The splitmix64 finalizer scrambles the bits so nearby inputs do not
-/// produce correlated walls.
+/// Folding the game number into the base seed keeps this on the same
+/// derivation as [`table::derive_wall_seed`], so simulation walls match
+/// what a seeded [`Table`] produces for the same inputs.
 fn derive_wall_seed(base_seed: u64, game: u64, round_serial: u64) -> u64 {
-    let mut x = base_seed
-        ^ game.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        ^ round_serial.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-    x ^= x >> 30;
-    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x ^= x >> 27;
-    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^= x >> 31;
-    x
+    table::derive_wall_seed(
+        base_seed ^ game.wrapping_mul(0x9E37_79B9_7F4A_7C15),
+        round_serial,
+    )
 }
 
 /// Runs the simulation.

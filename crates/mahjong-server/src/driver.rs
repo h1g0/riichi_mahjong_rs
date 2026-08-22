@@ -155,7 +155,9 @@ impl GameDriver {
 
     /// Starts the game with a seeded wall, for tests and reproduction.
     ///
-    /// The dealer stays at seat 0 to keep runs reproducible.
+    /// The dealer stays at seat 0, and every later hand started through
+    /// [`GameDriver::next_round`] derives its wall from the same seed, so
+    /// the whole game replays identically (#377).
     pub fn start_game_with_seed(&mut self, seed: u64) {
         self.pending_cpu_batches.clear();
         self.table.start_round_with_seed(seed);
@@ -655,6 +657,56 @@ mod tests {
         let mut driver = driver_with_three_cpus();
         driver.start_game_with_seed(42);
         assert_eq!(driver.table().dealer, 0);
+    }
+
+    /// Plays a whole game with every seat driven by a CPU and returns the
+    /// full event stream, the number of hands played, and the final scores.
+    fn play_seeded_game(seed: u64) -> (Vec<String>, usize, [i32; 4]) {
+        let mut driver = GameDriver::new(GameSettings::default());
+        for seat in 0..4 {
+            // A shadow CPU buffers events but does not act; handing it
+            // control gives a seat that both plays and records.
+            driver.set_shadow_cpu(seat, default_cpu_configs()[0].clone());
+            driver.set_cpu_controlled(seat, true);
+        }
+        driver.start_game_with_seed(seed);
+
+        let mut log = Vec::new();
+        let mut rounds = 1;
+        for _ in 0..20_000 {
+            driver.run_until_blocked();
+            for seat in 0..4 {
+                for event in driver.drain_events(seat) {
+                    log.push(format!("{seat}:{event:?}"));
+                }
+            }
+            if driver.is_round_over() {
+                if driver.is_game_over() {
+                    break;
+                }
+                driver.next_round();
+                rounds += 1;
+            } else {
+                driver.tick();
+            }
+        }
+        assert!(driver.is_game_over(), "game did not finish");
+        (log, rounds, driver.table().scores)
+    }
+
+    /// A seeded game must replay identically to its last hand, not only
+    /// through East 1 (#377).
+    #[test]
+    fn test_seeded_game_replays_identically() {
+        let (first_log, first_rounds, first_scores) = play_seeded_game(2024);
+        let (second_log, second_rounds, second_scores) = play_seeded_game(2024);
+
+        // Without several hands the comparison would only cover East 1,
+        // which was already deterministic before the fix.
+        assert!(first_rounds > 1, "game ended after a single hand");
+        assert_eq!(first_rounds, second_rounds);
+        assert_eq!(first_log, second_log);
+        assert_eq!(first_scores, second_scores);
     }
 
     #[test]
