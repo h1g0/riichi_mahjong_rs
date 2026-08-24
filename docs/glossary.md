@@ -1,12 +1,11 @@
 # Ubiquitous Language Glossary
 
+[日本語版はこちら](./glossary.ja.md)
+
 This document fixes the agreed correspondence between Japanese Riichi Mahjong terms,
 their English translations, and the identifiers used in the codebase. It is the
 reference for the upcoming i18n work and for any discussion that crosses the
 Japanese/English boundary.
-
-A Japanese-language edition of this document is maintained in parallel at
-[glossary.ja.md](glossary.ja.md).
 
 ## Conventions
 
