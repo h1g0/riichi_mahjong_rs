@@ -121,7 +121,12 @@ python -m http.server 8080 --directory public
 
 ## Contributing
 
-Contributions are welcome. Before contributing, please consult the
+Contributions are welcome. [CONTRIBUTING.md](./CONTRIBUTING.md) covers building,
+testing, and the conventions this project follows, and
+[docs/architecture.md](./docs/architecture.md) is a map of the codebase — start
+there if you are looking for where a change belongs.
+
+Before contributing, please also consult the
 [Ubiquitous Language Glossary](./docs/glossary.md) to understand the project's
 Riichi Mahjong terminology and to use it consistently when writing code,
 comments, and documentation. A [Japanese edition](./docs/glossary.ja.md) is

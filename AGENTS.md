@@ -9,6 +9,10 @@ Japanese Riichi Mahjong game implemented in Rust. Runs as a native desktop app a
 - **`mahjong-core`** — Pure game logic: tile representation, shanten calculation, yaku evaluation, fu/score calculation. No UI.
 - **`mahjong-server`** — Game progression and rule handling for local matches. Includes CPU opponent AI.
 - **`mahjong-client`** — Macroquad-based GUI client. Supports both native and WASM builds.
+- **`mahjong-net-server`** — WebSocket server (tokio + axum) hosting room-code online matches.
+- **`mahjong-mjai`** — mjai protocol codec, plus the CPU opponent as an mjai bot and mjai log export.
+
+See `docs/architecture.md` for the full map, and `CONTRIBUTING.md` for the human-facing setup instructions.
 
 ## Common Commands
 
@@ -54,9 +58,12 @@ export PATH="/c/Program Files/GitHub CLI:$PATH"
 
 ## Architecture Notes
 
-- `mahjong-client/src/adapter.rs` — bridges the client UI with the server logic
-- `mahjong-server/src/round.rs` — largest module; handles full turn sequence (~77KB)
+- `mahjong-server/src/protocol/mod.rs` — `ServerEvent` / `ClientAction`: the seam every other crate talks through
+- `mahjong-server/src/driver.rs` — `GameDriver`, the event pump (`drain_events` / `handle_action`); CPUs speak the same protocol as humans
+- `mahjong-server/src/round/` — one hand of play, split into `mod.rs`, `turn.rs`, `calls.rs`, `win.rs`, `draws.rs`, and `diagnostics.rs`
+- `mahjong-server/src/table.rs` — whole-game state: hands, dealer, scores, game end
 - `mahjong-server/src/cpu/` — CPU AI with personalities, defense, and move evaluation
+- `mahjong-client/src/adapter/` — bridges the client UI with the server logic (`local.rs` embeds the driver, `remote.rs` speaks WebSocket)
 - Yaku checks are organized by han level under `mahjong-core/src/winning_hand/`
 
 ## Development Guidelines
