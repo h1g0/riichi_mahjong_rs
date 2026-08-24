@@ -5,7 +5,7 @@ use mahjong_core::winning_hand::name::Kind;
 use rstest::rstest;
 use strum::IntoEnumIterator;
 
-use crate::yaku::{dora_name, kind_name, score_item_name};
+use crate::yaku::{dora_name, kind_from_name, kind_name, score_item_name};
 
 #[test]
 fn every_yaku_has_a_name() {
@@ -116,4 +116,59 @@ fn score_items_dispatch_to_the_right_table() {
         score_item_name(ScoreItem::Dora(DoraLabel::RedDora)),
         "akadora"
     );
+}
+
+// --- Drift against the published glossary data ---
+//
+// `data/yaku.json` publishes all three naming systems in one table, so the
+// mjai column there has to agree with the mapping above. See `data/README.md`.
+
+/// The published data file, embedded so the test needs no working directory.
+const YAKU_JSON: &str = include_str!("../../../data/yaku.json");
+
+#[derive(serde::Deserialize)]
+struct YakuData {
+    yaku: Vec<YakuEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct YakuEntry {
+    kind: Kind,
+    mjai: String,
+}
+
+fn published_yaku() -> Vec<YakuEntry> {
+    serde_json::from_str::<YakuData>(YAKU_JSON)
+        .expect("data/yaku.json does not parse")
+        .yaku
+}
+
+#[test]
+fn published_mjai_labels_match_this_crate() {
+    for entry in published_yaku() {
+        assert_eq!(
+            entry.mjai,
+            kind_name(entry.kind),
+            "data/yaku.json and yaku.rs disagree on {:?}",
+            entry.kind
+        );
+    }
+}
+
+#[test]
+fn every_published_label_decodes_to_a_yaku_carrying_it() {
+    // kind_from_name is a partial inverse: a collapsed label decodes to one
+    // documented representative, which must still be a yaku that the table
+    // lists under that label.
+    let entries = published_yaku();
+    for entry in &entries {
+        let decoded = kind_from_name(&entry.mjai)
+            .unwrap_or_else(|| panic!("{} does not decode to any yaku", entry.mjai));
+        assert_eq!(
+            kind_name(decoded),
+            entry.mjai,
+            "{} decodes to {decoded:?}, which mjai calls something else",
+            entry.mjai
+        );
+    }
 }

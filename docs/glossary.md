@@ -8,6 +8,10 @@ Japanese/English boundary.
 A Japanese-language edition of this document is maintained in parallel at
 [glossary.ja.md](glossary.ja.md).
 
+The yaku table below is also published in machine-readable form as
+[`data/yaku.json`](../data/yaku.json), which adds the mjai romaji label as a
+third naming system; see [`data/README.md`](../data/README.md) for the schema.
+
 ## Conventions
 
 - **English** translations follow the **World Riichi Championship (WRC) Rules 2025**
@@ -167,6 +171,9 @@ A Japanese-language edition of this document is maintained in parallel at
 English and romaji follow WRC Rules 2025 §11.5 / §13.3. Han values are written
 `closed / open`; a single number means it does not change when open. A blank **Code id**
 means the yaku is not currently implemented in the codebase.
+
+The same mapping, keyed by `Kind` and machine-readable, lives in
+[`data/yaku.json`](../data/yaku.json). Yaku with no **Code id** are absent from it.
 
 ### 1 han
 

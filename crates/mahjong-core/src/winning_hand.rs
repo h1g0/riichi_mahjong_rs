@@ -21,3 +21,7 @@ mod check_6_han;
 
 /// Yakuman checks
 mod check_yakuman;
+
+/// Drift tests between `name` and the published `data/yaku.json`
+#[cfg(test)]
+mod yaku_data_tests;

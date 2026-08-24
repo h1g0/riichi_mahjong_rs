@@ -38,6 +38,7 @@ python -m http.server 8080 --directory public
 ## Key Directories
 
 - `crates/` — workspace crates
+- `data/` — machine-readable data published for outside consumers (`yaku.json`)
 - `assets/fonts/` — ShipporiMincho-Regular.ttf (loaded at runtime; SIL OFL, see ShipporiMincho-OFL.txt)
 - `assets/images/` — tile PNGs and score stick PNGs
 - `assets/web/` — source HTML and favicon for the browser client
@@ -64,6 +65,7 @@ export PATH="/c/Program Files/GitHub CLI:$PATH"
 ### Game Logic
 
 - Before adding game logic to `mahjong-server` or `mahjong-client`, check whether it already exists in `mahjong-core`.
+- Yaku names live in `mahjong-core/src/winning_hand/name.rs`, which is the source of truth. `data/yaku.json` mirrors it and is pinned by drift tests, so changing a name means changing both.
 - After completing an implementation, verify that the build succeeds and all unit tests pass (`cargo build && cargo test`).
 - Add unit tests for any new functionality.
 - Add regression tests for any bug fixes.

@@ -19,6 +19,10 @@ pub enum Form {
 /// English names follow WRC Rules 2025 (see docs/glossary.md).
 /// The declaration order here also fixes the display order of equal-han
 /// yaku on the result screen.
+///
+/// This module is the source of truth for yaku names; `data/yaku.json`
+/// mirrors it for consumers outside Rust and is pinned to it by
+/// `winning_hand::yaku_data_tests`.
 #[derive(
     Debug,
     Clone,
