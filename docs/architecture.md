@@ -9,6 +9,9 @@ For how to build, test, and submit changes, see
 [CONTRIBUTING.md](../CONTRIBUTING.md). For terminology, see the
 [Ubiquitous Language Glossary](glossary.md).
 
+A Japanese edition of this document is maintained in parallel at
+[architecture.ja.md](architecture.ja.md).
+
 ## The crates
 
 ```
@@ -38,6 +41,24 @@ back to them:
   clock.** Time is injected as a `now: f64` parameter. That is why the same code
   drives a macroquad frame loop, an async server, and a batch simulation without
   changes.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `crates/` | The workspace crates above. |
+| `assets/fonts/` | ShipporiMincho-Regular.ttf, loaded at runtime (SIL OFL; see `ShipporiMincho-OFL.txt`). |
+| `assets/images/` | Tile and score-stick PNGs, embedded into the client binary. |
+| `assets/web/` | Source HTML and favicon for the browser client. |
+| `crates/mahjong-client/js/` | Hand-written JavaScript glue for the WASM build: `ws.js` (WebSocket), `storage.js` (settings), `loading.js`. |
+| `public/` | Generated web output. Built by `scripts/vercel-build.sh`; never edit by hand. |
+| `scripts/` | Vercel build and install scripts, plus the asset helper scripts they call. |
+| `docs/` | This guide, the glossary, the Japanese README, and images. |
+| `Dockerfile`, `fly.toml` | Container and Fly.io configuration for `mahjong-net-server`. |
+| `vercel.json` | Vercel build configuration for the web client. |
+
+Deployment (Vercel for the web client, Fly.io or any Docker host for the online
+server, itch.io from CI) is documented in the [README](../README.md).
 
 ## The seam: `ServerEvent` / `ClientAction`
 
@@ -256,5 +277,6 @@ Some files are large. Knowing which before you open them saves surprise:
 | [`hand_info/hand_analyzer.rs`](../crates/mahjong-core/src/hand_info/hand_analyzer.rs) | ~1,480 | Shanten. Dense, and the place to be most careful. |
 | [`driver.rs`](../crates/mahjong-server/src/driver.rs) | ~1,410 | The event pump. |
 
-Every module carries a `//!` header explaining what it is for; reading those
+Outside `mahjong-core`, every module carries a `//!` header explaining what it is
+for (`mahjong-core` documents its modules from `lib.rs` instead); reading those
 first is usually faster than reading the code.
