@@ -1,5 +1,7 @@
 # アーキテクチャ
 
+[English version](./architecture.md)
+
 初めてこのコードベースに触れる人のための地図です。5 つのクレートで約 5.7 万行
 ありますが、そのほとんどは 1 つの継ぎ目
 — [継ぎ目](#継ぎ目-serverevent--clientaction) で説明するイベントストリーム —
@@ -9,8 +11,6 @@
 ビルド・テスト・変更の出し方は
 [docs/CONTRIBUTING.ja.md](./CONTRIBUTING.ja.md) を、用語は
 [ユビキタス言語集](./glossary.ja.md) を参照してください。
-
-英語版は [architecture.md](architecture.md) に並行して管理しています。
 
 ## クレート構成
 

@@ -1,5 +1,7 @@
 # Architecture
 
+[日本語版はこちら](./architecture.ja.md)
+
 A map of the codebase for people arriving cold. It is roughly 57k lines of Rust
 across five crates, but almost all of it hangs off one seam — the event stream
 described in [The seam](#the-seam-serverevent--clientaction). Read that section
@@ -8,9 +10,6 @@ first; the rest is detail you can look up when you need it.
 For how to build, test, and submit changes, see
 [CONTRIBUTING.md](../CONTRIBUTING.md). For terminology, see the
 [Ubiquitous Language Glossary](glossary.md).
-
-A Japanese edition of this document is maintained in parallel at
-[architecture.ja.md](architecture.ja.md).
 
 ## The crates
 

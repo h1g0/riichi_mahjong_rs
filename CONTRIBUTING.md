@@ -1,5 +1,7 @@
 # Contributing to Riichi Mahjong RS
 
+[日本語版はこちら](./docs/CONTRIBUTING.ja.md)
+
 Thanks for taking an interest in this project. It is a Japanese Riichi Mahjong
 implementation in Rust: a rules engine, a CPU opponent, a Macroquad client that
 runs natively and in the browser, and a WebSocket server for online play.
@@ -8,9 +10,6 @@ Bug reports, rule corrections, CPU-strategy improvements, translations, and
 documentation fixes are all welcome. This document covers how to build, test,
 and submit changes. For a map of the codebase, read
 [docs/architecture.md](docs/architecture.md).
-
-A Japanese edition of this document is maintained in parallel at
-[docs/CONTRIBUTING.ja.md](docs/CONTRIBUTING.ja.md).
 
 ## Table of contents
 
