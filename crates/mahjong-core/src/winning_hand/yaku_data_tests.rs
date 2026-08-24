@@ -13,6 +13,9 @@ use crate::winning_hand::name::{Kind, get};
 /// The published data file, embedded so the test needs no working directory.
 const YAKU_JSON: &str = include_str!("../../../../data/yaku.json");
 
+/// The JSON Schema published alongside it.
+const YAKU_SCHEMA_JSON: &str = include_str!("../../../../data/yaku.schema.json");
+
 #[derive(Debug, Deserialize)]
 struct YakuData {
     schema_version: u32,
@@ -193,6 +196,25 @@ fn an_open_name_exists_exactly_when_the_value_drops() {
         );
         assert_eq!(entry.open_en.is_some(), entry.open_ja.is_some());
     }
+}
+
+#[test]
+fn the_schema_lists_exactly_the_kinds_that_exist() {
+    // `scripts/validate-data.py` checks the data against the schema, but that
+    // needs Python. This catches the half of the drift that Rust can see:
+    // a variant added to or removed from `Kind` and not mirrored in the
+    // schema's `kind` enum.
+    let schema: serde_json::Value =
+        serde_json::from_str(YAKU_SCHEMA_JSON).expect("data/yaku.schema.json is not valid JSON");
+    let listed = schema["$defs"]["yaku"]["properties"]["kind"]["enum"]
+        .as_array()
+        .expect("the schema has no kind enum");
+    let listed: Vec<&str> = listed
+        .iter()
+        .map(|value| value.as_str().expect("a kind enum entry is not a string"))
+        .collect();
+    let expected: Vec<String> = Kind::iter().map(|kind| format!("{kind:?}")).collect();
+    assert_eq!(listed, expected);
 }
 
 #[test]

@@ -1,4 +1,5 @@
 {
+  "$schema": "./yaku.schema.json",
   "schema_version": 1,
   "source_of_truth": "crates/mahjong-core/src/winning_hand/name.rs",
   "english_names": {

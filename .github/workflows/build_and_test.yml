@@ -28,6 +28,10 @@ jobs:
       run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     - name: Run tests
       run: cargo test --workspace --all-targets --all-features --locked --verbose
+    - name: Validate published data files
+      run: |
+        pip install --quiet jsonschema
+        python scripts/validate-data.py
     - name: Build web client
       env:
         MAHJONG_SERVER_URL: ${{ vars.MAHJONG_SERVER_URL }}

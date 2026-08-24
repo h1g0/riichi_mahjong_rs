@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/h1g0/riichi_mahjong_rs/main/data/yaku.schema.json",
+  "title": "Riichi mahjong yaku names",
+  "description": "The yaku of Japanese riichi mahjong under three naming systems: the World Riichi Championship Rules 2025 English names, the Japanese names, and the mjai romaji labels. Keyed by the `Kind` enum variant of mahjong-core. See data/README.md for the caveats, in particular that `mjai` is many-to-one and cannot be used as a key.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "Optional pointer to this schema, for editor support.",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Bumped on any incompatible change to this shape. A consumer should refuse a version it does not know.",
+      "const": 1
+    },
+    "source_of_truth": {
+      "description": "Repository-relative path to the Rust module this file mirrors. That module, not this file, decides what the game displays.",
+      "type": "string"
+    },
+    "english_names": {
+      "description": "Provenance of the English column.",
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "required": [
+        "source",
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "open_suffix": {
+      "description": "The suffix appended to a plain name to form `open_en` and `open_ja`. Given explicitly so a consumer can strip it.",
+      "type": "object",
+      "properties": {
+        "en": {
+          "type": "string"
+        },
+        "ja": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "en",
+        "ja"
+      ],
+      "additionalProperties": false
+    },
+    "yaku": {
+      "description": "One entry per yaku, in the declaration order of the `Kind` enum. That order also fixes how equal-han yaku are listed on the result screen.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/yaku"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "source_of_truth",
+    "english_names",
+    "open_suffix",
+    "yaku"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "yaku": {
+      "title": "Yaku",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The `Kind` enum variant, and the key of this table. Unique across the file.",
+          "enum": [
+            "Riichi",
+            "DoubleRiichi",
+            "Unbroken",
+            "FullyConcealedHand",
+            "SevenPairs",
+            "NagashiMangan",
+            "LastTileDraw",
+            "LastTileClaim",
+            "AfterAQuad",
+            "RobbingAQuad",
+            "Pinfu",
+            "TwinSequences",
+            "MixedSequences",
+            "FullStraight",
+            "DoubleTwinSequences",
+            "AllTriplets",
+            "ThreeConcealedTriplets",
+            "MixedTriplets",
+            "AllInside",
+            "ValueHonourSeatWind",
+            "ValueHonourRoundWind",
+            "ValueHonourWhiteDragon",
+            "ValueHonourGreenDragon",
+            "ValueHonourRedDragon",
+            "CommonEnds",
+            "PerfectEnds",
+            "CommonTerminals",
+            "LittleDragons",
+            "ThreeQuads",
+            "CommonFlush",
+            "PerfectFlush",
+            "ThirteenOrphans",
+            "ThirteenOrphansThirteenWait",
+            "FourConcealedTriplets",
+            "FourConcealedTripletsPairWait",
+            "BigDragons",
+            "LittleWinds",
+            "BigWinds",
+            "AllHonours",
+            "PerfectTerminals",
+            "AllGreen",
+            "NineGates",
+            "PureNineGates",
+            "FourQuads",
+            "BlessingOfHeaven",
+            "BlessingOfEarth"
+          ]
+        },
+        "en": {
+          "description": "English name, per WRC Rules 2025.",
+          "type": "string",
+          "minLength": 1
+        },
+        "ja": {
+          "description": "Japanese name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "romaji": {
+          "description": "WRC romanized reading, with macrons.",
+          "type": "string",
+          "minLength": 1
+        },
+        "mjai": {
+          "description": "mjai label, derived from the Tenhou yaku ids. Many-to-one: several yaku share one label, so this is not a key.",
+          "type": "string",
+          "pattern": "^[a-z_]+$"
+        },
+        "closed_only": {
+          "description": "Whether the yaku requires a closed hand.",
+          "type": "boolean"
+        },
+        "open_en": {
+          "description": "English name on an open hand, or null when the name does not change. Non-null exactly for the yaku that lose value when open.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "open_ja": {
+          "description": "Japanese name on an open hand, or null when the name does not change.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "value": {
+          "description": "What the yaku is worth, before dora.",
+          "oneOf": [
+            {
+              "title": "Han",
+              "description": "Han, before dora.",
+              "type": "object",
+              "properties": {
+                "unit": {
+                  "const": "han"
+                },
+                "closed": {
+                  "description": "Value on a closed hand.",
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "open": {
+                  "description": "Value on an open hand, or null when the yaku requires a closed hand. Equal to `closed` when the yaku keeps its value.",
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "unit",
+                "closed",
+                "open"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "title": "Yakuman",
+              "description": "Yakuman multiples, before `double_yakuman_option`.",
+              "type": "object",
+              "properties": {
+                "unit": {
+                  "const": "yakuman"
+                },
+                "closed": {
+                  "description": "Value on a closed hand.",
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "open": {
+                  "description": "Value on an open hand, or null when the yaku requires a closed hand. Equal to `closed` when the yaku keeps its value.",
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "unit",
+                "closed",
+                "open"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "title": "Mangan",
+              "description": "A fixed mangan, neither han nor yakuman. Only Nagashi Mangan.",
+              "type": "object",
+              "properties": {
+                "unit": {
+                  "const": "mangan"
+                }
+              },
+              "required": [
+                "unit"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "double_yakuman_option": {
+          "description": "Present and true only when the yaku counts double under the optional double-yakuman rule. Absent otherwise.",
+          "const": true
+        }
+      },
+      "required": [
+        "kind",
+        "en",
+        "ja",
+        "romaji",
+        "mjai",
+        "closed_only",
+        "open_en",
+        "open_ja",
+        "value"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "title": "A closed-only yaku has no open value",
+          "if": {
+            "properties": {
+              "closed_only": {
+                "const": true
+              }
+            },
+            "required": [
+              "closed_only"
+            ]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "properties": {
+                  "open": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "The two open names are present or absent together",
+          "oneOf": [
+            {
+              "properties": {
+                "open_en": {
+                  "type": "null"
+                },
+                "open_ja": {
+                  "type": "null"
+                }
+              }
+            },
+            {
+              "properties": {
+                "open_en": {
+                  "type": "string"
+                },
+                "open_ja": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

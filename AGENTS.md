@@ -21,6 +21,10 @@ cargo test -p mahjong-server
 # Run native client
 cargo run -p mahjong-client
 
+# Validate the published data files against their JSON Schemas
+# (needs `pip install jsonschema`; also run in CI)
+python scripts/validate-data.py
+
 # Build WASM client and assemble web assets
 bash scripts/vercel-build.sh
 
@@ -38,7 +42,7 @@ python -m http.server 8080 --directory public
 ## Key Directories
 
 - `crates/` — workspace crates
-- `data/` — machine-readable data published for outside consumers (`yaku.json`)
+- `data/` — machine-readable data published for outside consumers (`yaku.json` and its JSON Schema)
 - `assets/fonts/` — ShipporiMincho-Regular.ttf (loaded at runtime; SIL OFL, see ShipporiMincho-OFL.txt)
 - `assets/images/` — tile PNGs and score stick PNGs
 - `assets/web/` — source HTML and favicon for the browser client

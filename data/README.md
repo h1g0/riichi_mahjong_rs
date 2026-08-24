@@ -31,10 +31,30 @@ first, then mirror it here.
 
 ### Schema
 
+[`yaku.schema.json`](yaku.schema.json) is a JSON Schema (draft 2020-12)
+describing the file, so a consumer can validate it rather than trust this
+prose. `yaku.json` points at it with a `$schema` key, which is enough for most
+editors to validate and autocomplete it in place.
+
+Run the check locally with:
+
+```sh
+pip install jsonschema
+python scripts/validate-data.py
+```
+
+CI runs the same script. Two things it does that the Rust tests cannot: it
+rejects an undeclared field anywhere in the file, and it fails on a schema that
+has itself stopped being a valid schema. Going the other way, the schema cannot
+express that `open_en` is non-null exactly when the value drops — comparing two
+numbers is beyond it — so that invariant lives only in
+`winning_hand::yaku_data_tests`.
+
 Top level:
 
 | Field | Type | Meaning |
 |---|---|---|
+| `$schema` | string | Optional pointer to `yaku.schema.json`. |
 | `schema_version` | integer | Bumped on any incompatible change to the shape below. |
 | `source_of_truth` | string | Path to the Rust module this mirrors. |
 | `english_names` | object | Provenance of the English column: `source` and `url`. |
