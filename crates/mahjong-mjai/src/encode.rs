@@ -31,6 +31,9 @@ use crate::yaku::score_item_name;
 /// opponents in `start_kyoku`.
 const STARTING_HAND_LEN: usize = 13;
 
+/// Value of one riichi deposit.
+const RIICHI_STICK_VALUE: i32 = 1000;
+
 /// Hidden information for replay mode.
 ///
 /// A single seat's stream cannot see the other players' starting hands or
@@ -68,6 +71,11 @@ pub struct MjaiEncoder {
     last_discarder: Option<Actor>,
     /// Riichi declared but whose declaring discard has not been seen yet.
     awaiting_reach_discard: Option<PendingReach>,
+    /// Deposits the round took at declaration but mjai was never told about,
+    /// because the declaring discard was ronned and the acceptance suppressed.
+    /// The winner is still paid them, so they have to be charged to the
+    /// declarer by the win itself.
+    suppressed_deposits: usize,
     /// Riichi whose discard has been seen; `reach_accepted` is held back one
     /// event so that a ron on the declaring discard can suppress it.
     pending_reach_accepted: Option<PendingReach>,
@@ -99,6 +107,7 @@ impl MjaiEncoder {
             pending_end_kyoku: false,
             awaiting_reach_discard: None,
             pending_reach_accepted: None,
+            suppressed_deposits: 0,
             game_started: false,
             names,
             reveal: None,
@@ -277,6 +286,7 @@ impl MjaiEncoder {
         self.scores = scores.to_vec();
         self.awaiting_reach_discard = None;
         self.pending_reach_accepted = None;
+        self.suppressed_deposits = 0;
         self.last_discarder = None;
         self.hand_ended = false;
         self.pending_end_kyoku = false;
@@ -387,12 +397,20 @@ impl MjaiEncoder {
             score_points,
             uradora_indicators,
             player_hands,
+            riichi_sticks,
             ..
         } = event
         else {
             return;
         };
         let actor = self.actor_of(*winner);
+        let (deltas, after) = self.hora_deltas(
+            actor,
+            loser.map(|wind| self.actor_of(wind)),
+            *score_points,
+            *riichi_sticks,
+            scores,
+        );
         out.push(MjaiEvent::Hora {
             actor,
             // On a self-draw mjai names the winner as its own target.
@@ -414,12 +432,61 @@ impl MjaiEncoder {
             // revealed" rather than "not known".
             uradora_markers: (!uradora_indicators.is_empty()).then(|| uradora_indicators.clone()),
             hora_points: Some(*score_points),
-            deltas: Some(self.deltas(scores)),
-            scores: Some(scores[..self.player_count].to_vec()),
+            deltas: Some(deltas),
+            scores: Some(after.clone()),
             pao: None,
         });
-        self.scores = scores.to_vec();
+        self.scores = after;
         self.pending_end_kyoku = true;
+    }
+
+    /// Books one win, returning its score changes and the scores after it.
+    ///
+    /// A self-draw is never simultaneous, so the whole outstanding change
+    /// belongs to it and the difference against the running scores is exact —
+    /// which also keeps a liability payment (pao / 包) on the seats that
+    /// actually paid it.
+    ///
+    /// A ron can share its discard with another winner, and the round applies
+    /// every payment before emitting either `RoundWon`, so both events carry
+    /// the same final scores. Taking the difference would bill the whole
+    /// double ron to whichever winner mjai happened to be told about first and
+    /// leave the second win looking free. Each win is therefore booked between
+    /// its own winner and the discarder, using this winner's own total; the
+    /// riichi deposits inside that total came from the table rather than from
+    /// the discarder, so they are not charged to anyone. The one thing this
+    /// loses is a liability payment on a ron, which shows as paid by the
+    /// discarder alone.
+    fn hora_deltas(
+        &self,
+        winner: Actor,
+        loser: Option<Actor>,
+        score_points: i32,
+        riichi_sticks: usize,
+        final_scores: &[i32],
+    ) -> (Vec<i32>, Vec<i32>) {
+        let Some(loser) = loser else {
+            return (
+                self.deltas(final_scores),
+                final_scores[..self.player_count].to_vec(),
+            );
+        };
+        // Only the deposits mjai watched being placed are still on the table
+        // as far as a reader is concerned; one it never saw has to come out of
+        // the declarer's score here instead.
+        let deposits =
+            riichi_sticks.saturating_sub(self.suppressed_deposits) as i32 * RIICHI_STICK_VALUE;
+        let mut deltas = vec![0; self.player_count];
+        deltas[winner] = score_points;
+        deltas[loser] = deposits - score_points;
+        let after = self
+            .scores
+            .iter()
+            .zip(deltas.iter())
+            .take(self.player_count)
+            .map(|(before, delta)| before + delta)
+            .collect();
+        (deltas, after)
     }
 
     /// Closes the hand, at most once.
@@ -504,6 +571,7 @@ impl MjaiEncoder {
         } = next
             && self.actor_of(*loser) == reach.actor
         {
+            self.suppressed_deposits += 1;
             return Vec::new();
         }
         self.scores = reach.scores.clone();

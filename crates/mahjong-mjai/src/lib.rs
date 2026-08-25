@@ -18,6 +18,19 @@
 //! [`MjaiEvent`]; concealment shows up as [`MjaiTile::Hidden`] and as absent
 //! optional fields.
 //!
+//! # Importing game logs
+//!
+//! [`replay`] reads a log back: a replay-mode stream rebuilds all four seats,
+//! hands each of them the `ServerEvent`s it would have received live, and
+//! compares every result with the one the log reports. Tenhou and Mahjong Soul
+//! records go through an existing converter into mjai first — `tenhou-to-mjai`,
+//! `mjai-gateway`, or the converter shipped with gimite/mjai — so there is one
+//! importer here rather than one per site. The `mjai-import` binary is the
+//! command-line form.
+//!
+//! mjai carries no rule set, so the importer has to be told which table it is
+//! reading; [`replay::LogSource`] holds the presets.
+//!
 //! # Compatibility
 //!
 //! The published specification leaves `hora` and `ryukyoku` unfinished, so
@@ -50,6 +63,8 @@ pub mod event;
 pub mod host;
 #[cfg(feature = "server")]
 pub mod record;
+#[cfg(feature = "server")]
+pub mod replay;
 pub mod tile;
 pub mod yaku;
 
@@ -64,6 +79,8 @@ pub use event::{Actor, MjaiEvent, RyukyokuReason};
 pub use host::MjaiHost;
 #[cfg(feature = "server")]
 pub use record::MjaiRecorder;
+#[cfg(feature = "server")]
+pub use replay::{LogSource, MjaiReplay, ReplayReport, audit_log};
 pub use tile::{MjaiTile, tile_from_str, tile_to_str, wind_from_str, wind_to_str};
 pub use yaku::score_item_name;
 
@@ -106,3 +123,6 @@ mod encode_tests;
 
 #[cfg(all(test, feature = "server"))]
 mod record_tests;
+
+#[cfg(all(test, feature = "server"))]
+mod replay_tests;

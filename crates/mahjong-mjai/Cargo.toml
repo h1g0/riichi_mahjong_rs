@@ -9,6 +9,11 @@ name = "mjai-bot"
 path = "src/bin/mjai_bot.rs"
 required-features = ["server"]
 
+[[bin]]
+name = "mjai-import"
+path = "src/bin/mjai_import.rs"
+required-features = ["server"]
+
 [[example]]
 name = "mjai_export"
 path = "examples/mjai_export.rs"

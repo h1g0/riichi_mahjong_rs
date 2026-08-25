@@ -144,6 +144,20 @@ cargo run -p mahjong-mjai --bin mjai-bot -- --level strong --name my-bot
 cargo run -p mahjong-mjai --example mjai_export -- 42 > game.mjson
 ```
 
+Games from elsewhere go the other way. Convert a Tenhou or Mahjong Soul record
+into mjai with one of the existing converters, then replay it through the
+engine, which compares every result with the one the log reports:
+
+```sh
+cargo run -p mahjong-mjai --bin mjai-import -- --rules tenhou game.mjson
+```
+
+It exits non-zero when the log and this project disagree on han, minipoints,
+payments, or who was ready at an exhaustive draw, so a batch of logs works as a
+regression check on the rules engine. Because mjai carries no rule set, pass the
+`--rules` the log was actually played under; a disagreement caused by the wrong
+rule set looks exactly like a bug.
+
 ## Before you commit
 
 Both of these must be clean; CI fails on either:

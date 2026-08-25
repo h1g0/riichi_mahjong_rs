@@ -77,6 +77,8 @@ pub struct MjaiDecoder {
     kan_replacement_due: Option<Actor>,
     /// The most recent discard and who made it, which a call has to name.
     last_discard: Option<(Tile, Actor)>,
+    /// Seat whose riichi declaration is still waiting for its discard.
+    reach_pending: Option<Actor>,
 }
 
 impl MjaiDecoder {
@@ -107,6 +109,7 @@ impl MjaiDecoder {
             last_draw_was_dead_wall: false,
             kan_replacement_due: None,
             last_discard: None,
+            reach_pending: None,
         }
     }
 
@@ -123,6 +126,57 @@ impl MjaiDecoder {
     /// The tile drawn this turn, if the seat is holding one.
     pub fn last_drawn(&self) -> Option<Tile> {
         self.player.hand.drawn()
+    }
+
+    /// The rules this decoder was told the table is using.
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    /// Round wind (bakaze / 場風) of the hand in progress.
+    pub fn round_wind(&self) -> Wind {
+        self.round_wind
+    }
+
+    /// Hand number, 0-based, counting from the first hand of the game.
+    pub fn round_number(&self) -> usize {
+        self.round_number
+    }
+
+    /// Continuance counter (honba / 本場) of the hand in progress.
+    pub fn honba(&self) -> usize {
+        self.honba
+    }
+
+    /// Riichi deposits on the table (kyotaku / 供託).
+    pub fn riichi_sticks(&self) -> usize {
+        self.riichi_sticks
+    }
+
+    /// Every seat's score, in absolute seat order.
+    pub fn scores(&self) -> &[i32] {
+        &self.scores
+    }
+
+    /// Dora indicators turned up so far this hand.
+    pub fn dora_indicators(&self) -> &[Tile] {
+        &self.dora_indicators
+    }
+
+    /// Tiles left in the live wall.
+    pub fn remaining_tiles(&self) -> usize {
+        self.remaining_tiles
+    }
+
+    /// Whether the most recent draw was a quad replacement, which decides
+    /// between the last-tile yaku and the after-a-quad one.
+    pub fn last_draw_was_dead_wall(&self) -> bool {
+        self.last_draw_was_dead_wall
+    }
+
+    /// Maps an absolute seat to its seat wind for the hand in progress.
+    pub fn seat_wind_of(&self, actor: Actor) -> Wind {
+        self.wind_of(actor)
     }
 
     /// Records that this seat passed on a ron it could have declared.
@@ -433,6 +487,7 @@ impl MjaiDecoder {
         self.last_draw_was_dead_wall = false;
         self.kan_replacement_due = None;
         self.last_discard = None;
+        self.reach_pending = None;
 
         let hand: Vec<Tile> = tehais
             .get(self.self_actor)
@@ -497,11 +552,23 @@ impl MjaiDecoder {
     }
 
     fn decode_dahai(&mut self, actor: Actor, pai: Tile, tsumogiri: bool) -> Vec<ServerEvent> {
+        let is_reach_discard = self.reach_pending == Some(actor);
+        self.reach_pending = None;
         if actor == self.self_actor {
             // A tsumogiri is recorded as such so the discard pool, and with it
             // the furiten check, matches what the server would have stored.
             let target = if tsumogiri { None } else { Some(pai) };
             self.player.try_discard(target);
+            if is_reach_discard {
+                // try_discard() clears ippatsu on every discard, but the
+                // declaring discard is the one that must keep it: the window
+                // runs until the *next* discard. The round restores it the
+                // same way.
+                self.player.is_ippatsu = true;
+                if let Some(last) = self.player.discards.last_mut() {
+                    last.is_riichi_declaration = true;
+                }
+            }
         }
 
         self.last_discard = Some((pai, actor));
@@ -537,6 +604,7 @@ impl MjaiDecoder {
             *score -= 1000;
         }
         self.riichi_sticks += 1;
+        self.reach_pending = Some(actor);
         if actor == self.self_actor {
             let is_double = self.player.is_first_turn && !self.player.first_turn_interrupted;
             self.player.declare_riichi(is_double);
@@ -565,8 +633,10 @@ impl MjaiDecoder {
             self.kan_replacement_due = Some(actor);
         }
         // Any call breaks the uninterrupted first go-around that double riichi
-        // and the blessings require.
+        // and the blessings require, and takes ippatsu off the table for
+        // everyone, not only for the caller.
         self.player.first_turn_interrupted = true;
+        self.player.is_ippatsu = false;
 
         if actor == self.self_actor {
             self.apply_own_call(target, call_type.clone(), called, consumed);

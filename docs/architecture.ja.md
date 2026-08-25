@@ -102,6 +102,7 @@ let accepted: bool = driver.handle_action(seat, action);
 | ローカル対戦 | macroquad のフレームから `get_time()` 付きで `tick_at` / `drain_events_at` を呼ぶ | [`adapter/local.rs`](../crates/mahjong-client/src/adapter/local.rs) |
 | オンライン対戦 | tokio のルームタスクが `run_until_blocked` と `drain_all_events_at` を呼ぶ | [`net-server/src/room.rs`](../crates/mahjong-net-server/src/room.rs) |
 | mjai | デコーダーが mjai の JSON から `ServerEvent` 列を組み立てる | [`mjai/src/decode.rs`](../crates/mahjong-mjai/src/decode.rs) |
+| 取り込んだ牌譜 | 変換済みの天鳳・雀魂の牌譜を 4 つのデコーダで再生する（牌山を持たない） | [`mjai/src/replay.rs`](../crates/mahjong-mjai/src/replay.rs) |
 
 **機能を追加するときは、ここが出発点です。** 新しい宣言は `ClientAction` の
 バリアント、プレイヤーに新しく伝えたい情報は `ServerEvent` のバリアントになり
@@ -260,6 +261,22 @@ CPU の打ち方を変えたいときは、ほぼ常に、他所に分岐を足�
   卓に座らせる」側です。
 - [`record.rs`](../crates/mahjong-mjai/src/record.rs) — リプレイモード。4 席分を
   まとめ、すべて開示した検討ツール向けのログを出力します。
+- [`replay.rs`](../crates/mahjong-mjai/src/replay.rs) — その逆方向。取り込んだ
+  ログから 4 席を復元し、本エンジンと突き合わせて検証します。
+
+天鳳・雀魂の牌譜取り込みはこのモジュールを通ります。サイト固有のパーサーを
+置かないのは意図的で、mjai への変換ツールは既にあるため、経路は
+`天鳳 XML / 雀魂の牌譜 → (外部コンバータ) → mjai → MjaiReplay` となり、
+保守するインポーターは 1 つで済みます。リプレイは牌山を持ちません（ログ自体が
+牌山です）。`MjaiDecoder` は既に自席の `Player` をサーバーと同じ手順で保持して
+いるので、開示済みのストリームを 4 つのデコーダに同じだけ流せば卓全体が復元
+できます。
+
+リプレイの主眼はこの突き合わせにあります。和了は復元した手牌から採点し直して
+ログの翻・符・点数移動と比較し、荒牌平局のテンパイ宣言は本プロジェクトの
+シャンテン数と比較します。食い違いは `mahjong-core` 側のバグです。コマンド
+ライン版が `mjai-import` で、食い違いがあれば終了コードが非 0 になるため、
+牌譜をまとめて回帰チェックに使えます。
 
 ## 大きいファイル
 

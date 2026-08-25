@@ -98,6 +98,7 @@ This is why the same driver serves three very different hosts:
 | Local play | a macroquad frame calling `tick_at` / `drain_events_at` with `get_time()` | [`adapter/local.rs`](../crates/mahjong-client/src/adapter/local.rs) |
 | Online play | a tokio room task calling `run_until_blocked` and `drain_all_events_at` | [`net-server/src/room.rs`](../crates/mahjong-net-server/src/room.rs) |
 | mjai | a decoder rebuilding the `ServerEvent` stream from mjai JSON | [`mjai/src/decode.rs`](../crates/mahjong-mjai/src/decode.rs) |
+| Imported log | four decoders replaying a converted Tenhou or Mahjong Soul game, with no wall of its own | [`mjai/src/replay.rs`](../crates/mahjong-mjai/src/replay.rs) |
 
 **If you are adding a feature, this is where it starts.** A new declaration is a
 `ClientAction` variant; new information for players is a `ServerEvent` variant.
@@ -258,6 +259,23 @@ between mjai events and `ServerEvent` / `ClientAction`:
   our CPU as someone else's bot, and someone else's bot at our table.
 - [`record.rs`](../crates/mahjong-mjai/src/record.rs) — replay mode: all four
   seats collected into a fully revealed log for review tools.
+- [`replay.rs`](../crates/mahjong-mjai/src/replay.rs) — the same trip backwards:
+  an imported log rebuilt into all four seats and audited against this engine.
+
+Importing a Tenhou or Mahjong Soul game goes through that last module. There is
+no site-specific parser here on purpose: converters into mjai already exist, so
+the path is `Tenhou XML / Mahjong Soul record → (external converter) → mjai →
+MjaiReplay`, and only one importer needs maintaining. A replay owns no wall —
+the log is the wall — and four `MjaiDecoder`s fed the same revealed stream
+reconstruct the whole table, since a decoder already maintains its own seat's
+`Player` exactly as the server does.
+
+The point of replaying is the cross-check: every win is scored again from the
+rebuilt hand and compared with the log's own han, minipoints, and payments, and
+every exhaustive draw's ready declarations are compared with our shanten. A
+disagreement is a bug in `mahjong-core`. `mjai-import` is the command-line form
+and exits non-zero when anything disagreed, so a corpus of logs works as a
+regression check.
 
 ## Big files
 
