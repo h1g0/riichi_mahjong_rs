@@ -256,11 +256,19 @@ fn a_ronned_riichi_discard_is_never_accepted() {
     enc.encode(&discarded(Wind::East, Tile::new(Tile::S3)));
 
     // South rons the declaring discard, so the declaration never stood.
-    let won = enc.encode(&round_won(
-        Wind::South,
-        Some(Wind::East),
-        [18800, 31200, 25000, 25000],
-    ));
+    let mut win = round_won(Wind::South, Some(Wind::East), [18800, 31200, 25000, 25000]);
+    // The round takes the deposit at declaration and awards it to the winner
+    // regardless, so a faithful event reports it inside the winner's total.
+    if let ServerEvent::RoundWon {
+        score_points,
+        riichi_sticks,
+        ..
+    } = &mut win
+    {
+        *score_points = 6200;
+        *riichi_sticks = 1;
+    }
+    let won = enc.encode(&win);
     assert!(
         !won.iter()
             .any(|e| matches!(e, MjaiEvent::ReachAccepted { .. })),

@@ -146,6 +146,18 @@ cargo run -p mahjong-mjai --bin mjai-bot -- --level strong --name my-bot
 cargo run -p mahjong-mjai --example mjai_export -- 42 > game.mjson
 ```
 
+外部の牌譜は逆方向に流します。天鳳や雀魂の牌譜を既存のコンバータで mjai に
+変換したうえで、エンジンに再生させると、各結果がログの記載と突き合わされます。
+
+```sh
+cargo run -p mahjong-mjai --bin mjai-import -- --rules tenhou game.mjson
+```
+
+翻・符・点数移動・荒牌平局のテンパイ判定のいずれかが食い違うと終了コードが
+非 0 になるので、牌譜をまとめてルールエンジンの回帰チェックに使えます。mjai は
+ルール設定を持たないため、`--rules` にはその牌譜が実際に打たれたルールを渡して
+ください。ルール指定を誤ったときの食い違いは、バグと見分けがつきません。
+
 ## コミット前に
 
 次の 2 つは必ずクリーンにしてください。どちらも CI で失敗します。
