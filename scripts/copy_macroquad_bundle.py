@@ -21,6 +21,7 @@ def load_cargo_metadata() -> dict:
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "cargo metadata failed")

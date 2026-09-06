@@ -517,8 +517,8 @@ fn draw_jp_text(font: Option<&Font>, text: &str, x: f32, y: f32, font_size: u16,
 /// `HashMap` iteration order and is nondeterministic, so trimming the
 /// glyph/size set only lowers the odds. Skipping the prewarm lets WASM
 /// cache glyphs one at a time as they appear, avoiding mass repacking
-/// entirely (the black-square issue is native-only; verified absent on
-/// WASM without the prewarm).
+/// entirely. WASM flushes pending text batches before adding new glyphs
+/// in `theme::prepare_text`, so atlas growth cannot invalidate queued draws.
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn prewarm_fonts(
     font: Option<&Font>,

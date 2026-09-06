@@ -196,7 +196,19 @@ impl GameState {
 
     pub(super) fn refresh_self_kan_options(&mut self) {
         self.self_kan_options.clear();
-        if self.drawn.is_none() || self.is_riichi {
+        let total_kan_count = self
+            .melds
+            .iter()
+            .chain(self.other_players.iter().flat_map(|player| &player.melds))
+            .filter(|meld| meld.category.is_kan())
+            .count();
+        if self.drawn.is_none()
+            || self.is_riichi
+            || !mahjong_server::legality::kan_replacement_available(
+                self.remaining_tiles,
+                total_kan_count,
+            )
+        {
             return;
         }
 

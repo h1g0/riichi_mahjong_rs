@@ -119,6 +119,11 @@
         window.addEventListener("resize", fitMahjongCanvas);
         fitMahjongCanvas();
     </script>
+    <script>
+        // Macroquad 0.4.16's bundled quad_net assigns this callback in strict
+        // mode without declaring it; keep its registration from throwing (#329).
+        var register_plugin;
+    </script>
     <script src="mq_js_bundle.js"></script>
     <script src="ws.js"></script>
     <script src="storage.js"></script>

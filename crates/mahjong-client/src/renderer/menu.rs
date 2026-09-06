@@ -631,6 +631,38 @@ fn mode_summary_lines(state: &GameState, origin: MenuOrigin) -> Vec<String> {
     lines
 }
 
+/// Wraps rule summaries between complete settings using the rendered text width.
+fn wrapped_mode_summary_lines(
+    state: &GameState,
+    origin: MenuOrigin,
+    measure_width: impl Fn(&str) -> f32,
+) -> Vec<String> {
+    let separator = match state.lang {
+        Lang::Ja => "、",
+        Lang::En => " / ",
+    };
+    let max_width = mode_summary_rect().w - 24.0;
+    let mut lines = Vec::new();
+    for summary in mode_summary_lines(state, origin) {
+        let mut line = String::new();
+        for item in summary.split(separator) {
+            let candidate = if line.is_empty() {
+                item.to_string()
+            } else {
+                format!("{line}{separator}{item}")
+            };
+            if !line.is_empty() && measure_width(&candidate) > max_width {
+                lines.push(line);
+                line = item.to_string();
+            } else {
+                line = candidate;
+            }
+        }
+        lines.push(line);
+    }
+    lines
+}
+
 /// Draws the mode-selection screen.
 pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrigin) {
     let tr = state.tr();
@@ -666,7 +698,10 @@ pub fn draw_mode_select(state: &GameState, font: Option<&Font>, origin: MenuOrig
         theme::font_size::LABEL,
         theme::GOLD,
     );
-    for (idx, line) in mode_summary_lines(state, origin).iter().enumerate() {
+    let lines = wrapped_mode_summary_lines(state, origin, |text| {
+        theme::measure_text_size(font, text, theme::font_size::CAPTION).width
+    });
+    for (idx, line) in lines.iter().enumerate() {
         theme::draw_text_centered(
             font,
             line,
@@ -1169,6 +1204,52 @@ pub fn handle_rule_settings_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression for #354: translated summaries must stay inside their panel.
+    #[test]
+    fn translated_rule_summaries_fit_without_losing_settings() {
+        let font = fontdue::Font::from_bytes(
+            include_bytes!("../../../../assets/fonts/ShipporiMincho-Regular.ttf") as &[u8],
+            fontdue::FontSettings::default(),
+        )
+        .unwrap();
+        let measure = |text: &str| {
+            text.chars()
+                .map(|c| {
+                    font.metrics(c, theme::font_size::CAPTION as f32)
+                        .advance_width
+                })
+                .sum::<f32>()
+        };
+        for lang in [Lang::Ja, Lang::En] {
+            for mode in GameMode::ALL {
+                for origin in [MenuOrigin::Local, MenuOrigin::Online] {
+                    let mut state = GameState::new();
+                    state.lang = lang;
+                    state.setup_state.mode = mode;
+                    state.online_state.mode = mode;
+                    for rules in [&mut state.setup_state.rules, &mut state.online_state.rules] {
+                        rules.round_extension = true;
+                        rules.all_last_rule = AllLastRule::WinOrTenpai;
+                        rules.bankruptcy_rule = BankruptcyRule::ZeroOrLess;
+                        rules.triple_ron_draw = true;
+                    }
+                    let lines = wrapped_mode_summary_lines(&state, origin, measure);
+                    let panel = mode_summary_rect();
+                    assert!(
+                        lines.iter().all(|line| measure(line) <= panel.w - 24.0),
+                        "{lines:?}"
+                    );
+                    assert!(44.0 + (lines.len() - 1) as f32 * 20.0 + 8.0 <= panel.h);
+                    let separator = if lang == Lang::Ja { "、" } else { " / " };
+                    assert_eq!(
+                        lines.join(separator),
+                        mode_summary_lines(&state, origin).join(separator)
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn mode_summary_reports_mode_score_extension_and_rules() {

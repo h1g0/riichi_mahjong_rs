@@ -249,33 +249,24 @@ impl Table {
             return false;
         }
 
-        match action {
+        let restores_turn = matches!(
+            action,
+            ClientAction::Discard { .. }
+                | ClientAction::Riichi { .. }
+                | ClientAction::Tsumo
+                | ClientAction::Kan { .. }
+                | ClientAction::Pei
+        );
+        let accepted = match action {
             // Turn actions: current player only.
             ClientAction::Discard { tile } => {
-                let accepted = round.current_player == player_idx
+                round.current_player == player_idx
                     && round.phase == TurnPhase::WaitForDiscard
-                    && round.do_discard(tile);
-                if !accepted {
-                    // Clients apply discards locally before sending, so a
-                    // silent rejection would desync their hand (#294).
-                    round.resync_hand(player_idx);
-                }
-                accepted
+                    && round.do_discard(tile)
             }
-            ClientAction::Tsumo => {
-                if round.current_player != player_idx {
-                    return false;
-                }
-                round.do_tsumo()
-            }
+            ClientAction::Tsumo => round.current_player == player_idx && round.do_tsumo(),
             ClientAction::Riichi { tile } => {
-                let accepted = round.current_player == player_idx && round.do_riichi(tile);
-                if !accepted {
-                    // The riichi declaration discard is also applied locally
-                    // by the client (#294).
-                    round.resync_hand(player_idx);
-                }
-                accepted
+                round.current_player == player_idx && round.do_riichi(tile)
             }
 
             // Call responses: eligible players during WaitForCalls only.
@@ -300,24 +291,22 @@ impl Table {
                 } else if round.current_player == player_idx
                     && round.phase == TurnPhase::WaitForDiscard
                 {
-                    if tile_index >= Tile::LEN {
-                        return false;
-                    }
-                    round.do_kan(tile_index as u32)
+                    tile_index < Tile::LEN && round.do_kan(tile_index as u32)
                 } else {
                     false
                 }
             }
 
-            ClientAction::Pei => {
-                if round.current_player != player_idx {
-                    return false;
-                }
-                round.do_pei()
-            }
+            ClientAction::Pei => round.current_player == player_idx && round.do_pei(),
 
             ClientAction::NineTerminals { declare } => round.do_nine_terminals(player_idx, declare),
+        };
+        if !accepted && restores_turn {
+            // Optimistic clients hide all own-turn controls, even for actions
+            // that do not remove a tile. Every rejection needs recovery (#294).
+            round.resync_hand(player_idx);
         }
+        accepted
     }
 
     pub fn advance_auto_player(&mut self) -> bool {
@@ -500,6 +489,50 @@ mod tests {
     use super::*;
     use crate::player::Player;
     use mahjong_core::hand::Hand;
+
+    /// Regression for #294: every rejected own-turn action must restore controls.
+    #[test]
+    fn rejected_turn_actions_resync_the_acting_player() {
+        for action in [
+            ClientAction::Kan {
+                tile_index: Tile::M1 as usize,
+            },
+            ClientAction::Kan {
+                tile_index: usize::MAX,
+            },
+            ClientAction::Tsumo,
+            ClientAction::Pei,
+        ] {
+            let mut table = Table::new(GameSettings::default());
+            table.start_round();
+            let hand = Hand::from("1m4m7m2p5p8p3s6s9s1z2z3z4z 5z");
+            {
+                let round = table.current_round_mut().unwrap();
+                let wind = round.players[0].seat_wind;
+                round.players[0] = Player::new(wind, hand.tiles().to_vec(), 25000);
+                round.players[0].draw(hand.drawn().unwrap());
+                round.current_player = 0;
+                round.phase = TurnPhase::WaitForDiscard;
+                round.drain_events();
+            }
+            assert!(!table.handle_action(0, action.clone()), "{action:?}");
+            let events = table.drain_events();
+            assert!(events.iter().all(|(seat, _)| *seat == 0));
+            assert!(
+                events.iter().any(|(_, event)| matches!(event,
+                    ServerEvent::HandUpdated { hand: restored } if restored == hand.tiles()
+                )),
+                "{action:?}: concealed hand was not restored"
+            );
+            assert!(
+                events.iter().any(|(_, event)| matches!(event,
+                    ServerEvent::TileDrawn { tile, .. } if Some(*tile) == hand.drawn()
+                )),
+                "{action:?}: turn controls were not restored"
+            );
+            assert!(table.handle_action(0, ClientAction::Discard { tile: None }));
+        }
+    }
 
     /// A rejected discard must resync the sender with HandUpdated +
     /// TileDrawn (#294): clients apply discards locally before sending,

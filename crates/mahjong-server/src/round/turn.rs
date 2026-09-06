@@ -72,18 +72,15 @@ impl Round {
         if self.phase != TurnPhase::WaitForDiscard {
             return false;
         }
-        // A replacement draw must move one live-wall tile into the dead
-        // wall, so a kan is illegal after the final live-wall draw.
-        if self.wall.is_empty() {
+        if !crate::legality::kan_replacement_available(
+            self.wall.remaining(),
+            self.total_kan_count(),
+        ) {
             return false;
         }
 
         let player_idx = self.current_player;
         if self.players[player_idx].is_riichi {
-            return false;
-        }
-
-        if self.total_kan_count() >= 4 {
             return false;
         }
 
@@ -262,7 +259,7 @@ impl Round {
     }
 
     /// Sends the authoritative hand back to a player whose discard or
-    /// riichi was rejected.
+    /// other own-turn action was rejected.
     ///
     /// Clients apply discards to their local hand optimistically before
     /// sending, so a silent rejection leaves the client's hand out of sync;

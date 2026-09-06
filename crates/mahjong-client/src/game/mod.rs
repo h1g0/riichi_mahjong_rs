@@ -270,6 +270,8 @@ pub struct GameState {
     /// Tile kinds the swap-calling rule forbids on the post-call discard;
     /// set right after a chii/pon and cleared by discarding or drawing
     pub forbidden_discards: Vec<TileType>,
+    /// Active match's swap-calling rule, independent of saved local preferences.
+    pub forbid_swap_calling: bool,
     /// Whether a forbidden tile was clicked, to show the warning
     pub selected_forbidden_swap: bool,
     /// The hand's result message
@@ -435,6 +437,7 @@ impl GameState {
             riichi_selectable_tiles: Vec::new(),
             riichi_selectable_drawn: false,
             forbidden_discards: Vec::new(),
+            forbid_swap_calling: mahjong_core::settings::Settings::default().forbid_swap_calling,
             selected_forbidden_swap: false,
             result_message: None,
             message_result_kind: MessageResultKind::Draw,

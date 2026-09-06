@@ -9,7 +9,7 @@ use getrandom::Error;
 
 // XorShift64 state; WASM is single-threaded, so a Cell suffices.
 thread_local! {
-    static RNG_STATE: Cell<u64> = Cell::new(0);
+    static RNG_STATE: Cell<u64> = const { Cell::new(0) };
 }
 
 /// One XorShift64 step.
