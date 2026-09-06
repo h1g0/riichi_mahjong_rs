@@ -164,6 +164,9 @@ fn build_online_player_labels(room: &RoomView) -> [PlayerLabel; 4] {
 /// Copies the remote adapter's state for UI display.
 fn sync_online_ui(remote: &mut RemoteAdapter, state: &mut GameState) {
     let lang = state.lang;
+    if let Some(room) = remote.room() {
+        state.forbid_swap_calling = room.rules.forbid_swap_calling;
+    }
     let was_host = state
         .online_state
         .room
@@ -227,6 +230,7 @@ fn start_local_match(
     mut configs: [mahjong_server::cpu::client::CpuConfig; 3],
 ) -> ActiveAdapter {
     let settings = state.setup_state.build_game_settings();
+    state.forbid_swap_calling = settings.rules.forbid_swap_calling;
     // A rematch is a fresh game, so CPU seats and the starting dealer
     // receive the same randomization as the initial start.
     let cpu_count = settings.rules.player_count() - 1;

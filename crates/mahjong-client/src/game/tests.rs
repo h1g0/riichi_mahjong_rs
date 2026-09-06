@@ -2,6 +2,73 @@
 
 use super::*;
 
+/// Regression for #335: the swap-calling setting must affect actual discards.
+#[test]
+fn allowed_swap_calling_does_not_block_the_called_tile_kind() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.forbid_swap_calling = false;
+    state.hand = vec![Tile::new(Tile::P1), Tile::new(Tile::P2)];
+    state.handle_event(ServerEvent::PlayerCalled {
+        player: Wind::East,
+        call_type: CallType::Pon,
+        called_tile: Tile::new(Tile::P1),
+        tiles: vec![Tile::new(Tile::P1); 3],
+    });
+    assert!(state.forbidden_discards.is_empty());
+    assert!(state.handle_hand_tile_click(0).is_none());
+    assert!(matches!(state.handle_hand_tile_click(0),
+        Some(ClientAction::Discard { tile: Some(tile) }) if tile.get() == Tile::P1
+    ));
+}
+
+/// Regression for #296: a quad needs both a live-wall tile and a free kan slot.
+#[test]
+fn self_kan_options_require_a_replacement_draw() {
+    let mut state = GameState::new();
+    state.hand = vec![Tile::new(Tile::M1); 3];
+    state.drawn = Some(Tile::new(Tile::M1));
+    state.remaining_tiles = 1;
+    state.refresh_self_kan_options();
+    assert_eq!(state.self_kan_options, vec![Tile::new(Tile::M1)]);
+
+    state.remaining_tiles = 0;
+    state.refresh_self_kan_options();
+    assert!(state.self_kan_options.is_empty());
+}
+
+/// Regression for #296: all players' concealed, open, and promoted quads count.
+#[test]
+fn self_kan_options_stop_after_four_quads() {
+    let mut state = GameState::new();
+    state.hand = vec![Tile::new(Tile::M1); 3];
+    state.drawn = Some(Tile::new(Tile::M1));
+    state.remaining_tiles = 20;
+    for (opponent, tile_type) in state
+        .other_players
+        .iter_mut()
+        .zip([Tile::P1, Tile::P2, Tile::P3])
+    {
+        opponent.melds.push(Meld {
+            tiles: vec![Tile::new(tile_type); 4],
+            category: MeldType::Kan,
+            from: MeldFrom::Myself,
+            called_tile: None,
+        });
+    }
+    state.refresh_self_kan_options();
+    assert_eq!(state.self_kan_options, vec![Tile::new(Tile::M1)]);
+
+    state.melds.push(Meld {
+        tiles: vec![Tile::new(Tile::S1); 4],
+        category: MeldType::Kakan,
+        from: MeldFrom::Previous,
+        called_tile: Some(Tile::new(Tile::S1)),
+    });
+    state.refresh_self_kan_options();
+    assert!(state.self_kan_options.is_empty());
+}
+
 #[test]
 fn fresh_navigation_state_keeps_preferences_and_resets_match_data() {
     let mut state = GameState::new();

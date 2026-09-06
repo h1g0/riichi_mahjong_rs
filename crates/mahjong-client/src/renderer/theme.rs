@@ -3,6 +3,41 @@
 
 use macroquad::prelude::*;
 
+/// Glyphs prepared for the application's lifetime-long font and fallback font.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Default)]
+struct PreparedGlyphs(std::collections::HashSet<(bool, u16, char)>);
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl PreparedGlyphs {
+    fn add(&mut self, custom_font: bool, size: u16, text: &str) -> bool {
+        let mut added = false;
+        for character in text.chars() {
+            added |= self.0.insert((custom_font, size, character));
+        }
+        added
+    }
+}
+
+/// Prepares new glyphs before their atlas can invalidate queued draw commands.
+fn prepare_text(font: Option<&Font>, text: &str, size: u16) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        std::thread_local! {
+            static GLYPHS: std::cell::RefCell<PreparedGlyphs> = Default::default();
+        }
+        let added = GLYPHS.with(|glyphs| glyphs.borrow_mut().add(font.is_some(), size, text));
+        if added {
+            // Unlike native prewarming, WASM grows the atlas on demand. Finish
+            // old batches before Macroquad replaces their atlas texture (#321).
+            unsafe { macroquad::window::get_internal_gl().flush() };
+            let _ = measure_text(text, font, size, 1.0);
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (font, text, size);
+}
+
 /// 0xRRGGBB to an opaque [`Color`].
 const fn rgb(hex: u32) -> Color {
     Color {
@@ -263,6 +298,7 @@ pub mod font_size {
 
 /// Measures text at its final rendered size, for manual layout.
 pub fn measure_text_size(font: Option<&Font>, text: &str, font_size: u16) -> TextDimensions {
+    prepare_text(font, text, font_size);
     measure_text(text, font, font_size, 1.0)
 }
 
@@ -271,6 +307,7 @@ pub(super) const TEXT_SHADOW_OFFSET: f32 = 1.0;
 
 /// Draws text with a shadow and faux bold (no scaling; internal).
 fn draw_text_raw(font: Option<&Font>, text: &str, x: f32, y: f32, fs: u16, color: Color) {
+    prepare_text(font, text, fs);
     let draw = |c: Color, dx: f32, dy: f32| {
         draw_text_ex(
             text,
@@ -311,7 +348,7 @@ pub fn draw_text_centered(
     font_size: u16,
     color: Color,
 ) {
-    let dims = measure_text(text, font, font_size, 1.0);
+    let dims = measure_text_size(font, text, font_size);
     draw_text_raw(
         font,
         text,
@@ -320,4 +357,23 @@ pub fn draw_text_centered(
         font_size,
         color,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression for #321: new glyphs or sizes need a flush, repeated text does not.
+    #[test]
+    fn glyph_preparation_tracks_every_size_and_both_fonts() {
+        let mut glyphs = PreparedGlyphs::default();
+        assert!(glyphs.add(true, 15, "東南東"));
+        assert!(!glyphs.add(true, 15, "南東"));
+        assert!(glyphs.add(true, 15, "南西"));
+        assert!(!glyphs.add(true, 15, "西南東"));
+        assert!(glyphs.add(true, 20, "東"));
+        assert!(glyphs.add(false, 15, "東"));
+        assert!(!glyphs.add(false, 15, "東"));
+        assert!(!glyphs.add(true, 15, ""));
+    }
 }

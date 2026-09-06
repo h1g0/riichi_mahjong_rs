@@ -1099,9 +1099,15 @@ mod tests {
         let mut last_event_at = std::time::Instant::now();
 
         loop {
+            // Online CPU pacing makes a healthy full game exceed two minutes
+            // (#229). Detect stalls separately from the overall safety limit.
             assert!(
-                start.elapsed() < std::time::Duration::from_secs(120),
-                "E2E test timed out"
+                last_event_at.elapsed() < std::time::Duration::from_secs(30),
+                "E2E test received no game events for 30 seconds"
+            );
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(15 * 60),
+                "E2E game exceeded the 15-minute safety limit"
             );
             std::thread::sleep(std::time::Duration::from_millis(5));
 

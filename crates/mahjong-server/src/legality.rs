@@ -23,6 +23,13 @@ use crate::scoring;
 /// Minimum score needed to put up a riichi deposit.
 pub const RIICHI_MIN_SCORE: i32 = 1000;
 
+/// Whether the wall can supply another quad replacement draw.
+///
+/// Each kan consumes a live-wall tile and one of the four dead-wall draw slots.
+pub fn kan_replacement_available(wall_remaining: usize, total_kan_count: usize) -> bool {
+    wall_remaining > 0 && total_kan_count < 4
+}
+
 /// The table facts a legality check needs beyond the player themselves.
 #[derive(Debug, Clone, Copy)]
 pub struct TableContext<'a> {

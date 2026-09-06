@@ -329,7 +329,7 @@ impl GameState {
                             // swap-calling rule (called quads draw a
                             // replacement instead).
                             self.forbidden_discards = match call_type {
-                                CallType::Pon | CallType::Chi => self
+                                CallType::Pon | CallType::Chi if self.forbid_swap_calling => self
                                     .melds
                                     .last()
                                     .map(|meld| meld.forbidden_swap_tiles())
