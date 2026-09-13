@@ -23,9 +23,13 @@ Japanese editions: [`docs/architecture.ja.md`](docs/architecture.ja.md), [`docs/
 
 - **Start at the seam.** Before writing code, read the seam section of `docs/architecture.md`. Most features begin as a `ClientAction` or `ServerEvent` variant, and a change that bypasses the protocol is almost always in the wrong crate.
 - **Check `mahjong-core` first.** Do not add game logic to `mahjong-server` or `mahjong-client` before confirming the core crate does not already provide it.
-- **Verify before reporting done.** Run `cargo build && cargo test`, plus the `cargo fmt` / `cargo clippy` checks from `CONTRIBUTING.md`. Report failures rather than describing the change as complete.
+- **Carry authorized work through verification.** Make routine, reversible implementation decisions using the user's intent and existing conventions. Ask a focused question when missing information would materially change the result, while continuing independent work. Keep changes within the requested scope.
+- **Resolve instruction conflicts explicitly.** Subject to system and developer instructions, explicit user instructions take precedence over repository and skill guidance. If a skill causes a pause, identify its file and the exact instruction; do not infer an extra approval requirement from a recommendation.
+- **Delegate only when requested.** Use subagents only when the user or an applicable instruction explicitly asks for delegation or parallel agent work.
+- **Verify before reporting done.** Follow [Before you commit](CONTRIBUTING.md#before-you-commit) for the required checks and change-specific verification. Report failures and unverified behavior rather than describing the change as complete.
 - **Tests are not optional.** New functionality gets unit tests; every bug fix gets a regression test citing the issue number.
 - **Keep the docs in step.** A change that moves a module, renames a protocol variant, or alters a documented command invalidates `docs/architecture.md` or `CONTRIBUTING.md` — update them in the same commit.
+- **Report the outcome concisely.** State what changed, why, how it was verified, and any remaining limitation. Use the user's language for conversation; follow `CONTRIBUTING.md` for repository artifacts.
 
 ## GitHub CLI
 
