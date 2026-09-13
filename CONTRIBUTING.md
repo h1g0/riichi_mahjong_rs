@@ -46,6 +46,24 @@ and Python 3:
 rustup target add wasm32-unknown-unknown
 ```
 
+### Codex configuration
+
+The project-local [`.codex/config.toml`](.codex/config.toml) selects GPT-6 Astra
+with `xhigh` reasoning effort for development. Codex loads project configuration
+only for trusted projects. Explicit task or CLI choices can override defaults;
+check the selected model and effort when starting a task. See the official
+[configuration guide](https://learn.chatgpt.com/docs/config-file/config-basic).
+
+Keep model settings in that file and working instructions in [AGENTS.md](AGENTS.md).
+The configuration preserves the initial Astra baseline. Before changing effort
+or instructions further, compare the same task and starting commit in separate
+checkouts: a rules/mjai regression, an online synchronization change, and a
+Japanese/English UI change that runs in WASM. Record correctness, required-check
+results, unnecessary clarification pauses, out-of-scope changes, elapsed time,
+and usage when available. Keep the starting settings and instructions so a
+regression can be rolled back. Existing passing game tests alone do not establish
+an improvement in agent behavior.
+
 ## Build, run, and test
 
 ### Tests
@@ -160,15 +178,56 @@ rule set looks exactly like a bug.
 
 ## Before you commit
 
-Both of these must be clean; CI fails on either:
+During implementation, run the relevant crate or regression tests first. Before
+reporting a change complete or committing it, run the following checks from the
+repository root, one command at a time, and check each exit status:
 
 ```sh
-cargo fmt
+cargo fmt --all -- --check
 ```
 
 ```sh
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo build --workspace --locked
 ```
+
+```sh
+cargo test --workspace --all-targets --all-features --locked
+```
+
+```sh
+cargo test --workspace --doc --all-features --locked
+```
+
+```sh
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+```
+
+```sh
+git diff --check
+```
+
+The Cargo commands match CI's native checks and additionally cover doc tests,
+which `--all-targets` does not run. If formatting fails, run `cargo fmt --all`,
+then check it again. Once the required checks pass, repeat or broaden them only
+when a later change, a failure, or an unresolved concern justifies it. Report
+environment or permission failures separately from code failures.
+
+Add verification appropriate to the changed behavior:
+
+| Change | Additional verification |
+|---|---|
+| WASM code, shared code used by WASM, browser assets, or web build tooling | Run the WASM Clippy command below and `bash scripts/vercel-build.sh`; serve `public/` and exercise the affected browser flow. |
+| UI or displayed text | Check the affected flow in Japanese and English and capture before/after screenshots, including the browser client. |
+| Online protocol, connection, or synchronization | Exercise the affected room, reconnect, rejected-action, or resync flow with the local server. |
+| CPU strategy | Compare the same seeds and dependency set using [CPU simulations](#cpu-simulations). |
+| Documentation or configuration | Check links, translated editions, configuration syntax, and effective settings; add no Rust tests that merely duplicate document text. |
+
+```sh
+cargo clippy -p mahjong-client --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
+```
+
+CI also builds the web client for every pull request; a local native check is not
+evidence that the WASM build or browser behavior passed.
 
 Also:
 

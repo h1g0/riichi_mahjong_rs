@@ -47,6 +47,23 @@ Python 3 が必要です。
 rustup target add wasm32-unknown-unknown
 ```
 
+### Codex の設定
+
+プロジェクト内の [`.codex/config.toml`](../.codex/config.toml) は、開発用モデルに
+GPT-6 Astra、推論強度に `xhigh` を指定します。Codex がプロジェクト設定を読み込む
+のは、信頼済みのプロジェクトだけです。タスクや CLI での明示的な指定が既定値を
+上書きする場合があるため、タスク開始時に選択されたモデルと推論強度を確認して
+ください。詳細は公式の
+[設定ガイド](https://learn.chatgpt.com/docs/config-file/config-basic) を参照してください。
+
+モデル設定はこのファイルに、作業指示は [AGENTS.md](../AGENTS.md) に置きます。
+この設定は初期の Astra 評価基準を維持します。今後、推論強度や指示を変更する前に、
+同じ依頼と開始コミットを別々のチェックアウトで比較してください。題材は、ルール・
+mjai の回帰修正、オンライン同期の変更、WASM で動く日英 UI の変更です。正しさ、
+必須チェックの結果、不要な確認による中断、範囲外の変更、所要時間、取得できる場合は
+利用量を記録します。問題があれば戻せるよう、開始時の設定と指示を残してください。
+既存のゲームのテストが通るだけでは、エージェントの振る舞いが改善したとはいえません。
+
 ## ビルド・実行・テスト
 
 ### テスト
@@ -160,15 +177,56 @@ cargo run -p mahjong-mjai --bin mjai-import -- --rules tenhou game.mjson
 
 ## コミット前に
 
-次の 2 つは必ずクリーンにしてください。どちらも CI で失敗します。
+実装中は、まず対象クレートや回帰テストに絞って実行します。変更の完了報告や
+コミットの前には、リポジトリのルートで次のチェックを 1 コマンドずつ実行し、
+それぞれの終了コードを確認してください。
 
 ```sh
-cargo fmt
+cargo fmt --all -- --check
 ```
 
 ```sh
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo build --workspace --locked
 ```
+
+```sh
+cargo test --workspace --all-targets --all-features --locked
+```
+
+```sh
+cargo test --workspace --doc --all-features --locked
+```
+
+```sh
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+```
+
+```sh
+git diff --check
+```
+
+Cargo のコマンドは CI のネイティブ向けチェックに対応し、`--all-targets` では
+実行されないドキュメントテストも追加しています。整形チェックが失敗した場合は
+`cargo fmt --all` を実行してから再確認してください。必須チェックが通った後の
+再実行や検証範囲の拡大は、その後の変更、失敗、未解決の懸念がある場合に行います。
+環境や権限に起因する失敗は、コードの失敗と区別して報告してください。
+
+変更する振る舞いに応じて、次の検証を追加します。
+
+| 変更 | 追加の検証 |
+|---|---|
+| WASM コード、WASM から使う共通コード、Web アセット、Web ビルドツール | 下記の WASM 向け Clippy と `bash scripts/vercel-build.sh` を実行し、`public/` を配信して影響するブラウザ操作を確認します。 |
+| UI・表示文言 | 影響する操作を日本語と英語で確認し、ブラウザ版を含めて変更前後のスクリーンショットを撮ります。 |
+| オンラインプロトコル・接続・同期 | ローカルサーバーで、影響するルーム操作、再接続、操作拒否、再同期の動作を確認します。 |
+| CPU 戦略 | [CPU シミュレーション](#cpu-シミュレーション)で、同じシードと依存クレートを使って比較します。 |
+| ドキュメント・設定 | リンク、翻訳版、設定の構文、実際に適用される設定を確認します。ドキュメントの文章をなぞるだけの Rust テストは追加しません。 |
+
+```sh
+cargo clippy -p mahjong-client --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
+```
+
+CI はすべてのプルリクエストで Web クライアントもビルドします。ローカルでの
+ネイティブ向けチェックだけでは、WASM ビルドやブラウザ動作の成功は確認できません。
 
 加えて、
 
