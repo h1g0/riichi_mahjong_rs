@@ -45,6 +45,7 @@ impl GameState {
                 self.hand.sort();
                 self.drawn = None;
                 self.self_tedashi_anim = None;
+                self.self_discard_applied_locally = false;
                 self.scores = scores;
                 self.round_wind = Some(round_wind);
                 self.dora_indicators = dora_indicators;
@@ -178,6 +179,9 @@ impl GameState {
                 }
 
                 if Some(player) == self.seat_wind {
+                    if !std::mem::take(&mut self.self_discard_applied_locally) {
+                        self.apply_self_discard_from_server(tile, is_tsumogiri);
+                    }
                     self.is_my_turn = false;
                     self.drawn = None;
                     self.can_tsumo = false;
@@ -409,6 +413,9 @@ impl GameState {
                 self.hand = hand;
                 self.hand.sort();
                 self.self_tedashi_anim = None;
+                // The authoritative hand settles any optimistic discard,
+                // including one the server rejected (#389).
+                self.self_discard_applied_locally = false;
                 self.refresh_self_kan_options();
             }
 
@@ -565,6 +572,7 @@ impl GameState {
                 self.riichi_sticks = 0;
 
                 let winner_winds: Vec<Wind> = winners.iter().map(|winner| winner.wind).collect();
+                self.refresh_self_hand_on_exhaustion(&player_hands);
                 self.update_other_player_hands_on_nagashi(&player_hands, &winner_winds);
 
                 let tr = Translator::new(self.lang);
@@ -591,6 +599,11 @@ impl GameState {
             } => {
                 self.scores = scores;
                 self.riichi_sticks = riichi_sticks;
+                // An abortive draw can catch us holding a drawn tile, which
+                // the server's list omits; only exhaustion is safe to copy.
+                if matches!(reason, DrawReason::Exhaustive) {
+                    self.refresh_self_hand_on_exhaustion(&player_hands);
+                }
                 self.update_other_player_hands_on_draw(&player_hands, &tenpai, declarer);
                 let tr = Translator::new(self.lang);
                 let mut msg = tr.draw_headline(reason);
@@ -697,6 +710,53 @@ impl GameState {
                 other.revealed = true;
             }
         }
+    }
+
+    /// Applies our own discard when the click path did not already.
+    ///
+    /// Our hand is normally kept by the optimistic update in
+    /// `apply_local_discard_from_hand`, but the server also discards on our
+    /// behalf when the turn timer expires, and a reconnect replays the hand
+    /// from `GameStarted`. Without this, the tile stays in `hand` for the
+    /// rest of the round and the hand renders one tile too many — after a
+    /// call it looks like a complete fourteen-tile hand (#389).
+    ///
+    /// A tsumogiri only removes the drawn tile, which the caller clears.
+    fn apply_self_discard_from_server(&mut self, tile: Tile, is_tsumogiri: bool) {
+        if is_tsumogiri {
+            return;
+        }
+        let Some(index) = self.hand.iter().position(|held| *held == tile) else {
+            return;
+        };
+        self.hand.remove(index);
+        if let Some(drawn) = self.drawn.take() {
+            self.hand.push(drawn);
+            self.hand.sort();
+        }
+        // The indices the animation interpolates from no longer apply.
+        self.self_tedashi_anim = None;
+    }
+
+    /// Replaces our concealed hand with the server's list from a round-end
+    /// reveal.
+    ///
+    /// Only safe at live-wall exhaustion, where no player holds a drawn
+    /// tile and `PlayerHandInfo::hand` is therefore the whole concealed
+    /// hand. It backs up [`apply_self_discard_from_server`] so a desync
+    /// cannot survive into the result screen (#389).
+    pub(super) fn refresh_self_hand_on_exhaustion(&mut self, player_hands: &[PlayerHandInfo]) {
+        let Some(mine) = player_hands
+            .iter()
+            .find(|info| Some(info.wind) == self.seat_wind)
+        else {
+            return;
+        };
+        self.hand = mine.hand.clone();
+        self.hand.sort();
+        self.drawn = None;
+        self.self_tedashi_anim = None;
+        self.self_discard_applied_locally = false;
     }
 
     /// Updates opponents' hands on a draw, revealing tenpai players'

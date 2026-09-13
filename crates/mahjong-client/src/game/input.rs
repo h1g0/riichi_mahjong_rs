@@ -259,6 +259,9 @@ impl GameState {
         tiles_with_origins.sort_by_key(|(tile, _)| *tile);
 
         self.hand = tiles_with_origins.iter().map(|(tile, _)| *tile).collect();
+        // The server echoes this discard back; without the flag the echo
+        // would remove a second tile (#389).
+        self.self_discard_applied_locally = true;
         self.self_tedashi_anim = Some(SelfTedashiAnim {
             origins: tiles_with_origins
                 .into_iter()
