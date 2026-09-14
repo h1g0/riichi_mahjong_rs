@@ -226,6 +226,10 @@ pub struct GameState {
     pub drawn: Option<Tile>,
     /// Gap-closing animation of our latest hand discard
     pub self_tedashi_anim: Option<SelfTedashiAnim>,
+    /// Whether our own discard was already applied to [`hand`](Self::hand)
+    /// by the optimistic click path, so the server's `TileDiscarded` echo
+    /// must not remove a second tile (#389).
+    self_discard_applied_locally: bool,
     /// Discards per player (0 = self, 1 = right, 2 = across, 3 = left)
     pub discards: [Vec<DiscardInfo>; 4],
     /// Scores
@@ -417,6 +421,7 @@ impl GameState {
             hand: Vec::new(),
             drawn: None,
             self_tedashi_anim: None,
+            self_discard_applied_locally: false,
             discards: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             scores: [25000; 4],
             round_wind: None,
@@ -786,6 +791,9 @@ impl GameState {
         } else {
             Vec::new()
         };
+        // The reveal is built only for exhaustive draws, so the server's
+        // list is the whole concealed hand for our seat too.
+        self.refresh_self_hand_on_exhaustion(std::slice::from_ref(&player));
         self.update_other_player_hands_on_draw(
             std::slice::from_ref(&player),
             &revealed_winds,

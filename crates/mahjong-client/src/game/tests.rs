@@ -1985,3 +1985,315 @@ fn test_turn_player_tracks_events() {
         "the current-player indicator should be cleared after a drawn round"
     );
 }
+
+/// Post-call hand from the screenshot in #389: three chii melds plus five
+/// concealed tiles, which is one tile short of needing a discard.
+fn post_chii_hand() -> Vec<Tile> {
+    vec![
+        Tile::new(Tile::M3),
+        Tile::new(Tile::M3),
+        Tile::new(Tile::P6),
+        Tile::new(Tile::P7),
+        Tile::new(Tile::P8),
+    ]
+}
+
+/// Regression for #389: the turn timer makes the server pick a hand tile
+/// for us, and that discard has to leave our displayed hand.
+#[test]
+fn server_side_hand_discard_removes_the_tile_from_our_hand() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: post_chii_hand(),
+    });
+
+    state.handle_event(ServerEvent::TileDiscarded {
+        player: Wind::East,
+        tile: Tile::new(Tile::P8),
+        is_tsumogiri: false,
+        hand_index: Some(4),
+    });
+
+    assert_eq!(
+        state.hand,
+        vec![
+            Tile::new(Tile::M3),
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::P7),
+        ]
+    );
+    assert!(state.drawn.is_none());
+}
+
+/// Regression for #389: a server-side tedashi while we hold a drawn tile
+/// moves that tile into the hand, exactly as the server does.
+#[test]
+fn server_side_hand_discard_folds_the_drawn_tile_into_our_hand() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: vec![
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P7),
+            Tile::new(Tile::P8),
+        ],
+    });
+    state.handle_event(ServerEvent::TileDrawn {
+        tile: Tile::new(Tile::P6),
+        remaining_tiles: 0,
+        can_tsumo: false,
+        can_riichi: false,
+        is_furiten: false,
+    });
+
+    state.handle_event(ServerEvent::TileDiscarded {
+        player: Wind::East,
+        tile: Tile::new(Tile::M3),
+        is_tsumogiri: false,
+        hand_index: Some(0),
+    });
+
+    assert_eq!(
+        state.hand,
+        vec![
+            Tile::new(Tile::P6),
+            Tile::new(Tile::P7),
+            Tile::new(Tile::P8)
+        ]
+    );
+    assert!(state.drawn.is_none());
+}
+
+/// Regression for #389: our own click already removed the tile, so the
+/// server's echo must not remove a second one.
+///
+/// The discard is one of the paired 3m deliberately: with a tile kind we
+/// hold only once, the echo would find nothing to remove and the test
+/// would pass whether or not the double application is guarded.
+#[test]
+fn our_own_discard_is_not_applied_twice() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: post_chii_hand(),
+    });
+    state.is_my_turn = true;
+
+    assert!(state.handle_hand_tile_click(0).is_none());
+    let action = state.handle_hand_tile_click(0);
+    assert!(matches!(
+        action,
+        Some(ClientAction::Discard { tile: Some(tile) }) if tile == Tile::new(Tile::M3)
+    ));
+    assert_eq!(state.hand.len(), 4);
+
+    state.handle_event(ServerEvent::TileDiscarded {
+        player: Wind::East,
+        tile: Tile::new(Tile::M3),
+        is_tsumogiri: false,
+        hand_index: Some(0),
+    });
+
+    assert_eq!(
+        state.hand,
+        vec![
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::P7),
+            Tile::new(Tile::P8),
+        ]
+    );
+}
+
+/// Regression for #389: a rejected discard is resynced by `HandUpdated`,
+/// after which the timer's auto-discard must apply normally.
+#[test]
+fn rejected_discard_does_not_suppress_the_next_server_side_discard() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: post_chii_hand(),
+    });
+    state.is_my_turn = true;
+
+    assert!(state.handle_hand_tile_click(4).is_none());
+    assert!(state.handle_hand_tile_click(4).is_some());
+    // The server refuses it and resyncs the authoritative hand.
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: post_chii_hand(),
+    });
+    assert_eq!(state.hand.len(), 5);
+
+    state.handle_event(ServerEvent::TileDiscarded {
+        player: Wind::East,
+        tile: Tile::new(Tile::P8),
+        is_tsumogiri: false,
+        hand_index: Some(4),
+    });
+
+    assert_eq!(state.hand.len(), 4);
+}
+
+/// Regression for #389: a reconnect replays the hand from `GameStarted`,
+/// so the replayed discards have to shrink our hand too.
+#[test]
+fn reconnect_replay_keeps_our_hand_in_sync() {
+    let mut state = GameState::new();
+    for _ in 0..2 {
+        state.handle_event(game_started_4p(Wind::East, 0));
+        state.handle_event(ServerEvent::TileDrawn {
+            tile: Tile::new(Tile::S1),
+            remaining_tiles: 60,
+            can_tsumo: false,
+            can_riichi: false,
+            is_furiten: false,
+        });
+        state.handle_event(ServerEvent::TileDiscarded {
+            player: Wind::East,
+            tile: Tile::new(Tile::P1),
+            is_tsumogiri: false,
+            hand_index: Some(0),
+        });
+    }
+
+    // Thirteen dealt tiles, one swapped for the drawn tile.
+    assert_eq!(state.hand.len(), 13);
+    assert_eq!(state.hand.iter().filter(|t| t.get() == Tile::S1).count(), 1);
+    assert!(state.drawn.is_none());
+}
+
+/// Regression for #389: the exhaustive-draw reveal is the last chance to
+/// correct our own hand, so it copies the server's list.
+#[test]
+fn exhaustive_draw_refreshes_our_own_hand() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    // A hand one tile too long, as the bug used to leave it.
+    state.hand = post_chii_hand();
+
+    let player_hands: Vec<PlayerHandInfo> = [Wind::East, Wind::South, Wind::West, Wind::North]
+        .into_iter()
+        .map(|wind| PlayerHandInfo {
+            wind,
+            hand: vec![
+                Tile::new(Tile::M3),
+                Tile::new(Tile::P6),
+                Tile::new(Tile::P7),
+            ],
+            melds: vec![],
+            pei: vec![],
+        })
+        .collect();
+    state.handle_event(ServerEvent::RoundDraw {
+        scores: [25_000; 4],
+        reason: DrawReason::Exhaustive,
+        tenpai: vec![Wind::East],
+        riichi_sticks: 0,
+        player_hands,
+        declarer: None,
+    });
+
+    assert_eq!(
+        state.hand,
+        vec![
+            Tile::new(Tile::M3),
+            Tile::new(Tile::P6),
+            Tile::new(Tile::P7)
+        ]
+    );
+}
+
+/// Regression for #389, against the real server rather than hand-written
+/// events: a rejected post-call discard followed by the turn timer's
+/// auto-discard must leave our displayed hand equal to the server's.
+///
+/// This is the sequence from the report — the rejection hides our turn
+/// controls (#392), the timer then discards a hand tile for us, and only
+/// the server knows the tile is gone.
+#[test]
+fn our_hand_tracks_the_server_through_a_rejected_post_call_discard() {
+    use mahjong_server::driver::GameDriver;
+    use mahjong_server::round::TurnPhase;
+    use mahjong_server::table::GameSettings;
+
+    let mut driver = GameDriver::new(GameSettings::default());
+    driver.start_game_with_seed(389);
+
+    let mut state = GameState::new();
+    for event in driver.drain_events_at(0, 0.0) {
+        state.handle_event(event);
+    }
+
+    // Put seat 0 into the post-call state: three chii melds and five
+    // concealed tiles, waiting to discard.
+    {
+        let round = driver
+            .table_mut()
+            .current_round_mut()
+            .expect("a hand is in progress");
+        let player = &mut round.players[0];
+        *player.hand.tiles_mut() = post_chii_hand();
+        player.hand.set_drawn(None);
+        for (tiles, called) in [("123s", Tile::S1), ("123p", Tile::P3), ("789m", Tile::M7)] {
+            player.hand.add_meld(Meld {
+                tiles: Hand::from(tiles).tiles().to_vec(),
+                category: MeldType::Chi,
+                from: MeldFrom::Previous,
+                called_tile: Some(Tile::new(called)),
+            });
+        }
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+    }
+    // The call handed us the same hand the server holds.
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: post_chii_hand(),
+    });
+    state.is_my_turn = true;
+
+    // We pick a discard, but the server refuses the action.
+    assert!(state.handle_hand_tile_click(4).is_none());
+    let action = state.handle_hand_tile_click(4);
+    assert!(action.is_some());
+    assert!(!driver.handle_action(
+        0,
+        ClientAction::Discard {
+            tile: Some(Tile::new(Tile::Z1)),
+        },
+    ));
+    for event in driver.drain_events_at(0, 0.0) {
+        state.handle_event(event);
+    }
+    assert_eq!(
+        state.hand,
+        server_hand(&driver),
+        "resync left us out of sync"
+    );
+
+    // The turn timer then discards a hand tile on our behalf.
+    assert!(driver.force_default_action(0));
+    for event in driver.drain_events_at(0, 0.0) {
+        state.handle_event(event);
+    }
+    assert_eq!(
+        state.hand,
+        server_hand(&driver),
+        "the server's auto-discard was not applied to our hand"
+    );
+    assert_eq!(state.hand.len(), 4);
+}
+
+/// Seat 0's concealed tiles as the server holds them.
+#[cfg(test)]
+fn server_hand(driver: &mahjong_server::driver::GameDriver) -> Vec<Tile> {
+    driver
+        .table()
+        .current_round()
+        .expect("a hand is in progress")
+        .players[0]
+        .hand
+        .tiles()
+        .to_vec()
+}
