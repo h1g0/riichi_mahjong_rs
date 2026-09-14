@@ -19,7 +19,8 @@ use crate::table::GameLength;
 /// v4: structured Nagashi Mangan round-end events.
 /// v5: double-yakuman settings and dedicated special-yakuman score items.
 /// v6: post-game lobby state and same-room rematches.
-pub const PROTOCOL_VERSION: u32 = 6;
+/// v7: `TurnResumed`, which a v6 client cannot deserialize.
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// A CPU's level and personality.
 ///
@@ -405,6 +406,7 @@ mod tests {
                 can_riichi: true,
                 is_furiten: false,
             }),
+            ServerMessage::Event(ServerEvent::TurnResumed),
             ServerMessage::Event(ServerEvent::RoundNagashiMangan {
                 winners: vec![crate::protocol::NagashiManganWinner {
                     wind: Wind::West,

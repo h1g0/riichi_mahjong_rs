@@ -359,6 +359,14 @@ impl CpuGameState {
             ServerEvent::NineTerminalsAvailable => {
                 // No state change; decide_nine_terminals handles the reply.
             }
+
+            ServerEvent::TurnResumed => {
+                // The preceding HandUpdated already restored the hand. The
+                // CPU deliberately does not re-discard here: its own
+                // post-call discard filters the swap-calling restriction,
+                // so a rejection means the server refused a tile the CPU
+                // would pick again, and answering would loop (#294).
+            }
         }
     }
 

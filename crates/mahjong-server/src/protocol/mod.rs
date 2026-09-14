@@ -270,6 +270,15 @@ pub enum ServerEvent {
     /// This client may declare a nine-terminals abortive draw
     NineTerminalsAvailable,
 
+    /// This client's turn is open again without a new draw.
+    ///
+    /// Sent when an own-turn action is rejected while the player owes the
+    /// discard that follows a call. The drawn-tile case re-sends
+    /// `TileDrawn` instead, so this carries no action flags: with no drawn
+    /// tile neither a tsumo, a riichi, nor a concealed quad is available,
+    /// and the swap-calling restriction still stands from the call (#392).
+    TurnResumed,
+
     /// The hand ended in a draw
     RoundDraw {
         /// Scores after any noten penalty
