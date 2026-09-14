@@ -264,9 +264,12 @@ impl Round {
     /// Clients apply discards to their local hand optimistically before
     /// sending, so a silent rejection leaves the client's hand out of sync;
     /// every later discard of that tile then keeps getting rejected and the
-    /// game appears frozen (#294). `HandUpdated` restores the hand, and if
-    /// it is the player's turn with a drawn tile, `TileDrawn` is re-sent so
-    /// they can discard again (to that player only; no `OtherPlayerDrew`).
+    /// game appears frozen (#294). `HandUpdated` restores the hand, and
+    /// when the player still owes a discard their turn is reopened (to that
+    /// player only; no `OtherPlayerDrew`): `TileDrawn` carries the drawn
+    /// tile back, or `TurnResumed` stands in for it after a call, where
+    /// there is none and the client would otherwise stay locked out until
+    /// the turn timer discarded for it (#392).
     pub(crate) fn resync_hand(&mut self, player_idx: usize) {
         if player_idx >= self.player_count {
             return;
@@ -279,24 +282,28 @@ impl Round {
             },
         ));
 
-        if self.phase == TurnPhase::WaitForDiscard
-            && self.current_player == player_idx
-            && let Some(drawn) = self.players[player_idx].hand.drawn()
-        {
-            let can_tsumo = self.can_tsumo();
-            let can_riichi = self.can_player_riichi(player_idx);
-            let is_furiten = self.players[player_idx].is_furiten();
-            self.events.push((
-                player_idx,
-                ServerEvent::TileDrawn {
-                    tile: drawn,
-                    remaining_tiles: self.wall.remaining(),
-                    can_tsumo,
-                    can_riichi,
-                    is_furiten,
-                },
-            ));
+        if self.phase != TurnPhase::WaitForDiscard || self.current_player != player_idx {
+            return;
         }
+
+        let Some(drawn) = self.players[player_idx].hand.drawn() else {
+            self.events.push((player_idx, ServerEvent::TurnResumed));
+            return;
+        };
+
+        let can_tsumo = self.can_tsumo();
+        let can_riichi = self.can_player_riichi(player_idx);
+        let is_furiten = self.players[player_idx].is_furiten();
+        self.events.push((
+            player_idx,
+            ServerEvent::TileDrawn {
+                tile: drawn,
+                remaining_tiles: self.wall.remaining(),
+                can_tsumo,
+                can_riichi,
+                is_furiten,
+            },
+        ));
     }
 
     /// Queues the post-draw notifications: `TileDrawn` with the tile and

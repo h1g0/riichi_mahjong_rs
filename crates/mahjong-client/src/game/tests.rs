@@ -2297,3 +2297,109 @@ fn server_hand(driver: &mahjong_server::driver::GameDriver) -> Vec<Tile> {
         .tiles()
         .to_vec()
 }
+
+/// Regression for #392: submitting an action hides our own-turn controls,
+/// so a rejection the server answers with `TurnResumed` has to bring them
+/// back — otherwise the post-call discard can never be retried.
+#[test]
+fn turn_resumed_lets_us_discard_again() {
+    let mut state = GameState::new();
+    state.handle_event(game_started_4p(Wind::East, 0));
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: post_chii_hand(),
+    });
+    state.is_my_turn = true;
+    state.forbidden_discards = vec![Tile::M7];
+
+    // We pick a discard; the server refuses it and resyncs.
+    assert!(state.handle_hand_tile_click(0).is_none());
+    assert!(state.handle_hand_tile_click(0).is_some());
+    assert!(!state.is_my_turn);
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: post_chii_hand(),
+    });
+    state.handle_event(ServerEvent::TurnResumed);
+
+    assert!(state.is_my_turn);
+    assert_eq!(state.turn_player, Some(Wind::East));
+    assert!(!state.can_tsumo);
+    assert!(!state.can_riichi);
+    assert!(state.self_kan_options.is_empty());
+    // The call's swap-calling restriction outlives the rejection.
+    assert_eq!(state.forbidden_discards, vec![Tile::M7]);
+
+    // A second attempt now reaches the server.
+    assert!(state.handle_hand_tile_click(4).is_none());
+    assert!(matches!(
+        state.handle_hand_tile_click(4),
+        Some(ClientAction::Discard { tile: Some(tile) }) if tile == Tile::new(Tile::P8)
+    ));
+}
+
+/// Regression for #392 against the real server: a rejected post-call
+/// discard must leave us able to discard without waiting for the turn
+/// timer to do it for us.
+#[test]
+fn rejected_post_call_discard_stays_playable_against_the_server() {
+    use mahjong_server::driver::GameDriver;
+    use mahjong_server::round::TurnPhase;
+    use mahjong_server::table::GameSettings;
+
+    let mut driver = GameDriver::new(GameSettings::default());
+    driver.start_game_with_seed(392);
+
+    let mut state = GameState::new();
+    for event in driver.drain_events_at(0, 0.0) {
+        state.handle_event(event);
+    }
+
+    {
+        let round = driver
+            .table_mut()
+            .current_round_mut()
+            .expect("a hand is in progress");
+        let player = &mut round.players[0];
+        *player.hand.tiles_mut() = post_chii_hand();
+        player.hand.set_drawn(None);
+        for (tiles, called) in [("123s", Tile::S1), ("123p", Tile::P3), ("789m", Tile::M7)] {
+            player.hand.add_meld(Meld {
+                tiles: Hand::from(tiles).tiles().to_vec(),
+                category: MeldType::Chi,
+                from: MeldFrom::Previous,
+                called_tile: Some(Tile::new(called)),
+            });
+        }
+        round.current_player = 0;
+        round.phase = TurnPhase::WaitForDiscard;
+    }
+    state.handle_event(ServerEvent::HandUpdated {
+        hand: post_chii_hand(),
+    });
+    state.is_my_turn = true;
+
+    // Our discard is refused by the server.
+    assert!(state.handle_hand_tile_click(4).is_none());
+    assert!(state.handle_hand_tile_click(4).is_some());
+    assert!(!driver.handle_action(
+        0,
+        ClientAction::Discard {
+            tile: Some(Tile::new(Tile::Z1)),
+        },
+    ));
+    for event in driver.drain_events_at(0, 0.0) {
+        state.handle_event(event);
+    }
+
+    // Retry, this time with a tile we hold, and have the server take it.
+    assert!(state.is_my_turn, "the turn was never given back");
+    assert!(state.handle_hand_tile_click(4).is_none());
+    let action = state
+        .handle_hand_tile_click(4)
+        .expect("a discard should be submittable");
+    assert!(driver.handle_action(0, action), "the retry was refused");
+    for event in driver.drain_events_at(0, 0.0) {
+        state.handle_event(event);
+    }
+    assert_eq!(state.hand.len(), 4);
+    assert_eq!(state.discards[0].len(), 1);
+}

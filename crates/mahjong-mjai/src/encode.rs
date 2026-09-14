@@ -240,13 +240,15 @@ impl MjaiEncoder {
                 ));
                 self.end_kyoku(&mut out);
             }
-            // No mjai counterpart. HandUpdated and CallAvailable are resync
-            // and legality hints for our own client; an mjai player derives
-            // both for itself. PeiDeclared is three-player only, which this
-            // encoder does not claim to support.
+            // No mjai counterpart. HandUpdated, CallAvailable and
+            // TurnResumed are resync and legality hints for our own client;
+            // an mjai player derives them for itself. PeiDeclared is
+            // three-player only, which this encoder does not claim to
+            // support.
             ServerEvent::HandUpdated { .. }
             | ServerEvent::CallAvailable { .. }
             | ServerEvent::NineTerminalsAvailable
+            | ServerEvent::TurnResumed
             | ServerEvent::PeiDeclared { .. } => {}
         }
         out

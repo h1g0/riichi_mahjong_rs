@@ -619,6 +619,102 @@ mod tests {
         );
     }
 
+    /// Regression for #392: after a call the player holds no drawn tile,
+    /// so #294's recovery sent nothing that reopens the turn and the
+    /// client stayed locked out until the turn timer discarded for it.
+    #[test]
+    fn rejected_post_call_discard_reopens_the_turn() {
+        use mahjong_core::hand_info::meld::{Meld, MeldFrom, MeldType};
+
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+        let concealed = Hand::from("33m678p");
+        {
+            let round = table.current_round_mut().unwrap();
+            let seat_wind = round.players[0].seat_wind;
+            round.players[0] = Player::new(seat_wind, concealed.tiles().to_vec(), 25000);
+            for (tiles, called) in [("123s", Tile::S1), ("123p", Tile::P3), ("789m", Tile::M7)] {
+                round.players[0].hand.add_meld(Meld {
+                    tiles: Hand::from(tiles).tiles().to_vec(),
+                    category: MeldType::Chi,
+                    from: MeldFrom::Previous,
+                    called_tile: Some(Tile::new(called)),
+                });
+            }
+            round.current_player = 0;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.drain_events();
+        }
+        assert!(
+            table.current_round().unwrap().players[0]
+                .hand
+                .drawn()
+                .is_none()
+        );
+
+        // A tile the player does not hold: rejected.
+        let accepted = table.handle_action(
+            0,
+            ClientAction::Discard {
+                tile: Some(Tile::new(Tile::Z1)),
+            },
+        );
+        assert!(!accepted);
+
+        let events = table.drain_events();
+        assert!(events.iter().all(|(seat, _)| *seat == 0));
+        assert!(
+            events.iter().any(|(_, e)| matches!(e,
+                ServerEvent::HandUpdated { hand } if hand == concealed.tiles()
+            )),
+            "the concealed hand was not restored"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, ServerEvent::TurnResumed)),
+            "the turn was not reopened"
+        );
+
+        // The player can now make a legal discard themselves.
+        assert!(table.handle_action(
+            0,
+            ClientAction::Discard {
+                tile: Some(Tile::new(Tile::P8)),
+            },
+        ));
+    }
+
+    /// A rejection outside our turn must not claim the turn is open (#392);
+    /// only the hand is resynced.
+    #[test]
+    fn rejected_action_outside_our_turn_does_not_reopen_it() {
+        let mut table = Table::new(GameSettings::default());
+        table.start_round();
+        {
+            let round = table.current_round_mut().unwrap();
+            round.current_player = 1;
+            round.phase = TurnPhase::WaitForDiscard;
+            round.drain_events();
+        }
+
+        assert!(!table.handle_action(0, ClientAction::Discard { tile: None }));
+
+        let events = table.drain_events();
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, ServerEvent::HandUpdated { .. })),
+            "the hand was not resynced"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|(_, e)| matches!(e, ServerEvent::TurnResumed)),
+            "the turn was reopened for a seat that does not hold it"
+        );
+    }
+
     /// A rejected riichi must resync too (#294): the declaration discard
     /// is applied locally by the client just like a normal discard.
     #[test]

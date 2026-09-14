@@ -123,6 +123,21 @@ impl GameState {
                 self.nine_terminals_pending = true;
             }
 
+            ServerEvent::TurnResumed => {
+                // We hid our own-turn controls when we submitted, and the
+                // server refused the action; without this the post-call
+                // discard could never be retried (#392). The swap-calling
+                // restriction from the call is deliberately left in place.
+                self.is_my_turn = true;
+                self.turn_player = self.seat_wind;
+                // No drawn tile, so none of these can be available.
+                self.can_tsumo = false;
+                self.can_riichi = false;
+                self.self_kan_options.clear();
+                self.clear_riichi_selection();
+                self.refresh_can_pei();
+            }
+
             ServerEvent::OtherPlayerDrew {
                 player,
                 remaining_tiles,
