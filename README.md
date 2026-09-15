@@ -18,7 +18,6 @@ Implementation for Japanese Riichi Mahjong Game in Rust.
 ## Features
 
 - A playable Japanese Riichi Mahjong client that runs both as a native desktop application and in the browser via WASM.
-  - The native client saves a PNG screenshot to `screenshots/` when `F12` is pressed.
 - The client UI is multilingual (currently Japanese and English).
   - In English mode, each tile shows a small index label in its top-right corner so tiles can be identified without reading kanji: suit-colored digits for number tiles (man = red, pin = blue, sou = green), E/S/W/N for winds, and P/F/C for dragons.
 - CPU opponents with selectable strengths (weak / normal / strong) and personalities (balanced / speedy / high-value / defensive).
